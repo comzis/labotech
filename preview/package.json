@@ -1,0 +1,19 @@
+{
+  "name": "labotech-preview",
+  "version": "1.0.0",
+  "description": "Remotion video preview for Labotech",
+  "scripts": {
+    "start": "remotion studio",
+    "build": "remotion render --codec=h264 src/index.jsx Labotech out/labotech-preview.mp4",
+    "render": "remotion render src/index.jsx Labotech out/labotech-preview.mp4"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.215",
+    "remotion": "^4.0.215",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "remotion": {
+    "entryPoint": "src/index.jsx"
+  }
+}

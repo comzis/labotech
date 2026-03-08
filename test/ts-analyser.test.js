@@ -1,0 +1,126 @@
+'use strict';
+
+const TSAnalyser = require('../src/ts-analyser');
+
+describe('TSAnalyser', () => {
+  let analyser;
+
+  beforeEach(() => {
+    analyser = new TSAnalyser({ id: 'test-analyser', url: 'udp://239.1.1.1:5000' });
+  });
+
+  describe('constructor', () => {
+    test('sets id and url', () => {
+      expect(analyser.id).toBe('test-analyser');
+      expect(analyser.url).toBe('udp://239.1.1.1:5000');
+    });
+
+    test('isRunning starts false', () => {
+      expect(analyser.isRunning).toBe(false);
+    });
+
+    test('auto-generates id if not provided', () => {
+      const a = new TSAnalyser({ url: 'udp://1.2.3.4:5000' });
+      expect(a.id).toMatch(/^analyser-/);
+    });
+  });
+
+  describe('parseStructure', () => {
+    const mockRaw = {
+      programs: [
+        {
+          program_id: 1,
+          pmt_pid: 256,
+          pcr_pid: 257,
+          tags: { service_name: 'BBC One' },
+          streams: [
+            {
+              index: 0,
+              codec_type: 'video',
+              codec_name: 'h264',
+              id: 0x0101,
+              width: 1920,
+              height: 1080,
+              avg_frame_rate: '25/1',
+              bit_rate: '8000000',
+            },
+            {
+              index: 1,
+              codec_type: 'audio',
+              codec_name: 'aac',
+              id: 0x0102,
+              sample_rate: '48000',
+              channels: 2,
+              tags: { language: 'eng' },
+            },
+          ],
+        },
+      ],
+      streams: [
+        { index: 0, codec_type: 'video', codec_name: 'h264', id: 0x0101 },
+        { index: 1, codec_type: 'audio', codec_name: 'aac',  id: 0x0102 },
+      ],
+    };
+
+    test('parses program id and pmt', () => {
+      const r = analyser.parseStructure(mockRaw);
+      expect(r.programs).toHaveLength(1);
+      expect(r.programs[0].programId).toBe(1);
+      expect(r.programs[0].pmtPid).toBe(256);
+    });
+
+    test('parses service name from tags', () => {
+      const r = analyser.parseStructure(mockRaw);
+      expect(r.programs[0].name).toBe('BBC One');
+    });
+
+    test('parses video stream properties', () => {
+      const r = analyser.parseStructure(mockRaw);
+      const video = r.programs[0].streams[0];
+      expect(video.codecType).toBe('video');
+      expect(video.codecName).toBe('h264');
+      expect(video.width).toBe(1920);
+      expect(video.height).toBe(1080);
+    });
+
+    test('parses audio language', () => {
+      const r = analyser.parseStructure(mockRaw);
+      const audio = r.programs[0].streams[1];
+      expect(audio.language).toBe('eng');
+      expect(audio.sampleRate).toBe('48000');
+    });
+
+    test('identifies orphan streams', () => {
+      const rawWithOrphan = {
+        programs: [],
+        streams: [{ index: 5, codec_type: 'data', codec_name: 'bin_data', id: 0x01ff }],
+      };
+      const r = analyser.parseStructure(rawWithOrphan);
+      expect(r.orphanStreams).toHaveLength(1);
+      expect(r.orphanStreams[0].codecType).toBe('data');
+    });
+
+    test('returns probeTime', () => {
+      const before = Date.now();
+      const r = analyser.parseStructure(mockRaw);
+      expect(r.probeTime).toBeGreaterThanOrEqual(before);
+    });
+  });
+
+  describe('toJSON', () => {
+    test('returns correct fields', () => {
+      const j = analyser.toJSON();
+      expect(j.id).toBe('test-analyser');
+      expect(j.isRunning).toBe(false);
+      expect(j.url).toBe('udp://239.1.1.1:5000');
+    });
+  });
+
+  describe('stop', () => {
+    test('sets isRunning to false', () => {
+      analyser.isRunning = true;
+      analyser.stop();
+      expect(analyser.isRunning).toBe(false);
+    });
+  });
+});
