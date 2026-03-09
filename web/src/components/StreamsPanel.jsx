@@ -126,8 +126,22 @@ export default function StreamsPanel({ lastMessage }) {
                   </div>
                 )}
 
-                {/* Input source */}
+                {/* Input source + detected streams */}
                 <div className="text-xs text-gray-500 truncate">{s.input}</div>
+                {s.inputStreams?.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {s.inputStreams.map((st, i) => (
+                      <span key={i} className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                        st.kind === 'video' ? 'bg-blue-900/40 text-blue-300 border-blue-700/40' : 'bg-green-900/40 text-green-300 border-green-700/40'
+                      }`}>
+                        {st.kind === 'video'
+                          ? `${st.codec} ${st.width ? `${st.width}×${st.height}` : ''} ${st.fps ? `${st.fps}fps` : ''}`.trim()
+                          : `${st.codec} ${st.sampleRate ? `${st.sampleRate}Hz` : ''}`.trim()
+                        }
+                      </span>
+                    ))}
+                  </div>
+                )}
 
                 {/* Destination + PIDs */}
                 <div className="flex items-center gap-3 text-xs text-gray-600 font-mono">
@@ -148,6 +162,24 @@ export default function StreamsPanel({ lastMessage }) {
                         {p.language ? ` [${p.language}]` : ''}
                       </span>
                     ))}
+                  </div>
+                )}
+
+                {/* Encoding profile */}
+                {s.encodeProfile && (
+                  <div className="flex flex-wrap gap-1">
+                    <span className="text-[10px] font-mono bg-purple-900/40 text-purple-300 px-1.5 py-0.5 rounded border border-purple-700/40">
+                      {s.encodeProfile.videoCodec}
+                    </span>
+                    <span className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
+                      {s.encodeProfile.videoBitrate}
+                    </span>
+                    <span className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
+                      {s.encodeProfile.preset}
+                    </span>
+                    <span className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
+                      GOP {s.encodeProfile.gopSize}
+                    </span>
                   </div>
                 )}
 

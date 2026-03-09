@@ -295,6 +295,30 @@ class SRTEncoder extends EventEmitter {
       this.emit('stats', { inputBitrate: this.inputBitrate });
     }
 
+    // ── 0b. Input stream detection — parsed from FFmpeg stream info lines ────
+    // "  Stream #0:0[0x100]: Video: h264 (High), yuv420p, 1920x1080, 25 fps"
+    // "  Stream #0:1[0x101]: Audio: mp2, 48000 Hz, stereo, fltp, 256 kb/s"
+    const mStream = line.match(/Stream #0:(\d+).*?:\s*(Video|Audio|Data):\s*([^\s,]+)(.*)/i);
+    if (mStream) {
+      if (!this.inputStreams) this.inputStreams = [];
+      const kind = mStream[2].toLowerCase();
+      const codec = mStream[3];
+      const detail = mStream[4].trim();
+      const entry = { kind, codec, detail };
+      // Resolution + fps for video
+      const mRes = detail.match(/(\d{3,4})x(\d{3,4})/);
+      const mFpsD = detail.match(/([\d.]+)\s*fps/);
+      if (mRes) { entry.width = parseInt(mRes[1]); entry.height = parseInt(mRes[2]); }
+      if (mFpsD) entry.fps = parseFloat(mFpsD[1]);
+      // Sample rate + channels for audio
+      const mSr = detail.match(/([\d]+)\s*Hz/);
+      if (mSr) entry.sampleRate = parseInt(mSr[1]);
+      // Replace existing entry for same stream index or append
+      const idx = this.inputStreams.findIndex(s => s.kind === kind);
+      if (idx >= 0) this.inputStreams[idx] = entry; else this.inputStreams.push(entry);
+      this.emit('stats', { inputStreams: this.inputStreams });
+    }
+
     // ── 1. FFmpeg encode progress ────────────────────────────────────────────
     // frame=  123 fps= 25 q=28.0 size=N/A time=00:00:05.00 bitrate=6710.2kbits/s speed=1.00x
     const mFrame = line.match(/frame=\s*(\d+)/);
@@ -362,7 +386,15 @@ class SRTEncoder extends EventEmitter {
       startTime: this.startTime,
       lastStats: this.lastStats,
       inputBitrate: this.inputBitrate || null,
+      inputStreams: this.inputStreams || null,
       srtStats: this.srtStats,
+      encodeProfile: {
+        videoCodec: this.videoCodec,
+        videoBitrate: this.videoBitrate,
+        preset: this.preset,
+        profile: this.profile,
+        gopSize: this.gopSize,
+      },
       audioPairs: this.audioPairs || null,
       dvb: {
         serviceId: this.serviceId,

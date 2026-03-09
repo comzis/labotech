@@ -14,6 +14,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
   const [current,      setCurrent]      = useState(stats || null);
   const [srtStats,     setSrtStats]     = useState(null);
   const [inputBitrate, setInputBitrate] = useState(initInputBr || null);
+  const [inputStreams, setInputStreams] = useState(null);
   const [ffmpegError,  setFfmpegError]  = useState(null);
 
   useEffect(() => {
@@ -22,6 +23,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
       setCurrent(lastMessage);
       setHistory(h => [...h.slice(-(MAX_HISTORY - 1)), { t: h.length, v: lastMessage.bitrate || 0 }]);
       if (lastMessage.inputBitrate) setInputBitrate(lastMessage.inputBitrate);
+      if (lastMessage.inputStreams) setInputStreams(lastMessage.inputStreams);
     }
     if (lastMessage.type === 'srtStats' && lastMessage.id === id) {
       setSrtStats(lastMessage);
