@@ -192,6 +192,18 @@ class SRTEncoder extends EventEmitter {
     // ─── DVB-compliant output ────────────────────────────────────────────────
     args.push(...this._buildOutputArgs(effectiveMode));
 
+    // ─── Thumbnail output — tee from video, update every 5s ─────────────────
+    const { THUMBNAIL_DIR } = require('./monitoring');
+    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+    args.push(
+      '-map', '0:v:0',
+      '-vf', `fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2`,
+      '-update', '1',
+      '-q:v', '5',
+      '-y', thumbPath,
+    );
+
     return args;
   }
 
