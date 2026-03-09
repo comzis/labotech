@@ -21,6 +21,7 @@ class SRTEncoder extends EventEmitter {
     this.profile = options.profile || 'high';
     this.gopSize = options.gopSize || 50;
     this.pixFmt = options.pixFmt || 'yuv420p';
+    this.rateMode = options.rateMode || 'cbr'; // 'cbr' | 'vbr'
 
     // ── Output transport ─────────────────────────────────────────────────────
     // outputMode: 'srt' | 'udp' | 'rtp' | null (auto: 'srt' when host is set)
@@ -159,10 +160,20 @@ class SRTEncoder extends EventEmitter {
       '-profile:v', this.profile,
       '-g', this.gopSize.toString(),
       '-b:v', this.videoBitrate,
-      '-maxrate', this.videoBitrate,
-      '-bufsize', bufsize,
       '-pix_fmt', this.pixFmt,
     );
+
+    if (this.rateMode === 'cbr') {
+      // True CBR — VBV + HRD signalling (broadcast standard)
+      args.push(
+        '-maxrate', this.videoBitrate,
+        '-bufsize', bufsize,
+        '-x264-params', 'nal-hrd=cbr:force-cfr=1',
+      );
+    } else {
+      // VBR — constrained by bufsize only
+      args.push('-bufsize', bufsize);
+    }
 
     // ─── Professional Metadata & HDR Signaling (DVB TS 101 154) ────────────
     if (this.pixFmt && this.pixFmt.includes('10le')) {
@@ -409,6 +420,7 @@ class SRTEncoder extends EventEmitter {
         preset: this.preset,
         profile: this.profile,
         gopSize: this.gopSize,
+        rateMode: this.rateMode,
       },
       audioPairs: this.audioPairs || null,
       dvb: {

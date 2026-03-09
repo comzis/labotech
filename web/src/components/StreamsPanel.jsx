@@ -180,6 +180,13 @@ export default function StreamsPanel({ lastMessage }) {
                     <span className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
                       GOP {s.encodeProfile.gopSize}
                     </span>
+                    <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${
+                      s.encodeProfile.rateMode === 'cbr'
+                        ? 'bg-amber-900/40 text-amber-300 border-amber-700/40'
+                        : 'bg-gray-800 text-gray-400 border-gray-700'
+                    }`}>
+                      {(s.encodeProfile.rateMode || 'cbr').toUpperCase()}
+                    </span>
                   </div>
                 )}
 

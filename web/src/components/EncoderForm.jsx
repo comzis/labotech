@@ -16,7 +16,7 @@ const DEFAULTS = {
   pmtPid: '4096', videoPid: '256',
   serviceName: '', serviceProvider: '',
   // Video
-  videoCodec: 'libx264', videoBitrate: '8M', preset: 'medium', profile: 'high', gopSize: '50',
+  videoCodec: 'libx264', videoBitrate: '8M', preset: 'medium', profile: 'high', gopSize: '50', rateMode: 'cbr',
 };
 
 const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
@@ -251,12 +251,13 @@ export default function EncoderForm({ onStarted }) {
 
             {/* Bento Card 4: Video Matrix (full width) */}
             <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-3 border-neon-purple/20 bg-neon-purple/5">
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
                 <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
                 <Field label="Bitrate" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} />
                 <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />
+                <SelectField label="Rate Mode" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
               </div>
             </BentoCard>
 

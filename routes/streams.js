@@ -23,7 +23,7 @@ module.exports = function (streams, wss) {
   router.post('/', (req, res) => {
     const {
       id, input, inputLocalAddr, host, port, latency,
-      videoBitrate, videoCodec,
+      videoBitrate, videoCodec, rateMode,
       preset, profile, gopSize, pixFmt, passphrase, streamId,
       // Output transport
       outputMode, ttl, localAddr,
@@ -44,8 +44,8 @@ module.exports = function (streams, wss) {
     }
 
     const encoder = new SRTEncoder({
-      id, input, inputLocalAddr, host, port, latency,
-      videoBitrate, videoCodec,
+      id, input, inputLocalAddr, host, port, latency, rateMode,
+      videoBitrate, videoCodec, rateMode,
       preset, profile, gopSize, pixFmt, passphrase, streamId,
       outputMode, ttl, localAddr,
       serviceId, transportStreamId, originalNetworkId,
