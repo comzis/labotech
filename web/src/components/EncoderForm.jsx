@@ -148,14 +148,14 @@ export default function EncoderForm({ onStarted }) {
                     ]} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="10.67.18.30" />
+                    <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="10.67.18.29" />
                     <Field label="Stream ID" value={form.streamId} onChange={v => set('streamId', v)} placeholder="optional" />
                   </div>
                 </>}
 
                 {/* UDP / RTP — source NIC binding */}
                 {(form.outputMode === 'udp' || form.outputMode === 'rtp') &&
-                  <Field label="Local NIC / Source Address" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="10.67.18.30 (eno2)" />
+                  <Field label="Local NIC / Source Address" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="10.67.18.29 (eno2)" />
                 }
               </div>
             </BentoCard>
