@@ -1,26 +1,47 @@
 import React, { useState } from 'react';
+import { motion } from 'framer-motion';
+import { Settings2, Zap, Server, ShieldCheck, Play, Radio, Activity, Plus, Trash2, Tv2 } from 'lucide-react';
 import { startStream } from '../api';
 
 const DEFAULTS = {
-  id:           '',
-  input:        '',
-  host:         '',
-  port:         '9999',
-  latency:      '2000',
-  videoBitrate: '8M',
-  audioBitrate: '256k',
-  videoCodec:   'libx264',
-  preset:       'medium',
-  passphrase:   '',
+  id: '', input: '',
+  // Output transport
+  outputMode: 'srt',
+  host: '', port: '9999', latency: '2000', passphrase: '', pbkeylen: '16', adapter: '', streamId: '',
+  ttl: '16', localAddr: '',
+  // DVB/MPEG-TS service
+  serviceId: '1', transportStreamId: '1', originalNetworkId: '1',
+  pmtPid: '4096', videoPid: '256',
+  serviceName: '', serviceProvider: '',
+  // Video
+  videoCodec: 'libx264', videoBitrate: '8M', preset: 'medium', profile: 'high', gopSize: '50',
+};
+
+const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
+
+// Framer Motion Animation Variants
+const containerVariants = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
+};
+
+const itemVariants = {
+  hidden: { opacity: 0, y: 20 },
+  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
 };
 
 export default function EncoderForm({ onStarted }) {
-  const [form,    setForm]    = useState(DEFAULTS);
+  const [form, setForm] = useState(DEFAULTS);
+  const [audioPairs, setAudioPairs] = useState([{ ...DEFAULT_PAIR }]);
   const [loading, setLoading] = useState(false);
-  const [error,   setError]   = useState(null);
-  const [open,    setOpen]    = useState(false);
+  const [error, setError] = useState(null);
+  const [open, setOpen] = useState(false);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+
+  const addPair = () => setAudioPairs(p => [...p, { ...DEFAULT_PAIR, sourceIndex: p.length }]);
+  const removePair = (i) => setAudioPairs(p => p.filter((_, idx) => idx !== i));
+  const updatePair = (i, key, val) => setAudioPairs(p => p.map((pair, idx) => idx === i ? { ...pair, [key]: val } : pair));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -29,10 +50,24 @@ export default function EncoderForm({ onStarted }) {
     try {
       await startStream({
         ...form,
-        port:    parseInt(form.port),
+        port: parseInt(form.port),
         latency: parseInt(form.latency),
+        gopSize: parseInt(form.gopSize),
+        ttl: parseInt(form.ttl),
+        serviceId: parseInt(form.serviceId),
+        transportStreamId: parseInt(form.transportStreamId),
+        originalNetworkId: parseInt(form.originalNetworkId),
+        pmtPid: parseInt(form.pmtPid),
+        videoPid: parseInt(form.videoPid),
+        audioPairs: audioPairs.map(p => ({
+          ...p,
+          sourceIndex: parseInt(p.sourceIndex),
+          channels: parseInt(p.channels),
+          pid: p.pid !== '' ? parseInt(p.pid) : undefined,
+        })),
       });
       setForm(DEFAULTS);
+      setAudioPairs([{ ...DEFAULT_PAIR }]);
       setOpen(false);
       onStarted && onStarted();
     } catch (err) {
@@ -43,77 +78,277 @@ export default function EncoderForm({ onStarted }) {
   };
 
   return (
-    <div className="mb-4">
-      <button
-        onClick={() => setOpen(o => !o)}
-        className="bg-blue-700 hover:bg-blue-600 text-white text-sm px-4 py-2 rounded transition-colors"
-      >
-        {open ? '✕ Cancel' : '+ Start Encoder'}
-      </button>
+    <div className="mb-12 font-sans">
+      {!open && (
+        <motion.button
+          whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(34,211,238,0.2)' }}
+          whileTap={{ scale: 0.98 }}
+          onClick={() => setOpen(true)}
+          className="bg-midnight-glass border border-white/10 backdrop-blur-md rounded-2xl px-6 py-4 flex items-center justify-center gap-3 w-full hover:bg-white/5 transition-colors group cursor-pointer"
+        >
+          <div className="w-10 h-10 rounded-full bg-neon-cyan/20 flex items-center justify-center group-hover:bg-neon-cyan/30 transition-colors">
+            <Zap className="w-5 h-5 text-neon-cyan" strokeWidth={1.5} />
+          </div>
+          <span className="text-gray-200 font-semibold tracking-wide text-lg">Deploy New Broadcast Channel</span>
+        </motion.button>
+      )}
 
       {open && (
-        <form onSubmit={handleSubmit} className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-5 grid grid-cols-2 md:grid-cols-3 gap-4">
-          <Field label="Stream ID *"    value={form.id}           onChange={v => set('id', v)}           required />
-          <Field label="Input URL *"    value={form.input}        onChange={v => set('input', v)}        required className="col-span-2 md:col-span-2" />
-          <Field label="SRT Host *"     value={form.host}         onChange={v => set('host', v)}         required />
-          <Field label="SRT Port"       value={form.port}         onChange={v => set('port', v)}         type="number" />
-          <Field label="Latency (ms)"   value={form.latency}      onChange={v => set('latency', v)}      type="number" />
-          <Field label="Video Bitrate"  value={form.videoBitrate} onChange={v => set('videoBitrate', v)} />
-          <Field label="Audio Bitrate"  value={form.audioBitrate} onChange={v => set('audioBitrate', v)} />
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Video Codec</label>
-            <select
-              value={form.videoCodec}
-              onChange={e => set('videoCodec', e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200"
-            >
-              <option value="libx264">libx264</option>
-              <option value="libx265">libx265</option>
-              <option value="copy">copy</option>
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs text-gray-500 mb-1">Preset</label>
-            <select
-              value={form.preset}
-              onChange={e => set('preset', e.target.value)}
-              className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200"
-            >
-              {['ultrafast','superfast','veryfast','faster','fast','medium','slow','slower','veryslow'].map(p => (
-                <option key={p} value={p}>{p}</option>
-              ))}
-            </select>
-          </div>
-          <Field label="Passphrase"     value={form.passphrase}   onChange={v => set('passphrase', v)}   type="password" />
-
-          {error && <p className="col-span-full text-red-400 text-sm">{error}</p>}
-
-          <div className="col-span-full flex gap-3">
-            <button
-              type="submit"
-              disabled={loading}
-              className="bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded transition-colors"
-            >
-              {loading ? 'Starting…' : 'Start'}
+        <motion.form
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          onSubmit={handleSubmit}
+          className="relative"
+        >
+          {/* Form Header */}
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+              <Settings2 className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
+              Engine Configuration
+            </h2>
+            <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors text-sm font-medium">
+              ✕ Cancel Deployment
             </button>
           </div>
-        </form>
+
+          <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+
+            {/* Bento Card 1: Transport & Networking (2 cols) */}
+            <BentoCard icon={Server} title="Transport & Networking" className="md:col-span-2 lg:col-span-2">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
+                <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="udp://239.0.0.1:5000" />
+
+                {/* Output mode selector — spans full width */}
+                <div className="sm:col-span-2">
+                  <SelectField label="Output Mode" value={form.outputMode} onChange={v => set('outputMode', v)} options={[
+                    { value: 'srt',  label: 'SRT — Secure Reliable Transport' },
+                    { value: 'udp',  label: 'UDP — Multicast / Unicast MPEG-TS' },
+                    { value: 'rtp',  label: 'RTP — MPEG-TS over RTP' },
+                  ]} />
+                </div>
+
+                {/* Target host + port — common to all modes */}
+                <Field
+                  label={form.outputMode === 'srt' ? 'SRT Target Host' : 'Destination IP'}
+                  value={form.host} onChange={v => set('host', v)}
+                  placeholder={form.outputMode === 'udp' || form.outputMode === 'rtp' ? '239.100.25.29' : 'srt://host or IP'}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Port" value={form.port} onChange={v => set('port', v)} type="number" />
+                  {form.outputMode === 'srt'
+                    ? <Field label="Latency (ms)" value={form.latency} onChange={v => set('latency', v)} type="number" />
+                    : <Field label="TTL" value={form.ttl} onChange={v => set('ttl', v)} type="number" />
+                  }
+                </div>
+
+                {/* SRT-only fields */}
+                {form.outputMode === 'srt' && <>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Passphrase" value={form.passphrase} onChange={v => set('passphrase', v)} type="password" />
+                    <SelectField label="Encryption" value={form.pbkeylen} onChange={v => set('pbkeylen', v)} options={[
+                      { value: '16', label: 'AES-128' },
+                      { value: '24', label: 'AES-192' },
+                      { value: '32', label: 'AES-256' }
+                    ]} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="10.67.18.30" />
+                    <Field label="Stream ID" value={form.streamId} onChange={v => set('streamId', v)} placeholder="optional" />
+                  </div>
+                </>}
+
+                {/* UDP / RTP — source NIC binding */}
+                {(form.outputMode === 'udp' || form.outputMode === 'rtp') &&
+                  <Field label="Local NIC / Source Address" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="10.67.18.30 (eno2)" />
+                }
+              </div>
+            </BentoCard>
+
+            {/* Bento Card 2: Audio Pairs — per-track codec / bitrate / PID / language */}
+            <BentoCard icon={Radio} title="Audio Topology" className="col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
+              <div className="space-y-3">
+                {/* Column headers */}
+                <div className="grid grid-cols-[36px_1fr_64px_40px_44px_44px_20px] gap-1 items-center">
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider text-center">Src</span>
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Codec</span>
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider">Bitrate</span>
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider text-center">Ch</span>
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider text-center">PID</span>
+                  <span className="text-[9px] font-semibold text-gray-500 uppercase tracking-wider text-center">Lang</span>
+                  <span />
+                </div>
+
+                {/* One row per audio pair */}
+                {audioPairs.map((p, i) => (
+                  <div key={i} className="grid grid-cols-[36px_1fr_64px_40px_44px_44px_20px] gap-1 items-center">
+                    <input type="number" min="0" max="31" value={p.sourceIndex}
+                      onChange={e => updatePair(i, 'sourceIndex', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 text-center focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
+                    <select value={p.codec} onChange={e => updatePair(i, 'codec', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer">
+                      {['aac', 'mp2', 'ac3', 'eac3', 'copy'].map(c => <option key={c} value={c} className="bg-midnight-surface">{c}</option>)}
+                    </select>
+                    <input type="text" value={p.bitrate} placeholder="256k"
+                      onChange={e => updatePair(i, 'bitrate', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
+                    <select value={p.channels} onChange={e => updatePair(i, 'channels', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer">
+                      <option value="1" className="bg-midnight-surface">1</option>
+                      <option value="2" className="bg-midnight-surface">2</option>
+                      <option value="6" className="bg-midnight-surface">6</option>
+                    </select>
+                    {/* PID — blank = auto (videoPid+1+index) */}
+                    <input type="number" min="32" max="8190" value={p.pid} placeholder="auto"
+                      onChange={e => updatePair(i, 'pid', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 text-center focus:outline-none focus:border-neon-purple/50 focus:bg-neon-purple/5 transition-all" />
+                    <input type="text" value={p.language} placeholder="eng" maxLength={3}
+                      onChange={e => updatePair(i, 'language', e.target.value.toLowerCase())}
+                      className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 text-center focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
+                    <button type="button" onClick={() => removePair(i)} disabled={audioPairs.length === 1}
+                      className="flex items-center justify-center text-gray-600 hover:text-red-400 transition-colors disabled:opacity-20 disabled:cursor-not-allowed">
+                      <Trash2 className="w-3 h-3" strokeWidth={1.5} />
+                    </button>
+                  </div>
+                ))}
+
+                <button type="button" onClick={addPair} disabled={audioPairs.length >= 8}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 rounded-lg border border-dashed border-white/15 text-[11px] text-gray-500 hover:text-neon-cyan hover:border-neon-cyan/40 transition-colors disabled:opacity-30 disabled:cursor-not-allowed">
+                  <Plus className="w-3 h-3" strokeWidth={2} />
+                  Add Audio Pair
+                </button>
+              </div>
+            </BentoCard>
+
+            {/* Bento Card 3: DVB/TS Service */}
+            <BentoCard icon={Tv2} title="DVB / TS Service" className="col-span-1 border-neon-purple/20 bg-neon-purple/5">
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-3">
+                  <PidField label="Service ID"          value={form.serviceId}          onChange={v => set('serviceId', v)} />
+                  <PidField label="TS ID"               value={form.transportStreamId}  onChange={v => set('transportStreamId', v)} />
+                  <PidField label="Orig. Network ID"    value={form.originalNetworkId}  onChange={v => set('originalNetworkId', v)} />
+                  <PidField label="PMT PID"             value={form.pmtPid}             onChange={v => set('pmtPid', v)} />
+                  <PidField label="Video PID"           value={form.videoPid}           onChange={v => set('videoPid', v)} />
+                  {/* PCR is carried on the video PID automatically */}
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">PCR PID</label>
+                    <div className="w-full bg-black/20 border border-white/5 rounded-lg px-3 py-2 text-xs text-gray-500 italic">
+                      = Video PID
+                    </div>
+                  </div>
+                </div>
+                <Field label="Service Name"     value={form.serviceName}     onChange={v => set('serviceName', v)}     placeholder="My Channel" />
+                <Field label="Service Provider" value={form.serviceProvider} onChange={v => set('serviceProvider', v)} placeholder="Broadcaster" />
+              </div>
+            </BentoCard>
+
+            {/* Bento Card 4: Video Matrix (full width) */}
+            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-2 lg:col-span-3">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
+                <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
+                <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
+                <Field label="Bitrate" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} />
+                <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />
+              </div>
+            </BentoCard>
+
+          </motion.div>
+
+          {error && (
+            <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="mt-6 bg-red-950/50 border border-red-500/50 text-red-200 p-4 rounded-xl flex items-center gap-3 backdrop-blur-md">
+              <ShieldCheck className="w-5 h-5 text-red-400" />
+              <p className="text-sm font-medium">{error}</p>
+            </motion.div>
+          )}
+
+          {/* Action Footer */}
+          <div className="mt-8 flex justify-end">
+            <motion.button
+              whileHover={{ scale: 1.05, boxShadow: '0 0 25px rgba(34,211,238,0.4)' }}
+              whileTap={{ scale: 0.95 }}
+              type="submit"
+              disabled={loading}
+              className="relative group overflow-hidden bg-gradient-to-r from-neon-blue to-neon-cyan text-midnight-base font-bold px-8 py-3 rounded-xl flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <span className="animate-pulse">Initializing Matrix...</span>
+              ) : (
+                <>
+                  <Play className="w-4 h-4 fill-current" />
+                  INITIATE ENGINE
+                </>
+              )}
+            </motion.button>
+          </div>
+        </motion.form>
       )}
     </div>
   );
 }
 
-function Field({ label, value, onChange, type = 'text', required, className = '' }) {
+// Sub-components for Bento Grid
+function BentoCard({ title, icon: Icon, children, className = '' }) {
   return (
-    <div className={className}>
-      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+    <motion.div variants={itemVariants} className={`bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-3xl p-6 relative overflow-hidden group ${className}`}>
+      {/* Subtle Hover Glow */}
+      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+
+      <div className="flex items-center gap-2 mb-6 relative z-10">
+        <Icon className="w-5 h-5 text-gray-400 group-hover:text-neon-cyan transition-colors" strokeWidth={1.5} />
+        <h3 className="text-sm font-bold text-gray-200 uppercase tracking-widest">{title}</h3>
+      </div>
+      <div className="relative z-10">
+        {children}
+      </div>
+    </motion.div>
+  );
+}
+
+// Compact integer field styled for PID/ID values
+function PidField({ label, value, onChange }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
       <input
-        type={type}
-        value={value}
-        onChange={e => onChange(e.target.value)}
-        required={required}
-        className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-blue-600"
+        type="number" value={value} onChange={e => onChange(e.target.value)} min="1" max="65535"
+        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-neon-purple/90 font-mono focus:outline-none focus:border-neon-purple/50 focus:bg-neon-purple/5 transition-all"
       />
+    </div>
+  );
+}
+
+function Field({ label, value, onChange, ...props }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
+      <input
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        {...props}
+        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all placeholder:text-gray-600"
+      />
+    </div>
+  );
+}
+
+function SelectField({ label, options, value, onChange, ...props }) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        {...props}
+        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer"
+        style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg fill="%239ca3af" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+      >
+        {options.map(o => {
+          const isObj = typeof o === 'object';
+          return <option key={isObj ? o.value : o} value={isObj ? o.value : o} className="bg-midnight-surface">{isObj ? o.label : o}</option>
+        })}
+      </select>
     </div>
   );
 }

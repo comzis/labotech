@@ -6,11 +6,11 @@ const { spawn } = require('child_process');
 class TSAnalyser extends EventEmitter {
   constructor(options = {}) {
     super();
-    this.id        = options.id || `analyser-${Date.now()}`;
-    this.url       = options.url;
-    this.interval  = options.interval || 5000; // ms between continuous probes
+    this.id = options.id || `analyser-${Date.now()}`;
+    this.url = options.url;
+    this.interval = options.interval || 5000; // ms between continuous probes
 
-    this._timer    = null;
+    this._timer = null;
     this.isRunning = false;
     this.lastResult = null;
   }
@@ -53,11 +53,11 @@ class TSAnalyser extends EventEmitter {
 
   parseStructure(raw) {
     const programs = (raw.programs || []).map(prog => ({
-      programId:  prog.program_id,
-      pmtPid:     prog.pmt_pid,
-      pcrPid:     prog.pcr_pid,
-      name:       prog.tags && prog.tags['service_name'] || null,
-      streams:    (prog.streams || []).map(s => this._mapStream(s)),
+      programId: prog.program_id,
+      pmtPid: prog.pmt_pid,
+      pcrPid: prog.pcr_pid,
+      name: prog.tags && prog.tags['service_name'] || null,
+      streams: (prog.streams || []).map(s => this._mapStream(s)),
     }));
 
     // Streams not in any program
@@ -69,8 +69,8 @@ class TSAnalyser extends EventEmitter {
       .map(s => this._mapStream(s));
 
     return {
-      url:           this.url,
-      probeTime:     Date.now(),
+      url: this.url,
+      probeTime: Date.now(),
       programs,
       orphanStreams,
     };
@@ -78,17 +78,20 @@ class TSAnalyser extends EventEmitter {
 
   _mapStream(s) {
     return {
-      index:       s.index,
-      codecType:   s.codec_type,
-      codecName:   s.codec_name,
-      pid:         s.id !== undefined ? s.id : null,
-      width:       s.width  || null,
-      height:      s.height || null,
-      fps:         s.avg_frame_rate || null,
-      bitrate:     s.bit_rate ? parseInt(s.bit_rate) : null,
-      sampleRate:  s.sample_rate || null,
-      channels:    s.channels || null,
-      language:    s.tags && s.tags['language'] || null,
+      index: s.index,
+      codecType: s.codec_type,
+      codecName: s.codec_name,
+      pid: s.id !== undefined ? s.id : null,
+      width: s.width || null,
+      height: s.height || null,
+      fps: s.avg_frame_rate || null,
+      bitrate: s.bit_rate ? parseInt(s.bit_rate) : null,
+      sampleRate: s.sample_rate || null,
+      channels: s.channels || null,
+      language: s.tags && s.tags['language'] || null,
+      colorSpace: s.color_space || null,
+      colorTrc: s.color_transfer || null,
+      colorPrimaries: s.color_primaries || null,
     };
   }
 
@@ -123,9 +126,9 @@ class TSAnalyser extends EventEmitter {
 
   toJSON() {
     return {
-      id:         this.id,
-      url:        this.url,
-      isRunning:  this.isRunning,
+      id: this.id,
+      url: this.url,
+      isRunning: this.isRunning,
       lastResult: this.lastResult,
     };
   }

@@ -8,24 +8,70 @@ class SRTEncoder extends EventEmitter {
     super();
     this.id = options.id;
     this.input = options.input;
-    this.host = options.host;
-    this.port = options.port;
+    this.host = options.host || null;
+    this.port = options.port || 9999;
     this.latency = options.latency || 2000;
     this.passphrase = options.passphrase || null;
+    this.pbkeylen = options.pbkeylen || 16;
+    this.adapter = options.adapter || null;
     this.streamId = options.streamId || null;
     this.videoBitrate = options.videoBitrate || '8M';
-    this.audioBitrate = options.audioBitrate || '256k';
     this.videoCodec = options.videoCodec || 'libx264';
-    this.audioCodec = options.audioCodec || 'aac';
     this.preset = options.preset || 'medium';
+    this.profile = options.profile || 'high';
+    this.gopSize = options.gopSize || 50;
     this.pixFmt = options.pixFmt || 'yuv420p';
 
-    this.process = null;
+    // ── Output transport ─────────────────────────────────────────────────────
+    // outputMode: 'srt' | 'udp' | 'rtp' | null (auto: 'srt' when host is set)
+    this.outputMode = options.outputMode || null;
+    this.ttl = options.ttl != null ? parseInt(options.ttl) : 16;
+    this.localAddr = options.localAddr || null;
+
+    // ── DVB/MPEG-TS muxer parameters (ETSI EN 300 468 / ISO 13818-1) ────────
+    // PMT PID default 0x1000 (4096), video PID default 0x100 (256)
+    this.serviceId = options.serviceId != null ? parseInt(options.serviceId) : 1;
+    this.transportStreamId = options.transportStreamId != null ? parseInt(options.transportStreamId) : 1;
+    this.originalNetworkId = options.originalNetworkId != null ? parseInt(options.originalNetworkId) : 1;
+    this.pmtPid = options.pmtPid != null ? parseInt(options.pmtPid) : 0x1000;
+    this.videoPid = options.videoPid != null ? parseInt(options.videoPid) : 0x100;
+    this.serviceName = options.serviceName || '';
+    this.serviceProvider = options.serviceProvider || '';
+
+    // ── Audio configuration ───────────────────────────────────────────────────
+    // Preferred: audioPairs array — each entry controls one independent audio track
+    // Fallback: legacy flat fields (audioBitrate / audioCodec / audioChannels)
+    if (Array.isArray(options.audioPairs) && options.audioPairs.length > 0) {
+      this.audioPairs = options.audioPairs.map((p, i) => ({
+        sourceIndex: p.sourceIndex != null ? parseInt(p.sourceIndex) : 0,
+        codec: p.codec || 'aac',
+        bitrate: p.bitrate || '256k',
+        channels: p.channels != null ? parseInt(p.channels) : 2,
+        language: p.language || null,
+        // Per-pair PID; defaults to videoPid+1, videoPid+2, ... if not declared
+        pid: p.pid != null && p.pid !== '' ? parseInt(p.pid) : (this.videoPid + 1 + i),
+      }));
+    } else {
+      this.audioPairs = null;
+      // Legacy flat config — kept for backward compatibility
+      this.audioBitrate = options.audioBitrate || '256k';
+      this.audioCodec = options.audioCodec || 'aac';
+      const ac = options.audioChannels || 'stereo';
+      if (ac === 'mono') this.audioChannels = 1;
+      else if (ac === '5.1') this.audioChannels = 6;
+      else {
+        const m = String(ac).match(/^(\d+)\s*pair/i);
+        this.audioChannels = m ? parseInt(m[1]) * 2 : 2;
+      }
+    }
+
     this.isRunning = false;
-    this.lastStats = null;
+    this.lastStats = null;   // FFmpeg encode metrics
+    this.srtStats = null;   // Haivision libsrt connection stats
     this.startTime = null;
   }
 
+  // ─── Input type detection ───────────────────────────────────────────────────
   detectInputType(url) {
     if (!url) return 'file';
     if (url.startsWith('rtp://')) return 'rtp';
@@ -36,67 +82,165 @@ class SRTEncoder extends EventEmitter {
     return 'file';
   }
 
+  // ─── FFmpeg input flags ─────────────────────────────────────────────────────
   buildInputArgs() {
     const type = this.detectInputType(this.input);
     const args = [];
-
     if (type === 'rtp' || type === 'udp') {
-      // No -re for live multicast/UDP — consume at wire speed
-      args.push('-fflags', '+genpts+discardcorrupt');
-      args.push('-i', this.input);
+      args.push('-fflags', '+genpts+discardcorrupt', '-i', this.input);
     } else if (type === 'rtsp') {
-      args.push('-rtsp_transport', 'tcp');
-      args.push('-i', this.input);
+      args.push('-rtsp_transport', 'tcp', '-i', this.input);
     } else if (type === 'device') {
-      args.push('-f', 'v4l2');
-      args.push('-i', this.input);
+      args.push('-f', 'v4l2', '-i', this.input);
     } else if (type === 'srt') {
       args.push('-i', this.input);
     } else {
-      // file — rate-controlled playback
+      // File — rate-limited playback
       args.push('-re', '-i', this.input);
     }
-
     return args;
   }
 
+  // ─── SRT caller URL with Haivision stats parameters ────────────────────────
   buildSRTUrl() {
-    let url = `srt://${this.host}:${this.port}?mode=caller&latency=${this.latency}`;
-    if (this.passphrase) {
-      url += `&passphrase=${encodeURIComponent(this.passphrase)}&pbkeylen=16`;
+    let url;
+
+    if (this.host && this.host.startsWith('srt://')) {
+      // User supplied a full SRT URL — use it directly, inject stats params
+      const separator = this.host.includes('?') ? '&' : '?';
+      url = `${this.host}${separator}stats=1&statsintvl=1`;
+    } else {
+      // Build URL from host + port
+      // stats=1 + statsintvl=1 tells libsrt to emit periodic [srt-stats] lines
+      url = `srt://${this.host}:${this.port}?mode=caller&latency=${this.latency}&stats=1&statsintvl=1`;
     }
-    if (this.streamId) {
-      url += `&streamid=${encodeURIComponent(this.streamId)}`;
-    }
+
+    if (this.passphrase) url += `&passphrase=${encodeURIComponent(this.passphrase)}&pbkeylen=${this.pbkeylen}`;
+    if (this.streamId) url += `&streamid=${encodeURIComponent(this.streamId)}`;
+    if (this.adapter) url += `&adapter=${encodeURIComponent(this.adapter)}`;
     return url;
   }
 
+  // ─── Full FFmpeg argument chain ─────────────────────────────────────────────
   buildFFmpegArgs() {
     const bitrateNum = parseInt(this.videoBitrate);
     const bufsize = isNaN(bitrateNum) ? this.videoBitrate : `${bitrateNum * 2}M`;
 
-    return [
+    const effectiveMode = this.outputMode || (this.host ? 'srt' : 'null');
+    // 'info' loglevel required for libsrt [srt-stats] lines; 'warning' elsewhere
+    const loglevel = effectiveMode === 'srt' ? 'info' : 'warning';
+
+    const args = [
       '-hide_banner',
-      '-loglevel', 'warning',
+      '-loglevel', loglevel,
       '-stats',
       ...this.buildInputArgs(),
+    ];
+
+    // ─── Stream mapping ─────────────────────────────────────────────────────
+    // Explicit -map is required when using per-pair audio so every track is
+    // included and the output stream indices are deterministic for -streamid.
+    if (this.audioPairs) {
+      args.push('-map', '0:v:0');
+      this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}`));
+    }
+
+    args.push(
       '-c:v', this.videoCodec,
       '-preset', this.preset,
+      '-profile:v', this.profile,
+      '-g', this.gopSize.toString(),
       '-b:v', this.videoBitrate,
       '-maxrate', this.videoBitrate,
       '-bufsize', bufsize,
       '-pix_fmt', this.pixFmt,
-      '-c:a', this.audioCodec,
-      '-b:a', this.audioBitrate,
-      '-f', 'mpegts',
-      this.buildSRTUrl(),
-    ];
+    );
+
+    // ─── Professional Metadata & HDR Signaling (DVB TS 101 154) ────────────
+    if (this.pixFmt && this.pixFmt.includes('10le')) {
+      const colorPrimaries = this.colorPrimaries || 'bt2020';
+      const colorTrc = this.colorTransfer || 'smpte2084';
+      const colorSpace = this.colorSpace || 'bt2020nc';
+      args.push(
+        '-color_primaries', colorPrimaries,
+        '-color_trc', colorTrc,
+        '-colorspace', colorSpace,
+        '-x265-params', `hdr-opt=1:repeat-headers=1:colorprim=${colorPrimaries}:transfer=${colorTrc}:colormatrix=${colorSpace}`
+      );
+    }
+
+    // ─── Audio encoding ─────────────────────────────────────────────────────
+    if (this.audioPairs) {
+      // Per-pair: each track gets its own codec, bitrate, channel count, and
+      // optional language metadata tag (ISO 639-2, e.g. "eng", "fra").
+      this.audioPairs.forEach((p, i) => {
+        args.push(`-c:a:${i}`, p.codec, `-b:a:${i}`, p.bitrate, `-ac:a:${i}`, String(p.channels));
+        if (p.language) args.push(`-metadata:s:a:${i}`, `language=${p.language}`);
+      });
+    } else {
+      args.push('-c:a', this.audioCodec, '-b:a', this.audioBitrate, '-ac', this.audioChannels.toString());
+    }
+
+    // ─── DVB-compliant output ────────────────────────────────────────────────
+    args.push(...this._buildOutputArgs(effectiveMode));
+
+    return args;
   }
 
-  start() {
-    if (this.isRunning) {
-      throw new Error(`Encoder ${this.id} is already running`);
+  // ─── DVB MPEG-TS muxer options (ISO 13818-1 / ETSI EN 300 468) ─────────────
+  // Sets PAT/PMT service structure, original network ID, and transport stream ID.
+  _buildDvbMuxerArgs() {
+    const args = [
+      '-mpegts_service_id',         String(this.serviceId),
+      '-mpegts_pmt_start_pid',      String(this.pmtPid),
+      '-mpegts_start_pid',          String(this.videoPid),  // base for any un-mapped PIDs
+      '-mpegts_original_network_id', String(this.originalNetworkId),
+      '-mpegts_transport_stream_id', String(this.transportStreamId),
+    ];
+    if (this.serviceName)    args.push('-metadata', `service_name=${this.serviceName}`);
+    if (this.serviceProvider) args.push('-metadata', `service_provider=${this.serviceProvider}`);
+    return args;
+  }
+
+  // ─── Per-stream PID assignment via -streamid ─────────────────────────────────
+  // Output stream 0 = video (always first after -map 0:v:0 or FFmpeg auto-select).
+  // Output streams 1..N = audio pairs in declaration order.
+  _buildStreamIdArgs() {
+    const args = ['-streamid', `0:${this.videoPid}`];
+    if (this.audioPairs) {
+      this.audioPairs.forEach((p, i) => args.push('-streamid', `${i + 1}:${p.pid}`));
     }
+    return args;
+  }
+
+  // ─── Output URL + format selection ───────────────────────────────────────────
+  _buildOutputArgs(mode) {
+    if (mode === 'null') return ['-f', 'null', '-'];
+
+    const dvb = this._buildDvbMuxerArgs();
+    const pids = this._buildStreamIdArgs();
+
+    if (mode === 'udp') {
+      // UDP multicast — pkt_size=1316 aligns TS packets (7 × 188 bytes) per UDP datagram
+      let url = `udp://${this.host}:${this.port}?pkt_size=1316&ttl=${this.ttl}`;
+      if (this.localAddr) url += `&localaddr=${this.localAddr}`;
+      return ['-f', 'mpegts', ...dvb, ...pids, url];
+    }
+
+    if (mode === 'rtp') {
+      // RTP encapsulation of full MPEG-TS (rtp_mpegts muxer)
+      let url = `rtp://${this.host}:${this.port}?ttl=${this.ttl}`;
+      if (this.localAddr) url += `&localaddr=${this.localAddr}`;
+      return ['-f', 'rtp_mpegts', ...dvb, ...pids, url];
+    }
+
+    // SRT (default) — Haivision encapsulation with libsrt stats
+    return ['-f', 'mpegts', ...dvb, ...pids, this.buildSRTUrl()];
+  }
+
+  // ─── Lifecycle ──────────────────────────────────────────────────────────────
+  start() {
+    if (this.isRunning) throw new Error(`Encoder ${this.id} is already running`);
 
     const args = this.buildFFmpegArgs();
     this.process = spawn('ffmpeg', args);
@@ -129,45 +273,88 @@ class SRTEncoder extends EventEmitter {
   }
 
   stop() {
-    if (this.process && this.isRunning) {
-      this.process.kill('SIGTERM');
-    }
+    if (this.process && this.isRunning) this.process.kill('SIGTERM');
   }
 
+  // ─── Stats parsing ──────────────────────────────────────────────────────────
   parseStats(line) {
-    // FFmpeg stderr progress line:
-    // frame=  123 fps= 25 q=28.0 size=   4096kB time=00:00:05.00 bitrate=6710.2kbits/s speed=1.00x
-    const stats = {};
+    // ── 1. FFmpeg encode progress ────────────────────────────────────────────
+    // frame=  123 fps= 25 q=28.0 size=N/A time=00:00:05.00 bitrate=6710.2kbits/s speed=1.00x
+    const mFrame = line.match(/frame=\s*(\d+)/);
+    const mFps = line.match(/fps=\s*([\d.]+)/);
+    const mBitrate = line.match(/bitrate=\s*([\d.]+)kbits\/s/);
+    const mSpeed = line.match(/speed=\s*([\d.]+)x/);
+    const mDrop = line.match(/dup=\s*(\d+).*?drop=\s*(\d+)/);
 
-    const m = {
-      frame:       line.match(/frame=\s*(\d+)/),
-      fps:         line.match(/fps=\s*([\d.]+)/),
-      bitrate:     line.match(/bitrate=\s*([\d.]+)kbits\/s/),
-      speed:       line.match(/speed=\s*([\d.]+)x/),
-      dropFrames:  line.match(/drop=\s*(\d+)/),
-    };
+    const encStats = {};
+    if (mFrame) encStats.frame = parseInt(mFrame[1]);
+    if (mFps) encStats.fps = parseFloat(mFps[1]);
+    if (mBitrate) encStats.bitrate = parseFloat(mBitrate[1]);
+    if (mSpeed) encStats.speed = parseFloat(mSpeed[1]);
+    if (mDrop) encStats.dropFrames = parseInt(mDrop[2]);
 
-    if (m.frame)      stats.frame      = parseInt(m.frame[1]);
-    if (m.fps)        stats.fps        = parseFloat(m.fps[1]);
-    if (m.bitrate)    stats.bitrate    = parseFloat(m.bitrate[1]);
-    if (m.speed)      stats.speed      = parseFloat(m.speed[1]);
-    if (m.dropFrames) stats.dropFrames = parseInt(m.dropFrames[1]);
+    if (Object.keys(encStats).length > 0) {
+      this.lastStats = { ...this.lastStats, ...encStats };
+      this.emit('stats', { ...encStats });
+    }
 
-    if (Object.keys(stats).length > 0) {
-      this.lastStats = stats;
-      this.emit('stats', stats);
+    // ── 2. Haivision libsrt statistics ──────────────────────────────────────
+    // Format (emitted by libsrt when stats=1 is set):
+    // [srt-stats] rate=12.34Mbps bw=50.00Mbps rtt=42.1ms total=1234pkts retrans=0pkts loss=0pkts nak=0pkts
+    if (line.includes('srt-stats')) {
+      const mRate = line.match(/rate=([\d.]+)Mbps/i);
+      const mBw = line.match(/bw=([\d.]+)Mbps/i);
+      const mRtt = line.match(/rtt=([\d.]+)ms/i);
+      const mTotal = line.match(/total=(\d+)/i);
+      const mRetrans = line.match(/retrans=(\d+)/i);
+      const mLoss = line.match(/loss=(\d+)/i);
+      const mNak = line.match(/nak=(\d+)/i);   // NAK counter
+
+      const srt = {};
+      if (mRate) srt.rateMbps = parseFloat(mRate[1]);
+      if (mBw) srt.bwMbps = parseFloat(mBw[1]);
+      if (mRtt) srt.rttMs = parseFloat(mRtt[1]);
+      if (mTotal) srt.pktTotal = parseInt(mTotal[1]);
+      if (mRetrans) srt.pktRetrans = parseInt(mRetrans[1]);
+      if (mLoss) srt.pktLoss = parseInt(mLoss[1]);
+      if (mNak) srt.pktNak = parseInt(mNak[1]);  // Negative Acknowledgements
+
+      // Derived loss %
+      if (srt.pktTotal > 0 && srt.pktLoss !== undefined) {
+        srt.lossPercent = parseFloat(
+          ((srt.pktLoss / srt.pktTotal) * 100).toFixed(2)
+        );
+      }
+
+      if (Object.keys(srt).length > 0) {
+        this.srtStats = srt;
+        this.emit('srtStats', srt);
+      }
     }
   }
 
+  // ─── Serialisation ──────────────────────────────────────────────────────────
   toJSON() {
     return {
-      id:        this.id,
-      input:     this.input,
-      host:      this.host,
-      port:      this.port,
+      id: this.id,
+      input: this.input,
+      outputMode: this.outputMode || (this.host ? 'srt' : 'null'),
+      host: this.host,
+      port: this.port,
       isRunning: this.isRunning,
       startTime: this.startTime,
       lastStats: this.lastStats,
+      srtStats: this.srtStats,
+      audioPairs: this.audioPairs || null,
+      dvb: {
+        serviceId: this.serviceId,
+        transportStreamId: this.transportStreamId,
+        originalNetworkId: this.originalNetworkId,
+        pmtPid: this.pmtPid,
+        videoPid: this.videoPid,
+        serviceName: this.serviceName,
+        serviceProvider: this.serviceProvider,
+      },
     };
   }
 }

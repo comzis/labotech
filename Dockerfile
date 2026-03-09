@@ -4,7 +4,7 @@ WORKDIR /app
 COPY package*.json ./
 COPY web/package*.json ./web/
 RUN npm install
-RUN cd web && npm install
+RUN cd web && npm install && npm install framer-motion lucide-react clsx tailwind-merge
 COPY . .
 RUN cd web && npm run build
 

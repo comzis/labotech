@@ -1,10 +1,10 @@
 'use strict';
 
-const express    = require('express');
-const WebSocket  = require('ws');
+const express = require('express');
+const WebSocket = require('ws');
 const Transcoder = require('../src/transcoder');
 
-module.exports = function(transcoders, wss) {
+module.exports = function (transcoders, wss) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -14,16 +14,22 @@ module.exports = function(transcoders, wss) {
     });
   }
 
-  // GET /transcode/presets
+  // GET /transcode/presets (Interlace/Transformation)
   router.get('/presets', (req, res) => {
     const presets = Object.entries(Transcoder.PRESETS).map(([key, val]) => ({
       key,
       name: val.name,
-      inputFps:  val.inputFps,
+      inputFps: val.inputFps,
       outputFps: val.outputFps,
       interlaced: val.interlaced,
     }));
     res.json(presets);
+  });
+
+  // GET /transcode/broadcast-presets (Output Formats)
+  router.get('/broadcast-presets', (req, res) => {
+    const presets = require('../config/presets.json');
+    res.json(presets.slots);
   });
 
   // GET /transcode
@@ -35,7 +41,8 @@ module.exports = function(transcoders, wss) {
   router.post('/', (req, res) => {
     const {
       id, input, host, port, latency,
-      transcodePreset, videoBitrate, audioBitrate,
+      transcodePreset, broadcastPresetSlot,
+      videoBitrate, audioBitrate,
       videoCodec, audioCodec, preset, passphrase, streamId,
     } = req.body;
 
@@ -50,16 +57,17 @@ module.exports = function(transcoders, wss) {
     try {
       transcoder = new Transcoder({
         id, input, host, port, latency,
-        transcodePreset, videoBitrate, audioBitrate,
+        transcodePreset, broadcastPresetSlot,
+        videoBitrate, audioBitrate,
         videoCodec, audioCodec, preset, passphrase, streamId,
       });
     } catch (err) {
       return res.status(400).json({ error: err.message });
     }
 
-    transcoder.on('stats',   stats => broadcast({ type: 'transcode_stats', id, ...stats }));
-    transcoder.on('error',   err   => broadcast({ type: 'error', id, message: err.message }));
-    transcoder.on('stopped',       () => broadcast({ type: 'transcode_stopped', id }));
+    transcoder.on('stats', stats => broadcast({ type: 'transcode_stats', id, ...stats }));
+    transcoder.on('error', err => broadcast({ type: 'error', id, message: err.message }));
+    transcoder.on('stopped', () => broadcast({ type: 'transcode_stopped', id }));
 
     try {
       transcoder.start();

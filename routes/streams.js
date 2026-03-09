@@ -1,10 +1,10 @@
 'use strict';
 
-const express     = require('express');
-const WebSocket   = require('ws');
-const SRTEncoder  = require('../src/encoder');
+const express = require('express');
+const WebSocket = require('ws');
+const SRTEncoder = require('../src/encoder');
 
-module.exports = function(streams, wss) {
+module.exports = function (streams, wss) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -23,12 +23,21 @@ module.exports = function(streams, wss) {
   router.post('/', (req, res) => {
     const {
       id, input, host, port, latency,
-      videoBitrate, audioBitrate, videoCodec, audioCodec,
-      preset, pixFmt, passphrase, streamId,
+      videoBitrate, videoCodec,
+      preset, profile, gopSize, pixFmt, passphrase, streamId,
+      // Output transport
+      outputMode, ttl, localAddr,
+      // DVB/MPEG-TS service parameters
+      serviceId, transportStreamId, originalNetworkId,
+      pmtPid, videoPid, serviceName, serviceProvider,
+      // Per-pair audio (preferred)
+      audioPairs,
+      // Legacy flat audio fields (fallback when audioPairs not supplied)
+      audioBitrate, audioCodec, audioChannels,
     } = req.body;
 
-    if (!id || !input || !host || !port) {
-      return res.status(400).json({ error: 'id, input, host and port are required' });
+    if (!id || !input) {
+      return res.status(400).json({ error: 'id and input are required' });
     }
     if (streams.has(id)) {
       return res.status(409).json({ error: `Stream ${id} already exists` });
@@ -36,13 +45,19 @@ module.exports = function(streams, wss) {
 
     const encoder = new SRTEncoder({
       id, input, host, port, latency,
-      videoBitrate, audioBitrate, videoCodec, audioCodec,
-      preset, pixFmt, passphrase, streamId,
+      videoBitrate, videoCodec,
+      preset, profile, gopSize, pixFmt, passphrase, streamId,
+      outputMode, ttl, localAddr,
+      serviceId, transportStreamId, originalNetworkId,
+      pmtPid, videoPid, serviceName, serviceProvider,
+      audioPairs,
+      audioBitrate, audioCodec, audioChannels,
     });
 
     encoder.on('stats', stats => broadcast({ type: 'stats', id, ...stats }));
-    encoder.on('error', err  => broadcast({ type: 'error', id, message: err.message }));
-    encoder.on('stopped',   () => broadcast({ type: 'stopped', id }));
+    encoder.on('srtStats', srt => broadcast({ type: 'srtStats', id, ...srt }));
+    encoder.on('error', err => broadcast({ type: 'error', id, message: err.message }));
+    encoder.on('stopped', () => broadcast({ type: 'stopped', id }));
 
     try {
       encoder.start();

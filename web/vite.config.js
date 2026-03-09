@@ -16,5 +16,16 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react':   ['react', 'react-dom'],
+          'vendor-motion':  ['framer-motion'],
+          'vendor-charts':  ['recharts'],
+          'vendor-radix':   ['@radix-ui/react-dialog', '@radix-ui/react-tabs', '@radix-ui/react-tooltip'],
+          'vendor-query':   ['@tanstack/react-query'],
+        },
+      },
+    },
   },
 });

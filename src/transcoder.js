@@ -1,6 +1,7 @@
 'use strict';
 
 const SRTEncoder = require('./encoder');
+const BROADCAST_PRESETS = require('../config/presets.json');
 
 // PAL/NTSC/HFR interlacing presets
 const INTERLACE_PRESETS = {
@@ -44,9 +45,25 @@ const INTERLACE_PRESETS = {
 
 class Transcoder extends SRTEncoder {
   constructor(options = {}) {
-    super(options);
-    this.transcodePreset = options.transcodePreset || 'pal';
+    // Merge broadcast preset if slot is provided
+    let mergedOptions = { ...options };
+    if (options.broadcastPresetSlot) {
+      const slotData = BROADCAST_PRESETS.slots.find(s => s.slot === parseInt(options.broadcastPresetSlot));
+      if (slotData) {
+        // Options override slot defaults ONLY if they are not empty/null
+        const overrides = {};
+        for (const [k, v] of Object.entries(options)) {
+          if (v !== '' && v !== null && v !== undefined) overrides[k] = v;
+        }
+        mergedOptions = { ...slotData, ...overrides };
+      }
+    }
 
+    super(mergedOptions);
+    this.transcodePreset = mergedOptions.transcodePreset || 'pal';
+    this.broadcastPresetSlot = mergedOptions.broadcastPresetSlot || null;
+
+    // Use interlace preset if valid, otherwise default to PAL
     const preset = INTERLACE_PRESETS[this.transcodePreset];
     if (!preset) {
       throw new Error(
@@ -73,9 +90,26 @@ class Transcoder extends SRTEncoder {
       '-b:v', this.videoBitrate,
       '-maxrate', this.videoBitrate,
       '-bufsize', bufsize,
-      '-pix_fmt', 'yuv420p',
+      '-pix_fmt', this.pixFmt,
       '-flags', '+ildct+ilme',
     ];
+
+    if (this.profile) {
+      args.push('-profile:v', this.profile);
+    }
+
+    // ─── Professional Metadata & HDR Signaling (DVB TS 101 154) ────────────
+    if (this.pixFmt && this.pixFmt.includes('10le')) {
+      const colorPrimaries = this.colorPrimaries || 'bt2020';
+      const colorTrc = this.colorTransfer || 'smpte2084';
+      const colorSpace = this.colorSpace || 'bt2020nc';
+      args.push(
+        '-color_primaries', colorPrimaries,
+        '-color_trc', colorTrc,
+        '-colorspace', colorSpace,
+        '-x265-params', `hdr-opt=1:repeat-headers=1:colorprim=${colorPrimaries}:transfer=${colorTrc}:colormatrix=${colorSpace}`
+      );
+    }
 
     if (p.fieldOrder) {
       args.push('-field_order', p.fieldOrder);
@@ -85,20 +119,21 @@ class Transcoder extends SRTEncoder {
       args.push('-top', '1');
     }
 
-    args.push(
-      '-c:a', this.audioCodec,
-      '-b:a', this.audioBitrate,
-      '-f', 'mpegts',
-      this.buildSRTUrl()
-    );
+    // Output arguments (muxer, PIDs, etc.)
+    // We can't easily call super._buildOutputArgs directly because of the logic, 
+    // but SRTEncoder has it public or accessible.
+    // In src/encoder.js it is _buildOutputArgs
+    args.push(...this._buildOutputArgs(this.outputMode || (this.host ? 'srt' : 'null')));
 
     return args;
   }
 
   toJSON() {
+    const base = super.toJSON();
     return {
-      ...super.toJSON(),
+      ...base,
       transcodePreset: this.transcodePreset,
+      broadcastPresetSlot: this.broadcastPresetSlot,
       presetName: this._preset.name,
     };
   }

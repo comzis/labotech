@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import PidBadge from './PidBadge';
 import StatusDot from './StatusDot';
@@ -8,14 +8,13 @@ export default function TSAnalyser({ lastMessage }) {
   const [contId,   setContId]   = useState('');
   const [interval, setInterval] = useState(5000);
 
-  const { result, loading, error, activeId, probe, startContinuous, stop } = useTSAnalysis();
+  // Single hook instance — onWsResult must come from the same instance as result/loading/etc.
+  const { result, loading, error, activeId, probe, startContinuous, stop, onWsResult } = useTSAnalysis();
 
-  // Feed WS messages into hook
-  React.useEffect(() => {
+  // Feed WS analyse_result messages into the hook
+  useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
-  }, [lastMessage]);
-
-  const { onWsResult } = useTSAnalysis();
+  }, [lastMessage, onWsResult]);
 
   const handleProbe = (e) => {
     e.preventDefault();
@@ -134,11 +133,11 @@ function StreamRow({ stream: s }) {
       <PidBadge pid={s.pid} />
       <span className={`w-12 font-semibold ${typeColor}`}>{s.codecType}</span>
       <span className="text-gray-300 w-16">{s.codecName}</span>
-      {s.width && <span className="text-gray-500">{s.width}×{s.height}</span>}
-      {s.fps    && <span className="text-gray-500">{s.fps}</span>}
+      {s.width      && <span className="text-gray-500">{s.width}×{s.height}</span>}
+      {s.fps        && <span className="text-gray-500">{s.fps}</span>}
       {s.sampleRate && <span className="text-gray-500">{s.sampleRate}Hz {s.channels}ch</span>}
-      {s.bitrate && <span className="text-gray-500">{(s.bitrate / 1000).toFixed(0)} kbps</span>}
-      {s.language && <span className="text-gray-600">[{s.language}]</span>}
+      {s.bitrate    && <span className="text-gray-500">{(s.bitrate / 1000000).toFixed(2)} Mbps</span>}
+      {s.language   && <span className="text-gray-600">[{s.language}]</span>}
     </div>
   );
 }
