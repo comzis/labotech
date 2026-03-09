@@ -24,23 +24,34 @@ if (!fs.existsSync(THUMBNAIL_DIR)) {
 function captureThumbnail(streamId, inputUrl) {
   return new Promise((resolve, reject) => {
     const outPath = path.join(THUMBNAIL_DIR, `${streamId}.jpg`);
+
+    // Build input URL with multicast-friendly options
+    let src = inputUrl;
+    if (inputUrl.startsWith('udp://') || inputUrl.startsWith('rtp://')) {
+      const sep = inputUrl.includes('?') ? '&' : '?';
+      src = `${inputUrl}${sep}timeout=3000000`; // 3s timeout
+    }
+
     const args = [
       '-y',
       '-hide_banner',
       '-loglevel', 'error',
-      '-i', inputUrl,
+      '-fflags', '+genpts+discardcorrupt',
+      '-i', src,
       '-vframes', '1',
-      '-vf', 'scale=320:-1',
+      '-vf', 'scale=320:trunc(320/dar/2)*2',
       '-q:v', '5',
       outPath,
     ];
 
     const proc = spawn('ffmpeg', args);
+    const timer = setTimeout(() => { proc.kill('SIGTERM'); reject(new Error('Thumbnail timeout')); }, 8000);
     proc.on('exit', (code) => {
+      clearTimeout(timer);
       if (code === 0) resolve(outPath);
-      else reject(new Error(`Thumbnail capture failed for ${streamId}`));
+      else reject(new Error(`Thumbnail capture failed with code ${code}`));
     });
-    proc.on('error', reject);
+    proc.on('error', (err) => { clearTimeout(timer); reject(err); });
   });
 }
 
