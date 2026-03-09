@@ -27,10 +27,12 @@ export default function StreamsPanel({ lastMessage }) {
     try {
       if (isTranscoder) await stopTranscoder(id);
       else await stopStream(id);
-      refresh();
     } catch (err) {
-      toast.error(`Failed to stop ${id}: ${err.message}`);
+      if (!err.message.includes('404') && !err.message.toLowerCase().includes('not found')) {
+        toast.error(`Failed to stop ${id}: ${err.message}`);
+      }
     }
+    refresh();
   };
 
   const all = [

@@ -82,7 +82,10 @@ export default function TranscodePanel({ lastMessage }) {
     try {
       await stopTranscoder(id);
     } catch (err) {
-      toast.error(`Stop failed: ${err.message}`);
+      // 404 = already gone (server restart etc.) — just refresh silently
+      if (!err.message.includes('404') && !err.message.toLowerCase().includes('not found')) {
+        toast.error(`Stop failed: ${err.message}`);
+      }
     }
     load();
   };
