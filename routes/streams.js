@@ -11,7 +11,9 @@ const thumbTimers = new Map(); // id → intervalId
 function startThumbnailCapture(id, inputUrl) {
   if (thumbTimers.has(id)) return;
   const timer = setInterval(() => {
-    captureThumbnail(id, inputUrl).catch(() => {});
+    captureThumbnail(id, inputUrl).catch(err => {
+      console.error(`[thumbnail] ${id}: ${err.message}`);
+    });
   }, THUMB_INTERVAL);
   thumbTimers.set(id, timer);
 }
