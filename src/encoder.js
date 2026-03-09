@@ -27,6 +27,7 @@ class SRTEncoder extends EventEmitter {
     this.outputMode = options.outputMode || null;
     this.ttl = options.ttl != null ? parseInt(options.ttl) : 16;
     this.localAddr = options.localAddr || null;
+    this.inputLocalAddr = options.inputLocalAddr || null;
 
     // ── DVB/MPEG-TS muxer parameters (ETSI EN 300 468 / ISO 13818-1) ────────
     // PMT PID default 0x1000 (4096), video PID default 0x100 (256)
@@ -87,7 +88,11 @@ class SRTEncoder extends EventEmitter {
     const type = this.detectInputType(this.input);
     const args = [];
     if (type === 'rtp' || type === 'udp') {
-      args.push('-fflags', '+genpts+discardcorrupt', '-i', this.input);
+      const sep = this.input.includes('?') ? '&' : '?';
+      const inputUrl = this.inputLocalAddr
+        ? `${this.input}${sep}localaddr=${this.inputLocalAddr}`
+        : this.input;
+      args.push('-fflags', '+genpts+discardcorrupt', '-i', inputUrl);
     } else if (type === 'rtsp') {
       args.push('-rtsp_transport', 'tcp', '-i', this.input);
     } else if (type === 'device') {
