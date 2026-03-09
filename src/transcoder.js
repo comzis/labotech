@@ -81,18 +81,22 @@ class Transcoder extends SRTEncoder {
 
     const args = [
       '-hide_banner',
-      '-loglevel', 'warning',
+      '-loglevel', 'info',
       '-stats',
       ...this.buildInputArgs(),
       '-vf', p.videoFilter,
       '-c:v', this.videoCodec,
       '-preset', this.preset,
       '-b:v', this.videoBitrate,
-      '-maxrate', this.videoBitrate,
-      '-bufsize', bufsize,
       '-pix_fmt', this.pixFmt,
       '-flags', '+ildct+ilme',
     ];
+
+    if (this.rateMode === 'cbr') {
+      args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize, '-x264-params', 'nal-hrd=cbr:force-cfr=1');
+    } else {
+      args.push('-bufsize', bufsize);
+    }
 
     if (this.profile) {
       args.push('-profile:v', this.profile);
@@ -119,11 +123,13 @@ class Transcoder extends SRTEncoder {
       args.push('-top', '1');
     }
 
-    // Output arguments (muxer, PIDs, etc.)
-    // We can't easily call super._buildOutputArgs directly because of the logic, 
-    // but SRTEncoder has it public or accessible.
-    // In src/encoder.js it is _buildOutputArgs
     args.push(...this._buildOutputArgs(this.outputMode || (this.host ? 'srt' : 'null')));
+
+    // Thumbnail output
+    const { THUMBNAIL_DIR } = require('./monitoring');
+    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+    args.push('-map', '0:v:0', '-vf', `fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2`, '-update', '1', '-q:v', '5', '-y', thumbPath);
 
     return args;
   }
