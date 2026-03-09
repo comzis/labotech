@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Settings2, Zap, Server, ShieldCheck, Play, Radio, Activity, Plus, Trash2, Tv2 } from 'lucide-react';
 import { startStream } from '../api';
+import BentoCard, { containerVariants } from './ui/BentoCard';
+import { Field, SelectField, PidField } from './ui/MatrixField';
 
 const DEFAULTS = {
   id: '', input: '',
@@ -19,16 +21,7 @@ const DEFAULTS = {
 
 const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
 
-// Framer Motion Animation Variants
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
-};
+// Animations moved to BentoCard.jsx
 
 export default function EncoderForm({ onStarted }) {
   const [form, setForm] = useState(DEFAULTS);
@@ -112,10 +105,10 @@ export default function EncoderForm({ onStarted }) {
             </button>
           </div>
 
-          <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-3 gap-6">
 
             {/* Bento Card 1: Transport & Networking (2 cols) */}
-            <BentoCard icon={Server} title="Transport & Networking" className="md:col-span-2 lg:col-span-2">
+            <BentoCard icon={Server} title="Transport & Networking" className="md:col-span-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
                 <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="udp://239.0.0.1:5000" />
@@ -168,7 +161,7 @@ export default function EncoderForm({ onStarted }) {
             </BentoCard>
 
             {/* Bento Card 2: Audio Matrix — per-track codec / bitrate / PID / language */}
-            <BentoCard icon={Radio} title="Audio Matrix" className="col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
+            <BentoCard icon={Radio} title="Audio Matrix" className="md:col-span-1 md:row-span-2 border-neon-cyan/20 bg-neon-cyan/5">
               <div className="space-y-3">
                 {/* Column headers */}
                 <div className="grid grid-cols-[36px_1fr_64px_40px_44px_44px_20px] gap-1 items-center">
@@ -223,7 +216,7 @@ export default function EncoderForm({ onStarted }) {
             </BentoCard>
 
             {/* Bento Card 3: DVB/TS Service */}
-            <BentoCard icon={Tv2} title="DVB / TS Service" className="col-span-1 border-neon-purple/20 bg-neon-purple/5">
+            <BentoCard icon={Tv2} title="DVB / TS Service" className="md:col-span-2 border-neon-purple/20 bg-neon-purple/5">
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
                   <PidField label="Service ID" value={form.serviceId} onChange={v => set('serviceId', v)} />
@@ -245,7 +238,7 @@ export default function EncoderForm({ onStarted }) {
             </BentoCard>
 
             {/* Bento Card 4: Video Matrix (full width) */}
-            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-2 lg:col-span-3 border-neon-purple/20 bg-neon-purple/5">
+            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-3 border-neon-purple/20 bg-neon-purple/5">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
@@ -289,67 +282,4 @@ export default function EncoderForm({ onStarted }) {
   );
 }
 
-// Sub-components for Bento Grid
-function BentoCard({ title, icon: Icon, children, className = '' }) {
-  return (
-    <motion.div variants={itemVariants} className={`bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-3xl p-6 relative overflow-hidden group ${className}`}>
-      {/* Subtle Hover Glow */}
-      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-
-      <div className="flex items-center gap-2 mb-6 relative z-10">
-        <Icon className="w-5 h-5 text-gray-400 group-hover:text-neon-cyan transition-colors" strokeWidth={1.5} />
-        <h3 className="text-sm font-bold text-gray-200 uppercase tracking-widest">{title}</h3>
-      </div>
-      <div className="relative z-10">
-        {children}
-      </div>
-    </motion.div>
-  );
-}
-
-// Compact integer field styled for PID/ID values
-function PidField({ label, value, onChange }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
-      <input
-        type="number" value={value} onChange={e => onChange(e.target.value)} min="1" max="65535"
-        className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-neon-purple/90 font-mono focus:outline-none focus:border-neon-purple/50 focus:bg-neon-purple/5 transition-all"
-      />
-    </div>
-  );
-}
-
-function Field({ label, value, onChange, ...props }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...props}
-        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all placeholder:text-gray-600"
-      />
-    </div>
-  );
-}
-
-function SelectField({ label, options, value, onChange, ...props }) {
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1">{label}</label>
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...props}
-        className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer"
-        style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg fill="%239ca3af" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
-      >
-        {options.map(o => {
-          const isObj = typeof o === 'object';
-          return <option key={isObj ? o.value : o} value={isObj ? o.value : o} className="bg-midnight-surface">{isObj ? o.label : o}</option>
-        })}
-      </select>
-    </div>
-  );
-}
+// End of EncoderForm

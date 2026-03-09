@@ -5,6 +5,7 @@ import { stopStream, stopTranscoder } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
+import { motion } from 'framer-motion';
 
 // Output mode pill — colour-coded for quick identification at a glance
 const MODE_STYLE = {
@@ -33,7 +34,7 @@ export default function StreamsPanel({ lastMessage }) {
   };
 
   const all = [
-    ...streams.map(s    => ({ ...s, _type: 'encoder'    })),
+    ...streams.map(s => ({ ...s, _type: 'encoder' })),
     ...transcoders.map(t => ({ ...t, _type: 'transcoder' })),
   ];
 
@@ -47,7 +48,7 @@ export default function StreamsPanel({ lastMessage }) {
         </h2>
 
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
-        {error   && <p className="text-red-400  text-sm">{error}</p>}
+        {error && <p className="text-red-400  text-sm">{error}</p>}
 
         {!loading && all.length === 0 && (
           <p className="text-gray-600 text-sm">No active streams.</p>
@@ -56,9 +57,15 @@ export default function StreamsPanel({ lastMessage }) {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {all.map(s => {
             const mode = s.outputMode || 'srt';
-            const dvb  = s.dvb;
+            const dvb = s.dvb;
             return (
-              <div key={s.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
+              <motion.div
+                key={s.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
                 {/* Header row */}
                 <div className="flex items-center justify-between">
@@ -104,7 +111,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <span>→ {s.host}:{s.port}</span>
                   {dvb && (
                     <span className="text-gray-700">
-                      SID {dvb.serviceId} · V:{`0x${dvb.videoPid?.toString(16).toUpperCase().padStart(4,'0')}`}
+                      SID {dvb.serviceId} · V:{`0x${dvb.videoPid?.toString(16).toUpperCase().padStart(4, '0')}`}
                     </span>
                   )}
                 </div>
@@ -114,7 +121,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <div className="flex flex-wrap gap-1">
                     {s.audioPairs.map((p, i) => (
                       <span key={i} className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
-                        A{i} {p.codec} {`0x${p.pid?.toString(16).toUpperCase().padStart(4,'0')}`}
+                        A{i} {p.codec} {`0x${p.pid?.toString(16).toUpperCase().padStart(4, '0')}`}
                         {p.language ? ` [${p.language}]` : ''}
                       </span>
                     ))}
@@ -124,7 +131,7 @@ export default function StreamsPanel({ lastMessage }) {
                 {s.isRunning && (
                   <MetricsTile id={s.id} stats={s.lastStats} lastMessage={lastMessage} />
                 )}
-              </div>
+              </motion.div>
             );
           })}
         </div>

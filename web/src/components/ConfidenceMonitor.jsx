@@ -2,15 +2,17 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { toast } from 'sonner';
 import { getStreams, getTranscoders } from '../api';
 import StatusDot from './StatusDot';
+import { motion, AnimatePresence } from 'framer-motion';
+import { ShieldCheck, Monitor } from 'lucide-react';
 
-const THUMB_BASE  = '/logs/thumbnails';
-const REFRESH_MS  = parseInt(import.meta.env?.VITE_THUMB_INTERVAL_MS) || 5000;
+const THUMB_BASE = '/logs/thumbnails';
+const REFRESH_MS = parseInt(import.meta.env?.VITE_THUMB_INTERVAL_MS) || 5000;
 
 export default function ConfidenceMonitor({ lastMessage }) {
-  const [streams,     setStreams]     = useState([]);
+  const [streams, setStreams] = useState([]);
   const [transcoders, setTranscoders] = useState([]);
-  const [loadError,   setLoadError]   = useState(null);
-  const [tick,        setTick]        = useState(0);
+  const [loadError, setLoadError] = useState(null);
+  const [tick, setTick] = useState(0);
 
   // Per-stream live bitrate fed from WebSocket — avoids stale REST poll values
   const [liveBitrates, setLiveBitrates] = useState({});
@@ -48,18 +50,25 @@ export default function ConfidenceMonitor({ lastMessage }) {
   }, [lastMessage, load]);
 
   const all = [
-    ...streams.map(s    => ({ ...s, _type: 'encoder'    })),
+    ...streams.map(s => ({ ...s, _type: 'encoder' })),
     ...transcoders.map(t => ({ ...t, _type: 'transcoder' })),
   ].filter(s => s.isRunning);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-8 font-sans">
+      {/* Header */}
       <div className="flex items-center justify-between">
-        <h2 className="text-sm text-gray-400 uppercase tracking-widest">
-          Confidence Monitor ({all.length} active)
-        </h2>
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+            <ShieldCheck className="w-6 h-6 text-neon-blue" strokeWidth={1.5} />
+            Confidence Monitor
+          </h1>
+          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Real-time Visual QC & Signal Integrity</p>
+        </div>
         {loadError && (
-          <span className="text-xs text-red-400 font-mono">⚠ {loadError}</span>
+          <span className="text-xs text-red-400 font-mono bg-red-900/20 border border-red-500/20 px-3 py-1.5 rounded-full animate-pulse">
+            ⚠ {loadError}
+          </span>
         )}
       </div>
 
@@ -87,7 +96,7 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
 
   // Prefer live WS bitrate; fall back to last REST-polled value
   const bitrate = liveBitrate ?? s.lastStats?.bitrate;
-  const mbps    = bitrate ? (bitrate / 1000).toFixed(2) : null;
+  const mbps = bitrate ? (bitrate / 1000).toFixed(2) : null;
 
   const dvb = s.dvb;
   const mode = s.outputMode || 'srt';
@@ -99,7 +108,11 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
   };
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg overflow-hidden">
+    <motion.div
+      initial={{ opacity: 0, scale: 0.95 }}
+      animate={{ opacity: 1, scale: 1 }}
+      className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl overflow-hidden group"
+    >
       {/* Thumbnail frame */}
       <div className="relative aspect-video bg-gray-950">
         {imgError ? (
@@ -122,32 +135,34 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
       </div>
 
       {/* Service identity + metrics */}
-      <div className="p-2 space-y-1">
-        <div className="flex items-center gap-2">
+      <div className="p-3 space-y-2 relative z-10">
+        <div className="flex items-center gap-3">
           <StatusDot status="live" pulse />
-          <span className="text-xs font-mono text-gray-300 truncate flex-1">{s.id}</span>
+          <span className="text-[11px] font-mono text-gray-200 truncate font-semibold flex-1 tracking-tight">{s.id}</span>
           {mbps && (
-            <span className={`text-xs font-mono font-bold ${parseFloat(mbps) > 0 ? 'text-sky-400' : 'text-red-400'}`}>
+            <span className={`text-[11px] font-mono font-bold ${parseFloat(mbps) > 0 ? 'text-neon-cyan' : 'text-red-400'}`}>
               {mbps} Mbps
             </span>
           )}
         </div>
 
-        {/* DVB service name if declared */}
-        {dvb?.serviceName && (
-          <div className="text-[10px] text-gray-500 truncate font-mono">
-            {dvb.serviceName}
-            {dvb.serviceProvider ? ` · ${dvb.serviceProvider}` : ''}
-          </div>
-        )}
+        <div className="flex flex-col gap-0.5 opacity-60">
+          {/* DVB service name if declared */}
+          {dvb?.serviceName && (
+            <div className="text-[9px] text-gray-400 truncate uppercase tracking-wider font-bold">
+              {dvb.serviceName}
+              {dvb.serviceProvider ? ` · ${dvb.serviceProvider}` : ''}
+            </div>
+          )}
 
-        {/* SID + Video PID */}
-        {dvb && (
-          <div className="text-[10px] text-gray-700 font-mono">
-            SID {dvb.serviceId} · VPID 0x{dvb.videoPid?.toString(16).toUpperCase().padStart(4,'0')}
-          </div>
-        )}
+          {/* SID + Video PID */}
+          {dvb && (
+            <div className="text-[9px] text-gray-500 font-mono">
+              SID {dvb.serviceId} • VPID 0x{dvb.videoPid?.toString(16).toUpperCase().padStart(4, '0')}
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </motion.div>
   );
 }

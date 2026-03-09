@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
+import { Zap, Activity, Settings2, Play, Tv2, Share2 } from 'lucide-react';
+import BentoCard, { containerVariants } from './ui/BentoCard';
+import { Field } from './ui/MatrixField';
 import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopTranscoder } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
-import { Zap, Activity, Settings2, Play, Tv2, Share2 } from 'lucide-react';
 
 const DEFAULTS = {
   id: '',
@@ -18,15 +20,7 @@ const DEFAULTS = {
 };
 
 // Framer Motion Animation Variants (Same as EncoderForm)
-const containerVariants = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.1 } }
-};
-
-const itemVariants = {
-  hidden: { opacity: 0, y: 20 },
-  show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
-};
+// Animations moved to BentoCard.jsx
 
 export default function TranscodePanel({ lastMessage }) {
   const [presets, setPresets] = useState([]);
@@ -239,36 +233,4 @@ export default function TranscodePanel({ lastMessage }) {
   );
 }
 
-// Sub-components for Bento Grid (Synchronized with EncoderForm)
-function BentoCard({ title, icon: Icon, children, className = '' }) {
-  return (
-    <motion.div variants={itemVariants} className={`bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-3xl p-6 relative overflow-hidden group ${className}`}>
-      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-      <div className="flex items-center gap-2 mb-6 relative z-10">
-        <Icon className="w-5 h-5 text-gray-400 group-hover:text-white transition-colors" strokeWidth={1.5} />
-        <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-[0.2em]">{title}</h3>
-      </div>
-      <div className="relative z-10">
-        {children}
-      </div>
-    </motion.div>
-  );
-}
-
-function Field({ label, value, onChange, color = 'purple', ...props }) {
-  const focusColor = color === 'cyan' ? 'focus:border-neon-cyan/50 focus:bg-neon-cyan/5' :
-    color === 'green' ? 'focus:border-neon-green/50 focus:bg-neon-green/5' :
-      'focus:border-neon-purple/50 focus:bg-neon-purple/5';
-
-  return (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">{label}</label>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        {...props}
-        className={`w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200 focus:outline-none transition-all placeholder:text-gray-600 ${focusColor}`}
-      />
-    </div>
-  );
-}
+// End of TranscodePanel

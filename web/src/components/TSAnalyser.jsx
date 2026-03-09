@@ -2,10 +2,14 @@ import React, { useState, useEffect } from 'react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import PidBadge from './PidBadge';
 import StatusDot from './StatusDot';
+import { motion } from 'framer-motion';
+import { Search, Zap, Activity } from 'lucide-react';
+import BentoCard from './ui/BentoCard';
+import { Field } from './ui/MatrixField';
 
 export default function TSAnalyser({ lastMessage }) {
-  const [url,      setUrl]      = useState('');
-  const [contId,   setContId]   = useState('');
+  const [url, setUrl] = useState('');
+  const [contId, setContId] = useState('');
   const [interval, setInterval] = useState(5000);
 
   // Single hook instance — onWsResult must come from the same instance as result/loading/etc.
@@ -31,71 +35,91 @@ export default function TSAnalyser({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Input */}
-      <div className="bg-gray-900 border border-gray-800 rounded-lg p-5">
-        <h2 className="text-sm text-gray-400 mb-4 uppercase tracking-widest">TS Analyser</h2>
-        <form onSubmit={handleProbe} className="flex gap-3 flex-wrap">
-          <input
-            value={url}
-            onChange={e => setUrl(e.target.value)}
-            placeholder="udp://239.x.x.x:port or srt://..."
-            className="flex-1 min-w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-blue-600"
-          />
-          <button
-            type="submit"
-            disabled={loading || !url}
-            className="bg-blue-700 hover:bg-blue-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded"
-          >
-            {loading ? 'Probing…' : 'One-shot Probe'}
-          </button>
-          <button
-            type="button"
-            onClick={handleContinuous}
-            disabled={!url && !activeId}
-            className={`text-sm px-4 py-2 rounded transition-colors ${
-              activeId
-                ? 'bg-red-800 hover:bg-red-700 text-red-200'
-                : 'bg-yellow-800 hover:bg-yellow-700 text-yellow-200'
-            } disabled:opacity-50`}
-          >
-            {activeId ? 'Stop Continuous' : 'Start Continuous'}
-          </button>
-        </form>
-        {activeId && (
-          <div className="mt-3 flex items-center gap-2 text-xs text-green-400">
-            <StatusDot status="live" pulse />
-            Continuous probe: {activeId}
-          </div>
-        )}
-        {error && <p className="mt-3 text-red-400 text-sm">{error}</p>}
+    <div className="space-y-8 font-sans">
+      {/* Header */}
+      <div>
+        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+          <Search className="w-6 h-6 text-neon-cyan" strokeWidth={1.5} />
+          Analysis Matrix
+        </h1>
+        <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Deep Packet Inspection & Service Validation</p>
       </div>
 
-      {/* Results */}
-      {result && (
-        <div className="space-y-4">
-          <div className="text-xs text-gray-500">
-            Probed: <span className="text-gray-300">{result.url}</span>
-            {result.probeTime && (
-              <span className="ml-3 text-gray-600">
-                at {new Date(result.probeTime).toLocaleTimeString()}
-              </span>
-            )}
+      {/* Control Bento Card */}
+      <BentoCard icon={Activity} title="Probe Configuration">
+        <form onSubmit={handleProbe} className="space-y-4">
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <Field
+                label="Source URL *"
+                value={url}
+                onChange={setUrl}
+                placeholder="udp://239.x.x.x:port or srt://..."
+                required
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={loading || !url}
+              className="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/30 px-6 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50"
+            >
+              {loading ? 'Probing…' : 'One-shot'}
+            </button>
+            <button
+              type="button"
+              onClick={handleContinuous}
+              disabled={!url && !activeId}
+              className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${activeId
+                ? 'bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30'
+                : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20'
+                } disabled:opacity-50`}
+            >
+              {activeId ? 'Stop Continuous' : 'Start Continuous'}
+            </button>
           </div>
 
-          {result.programs?.map(prog => (
-            <ProgramBlock key={prog.programId} prog={prog} />
-          ))}
-
-          {result.orphanStreams?.length > 0 && (
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-              <h3 className="text-xs text-gray-500 mb-2">Orphan Streams (not in any program)</h3>
-              <div className="space-y-1">
-                {result.orphanStreams.map(s => <StreamRow key={s.index} stream={s} />)}
-              </div>
+          {activeId && (
+            <div className="flex items-center gap-2 text-xs text-neon-cyan font-mono animate-pulse">
+              <StatusDot status="live" pulse />
+              Active Analysis: {activeId}
             </div>
           )}
-        </div>
+          {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
+        </form>
+      </BentoCard>
+
+      {/* Results Matrix */}
+      {result && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">
+              Packet Structure
+            </h2>
+            <div className="text-[10px] text-gray-500 font-mono">
+              PID count: {result.programs?.reduce((acc, p) => acc + (p.streams?.length || 0), 0) + (result.orphanStreams?.length || 0)}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4">
+            {result.programs?.map(prog => (
+              <ProgramBlock key={prog.programId} prog={prog} />
+            ))}
+
+            {result.orphanStreams?.length > 0 && (
+              <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-5 relative overflow-hidden group">
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4">Orphan Matrix</h3>
+                <div className="space-y-1 relative z-10">
+                  {result.orphanStreams.map(s => <StreamRow key={s.index} stream={s} />)}
+                </div>
+              </div>
+            )}
+          </div>
+        </motion.div>
       )}
     </div>
   );
@@ -103,18 +127,21 @@ export default function TSAnalyser({ lastMessage }) {
 
 function ProgramBlock({ prog }) {
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-lg p-4">
-      <div className="flex items-center gap-3 mb-3">
-        <span className="text-sm font-semibold text-white">
-          Program {prog.programId}
-          {prog.name && <span className="ml-2 text-gray-400">— {prog.name}</span>}
-        </span>
-        <div className="flex gap-2 text-xs text-gray-600">
-          <span>PMT: <PidBadge pid={prog.pmtPid} /></span>
-          <span>PCR: <PidBadge pid={prog.pcrPid} /></span>
+    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-5 relative overflow-hidden group">
+      <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+      <div className="flex items-center justify-between mb-4 relative z-10">
+        <div className="flex items-center gap-3">
+          <span className="text-[11px] font-bold text-white uppercase tracking-wider">
+            Program {prog.programId}
+            {prog.name && <span className="ml-2 text-gray-400 opacity-70">— {prog.name}</span>}
+          </span>
+        </div>
+        <div className="flex gap-3 text-[10px] font-mono text-gray-500">
+          <span className="flex items-center gap-1.5">PMT <PidBadge pid={prog.pmtPid} /></span>
+          <span className="flex items-center gap-1.5">PCR <PidBadge pid={prog.pcrPid} /></span>
         </div>
       </div>
-      <div className="space-y-1">
+      <div className="space-y-1 relative z-10">
         {prog.streams?.map(s => <StreamRow key={s.index} stream={s} />)}
       </div>
     </div>
@@ -125,7 +152,7 @@ function StreamRow({ stream: s }) {
   const typeColor = {
     video: 'text-blue-400',
     audio: 'text-green-400',
-    data:  'text-yellow-400',
+    data: 'text-yellow-400',
   }[s.codecType] || 'text-gray-400';
 
   return (
@@ -133,11 +160,11 @@ function StreamRow({ stream: s }) {
       <PidBadge pid={s.pid} />
       <span className={`w-12 font-semibold ${typeColor}`}>{s.codecType}</span>
       <span className="text-gray-300 w-16">{s.codecName}</span>
-      {s.width      && <span className="text-gray-500">{s.width}×{s.height}</span>}
-      {s.fps        && <span className="text-gray-500">{s.fps}</span>}
+      {s.width && <span className="text-gray-500">{s.width}×{s.height}</span>}
+      {s.fps && <span className="text-gray-500">{s.fps}</span>}
       {s.sampleRate && <span className="text-gray-500">{s.sampleRate}Hz {s.channels}ch</span>}
-      {s.bitrate    && <span className="text-gray-500">{(s.bitrate / 1000000).toFixed(2)} Mbps</span>}
-      {s.language   && <span className="text-gray-600">[{s.language}]</span>}
+      {s.bitrate && <span className="text-gray-500">{(s.bitrate / 1000000).toFixed(2)} Mbps</span>}
+      {s.language && <span className="text-gray-600">[{s.language}]</span>}
     </div>
   );
 }

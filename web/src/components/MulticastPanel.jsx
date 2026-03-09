@@ -2,21 +2,25 @@ import React, { useState, useEffect } from 'react';
 import { getMulticastConfig, getForwarders, startForwarder, stopForwarder } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Network, Zap, Settings2, Globe, Share2 } from 'lucide-react';
+import BentoCard, { containerVariants } from './ui/BentoCard';
+import { Field } from './ui/MatrixField';
 
 const DEFAULTS = {
-  id:        '',
+  id: '',
   sourceUrl: '',
-  destIp:    '',
-  destPort:  '1234',
+  destIp: '',
+  destPort: '1234',
 };
 
 export default function MulticastPanel({ lastMessage }) {
-  const [config,     setConfig]     = useState(null);
+  const [config, setConfig] = useState(null);
   const [forwarders, setForwarders] = useState([]);
-  const [form,       setForm]       = useState(DEFAULTS);
-  const [loading,    setLoading]    = useState(false);
-  const [error,      setError]      = useState(null);
-  const [open,       setOpen]       = useState(false);
+  const [form, setForm] = useState(DEFAULTS);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [open, setOpen] = useState(false);
 
   const load = async () => {
     const [cfg, fwds] = await Promise.all([getMulticastConfig(), getForwarders()]);
@@ -54,91 +58,121 @@ export default function MulticastPanel({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-6">
-      {/* Config badge */}
-      {config && (
-        <div className="bg-gray-900 border border-gray-800 rounded-lg p-4 text-sm grid grid-cols-2 md:grid-cols-4 gap-3">
-          {[
-            ['NIC',    config.nic],
-            ['Subnet', config.subnet],
-            ['Default IP', config.address],
-            ['TTL',    config.ttl],
-          ].map(([k, v]) => (
-            <div key={k}>
-              <div className="text-xs text-gray-600">{k}</div>
-              <div className="font-mono text-green-400">{v}</div>
-            </div>
-          ))}
+    <div className="space-y-8 font-sans">
+      {/* Header */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+            <Network className="w-6 h-6 text-neon-green" strokeWidth={1.5} />
+            Multicast Matrix
+          </h1>
+          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Network Distribution & Group Forwarding</p>
         </div>
-      )}
-
-      {/* Start form */}
-      <div>
         <button
           onClick={() => setOpen(o => !o)}
-          className="bg-green-700 hover:bg-green-600 text-white text-sm px-4 py-2 rounded transition-colors"
+          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${open
+            ? 'bg-gray-800 text-gray-400 hover:text-white border border-white/10'
+            : 'bg-gradient-to-r from-neon-green to-green-600 text-white shadow-lg shadow-neon-green/20 hover:shadow-neon-green/40'
+            }`}
         >
-          {open ? '✕ Cancel' : '+ Start Forwarder'}
+          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Deploy Forwarder</>}
         </button>
-
-        {open && (
-          <form onSubmit={handleSubmit} className="mt-4 bg-gray-900 border border-gray-800 rounded-lg p-5 grid grid-cols-2 md:grid-cols-3 gap-4">
-            {[
-              ['Forwarder ID *', 'id'],
-              ['Source URL *',   'sourceUrl'],
-              ['Dest IP *',      'destIp'],
-              ['Dest Port',      'destPort'],
-            ].map(([label, key]) => (
-              <div key={key}>
-                <label className="block text-xs text-gray-500 mb-1">{label}</label>
-                <input
-                  value={form[key]}
-                  onChange={e => set(key, e.target.value)}
-                  required={label.endsWith('*')}
-                  placeholder={key === 'destIp' ? '239.100.25.x' : key === 'sourceUrl' ? 'udp://239.x.x.x:port' : ''}
-                  className="w-full bg-gray-800 border border-gray-700 rounded px-2 py-1.5 text-sm text-gray-200 focus:outline-none focus:border-green-600"
-                />
-              </div>
-            ))}
-            {error && <p className="col-span-full text-red-400 text-sm">{error}</p>}
-            <div className="col-span-full">
-              <button
-                type="submit"
-                disabled={loading}
-                className="bg-green-700 hover:bg-green-600 disabled:opacity-50 text-white text-sm px-4 py-2 rounded"
-              >
-                {loading ? 'Starting…' : 'Start'}
-              </button>
-            </div>
-          </form>
-        )}
       </div>
 
-      {/* Active forwarders */}
+      {/* Config Overview Bento Card */}
+      {config && (
+        <BentoCard icon={Settings2} title="Interface Configuration" accentColor="green">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              ['NIC', config.nic],
+              ['Subnet', config.subnet],
+              ['Default IP', config.address],
+              ['TTL', config.ttl],
+            ].map(([k, v]) => (
+              <div key={k}>
+                <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5 font-bold">{k}</div>
+                <div className="font-mono text-neon-green/90 text-sm">{v}</div>
+              </div>
+            ))}
+          </div>
+        </BentoCard>
+      )}
+
+      {/* Deploy Form */}
+      <AnimatePresence>
+        {open && (
+          <motion.form
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            onSubmit={handleSubmit}
+            className="relative"
+          >
+            <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <BentoCard icon={Globe} title="Source Configuration" accentColor="green">
+                <div className="space-y-4">
+                  <Field label="Forwarder ID *" value={form.id} onChange={v => set('id', v)} required color="green" />
+                  <Field label="Source URL *" value={form.sourceUrl} onChange={v => set('sourceUrl', v)} required color="green" placeholder="udp://239.x.x.x:port" />
+                </div>
+              </BentoCard>
+
+              <BentoCard icon={Share2} title="Destination Configuration" accentColor="green">
+                <div className="space-y-4">
+                  <Field label="Dest IP *" value={form.destIp} onChange={v => set('destIp', v)} required color="green" placeholder="239.100.25.x" />
+                  <Field label="Dest Port" value={form.destPort} onChange={v => set('destPort', v)} type="number" color="green" />
+                </div>
+              </BentoCard>
+
+              <div className="flex items-end justify-end">
+                <motion.button
+                  whileHover={{ scale: 1.05, boxShadow: '0 0 25px rgba(34,197,94,0.4)' }}
+                  whileTap={{ scale: 0.95 }}
+                  type="submit"
+                  disabled={loading}
+                  className="bg-gradient-to-r from-neon-green to-green-600 text-white font-bold px-10 py-3 rounded-xl shadow-lg transition-all disabled:opacity-50"
+                >
+                  {loading ? 'Initializing Forwarder...' : 'INITIATE FORWARDER'}
+                </motion.button>
+              </div>
+            </motion.div>
+            {error && (
+              <p className="mt-4 text-red-400 text-sm bg-red-900/20 border border-red-500/30 p-3 rounded-xl">{error}</p>
+            )}
+          </motion.form>
+        )}
+      </AnimatePresence>
+
+      {/* Active Forwarders */}
       <section>
-        <h2 className="text-sm text-gray-400 mb-3 uppercase tracking-widest">
-          Active Forwarders ({forwarders.length})
+        <h2 className="text-sm text-gray-400 mb-4 uppercase tracking-widest font-bold opacity-80">
+          Running Forwarders ({forwarders.length})
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {forwarders.map(f => (
-            <div key={f.id} className="bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
-              <div className="flex items-center justify-between">
+            <motion.div
+              key={f.id}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
+            >
+              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+              <div className="flex items-center justify-between relative z-10">
                 <div className="flex items-center gap-2">
                   <StatusDot status={f.isRunning ? 'live' : 'stopped'} pulse />
-                  <span className="font-mono text-sm font-semibold">{f.id}</span>
+                  <span className="font-mono text-sm font-semibold text-gray-200">{f.id}</span>
                 </div>
                 {f.isRunning && (
                   <button
                     onClick={() => handleStop(f.id)}
-                    className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-2 py-1 rounded"
+                    className="text-[10px] font-bold uppercase tracking-tighter bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded-md border border-red-500/20 transition-colors"
                   >
                     Stop
                   </button>
                 )}
               </div>
-              <div className="text-xs text-gray-500">{f.sourceUrl} → {f.destIp}:{f.destPort}</div>
-              {f.isRunning && <MetricsTile id={f.id} stats={f.lastStats} lastMessage={lastMessage} />}
-            </div>
+              <div className="text-xs text-gray-500 relative z-10 font-mono">{f.sourceUrl} → {f.destIp}:{f.destPort}</div>
+              {f.isRunning && <div className="relative z-10 pt-2"><MetricsTile id={f.id} stats={f.lastStats} lastMessage={lastMessage} /></div>}
+            </motion.div>
           ))}
         </div>
       </section>
