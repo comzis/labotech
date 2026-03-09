@@ -8,7 +8,9 @@ class SRTEncoder extends EventEmitter {
     super();
     this.id = options.id;
     this.input = options.input;
-    this.host = options.host || null;
+    // Guard against the string "null" arriving from JSON form fields
+    const rawHost = options.host;
+    this.host = (rawHost && rawHost !== 'null') ? rawHost : null;
     this.port = options.port || 9999;
     this.latency = options.latency || 2000;
     this.passphrase = options.passphrase || null;
