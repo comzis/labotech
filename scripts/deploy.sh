@@ -20,11 +20,13 @@ echo "==> Ensuring logs directory..."
 mkdir -p logs/thumbnails
 
 echo "==> Restarting service..."
-if systemctl is-active --quiet labotech; then
+if systemctl list-unit-files labotech.service &>/dev/null && systemctl list-unit-files labotech.service | grep -q labotech; then
   sudo systemctl restart labotech
-  echo "==> Service restarted."
-  sudo systemctl status labotech --no-pager
+  sleep 2
+  echo "==> Service status:"
+  sudo systemctl status labotech --no-pager -l
 else
-  echo "==> Service not running — starting with npm start"
+  echo "==> systemd service not installed — run: sudo bash scripts/install-service.sh"
+  echo "==> Starting manually..."
   npm start
 fi
