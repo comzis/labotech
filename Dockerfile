@@ -22,5 +22,5 @@ COPY config/ ./config/
 # Grab the compiled frontend from Stage 1
 COPY --from=builder /app/web/dist ./web/dist
 RUN mkdir -p /app/logs
-EXPOSE 3000
+EXPOSE 4000
 CMD ["node", "src/index.js"]
