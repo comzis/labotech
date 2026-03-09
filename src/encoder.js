@@ -150,6 +150,9 @@ class SRTEncoder extends EventEmitter {
       this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}`));
     }
 
+    // Enforce even dimensions (libx264 requires width/height divisible by 2)
+    args.push('-vf', `scale=trunc(iw/2)*2:trunc(ih/2)*2`);
+
     args.push(
       '-c:v', this.videoCodec,
       '-preset', this.preset,
