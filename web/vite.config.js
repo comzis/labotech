@@ -6,16 +6,16 @@ export default defineConfig({
   server: {
     proxy: {
       '/streams': {
-        target: 'http://127.0.0.1:3000',
+        target: 'http://127.0.0.1:4000',
         ws: true,
       },
-      '/transcode': 'http://127.0.0.1:3000',
-      '/multicast': 'http://127.0.0.1:3000',
-      '/analyse': 'http://127.0.0.1:3000',
-      '/pipeline': 'http://127.0.0.1:3000',
-      '/scte35': 'http://127.0.0.1:3000',
-      '/health': 'http://127.0.0.1:3000',
-      '/ws': { target: 'ws://127.0.0.1:3000', ws: true },
+      '/transcode': 'http://127.0.0.1:4000',
+      '/multicast': 'http://127.0.0.1:4000',
+      '/analyse': 'http://127.0.0.1:4000',
+      '/pipeline': 'http://127.0.0.1:4000',
+      '/scte35': 'http://127.0.0.1:4000',
+      '/health': 'http://127.0.0.1:4000',
+      '/ws': { target: 'ws://127.0.0.1:4000', ws: true },
     },
   },
   build: {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL       = import.meta.env.DEV
-  ? 'ws://127.0.0.1:3000'
+  ? 'ws://127.0.0.1:4000'
   : `ws://${window.location.host}`;
 const BASE_DELAY   = 1000;   // 1s initial backoff
 const MAX_DELAY    = 30000;  // 30s ceiling — broadcast servers must always reconnect
