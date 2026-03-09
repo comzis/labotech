@@ -68,6 +68,10 @@ function start() {
   const webDist = path.join(__dirname, '..', 'web', 'dist');
   app.use(express.static(webDist));
 
+  // Serve thumbnails for Confidence Monitor
+  const { THUMBNAIL_DIR } = require('./monitoring');
+  app.use('/logs/thumbnails', express.static(THUMBNAIL_DIR));
+
   app.use('/streams', require('../routes/streams')(streams, wss));
   app.use('/transcode', require('../routes/transcode')(transcoders, wss));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss));

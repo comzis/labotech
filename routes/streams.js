@@ -3,6 +3,23 @@
 const express = require('express');
 const WebSocket = require('ws');
 const SRTEncoder = require('../src/encoder');
+const { captureThumbnail } = require('../src/monitoring');
+
+const THUMB_INTERVAL = (parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5) * 1000;
+const thumbTimers = new Map(); // id → intervalId
+
+function startThumbnailCapture(id, inputUrl) {
+  if (thumbTimers.has(id)) return;
+  const timer = setInterval(() => {
+    captureThumbnail(id, inputUrl).catch(() => {});
+  }, THUMB_INTERVAL);
+  thumbTimers.set(id, timer);
+}
+
+function stopThumbnailCapture(id) {
+  const timer = thumbTimers.get(id);
+  if (timer) { clearInterval(timer); thumbTimers.delete(id); }
+}
 
 module.exports = function (streams, wss) {
   const router = express.Router();
@@ -56,8 +73,9 @@ module.exports = function (streams, wss) {
 
     encoder.on('stats', stats => broadcast({ type: 'stats', id, ...stats }));
     encoder.on('srtStats', srt => broadcast({ type: 'srtStats', id, ...srt }));
-    encoder.on('error', err => broadcast({ type: 'error', id, message: err.message }));
-    encoder.on('stopped', () => broadcast({ type: 'stopped', id }));
+    encoder.on('error', err => { stopThumbnailCapture(id); broadcast({ type: 'error', id, message: err.message }); });
+    encoder.on('stopped', () => { stopThumbnailCapture(id); broadcast({ type: 'stopped', id }); });
+    encoder.on('started', () => startThumbnailCapture(id, input));
 
     try {
       encoder.start();
@@ -80,6 +98,7 @@ module.exports = function (streams, wss) {
     const encoder = streams.get(req.params.id);
     if (!encoder) return res.status(404).json({ error: 'Stream not found' });
     encoder.stop();
+    stopThumbnailCapture(req.params.id);
     streams.delete(req.params.id);
     res.json({ stopped: req.params.id });
   });
