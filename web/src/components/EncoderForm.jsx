@@ -123,7 +123,7 @@ export default function EncoderForm({ onStarted }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
                 <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="udp://239.0.0.1:5000" />
-                <Field label="Input Interface / Bind IP" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="eno2 or leave blank" />
+                <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Leave blank for eno2 multicast" />
 
                 {/* Output mode selector — spans full width */}
                 <div className="sm:col-span-2">
