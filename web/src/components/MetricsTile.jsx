@@ -9,30 +9,52 @@ const MAX_HISTORY = 60;
 const rttColor  = ms  => !ms  ? 'text-gray-500' : ms  < 30  ? 'text-green-400' : ms  < 80  ? 'text-yellow-400' : 'text-red-400';
 const lossColor = pct => !pct && pct !== 0 ? 'text-gray-500' : pct === 0 ? 'text-green-400' : pct < 1 ? 'text-yellow-400' : 'text-red-400';
 
-export default function MetricsTile({ id, stats, lastMessage }) {
-  const [history,  setHistory]  = useState([]);
-  const [current,  setCurrent]  = useState(stats || null);
-  const [srtStats, setSrtStats] = useState(null);
+export default function MetricsTile({ id, stats, inputBitrate: initInputBr, lastMessage }) {
+  const [history,      setHistory]      = useState([]);
+  const [current,      setCurrent]      = useState(stats || null);
+  const [srtStats,     setSrtStats]     = useState(null);
+  const [inputBitrate, setInputBitrate] = useState(initInputBr || null);
+  const [ffmpegError,  setFfmpegError]  = useState(null);
 
   useEffect(() => {
     if (!lastMessage) return;
     if ((lastMessage.type === 'stats' || lastMessage.type === 'transcode_stats') && lastMessage.id === id) {
       setCurrent(lastMessage);
       setHistory(h => [...h.slice(-(MAX_HISTORY - 1)), { t: h.length, v: lastMessage.bitrate || 0 }]);
+      if (lastMessage.inputBitrate) setInputBitrate(lastMessage.inputBitrate);
     }
     if (lastMessage.type === 'srtStats' && lastMessage.id === id) {
       setSrtStats(lastMessage);
     }
+    if (lastMessage.type === 'error' && lastMessage.id === id) {
+      setFfmpegError(lastMessage.message);
+    }
   }, [lastMessage, id]);
 
   // Broadcast standard: display TS bitrate in Mbps
-  const mbps   = current?.bitrate ? (current.bitrate / 1000).toFixed(2) : null;
+  const mbps      = current?.bitrate ? (current.bitrate / 1000).toFixed(2) : null;
+  const inputMbps = inputBitrate ? (inputBitrate / 1000).toFixed(2) : null;
   const fps    = current?.fps     ? current.fps     : null;
   const speed  = current?.speed   ? current.speed   : null;
   const frame  = current?.frame   ? current.frame   : null;
 
   return (
     <div className="bg-black/20 border border-white/5 rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-sm">
+
+      {/* FFmpeg error banner */}
+      {ffmpegError && (
+        <div className="bg-red-950/60 border border-red-700/40 rounded-lg px-3 py-2 text-[10px] text-red-300 font-mono break-all">
+          {ffmpegError}
+        </div>
+      )}
+
+      {/* Input bitrate */}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Input Bitrate</span>
+        <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : 'text-gray-600'}`}>
+          {inputMbps ? `${inputMbps} Mbps` : '—'}
+        </span>
+      </div>
 
       {/* Bitrate sparkline — Recharts AreaChart */}
       <div className="space-y-1">
