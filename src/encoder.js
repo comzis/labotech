@@ -100,7 +100,6 @@ class SRTEncoder extends EventEmitter {
       // -avoid_negative_ts: normalise discontinuous timestamps from live UDP sources
       args.push(
         '-fflags', '+genpts+discardcorrupt',
-        '-avoid_negative_ts', 'make_zero',
         '-f', 'mpegts',
         '-i', inputUrl,
       );
@@ -139,8 +138,9 @@ class SRTEncoder extends EventEmitter {
 
   // ─── Full FFmpeg argument chain ─────────────────────────────────────────────
   buildFFmpegArgs() {
-    const bitrateNum = parseInt(this.videoBitrate);
-    const bufsize = isNaN(bitrateNum) ? this.videoBitrate : `${bitrateNum * 2}M`;
+    // bufsize = 2× video bitrate. Use _parseBps() so '12000k', '8M', etc. all work.
+    const vbps = this._parseBps(this.videoBitrate);
+    const bufsize = vbps ? `${Math.round(vbps / 1e6 * 2)}M` : this.videoBitrate;
 
     const effectiveMode = this.outputMode || (this.host ? 'srt' : 'null');
     // 'info' loglevel required for libsrt [srt-stats] lines; 'warning' elsewhere
@@ -199,11 +199,13 @@ class SRTEncoder extends EventEmitter {
 
     if (this.rateMode === 'cbr') {
       // True CBR — VBV + HRD signalling (broadcast standard)
-      args.push(
-        '-maxrate', this.videoBitrate,
-        '-bufsize', bufsize,
-        '-x264-params', 'nal-hrd=cbr:force-cfr=1',
-      );
+      args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize);
+      if (this.videoCodec === 'libx264') {
+        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1');
+      } else if (this.videoCodec === 'libx265') {
+        args.push('-x265-params', 'hrd=1:nal-hrd=cbr:vbv-bufsize=' + Math.round(vbps / 1e3));
+      }
+      // Other codecs (e.g. libx262, mpeg2video) rely on -maxrate + -bufsize alone
     } else {
       // VBR — constrained by bufsize only
       args.push('-bufsize', bufsize);

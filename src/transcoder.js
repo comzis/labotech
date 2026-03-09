@@ -76,8 +76,8 @@ class Transcoder extends SRTEncoder {
 
   buildFFmpegArgs() {
     const p = this._preset;
-    const bitrateNum = parseInt(this.videoBitrate);
-    const bufsize = isNaN(bitrateNum) ? this.videoBitrate : `${bitrateNum * 2}M`;
+    const vbps = this._parseBps(this.videoBitrate);
+    const bufsize = vbps ? `${Math.round(vbps / 1e6 * 2)}M` : this.videoBitrate;
 
     // Thumbnail interval
     const { THUMBNAIL_DIR } = require('./monitoring');
@@ -103,7 +103,12 @@ class Transcoder extends SRTEncoder {
     ];
 
     if (this.rateMode === 'cbr') {
-      args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize, '-x264-params', 'nal-hrd=cbr:force-cfr=1');
+      args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize);
+      if (this.videoCodec === 'libx264') {
+        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1');
+      } else if (this.videoCodec === 'libx265') {
+        args.push('-x265-params', 'hrd=1:nal-hrd=cbr:vbv-bufsize=' + Math.round(vbps / 1e3));
+      }
     } else {
       args.push('-bufsize', bufsize);
     }
