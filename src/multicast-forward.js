@@ -75,14 +75,21 @@ class MulticastForwarder extends EventEmitter {
     this.validateDestination();
     await this.ensureMulticastRoute();
 
+    // Append UDP buffer options to source URL to prevent packet loss / PAT drops
+    const sep = this.sourceUrl.includes('?') ? '&' : '?';
+    const srcUrl = this.sourceUrl.startsWith('udp://') || this.sourceUrl.startsWith('rtp://')
+      ? `${this.sourceUrl}${sep}fifo_size=10000000&overrun_nonfatal=1`
+      : this.sourceUrl;
+
     const args = [
       '-hide_banner',
       '-loglevel', 'warning',
       '-stats',
       '-fflags', '+genpts+discardcorrupt',
-      '-i', this.sourceUrl,
+      '-i', srcUrl,
       '-c', 'copy',
       '-f', 'mpegts',
+      '-mpegts_copyts', '1',   // preserve original TS timestamps + PAT/PMT
       this.buildMulticastUrl(),
     ];
 

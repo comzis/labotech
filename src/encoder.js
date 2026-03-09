@@ -90,9 +90,10 @@ class SRTEncoder extends EventEmitter {
     const args = [];
     if (type === 'rtp' || type === 'udp') {
       const sep = this.input.includes('?') ? '&' : '?';
-      const inputUrl = this.inputLocalAddr
-        ? `${this.input}${sep}localaddr=${this.inputLocalAddr}`
-        : this.input;
+      // fifo_size: 10 MB receive buffer to handle bursts; overrun_nonfatal: keep
+      // running on overflow rather than crashing (logs a warning instead)
+      let inputUrl = `${this.input}${sep}fifo_size=10000000&overrun_nonfatal=1`;
+      if (this.inputLocalAddr) inputUrl += `&localaddr=${this.inputLocalAddr}`;
       args.push('-fflags', '+genpts+discardcorrupt', '-i', inputUrl);
     } else if (type === 'rtsp') {
       args.push('-rtsp_transport', 'tcp', '-i', this.input);
