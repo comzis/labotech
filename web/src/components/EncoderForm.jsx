@@ -123,9 +123,9 @@ export default function EncoderForm({ onStarted }) {
                 {/* Output mode selector — spans full width */}
                 <div className="sm:col-span-2">
                   <SelectField label="Output Mode" value={form.outputMode} onChange={v => set('outputMode', v)} options={[
-                    { value: 'srt',  label: 'SRT — Secure Reliable Transport' },
-                    { value: 'udp',  label: 'UDP — Multicast / Unicast MPEG-TS' },
-                    { value: 'rtp',  label: 'RTP — MPEG-TS over RTP' },
+                    { value: 'srt', label: 'SRT — Secure Reliable Transport' },
+                    { value: 'udp', label: 'UDP — Multicast / Unicast MPEG-TS' },
+                    { value: 'rtp', label: 'RTP — MPEG-TS over RTP' },
                   ]} />
                 </div>
 
@@ -150,7 +150,8 @@ export default function EncoderForm({ onStarted }) {
                     <SelectField label="Encryption" value={form.pbkeylen} onChange={v => set('pbkeylen', v)} options={[
                       { value: '16', label: 'AES-128' },
                       { value: '24', label: 'AES-192' },
-                      { value: '32', label: 'AES-256' }
+                      { value: '32', label: 'AES-256' },
+                      { value: '0', label: 'None' }
                     ]} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -166,8 +167,8 @@ export default function EncoderForm({ onStarted }) {
               </div>
             </BentoCard>
 
-            {/* Bento Card 2: Audio Pairs — per-track codec / bitrate / PID / language */}
-            <BentoCard icon={Radio} title="Audio Topology" className="col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
+            {/* Bento Card 2: Audio Matrix — per-track codec / bitrate / PID / language */}
+            <BentoCard icon={Radio} title="Audio Matrix" className="col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
               <div className="space-y-3">
                 {/* Column headers */}
                 <div className="grid grid-cols-[36px_1fr_64px_40px_44px_44px_20px] gap-1 items-center">
@@ -225,11 +226,11 @@ export default function EncoderForm({ onStarted }) {
             <BentoCard icon={Tv2} title="DVB / TS Service" className="col-span-1 border-neon-purple/20 bg-neon-purple/5">
               <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3">
-                  <PidField label="Service ID"          value={form.serviceId}          onChange={v => set('serviceId', v)} />
-                  <PidField label="TS ID"               value={form.transportStreamId}  onChange={v => set('transportStreamId', v)} />
-                  <PidField label="Orig. Network ID"    value={form.originalNetworkId}  onChange={v => set('originalNetworkId', v)} />
-                  <PidField label="PMT PID"             value={form.pmtPid}             onChange={v => set('pmtPid', v)} />
-                  <PidField label="Video PID"           value={form.videoPid}           onChange={v => set('videoPid', v)} />
+                  <PidField label="Service ID" value={form.serviceId} onChange={v => set('serviceId', v)} />
+                  <PidField label="TS ID" value={form.transportStreamId} onChange={v => set('transportStreamId', v)} />
+                  <PidField label="Orig. Network ID" value={form.originalNetworkId} onChange={v => set('originalNetworkId', v)} />
+                  <PidField label="PMT PID" value={form.pmtPid} onChange={v => set('pmtPid', v)} />
+                  <PidField label="Video PID" value={form.videoPid} onChange={v => set('videoPid', v)} />
                   {/* PCR is carried on the video PID automatically */}
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">PCR PID</label>
@@ -238,13 +239,13 @@ export default function EncoderForm({ onStarted }) {
                     </div>
                   </div>
                 </div>
-                <Field label="Service Name"     value={form.serviceName}     onChange={v => set('serviceName', v)}     placeholder="My Channel" />
+                <Field label="Service Name" value={form.serviceName} onChange={v => set('serviceName', v)} placeholder="My Channel" />
                 <Field label="Service Provider" value={form.serviceProvider} onChange={v => set('serviceProvider', v)} placeholder="Broadcaster" />
               </div>
             </BentoCard>
 
             {/* Bento Card 4: Video Matrix (full width) */}
-            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-2 lg:col-span-3">
+            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-2 lg:col-span-3 border-neon-purple/20 bg-neon-purple/5">
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />

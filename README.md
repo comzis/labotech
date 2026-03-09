@@ -1,0 +1,234 @@
+# Labotech — Broadcast Encoder & Stream Management
+
+Professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu. Manages SRT/UDP/RTP streams, handles 1080p→1080i transcoding, routes multicast traffic, and analyses MPEG-TS structure.
+
+---
+
+## Hardware Target
+
+| Component | Detail |
+|---|---|
+| Server | HPE DL360, Ubuntu Server |
+| Management NIC | `eno1` → `10.67.18.30` → Web UI + API port `3000` |
+| Multicast NIC | `eno2` → no IP → all `239.0.0.0/8` traffic |
+| Multicast subnet | `239.100.25.0/26` (default address `239.100.25.29`) |
+| Container | Docker with `network_mode: host` |
+
+---
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Backend | Node.js 20, Express.js, WebSocket (`ws`) |
+| Video processing | FFmpeg + ffprobe (system install via apt) |
+| Frontend | React 18, Vite 7, Tailwind CSS |
+| Charts | Recharts |
+| Notifications | Sonner |
+| State | TanStack React Query |
+| Containerisation | Docker + docker-compose |
+
+---
+
+## Quick Start
+
+### 1. Host setup (run once on Ubuntu server as root)
+
+```bash
+sudo bash scripts/setup-host.sh
+sudo bash scripts/check-routes.sh   # verify networking
+```
+
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+# edit .env — set API_HOST, SRT_HOST, multicast addresses, SNMP targets
+```
+
+### 3. Production deployment
+
+```bash
+docker-compose up -d
+```
+
+### 4. Development (live reload)
+
+```bash
+docker-compose -f docker-compose.dev.yml up
+# or run locally:
+npm install && npm start
+cd web && npm install && npm run dev
+```
+
+Web UI: `http://10.67.18.30:3000`
+
+---
+
+## Build Commands
+
+```bash
+# Backend
+npm install
+npm test                          # 193 tests across 4 suites
+npm test -- test/encoder.test.js  # single suite
+npm start                         # API server
+
+# Frontend
+cd web && npm install
+npm run build                     # production build → web/dist/
+npm run dev                       # Vite dev server (proxies to API)
+
+# Docker
+docker-compose up -d
+docker-compose -f docker-compose.dev.yml up
+```
+
+---
+
+## Architecture
+
+### Backend (`src/`)
+
+All state is **in-memory `Map()` objects** — no database.
+
+| File | Class | Purpose |
+|---|---|---|
+| `encoder.js` | `SRTEncoder` | Core FFmpeg wrapper. Supports SRT, UDP, RTP output with full DVB/MPEG-TS muxer compliance (service ID, PIDs, transport stream ID). Per-audio-pair codec, bitrate, PID and ISO 639-2 language. |
+| `transcoder.js` | `Transcoder` | Extends `SRTEncoder`. Four broadcast interlace presets: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT). |
+| `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `eno2`. Validates all addresses against `239.100.25.0/26`. Manages routes via `ensureMulticastRoute()`. |
+| `ts-analyser.js` | `TSAnalyser` | ffprobe wrapper. Parses PAT/PMT/PID tree via `parseStructure()`. One-shot and continuous probing modes. |
+| `failover.js` | `FailoverEncoder` | Primary/backup input watchdog. 3-second switchover threshold. Emits `switched` event. |
+| `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder for ad marker injection. |
+| `monitoring.js` | — | Confidence thumbnail capture (ffmpeg), SNMP traps, syslog events. |
+| `filters.js` | — | FFmpeg filter chain builders: logo overlay, noise reduction, scale. |
+| `api.js` | — | Express server bound to `10.67.18.30:3000`. WebSocket broadcasts all encoder events. Serves React SPA from `web/dist/`. |
+
+### Routes (`routes/`)
+
+| File | Endpoints |
+|---|---|
+| `streams.js` | `GET/POST/DELETE /streams` |
+| `transcode.js` | `GET/POST/DELETE /transcode`, `GET /transcode/presets` |
+| `multicast.js` | `GET/POST/DELETE /multicast/forward`, `GET /multicast/config` |
+| `analyse.js` | `GET /analyse`, `POST /analyse/start`, `GET/DELETE /analyse/:id` |
+| `pipelines.js` | `POST /pipeline` — chained ingest → transcode → forward |
+| `scte35.js` | `POST /scte35/splice` |
+
+### Frontend (`web/src/`)
+
+| Component | Purpose |
+|---|---|
+| `App.jsx` | Root shell, tab routing, WebSocket lifecycle toasts |
+| `StreamsPanel` | Active streams grid — output mode badge, DVB service identity, audio pair PIDs, real-time metrics |
+| `EncoderForm` | Full encoder configuration: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
+| `TranscodePanel` | 1080p→1080i presets + broadcast preset slot selector |
+| `MulticastPanel` | `eno2` forwarder controls and subnet status |
+| `TSAnalyser` | PAT→PMT→PID tree, one-shot and continuous probing |
+| `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
+| `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
+
+---
+
+## DVB / MPEG-TS Compliance
+
+The encoder supports full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13818-1):
+
+- **Service ID** (`-mpegts_service_id`)
+- **Transport Stream ID** (`-mpegts_transport_stream_id`)
+- **Original Network ID** (`-mpegts_original_network_id`)
+- **PMT PID** (`-mpegts_pmt_start_pid`)
+- **Video PID** — declared via `-streamid 0:<pid>`, PCR carried on video PID
+- **Per-audio-pair PID** — `-streamid N:<pid>` for each track
+- **Service name / provider** — written to SI metadata
+- **Language tags** — ISO 639-2 per audio track (`-metadata:s:a:N language=xxx`)
+
+---
+
+## Output Modes
+
+| Mode | Format | Use case |
+|---|---|---|
+| `srt` | MPEG-TS over SRT (Haivision) | Contribution, low-latency delivery with ARQ |
+| `udp` | MPEG-TS over UDP (`pkt_size=1316`) | Multicast distribution, internal routing |
+| `rtp` | MPEG-TS over RTP (`rtp_mpegts`) | Standards-compliant RTP delivery |
+
+---
+
+## Encoder Presets
+
+64 slots in `config/presets.json`, organised by category:
+
+| Slots | Category |
+|---|---|
+| 1–16 | HD/SD H.264 and H.265 — standard bitrate range |
+| 17–29 | HD/SD H.264 extended bitrates + 4:2:2 profiles |
+| 30–36 | UHD/HDR — HEVC PQ10, HLG10, archival |
+| 37–40 | HD H.264 — low-latency speed presets (ultrafast → faster) |
+| 41–45 | HD H.265 10-bit SDR and HQ |
+| 46–50 | 720p H.264 and H.265 |
+| 51–57 | Broadcast audio codecs — MP2 (DVB), AC3, E-AC3 |
+| 58–59 | 4K HEVC PQ10 / HLG10 |
+| 60–61 | HD contribution / archival 4:2:2 |
+| 62–63 | H.264 baseline and main profiles (legacy devices) |
+| 64 | Pass-through / remux (`copy` video + audio) |
+
+---
+
+## Configuration
+
+### `config/multicast.json`
+
+```json
+{
+  "nic": "eno2",
+  "subnet": "239.100.25.0/26",
+  "address": "239.100.25.29",
+  "ttl": 10
+}
+```
+
+### `.env.example`
+
+Key variables:
+
+```env
+API_HOST=10.67.18.30
+API_PORT=3000
+MANAGEMENT_NIC=eno1
+MULTICAST_NIC=eno2
+FORWARD_MULTICAST_SUBNET=239.100.25.0/26
+FORWARD_MULTICAST_IP=239.100.25.29
+SRT_HOST=your.destination.server.com
+SRT_PORT=9999
+SRT_LATENCY=2000
+SNMP_MANAGER_HOST=10.67.18.1
+SYSLOG_HOST=10.67.18.1
+```
+
+---
+
+## Coding Rules
+
+- Plain ES6 Node.js with `require()` — no TypeScript
+- FFmpeg always via `child_process.spawn` — never `exec`
+- Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
+- All multicast addresses validated against `239.100.25.0/26` before use
+- API server always binds to `10.67.18.30` — never `0.0.0.0`
+- All state in-memory `Map()` — no database, no ORM
+
+---
+
+## Tests
+
+```bash
+npm test
+# 193 tests across 4 suites — encoder, transcoder, multicast, ts-analyser
+```
+
+| Suite | Tests | Coverage |
+|---|---|---|
+| `encoder.test.js` | 91 | Input detection, FFmpeg args, DVB muxer, output modes (SRT/UDP/RTP), PID assignment, stats parsing |
+| `transcoder.test.js` | 13 | Interlace presets, yadif filter, broadcast conversions |
+| `multicast.test.js` | 13 | Subnet validator, CIDR edge cases, URL building |
+| `ts-analyser.test.js` | 12 | PAT/PMT/PID parsing, orphan streams, continuous probing |

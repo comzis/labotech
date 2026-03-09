@@ -1,179 +1,77 @@
 {
   "slots": [
-    {
-      "slot": 1,
-      "name": "HD 8Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "8M",
-      "audioBitrate": "256k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 2,
-      "name": "HD 6Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "6M",
-      "audioBitrate": "192k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 3,
-      "name": "HD 4Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "4M",
-      "audioBitrate": "128k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 4,
-      "name": "HD 15Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "15M",
-      "audioBitrate": "320k",
-      "preset": "slow",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 5,
-      "name": "HD 20Mbps H.264 HQ",
-      "videoCodec": "libx264",
-      "videoBitrate": "20M",
-      "audioBitrate": "320k",
-      "preset": "slow",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 6,
-      "name": "HD 8Mbps H.265",
-      "videoCodec": "libx265",
-      "videoBitrate": "8M",
-      "audioBitrate": "256k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 7,
-      "name": "HD 4Mbps H.265",
-      "videoCodec": "libx265",
-      "videoBitrate": "4M",
-      "audioBitrate": "128k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 8,
-      "name": "SD 2Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "2M",
-      "audioBitrate": "128k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 9,
-      "name": "SD 1Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "1M",
-      "audioBitrate": "96k",
-      "preset": "fast",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 10,
-      "name": "HD 10Mbps H.264 Fast",
-      "videoCodec": "libx264",
-      "videoBitrate": "10M",
-      "audioBitrate": "256k",
-      "preset": "fast",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 11,
-      "name": "HD 12Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "12M",
-      "audioBitrate": "256k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 12,
-      "name": "HD 16Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "16M",
-      "audioBitrate": "320k",
-      "preset": "slow",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 13,
-      "name": "HD 6Mbps H.265",
-      "videoCodec": "libx265",
-      "videoBitrate": "6M",
-      "audioBitrate": "192k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 14,
-      "name": "HD 10Mbps H.265",
-      "videoCodec": "libx265",
-      "videoBitrate": "10M",
-      "audioBitrate": "256k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 15,
-      "name": "HD 3Mbps H.264 Mobile",
-      "videoCodec": "libx264",
-      "videoBitrate": "3M",
-      "audioBitrate": "128k",
-      "preset": "fast",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 16,
-      "name": "HD 5Mbps H.264",
-      "videoCodec": "libx264",
-      "videoBitrate": "5M",
-      "audioBitrate": "192k",
-      "preset": "medium",
-      "pixFmt": "yuv420p"
-    },
-    {
-      "slot": 30,
-      "name": "UHD 25Mbps HEVC PQ10",
-      "videoCodec": "libx265",
-      "videoBitrate": "25M",
-      "audioBitrate": "384k",
-      "preset": "medium",
-      "pixFmt": "yuv420p10le",
-      "profile": "main10"
-    },
-    {
-      "slot": 31,
-      "name": "UHD 25Mbps HEVC HLG10",
-      "videoCodec": "libx265",
-      "videoBitrate": "25M",
-      "audioBitrate": "384k",
-      "preset": "medium",
-      "pixFmt": "yuv420p10le",
-      "profile": "main10",
-      "colorTransfer": "arib-std-b67"
-    },
-    {
-      "slot": 32,
-      "name": "HD 12Mbps HEVC HDR10",
-      "videoCodec": "libx265",
-      "videoBitrate": "12M",
-      "audioBitrate": "256k",
-      "preset": "slow",
-      "pixFmt": "yuv420p10le",
-      "profile": "main10"
-    }
+    { "slot":  1, "name": "HD 8Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot":  2, "name": "HD 6Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "6M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot":  3, "name": "HD 4Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "4M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot":  4, "name": "HD 15Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "15M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot":  5, "name": "HD 20Mbps H.264 HQ",          "videoCodec": "libx264", "videoBitrate": "20M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot":  6, "name": "HD 8Mbps H.265",              "videoCodec": "libx265", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot":  7, "name": "HD 4Mbps H.265",              "videoCodec": "libx265", "videoBitrate": "4M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot":  8, "name": "SD 2Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "2M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot":  9, "name": "SD 1Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "1M",  "audioBitrate": "96k",  "audioCodec": "aac",  "preset": "fast",      "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 10, "name": "HD 10Mbps H.264 Fast",        "videoCodec": "libx264", "videoBitrate": "10M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "fast",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 11, "name": "HD 12Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "12M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 12, "name": "HD 16Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "16M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 13, "name": "HD 6Mbps H.265",              "videoCodec": "libx265", "videoBitrate": "6M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 14, "name": "HD 10Mbps H.265",             "videoCodec": "libx265", "videoBitrate": "10M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 15, "name": "HD 3Mbps H.264 Mobile",       "videoCodec": "libx264", "videoBitrate": "3M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "fast",      "profile": "baseline","pixFmt": "yuv420p" },
+    { "slot": 16, "name": "HD 5Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "5M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+
+    { "slot": 17, "name": "HD 7Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "7M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 18, "name": "HD 9Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "9M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 19, "name": "HD 11Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "11M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 20, "name": "HD 14Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "14M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 21, "name": "HD 18Mbps H.264",             "videoCodec": "libx264", "videoBitrate": "18M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 22, "name": "SD 3Mbps H.264",              "videoCodec": "libx264", "videoBitrate": "3M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 23, "name": "SD 1.5Mbps H.264",            "videoCodec": "libx264", "videoBitrate": "1500k","audioBitrate":"96k",  "audioCodec": "aac",  "preset": "fast",      "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 24, "name": "SD 500kbps H.264",            "videoCodec": "libx264", "videoBitrate": "500k","audioBitrate": "64k",  "audioCodec": "aac",  "preset": "veryfast",  "profile": "baseline","pixFmt": "yuv420p" },
+    { "slot": 25, "name": "HD 4Mbps H.264 4:2:2",        "videoCodec": "libx264", "videoBitrate": "4M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "high422", "pixFmt": "yuv422p" },
+    { "slot": 26, "name": "HD 25Mbps H.264 4:2:2 Studio","videoCodec": "libx264", "videoBitrate": "25M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "high422", "pixFmt": "yuv422p" },
+    { "slot": 27, "name": "HD 50Mbps H.264 Intra",       "videoCodec": "libx264", "videoBitrate": "50M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "medium",    "profile": "high422", "pixFmt": "yuv422p" },
+    { "slot": 28, "name": "HD 2Mbps H.265",              "videoCodec": "libx265", "videoBitrate": "2M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 29, "name": "HD 3Mbps H.265",              "videoCodec": "libx265", "videoBitrate": "3M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+
+    { "slot": 30, "name": "UHD 25Mbps HEVC PQ10",        "videoCodec": "libx265", "videoBitrate": "25M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "smpte2084"   },
+    { "slot": 31, "name": "UHD 25Mbps HEVC HLG10",       "videoCodec": "libx265", "videoBitrate": "25M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "arib-std-b67"},
+    { "slot": 32, "name": "HD 12Mbps HEVC HDR10",        "videoCodec": "libx265", "videoBitrate": "12M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "smpte2084"   },
+
+    { "slot": 33, "name": "UHD 15Mbps HEVC SDR",         "videoCodec": "libx265", "videoBitrate": "15M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 34, "name": "UHD 20Mbps HEVC HLG10",       "videoCodec": "libx265", "videoBitrate": "20M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "arib-std-b67"},
+    { "slot": 35, "name": "UHD 30Mbps HEVC PQ10",        "videoCodec": "libx265", "videoBitrate": "30M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "smpte2084"   },
+    { "slot": 36, "name": "UHD 40Mbps HEVC Archival",    "videoCodec": "libx265", "videoBitrate": "40M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "smpte2084"   },
+
+    { "slot": 37, "name": "HD 8Mbps H.264 Ultrafast",    "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "ultrafast", "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 38, "name": "HD 8Mbps H.264 Superfast",    "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "superfast", "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 39, "name": "HD 8Mbps H.264 Veryfast",     "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "veryfast",  "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 40, "name": "HD 8Mbps H.264 Faster",       "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "aac",  "preset": "faster",    "profile": "high",    "pixFmt": "yuv420p" },
+
+    { "slot": 41, "name": "HD 10Mbps H.265 10-bit SDR",  "videoCodec": "libx265", "videoBitrate": "10M", "audioBitrate": "256k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le" },
+    { "slot": 42, "name": "HD 6Mbps H.265 10-bit SDR",   "videoCodec": "libx265", "videoBitrate": "6M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le" },
+    { "slot": 43, "name": "HD 4Mbps H.265 10-bit SDR",   "videoCodec": "libx265", "videoBitrate": "4M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main10",  "pixFmt": "yuv420p10le" },
+    { "slot": 44, "name": "HD 15Mbps H.265 HQ",          "videoCodec": "libx265", "videoBitrate": "15M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 45, "name": "HD 20Mbps H.265 HQ 10-bit",   "videoCodec": "libx265", "videoBitrate": "20M", "audioBitrate": "320k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le" },
+
+    { "slot": 46, "name": "720p 3Mbps H.264",            "videoCodec": "libx264", "videoBitrate": "3M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 47, "name": "720p 4Mbps H.264",            "videoCodec": "libx264", "videoBitrate": "4M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 48, "name": "720p 5Mbps H.264",            "videoCodec": "libx264", "videoBitrate": "5M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 49, "name": "720p 2Mbps H.265",            "videoCodec": "libx265", "videoBitrate": "2M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 50, "name": "720p 3Mbps H.265",            "videoCodec": "libx265", "videoBitrate": "3M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+
+    { "slot": 51, "name": "HD 8Mbps H.264 MP2",          "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "mp2",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 52, "name": "HD 10Mbps H.264 MP2",         "videoCodec": "libx264", "videoBitrate": "10M", "audioBitrate": "320k", "audioCodec": "mp2",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 53, "name": "HD 8Mbps H.264 AC3",          "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "384k", "audioCodec": "ac3",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 54, "name": "HD 10Mbps H.264 AC3",         "videoCodec": "libx264", "videoBitrate": "10M", "audioBitrate": "384k", "audioCodec": "ac3",  "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 55, "name": "HD 10Mbps H.264 E-AC3",       "videoCodec": "libx264", "videoBitrate": "10M", "audioBitrate": "384k", "audioCodec": "eac3", "preset": "medium",    "profile": "high",    "pixFmt": "yuv420p" },
+    { "slot": 56, "name": "HD 8Mbps H.265 MP2",          "videoCodec": "libx265", "videoBitrate": "8M",  "audioBitrate": "256k", "audioCodec": "mp2",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 57, "name": "HD 8Mbps H.265 AC3",          "videoCodec": "libx265", "videoBitrate": "8M",  "audioBitrate": "384k", "audioCodec": "ac3",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+
+    { "slot": 58, "name": "4K 50Mbps HEVC PQ10",         "videoCodec": "libx265", "videoBitrate": "50M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "smpte2084"   },
+    { "slot": 59, "name": "4K 35Mbps HEVC HLG10",        "videoCodec": "libx265", "videoBitrate": "35M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "slow",      "profile": "main10",  "pixFmt": "yuv420p10le", "colorTransfer": "arib-std-b67"},
+
+    { "slot": 60, "name": "HD 30Mbps H.264 Contribution","videoCodec": "libx264", "videoBitrate": "30M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "medium",    "profile": "high422", "pixFmt": "yuv422p" },
+    { "slot": 61, "name": "HD 50Mbps H.264 Archival",    "videoCodec": "libx264", "videoBitrate": "50M", "audioBitrate": "384k", "audioCodec": "aac",  "preset": "slow",      "profile": "high422", "pixFmt": "yuv422p" },
+    { "slot": 62, "name": "HD 8Mbps H.264 Baseline",     "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "128k", "audioCodec": "aac",  "preset": "medium",    "profile": "baseline","pixFmt": "yuv420p" },
+    { "slot": 63, "name": "HD 8Mbps H.264 Main",         "videoCodec": "libx264", "videoBitrate": "8M",  "audioBitrate": "192k", "audioCodec": "aac",  "preset": "medium",    "profile": "main",    "pixFmt": "yuv420p" },
+    { "slot": 64, "name": "Pass-through / Remux",         "videoCodec": "copy",    "videoBitrate": null,  "audioBitrate": null,   "audioCodec": "copy", "preset": null,        "profile": null,      "pixFmt": null }
   ]
 }
