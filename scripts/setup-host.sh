@@ -37,8 +37,18 @@ echo "==> Disabling rp_filter on $MULTICAST_NIC..."
 sysctl -w "net.ipv4.conf.${MULTICAST_NIC}.rp_filter=0" || true
 sysctl -w "net.ipv4.conf.all.rp_filter=0" || true
 
-# ── 4. Add persistent multicast route (netplan) ─────────────────────────────
-echo "==> Adding multicast route $MULTICAST_SUBNET dev $MULTICAST_NIC..."
+# ── 4. Assign link-local IP to multicast NIC so IGMP joins work ─────────────
+echo "==> Assigning link-local IP 169.254.0.2/16 to $MULTICAST_NIC for IGMP..."
+ip addr add 169.254.0.2/16 dev "$MULTICAST_NIC" 2>/dev/null || \
+  echo "    Address already set."
+ip link set "$MULTICAST_NIC" up
+
+# ── 5. Route all multicast traffic to multicast NIC ─────────────────────────
+echo "==> Adding multicast route 239.0.0.0/8 dev $MULTICAST_NIC..."
+ip route add 239.0.0.0/8 dev "$MULTICAST_NIC" 2>/dev/null || \
+  echo "    Route already exists."
+
+echo "==> Adding forward subnet route $MULTICAST_SUBNET dev $MULTICAST_NIC..."
 ip route add "$MULTICAST_SUBNET" dev "$MULTICAST_NIC" 2>/dev/null || \
   echo "    Route already exists."
 
@@ -46,7 +56,10 @@ ip route add "$MULTICAST_SUBNET" dev "$MULTICAST_NIC" 2>/dev/null || \
 if ! grep -q "labotech" /etc/rc.local 2>/dev/null; then
   cat >> /etc/rc.local << EOF
 
-# Labotech multicast route
+# Labotech multicast setup
+ip addr add 169.254.0.2/16 dev $MULTICAST_NIC 2>/dev/null || true
+ip link set $MULTICAST_NIC up
+ip route add 239.0.0.0/8 dev $MULTICAST_NIC 2>/dev/null || true
 ip route add $MULTICAST_SUBNET dev $MULTICAST_NIC 2>/dev/null || true
 EOF
 fi
