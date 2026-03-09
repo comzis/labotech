@@ -143,16 +143,24 @@ class SRTEncoder extends EventEmitter {
       ...this.buildInputArgs(),
     ];
 
-    // ─── Stream mapping ─────────────────────────────────────────────────────
-    // Explicit -map is required when using per-pair audio so every track is
-    // included and the output stream indices are deterministic for -streamid.
+    // ─── Filter complex: even-dimension scale + split for thumbnail tee ─────
+    // Using filter_complex with split avoids the two-vf conflict (FFmpeg cannot
+    // apply two separate simple filtergraphs to the same input stream).
+    const { THUMBNAIL_DIR } = require('./monitoring');
+    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+
+    args.push(
+      '-filter_complex',
+      `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
+      `[vthumb]fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2[thumbout]`,
+    );
+
+    // Map video for main output via filter_complex, plus per-pair audio
+    args.push('-map', '[vout]');
     if (this.audioPairs) {
-      args.push('-map', '0:v:0');
       this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}`));
     }
-
-    // Enforce even dimensions (libx264 requires width/height divisible by 2)
-    args.push('-vf', `scale=trunc(iw/2)*2:trunc(ih/2)*2`);
 
     args.push(
       '-c:v', this.videoCodec,
@@ -190,8 +198,6 @@ class SRTEncoder extends EventEmitter {
 
     // ─── Audio encoding ─────────────────────────────────────────────────────
     if (this.audioPairs) {
-      // Per-pair: each track gets its own codec, bitrate, channel count, and
-      // optional language metadata tag (ISO 639-2, e.g. "eng", "fra").
       this.audioPairs.forEach((p, i) => {
         args.push(`-c:a:${i}`, p.codec, `-b:a:${i}`, p.bitrate, `-ac:a:${i}`, String(p.channels));
         if (p.language) args.push(`-metadata:s:a:${i}`, `language=${p.language}`);
@@ -203,17 +209,8 @@ class SRTEncoder extends EventEmitter {
     // ─── DVB-compliant output ────────────────────────────────────────────────
     args.push(...this._buildOutputArgs(effectiveMode));
 
-    // ─── Thumbnail output — tee from video, update every 5s ─────────────────
-    const { THUMBNAIL_DIR } = require('./monitoring');
-    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
-    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
-    args.push(
-      '-map', '0:v:0',
-      '-vf', `fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2`,
-      '-update', '1',
-      '-q:v', '5',
-      '-y', thumbPath,
-    );
+    // ─── Thumbnail output — from split filter, update every N seconds ────────
+    args.push('-map', '[thumbout]', '-update', '1', '-q:v', '5', '-y', thumbPath);
 
     return args;
   }

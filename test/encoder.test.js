@@ -93,9 +93,22 @@ describe('SRTEncoder', () => {
       expect(args).toContain('mpegts');
     });
 
-    test('ends with SRT URL', () => {
+    test('contains SRT URL', () => {
       const args = enc.buildFFmpegArgs();
-      expect(args[args.length - 1]).toMatch(/^srt:\/\//);
+      expect(args.some(a => /^srt:\/\//.test(a))).toBe(true);
+    });
+
+    test('ends with thumbnail path (filter_complex split)', () => {
+      const args = enc.buildFFmpegArgs();
+      expect(args[args.length - 1]).toMatch(/\.jpg$/);
+    });
+
+    test('uses filter_complex with split for thumbnail tee', () => {
+      const args = enc.buildFFmpegArgs();
+      const fcIdx = args.indexOf('-filter_complex');
+      expect(fcIdx).toBeGreaterThan(-1);
+      expect(args[fcIdx + 1]).toContain('split=2');
+      expect(args[fcIdx + 1]).toContain('[thumbout]');
     });
   });
 
@@ -125,7 +138,8 @@ describe('SRTEncoder', () => {
       expect(args).toContain('-c:a');
       expect(args).toContain('-b:a');
       expect(args).toContain('-ac');
-      expect(args).not.toContain('-map');
+      // No source audio maps (0:a:...) — only filter_complex video map present
+      expect(args.some(a => /^0:a:/.test(a))).toBe(false);
     });
 
     test('generates per-pair args and explicit maps when audioPairs supplied', () => {
@@ -145,9 +159,9 @@ describe('SRTEncoder', () => {
         ],
       });
       const args = enc2.buildFFmpegArgs();
-      // Explicit stream mapping
+      // Explicit stream mapping via filter_complex + audio pairs
       expect(args).toContain('-map');
-      expect(args).toContain('0:v:0');
+      expect(args).toContain('[vout]');
       expect(args).toContain('0:a:0');
       expect(args).toContain('0:a:1');
       // Per-pair codec
@@ -302,40 +316,42 @@ describe('SRTEncoder', () => {
       videoBitrate: '8M', videoCodec: 'libx264', preset: 'medium', pixFmt: 'yuv420p',
     };
 
+    // Helper: find main output URL (arg immediately before -map [thumbout])
+    function mainUrl(args) {
+      const idx = args.indexOf('[thumbout]');
+      return args[idx - 2]; // ..., url, '-map', '[thumbout]', ...
+    }
+
     test('UDP mode: uses -f mpegts with udp:// URL', () => {
       const enc2 = new SRTEncoder({ ...base, outputMode: 'udp' });
       const args = enc2.buildFFmpegArgs();
       expect(args).toContain('mpegts');
-      const url = args[args.length - 1];
-      expect(url).toMatch(/^udp:\/\//);
-      expect(url).toContain('pkt_size=1316');
+      expect(mainUrl(args)).toMatch(/^udp:\/\//);
+      expect(mainUrl(args)).toContain('pkt_size=1316');
     });
 
     test('UDP mode: includes TTL in URL', () => {
       const enc2 = new SRTEncoder({ ...base, outputMode: 'udp', ttl: 32 });
-      const url = enc2.buildFFmpegArgs()[enc2.buildFFmpegArgs().length - 1];
-      expect(url).toContain('ttl=32');
+      expect(mainUrl(enc2.buildFFmpegArgs())).toContain('ttl=32');
     });
 
     test('UDP mode: includes localaddr when set', () => {
       const enc2 = new SRTEncoder({ ...base, outputMode: 'udp', localAddr: '10.67.18.30' });
-      const url = enc2.buildFFmpegArgs()[enc2.buildFFmpegArgs().length - 1];
-      expect(url).toContain('localaddr=10.67.18.30');
+      expect(mainUrl(enc2.buildFFmpegArgs())).toContain('localaddr=10.67.18.30');
     });
 
     test('RTP mode: uses -f rtp_mpegts with rtp:// URL', () => {
       const enc2 = new SRTEncoder({ ...base, outputMode: 'rtp' });
       const args = enc2.buildFFmpegArgs();
       expect(args).toContain('rtp_mpegts');
-      const url = args[args.length - 1];
-      expect(url).toMatch(/^rtp:\/\//);
+      expect(mainUrl(args)).toMatch(/^rtp:\/\//);
     });
 
     test('null mode: uses -f null -', () => {
       const enc2 = new SRTEncoder({ ...base, outputMode: 'null', host: null });
       const args = enc2.buildFFmpegArgs();
       expect(args).toContain('null');
-      expect(args[args.length - 1]).toBe('-');
+      expect(mainUrl(args)).toBe('-');
     });
 
     test('loglevel is warning for UDP (no SRT stats)', () => {

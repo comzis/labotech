@@ -79,12 +79,21 @@ class Transcoder extends SRTEncoder {
     const bitrateNum = parseInt(this.videoBitrate);
     const bufsize = isNaN(bitrateNum) ? this.videoBitrate : `${bitrateNum * 2}M`;
 
+    // Thumbnail interval
+    const { THUMBNAIL_DIR } = require('./monitoring');
+    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+
     const args = [
       '-hide_banner',
       '-loglevel', 'info',
       '-stats',
       ...this.buildInputArgs(),
-      '-vf', p.videoFilter,
+      // filter_complex: interlace/deinterlace filter + split for thumbnail tee
+      '-filter_complex',
+      `[0:v]${p.videoFilter},scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
+      `[vthumb]fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2[thumbout]`,
+      '-map', '[vout]',
       '-c:v', this.videoCodec,
       '-preset', this.preset,
       '-b:v', this.videoBitrate,
@@ -125,11 +134,8 @@ class Transcoder extends SRTEncoder {
 
     args.push(...this._buildOutputArgs(this.outputMode || (this.host ? 'srt' : 'null')));
 
-    // Thumbnail output
-    const { THUMBNAIL_DIR } = require('./monitoring');
-    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
-    const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
-    args.push('-map', '0:v:0', '-vf', `fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2`, '-update', '1', '-q:v', '5', '-y', thumbPath);
+    // Thumbnail output — from split filter defined in filter_complex above
+    args.push('-map', '[thumbout]', '-update', '1', '-q:v', '5', '-y', thumbPath);
 
     return args;
   }
