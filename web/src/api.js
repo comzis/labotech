@@ -37,5 +37,11 @@ export const startAnalyser = (body) => request('POST', '/analyse/start', body);
 export const getAnalyser = (id) => request('GET', `/analyse/${id}`);
 export const stopAnalyser = (id) => request('DELETE', `/analyse/${id}`);
 
+// ETR 290
+export const getETR290Monitors = () => request('GET', '/etr290');
+export const startETR290 = (body) => request('POST', '/etr290/start', body);
+export const getETR290 = (id) => request('GET', `/etr290/${id}`);
+export const stopETR290 = (id) => request('DELETE', `/etr290/${id}`);
+
 // Health
 export const getHealth = () => request('GET', '/health');
