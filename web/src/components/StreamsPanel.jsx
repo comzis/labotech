@@ -129,7 +129,7 @@ export default function StreamsPanel({ lastMessage }) {
                 )}
 
                 {s.isRunning && (
-                  <MetricsTile id={s.id} stats={s.lastStats} lastMessage={lastMessage} />
+                  <MetricsTile id={s.id} stats={s.lastStats} inputBitrate={s.inputBitrate} lastMessage={lastMessage} />
                 )}
               </motion.div>
             );

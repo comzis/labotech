@@ -246,10 +246,13 @@ class SRTEncoder extends EventEmitter {
     this.process = spawn('ffmpeg', args);
     this.isRunning = true;
     this.startTime = Date.now();
+    this._stderrBuffer = [];
 
     this.process.stderr.on('data', (data) => {
       data.toString().split('\n').forEach(line => {
-        if (line.trim()) this.parseStats(line);
+        if (!line.trim()) return;
+        this._stderrBuffer = [...this._stderrBuffer.slice(-9), line];
+        this.parseStats(line);
       });
     });
 
@@ -259,7 +262,8 @@ class SRTEncoder extends EventEmitter {
       if (signal === 'SIGTERM' || code === 0) {
         this.emit('stopped', { id: this.id, code, signal });
       } else {
-        this.emit('error', new Error(`FFmpeg exited with code ${code}`));
+        const context = (this._stderrBuffer || []).slice(-5).join(' | ');
+        this.emit('error', new Error(`FFmpeg exited with code ${code}: ${context}`));
       }
     });
 
@@ -278,6 +282,14 @@ class SRTEncoder extends EventEmitter {
 
   // ─── Stats parsing ──────────────────────────────────────────────────────────
   parseStats(line) {
+    // ── 0. Input bitrate — parsed from FFmpeg demuxer startup line ───────────
+    // "  Duration: N/A, start: 1234.56, bitrate: 8192 kb/s"
+    const mInputBr = line.match(/Duration:.*bitrate:\s*([\d.]+)\s*kb\/s/);
+    if (mInputBr) {
+      this.inputBitrate = parseFloat(mInputBr[1]);
+      this.emit('stats', { inputBitrate: this.inputBitrate });
+    }
+
     // ── 1. FFmpeg encode progress ────────────────────────────────────────────
     // frame=  123 fps= 25 q=28.0 size=N/A time=00:00:05.00 bitrate=6710.2kbits/s speed=1.00x
     const mFrame = line.match(/frame=\s*(\d+)/);
@@ -344,6 +356,7 @@ class SRTEncoder extends EventEmitter {
       isRunning: this.isRunning,
       startTime: this.startTime,
       lastStats: this.lastStats,
+      inputBitrate: this.inputBitrate || null,
       srtStats: this.srtStats,
       audioPairs: this.audioPairs || null,
       dvb: {
