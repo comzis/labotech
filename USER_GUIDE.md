@@ -8,13 +8,14 @@
 
 1. [System Overview](#1-system-overview)
 2. [Server Setup](#2-server-setup)
-3. [Starting the Application](#3-starting-the-application)
-4. [Streams Panel](#4-streams-panel)
-5. [Transcode Panel](#5-transcode-panel)
-6. [Multicast Panel](#6-multicast-panel)
-7. [TS Analyser](#7-ts-analyser)
-8. [Confidence Monitor](#8-confidence-monitor)
-9. [Troubleshooting](#9-troubleshooting)
+3. [Ubuntu Optimisation for Broadcast Processing](#3-ubuntu-optimisation-for-broadcast-processing)
+4. [Starting the Application](#4-starting-the-application)
+5. [Streams Panel](#5-streams-panel)
+6. [Transcode Panel](#6-transcode-panel)
+7. [Multicast Panel](#7-multicast-panel)
+8. [TS Analyser](#8-ts-analyser)
+9. [Confidence Monitor](#9-confidence-monitor)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -52,7 +53,148 @@ cp .env.example .env
 
 ---
 
-## 3. Starting the Application
+## 3. Ubuntu Optimisation for Broadcast Processing
+
+These steps should be applied once on the HPE DL360 Ubuntu Server to ensure low-latency, high-throughput FFmpeg performance for live broadcast workloads.
+
+### 3.1 Install FFmpeg
+
+```bash
+sudo apt update
+sudo apt install -y ffmpeg
+ffmpeg -version   # verify — must be 4.x or later
+```
+
+For best H.264 performance, build FFmpeg with `--enable-libx264`:
+
+```bash
+sudo apt install -y libx264-dev libx265-dev
+# or use a pre-built PPA with full codec support:
+sudo add-apt-repository ppa:savoury1/ffmpeg4
+sudo apt update && sudo apt install -y ffmpeg
+```
+
+### 3.2 CPU Governor — Performance Mode
+
+Sets all CPU cores to maximum clock speed, eliminating frequency-scaling latency during encoding:
+
+```bash
+sudo apt install -y cpufrequtils
+echo 'GOVERNOR="performance"' | sudo tee /etc/default/cpufrequtils
+sudo systemctl restart cpufrequtils
+
+# Verify
+cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
+```
+
+### 3.3 Network Buffer Tuning
+
+Prevents UDP packet drops on high-bitrate multicast and SRT streams:
+
+```bash
+sudo tee /etc/sysctl.d/99-labotech.conf << 'EOF'
+# Increase UDP receive/send buffers (128 MB)
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.rmem_default = 26214400
+net.core.wmem_default = 26214400
+
+# Increase network device backlog queue
+net.core.netdev_max_backlog = 50000
+
+# UDP socket buffer limits
+net.ipv4.udp_rmem_min = 8192
+net.ipv4.udp_wmem_min = 8192
+
+# Multicast — allow multiple sockets to bind same port
+net.ipv4.ip_local_port_range = 1024 65535
+
+# Reduce TCP TIME_WAIT for SRT control connections
+net.ipv4.tcp_tw_reuse = 1
+EOF
+
+sudo sysctl -p /etc/sysctl.d/99-labotech.conf
+```
+
+### 3.4 Disable IRQ Balancing & Pin NICs to Cores
+
+On the HPE DL360, binding `eno2` interrupts to dedicated CPU cores reduces packet processing jitter:
+
+```bash
+sudo apt install -y irqbalance
+sudo systemctl stop irqbalance
+sudo systemctl disable irqbalance
+
+# Find eno2 IRQ numbers
+grep eno2 /proc/interrupts
+
+# Pin each IRQ to a specific core (e.g. core 4)
+# Replace <IRQ_NUM> with values from above
+echo 4 | sudo tee /proc/irq/<IRQ_NUM>/smp_affinity_list
+```
+
+### 3.5 Real-Time Scheduling for FFmpeg
+
+Allows FFmpeg processes to use real-time CPU scheduling, preventing frame drops under load:
+
+```bash
+# Add the labotech service user to the realtime group
+sudo groupadd -f realtime
+sudo usermod -aG realtime $USER
+
+# Set RT limits
+sudo tee /etc/security/limits.d/99-realtime.conf << 'EOF'
+@realtime   soft  rtprio  99
+@realtime   hard  rtprio  99
+@realtime   soft  memlock unlimited
+@realtime   hard  memlock unlimited
+EOF
+```
+
+Reboot or re-login for limits to take effect.
+
+### 3.6 Disable Unnecessary Services
+
+Free CPU and memory by stopping services not needed on a dedicated encoder:
+
+```bash
+sudo systemctl disable --now snapd
+sudo systemctl disable --now unattended-upgrades
+sudo systemctl disable --now ModemManager
+sudo systemctl disable --now avahi-daemon
+```
+
+### 3.7 Hugepages (Optional — for high channel counts)
+
+Reduces TLB pressure when running 10+ simultaneous FFmpeg processes:
+
+```bash
+# Allocate 512 x 2MB hugepages (1 GB total)
+echo 512 | sudo tee /proc/sys/vm/nr_hugepages
+
+# Make persistent
+echo 'vm.nr_hugepages = 512' | sudo tee -a /etc/sysctl.d/99-labotech.conf
+```
+
+### 3.8 Verify Optimisations
+
+```bash
+# CPU governor
+cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+# → performance
+
+# Network buffers
+sysctl net.core.rmem_max
+# → 134217728
+
+# FFmpeg can access real-time priority
+ulimit -r
+# → 99
+```
+
+---
+
+## 4. Starting the Application
 
 ### Production (Docker)
 
@@ -81,7 +223,7 @@ The status indicator in the top-right corner shows **ONLINE** (green) when the W
 
 ---
 
-## 4. Streams Panel
+## 5. Streams Panel
 
 Manages live SRT/UDP/RTP encoder channels.
 
@@ -153,7 +295,7 @@ Click **Stop** to terminate a channel.
 
 ---
 
-## 5. Transcode Panel
+## 6. Transcode Panel
 
 Handles broadcast format conversion (interlace/deinterlace/frame-rate normalisation).
 
@@ -194,7 +336,7 @@ Active transcoder jobs appear as cards with live metrics. Click **Terminate** to
 
 ---
 
-## 6. Multicast Panel
+## 7. Multicast Panel
 
 Forwards MPEG-TS multicast streams via `eno2`.
 
@@ -213,7 +355,7 @@ The panel also displays the current multicast NIC configuration (`eno2`, subnet,
 
 ---
 
-## 7. TS Analyser
+## 8. TS Analyser
 
 Probes any MPEG-TS stream and displays the full PAT/PMT/PID tree.
 
@@ -228,7 +370,7 @@ Useful for verifying DVB compliance and diagnosing multiplexer issues.
 
 ---
 
-## 8. Confidence Monitor
+## 9. Confidence Monitor
 
 Provides a real-time health overview of all active streams and transcoders.
 
@@ -238,7 +380,7 @@ Provides a real-time health overview of all active streams and transcoders.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
