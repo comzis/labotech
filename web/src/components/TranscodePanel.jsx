@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Zap, Activity, Settings2, Play, Tv2, Share2 } from 'lucide-react';
+import { toast } from 'sonner';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopTranscoder } from '../api';
@@ -46,10 +47,14 @@ export default function TranscodePanel({ lastMessage }) {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    const interval = setInterval(load, 5000);
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
-    if (lastMessage?.type === 'transcode_stopped') load();
+    if (lastMessage?.type === 'transcode_stopped' || lastMessage?.type === 'error') load();
   }, [lastMessage]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
@@ -74,7 +79,11 @@ export default function TranscodePanel({ lastMessage }) {
   };
 
   const handleStop = async (id) => {
-    await stopTranscoder(id);
+    try {
+      await stopTranscoder(id);
+    } catch (err) {
+      toast.error(`Stop failed: ${err.message}`);
+    }
     load();
   };
 
