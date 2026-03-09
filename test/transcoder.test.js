@@ -56,19 +56,20 @@ describe('Transcoder', () => {
   });
 
   describe('buildFFmpegArgs', () => {
-    test('PAL includes interlace filter', () => {
+    test('PAL includes interlace filter in filter_complex', () => {
       const tc = new Transcoder({ ...baseOpts, transcodePreset: 'pal' });
       const args = tc.buildFFmpegArgs();
-      expect(args).toContain('-vf');
-      const vfIdx = args.indexOf('-vf');
-      expect(args[vfIdx + 1]).toContain('interlace');
+      const fcIdx = args.indexOf('-filter_complex');
+      expect(fcIdx).toBeGreaterThan(-1);
+      expect(args[fcIdx + 1]).toContain('interlace');
     });
 
-    test('deinterlace includes yadif filter', () => {
+    test('deinterlace includes yadif filter in filter_complex', () => {
       const tc = new Transcoder({ ...baseOpts, transcodePreset: 'deinterlace' });
       const args = tc.buildFFmpegArgs();
-      const vfIdx = args.indexOf('-vf');
-      expect(args[vfIdx + 1]).toContain('yadif');
+      const fcIdx = args.indexOf('-filter_complex');
+      expect(fcIdx).toBeGreaterThan(-1);
+      expect(args[fcIdx + 1]).toContain('yadif');
     });
 
     test('includes -flags +ildct+ilme for interlaced presets', () => {
@@ -77,10 +78,16 @@ describe('Transcoder', () => {
       expect(args).toContain('+ildct+ilme');
     });
 
-    test('ends with SRT URL', () => {
+    test('contains SRT URL', () => {
       const tc = new Transcoder({ ...baseOpts, transcodePreset: 'ntsc' });
       const args = tc.buildFFmpegArgs();
-      expect(args[args.length - 1]).toMatch(/^srt:\/\//);
+      expect(args.some(a => /^srt:\/\//.test(a))).toBe(true);
+    });
+
+    test('ends with thumbnail path', () => {
+      const tc = new Transcoder({ ...baseOpts, transcodePreset: 'ntsc' });
+      const args = tc.buildFFmpegArgs();
+      expect(args[args.length - 1]).toMatch(/\.jpg$/);
     });
   });
 
