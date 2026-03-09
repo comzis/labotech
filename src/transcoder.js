@@ -92,8 +92,9 @@ class Transcoder extends SRTEncoder {
       // filter_complex: interlace/deinterlace filter + split for thumbnail tee
       '-filter_complex',
       `[0:v]${p.videoFilter},scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
-      `[vthumb]fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2[thumbout]`,
+      `[vthumb]fps=1/${thumbInterval},scale=320:-2[thumbout]`,
       '-map', '[vout]',
+      '-map', '0:a?',
       '-c:v', this.videoCodec,
       '-preset', this.preset,
       '-b:v', this.videoBitrate,
@@ -135,7 +136,7 @@ class Transcoder extends SRTEncoder {
     args.push(...this._buildOutputArgs(this.outputMode || (this.host ? 'srt' : 'null')));
 
     // Thumbnail output — from split filter defined in filter_complex above
-    args.push('-map', '[thumbout]', '-update', '1', '-q:v', '5', '-y', thumbPath);
+    args.push('-map', '[thumbout]', '-f', 'image2', '-update', '1', '-q:v', '5', '-y', thumbPath);
 
     return args;
   }

@@ -154,13 +154,15 @@ class SRTEncoder extends EventEmitter {
     args.push(
       '-filter_complex',
       `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
-      `[vthumb]fps=1/${thumbInterval},scale=320:trunc(320/dar/2)*2[thumbout]`,
+      `[vthumb]fps=1/${thumbInterval},scale=320:-2[thumbout]`,
     );
 
-    // Map video for main output via filter_complex, plus per-pair audio
+    // Map video for main output via filter_complex, plus audio
     args.push('-map', '[vout]');
     if (this.audioPairs) {
       this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}`));
+    } else {
+      args.push('-map', '0:a?'); // '?' = non-fatal if no audio stream present
     }
 
     args.push(
@@ -211,7 +213,7 @@ class SRTEncoder extends EventEmitter {
     args.push(...this._buildOutputArgs(effectiveMode));
 
     // ─── Thumbnail output — from split filter, update every N seconds ────────
-    args.push('-map', '[thumbout]', '-update', '1', '-q:v', '5', '-y', thumbPath);
+    args.push('-map', '[thumbout]', '-f', 'image2', '-update', '1', '-q:v', '5', '-y', thumbPath);
 
     return args;
   }
