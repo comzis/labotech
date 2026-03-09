@@ -94,7 +94,8 @@ class SRTEncoder extends EventEmitter {
       // running on overflow rather than crashing (logs a warning instead)
       let inputUrl = `${this.input}${sep}fifo_size=10000000&overrun_nonfatal=1`;
       if (this.inputLocalAddr) inputUrl += `&localaddr=${this.inputLocalAddr}`;
-      args.push('-fflags', '+genpts+discardcorrupt', '-i', inputUrl);
+      // -f mpegts: force MPEG-TS demuxer so PAT/PMT/PIDs are parsed correctly
+      args.push('-fflags', '+genpts+discardcorrupt', '-f', 'mpegts', '-i', inputUrl);
     } else if (type === 'rtsp') {
       args.push('-rtsp_transport', 'tcp', '-i', this.input);
     } else if (type === 'device') {
@@ -144,13 +145,27 @@ class SRTEncoder extends EventEmitter {
       ...this.buildInputArgs(),
     ];
 
-    // ─── Filter complex: even-dimension scale + split for thumbnail tee ─────
-    // Using filter_complex with split avoids the two-vf conflict (FFmpeg cannot
-    // apply two separate simple filtergraphs to the same input stream).
     const { THUMBNAIL_DIR } = require('./monitoring');
     const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
     const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 
+    // ─── Copy / passthrough mode ─────────────────────────────────────────────
+    // filter_complex cannot be used with -c copy (no decoding). Instead map
+    // streams directly and decode only for the thumbnail second output.
+    if (this.videoCodec === 'copy') {
+      args.push('-map', '0:v', '-map', '0:a?', '-c', 'copy');
+      args.push(...this._buildOutputArgs(effectiveMode));
+      args.push(
+        '-map', '0:v',
+        '-vf', `fps=1/${thumbInterval},scale=320:-2`,
+        '-f', 'image2', '-update', '1', '-q:v', '5', '-y', thumbPath,
+      );
+      return args;
+    }
+
+    // ─── Filter complex: even-dimension scale + split for thumbnail tee ─────
+    // Using filter_complex with split avoids the two-vf conflict (FFmpeg cannot
+    // apply two separate simple filtergraphs to the same input stream).
     args.push(
       '-filter_complex',
       `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
