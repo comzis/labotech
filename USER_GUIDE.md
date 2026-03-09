@@ -206,6 +206,15 @@ docker-compose up -d
 
 The UI is then available at `http://<server-ip>:4000`.
 
+### Production (without Docker)
+
+```bash
+npm install
+npm start
+```
+
+The UI is then available at `http://<server-ip>:4000`.
+
 ### Development (local Mac)
 
 **Terminal 1 — Backend:**
