@@ -6,7 +6,7 @@ import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
 
 const DEFAULTS = {
-  id: '', input: '',
+  id: '', input: '', inputLocalAddr: '',
   // Output transport
   outputMode: 'srt',
   host: '', port: '9999', latency: '2000', passphrase: '', pbkeylen: '16', adapter: '', streamId: '',
@@ -123,6 +123,7 @@ export default function EncoderForm({ onStarted }) {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
                 <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="udp://239.0.0.1:5000" />
+                <Field label="Input Interface / Bind IP" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="eno2 or leave blank" />
 
                 {/* Output mode selector — spans full width */}
                 <div className="sm:col-span-2">
