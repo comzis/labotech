@@ -275,11 +275,6 @@ class SRTEncoder extends EventEmitter {
     ];
     if (this.serviceName)     args.push('-metadata', `service_name=${this.serviceName}`);
     if (this.serviceProvider) args.push('-metadata', `service_provider=${this.serviceProvider}`);
-    // CBR mux rate: enables accurate PCR insertion (fixes PCR repetition/accuracy errors)
-    if (this.rateMode === 'cbr') {
-      const muxrate = this._calcMuxrate();
-      if (muxrate) args.push('-muxrate', String(muxrate));
-    }
     return args;
   }
 
