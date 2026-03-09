@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Activity, Radio, Network, Search, ShieldCheck } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import StreamsPanel from './components/StreamsPanel';
@@ -111,21 +111,11 @@ export default function App() {
 
       {/* Main Content Area */}
       <main className="flex-1 mt-24 mb-12 max-w-7xl w-full mx-auto px-6 relative z-10">
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={tab}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            transition={{ duration: 0.3, ease: 'easeOut' }}
-          >
-            {tab === 'streams'    && <StreamsPanel    lastMessage={lastMessage} />}
-            {tab === 'transcode'  && <TranscodePanel  lastMessage={lastMessage} />}
-            {tab === 'multicast'  && <MulticastPanel  lastMessage={lastMessage} />}
-            {tab === 'analyse'    && <TSAnalyser       lastMessage={lastMessage} />}
-            {tab === 'confidence' && <ConfidenceMonitor lastMessage={lastMessage} />}
-          </motion.div>
-        </AnimatePresence>
+        <div style={{ display: tab === 'streams'    ? 'block' : 'none' }}><StreamsPanel     lastMessage={lastMessage} /></div>
+        <div style={{ display: tab === 'transcode'  ? 'block' : 'none' }}><TranscodePanel   lastMessage={lastMessage} /></div>
+        <div style={{ display: tab === 'multicast'  ? 'block' : 'none' }}><MulticastPanel   lastMessage={lastMessage} /></div>
+        <div style={{ display: tab === 'analyse'    ? 'block' : 'none' }}><TSAnalyser        lastMessage={lastMessage} /></div>
+        <div style={{ display: tab === 'confidence' ? 'block' : 'none' }}><ConfidenceMonitor lastMessage={lastMessage} /></div>
       </main>
     </div>
   );
