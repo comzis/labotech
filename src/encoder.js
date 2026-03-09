@@ -95,7 +95,13 @@ class SRTEncoder extends EventEmitter {
       let inputUrl = `${this.input}${sep}fifo_size=10000000&overrun_nonfatal=1`;
       if (this.inputLocalAddr) inputUrl += `&localaddr=${this.inputLocalAddr}`;
       // -f mpegts: force MPEG-TS demuxer so PAT/PMT/PIDs are parsed correctly
-      args.push('-fflags', '+genpts+discardcorrupt', '-f', 'mpegts', '-i', inputUrl);
+      // -avoid_negative_ts: normalise discontinuous timestamps from live UDP sources
+      args.push(
+        '-fflags', '+genpts+discardcorrupt',
+        '-avoid_negative_ts', 'make_zero',
+        '-f', 'mpegts',
+        '-i', inputUrl,
+      );
     } else if (type === 'rtsp') {
       args.push('-rtsp_transport', 'tcp', '-i', this.input);
     } else if (type === 'device') {
@@ -233,18 +239,45 @@ class SRTEncoder extends EventEmitter {
     return args;
   }
 
+  // ─── Parse a bitrate string like '8M', '3000k', '256k' → bits/s ────────────
+  _parseBps(s) {
+    if (!s) return 0;
+    const m = String(s).match(/^([\d.]+)\s*([kmg]?)/i);
+    if (!m) return 0;
+    const v = parseFloat(m[1]);
+    const u = (m[2] || '').toLowerCase();
+    return u === 'g' ? v * 1e9 : u === 'm' ? v * 1e6 : u === 'k' ? v * 1e3 : v;
+  }
+
+  // ─── Calculate CBR mux rate: video + audio + 5% TS overhead ─────────────────
+  _calcMuxrate() {
+    const vbps = this._parseBps(this.videoBitrate);
+    if (!vbps) return null;
+    const abps = this.audioPairs
+      ? this.audioPairs.reduce((s, p) => s + this._parseBps(p.bitrate || '256k'), 0)
+      : this._parseBps(this.audioBitrate || '256k');
+    return Math.round((vbps + abps) * 1.05);
+  }
+
   // ─── DVB MPEG-TS muxer options (ISO 13818-1 / ETSI EN 300 468) ─────────────
   // Sets PAT/PMT service structure, original network ID, and transport stream ID.
   _buildDvbMuxerArgs() {
     const args = [
-      '-mpegts_service_id',         String(this.serviceId),
-      '-mpegts_pmt_start_pid',      String(this.pmtPid),
-      '-mpegts_start_pid',          String(this.videoPid),  // base for any un-mapped PIDs
+      '-mpegts_service_id',          String(this.serviceId),
+      '-mpegts_pmt_start_pid',       String(this.pmtPid),
+      '-mpegts_start_pid',           String(this.videoPid),
       '-mpegts_original_network_id', String(this.originalNetworkId),
       '-mpegts_transport_stream_id', String(this.transportStreamId),
+      // DVB/ETR 290: PAT+PMT every 100 ms, ensures P1 tests pass
+      '-pat_period', '0.1',
     ];
-    if (this.serviceName)    args.push('-metadata', `service_name=${this.serviceName}`);
+    if (this.serviceName)     args.push('-metadata', `service_name=${this.serviceName}`);
     if (this.serviceProvider) args.push('-metadata', `service_provider=${this.serviceProvider}`);
+    // CBR mux rate: enables accurate PCR insertion (fixes PCR repetition/accuracy errors)
+    if (this.rateMode === 'cbr') {
+      const muxrate = this._calcMuxrate();
+      if (muxrate) args.push('-muxrate', String(muxrate));
+    }
     return args;
   }
 
