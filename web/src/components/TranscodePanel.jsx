@@ -165,7 +165,7 @@ export default function TranscodePanel({ lastMessage }) {
                 <Field label="Stream ID *" placeholder="channel-1-transcoded" value={form.id} onChange={v => set('id', v)} required color="green" />
                 <Field label="Input Source *" placeholder="udp://239.0.0.1:5000" value={form.input} onChange={v => set('input', v)} required color="green" />
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Target Host *" placeholder="10.67.18.30" value={form.host} onChange={v => set('host', v)} required color="green" />
+                  <Field label="Target Host *" placeholder="10.67.18.29" value={form.host} onChange={v => set('host', v)} required color="green" />
                   <Field label="Port *" value={form.port} onChange={v => set('port', v)} type="number" required color="green" />
                 </div>
               </div>

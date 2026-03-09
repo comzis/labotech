@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Labotech** is a professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu. It manages SRT streams, handles 1080p→1080i transcoding, routes multicast traffic, and analyses MPEG-TS structure.
 
 **Server target:** HPE DL360, Ubuntu Server, Docker with `network_mode: host`
-- **eno1:** Management NIC → `10.67.18.30` → Web UI + API on port `3000`
+- **eno1:** Management NIC → `10.67.18.29` → Web UI + API on port `3000`
 - **eno2:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
 - **Multicast forward subnet:** `239.100.25.0/26` (address `239.100.25.29`)
 
@@ -54,7 +54,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 - **`multicast-forward.js`** — `MulticastForwarder` class. Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
 - **`ts-analyser.js`** — `TSAnalyser` class wrapping ffprobe. Parses PAT/PMT/PID tree via `parseStructure()`.
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
-- **`api.js`** — Express server bound to `10.67.18.30:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active encoders.
+- **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active encoders.
 
 ### Routes (`routes/`)
 
@@ -70,7 +70,7 @@ React SPA. `App.jsx` handles tab routing to feature panels. Custom hooks in `hoo
 - FFmpeg is always called via `child_process.spawn` — never `exec`
 - Every class must extend `EventEmitter` and emit `started`, `stopped`, `error`, `stats`
 - All multicast addresses must be validated against `239.100.25.0/26` before use
-- API server must always bind to `10.67.18.30`, never `0.0.0.0`
+- API server must always bind to `10.67.18.29`, never `0.0.0.0`
 
 ## Build Order
 
