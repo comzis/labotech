@@ -83,12 +83,19 @@ export default function StreamsPanel({ lastMessage }) {
                         {s.presetName || 'transcode'}
                       </span>
                     )}
-                    {s.isRunning && (
+                    {s.isRunning ? (
                       <button
                         onClick={() => handleStop(s.id, s._type === 'transcoder')}
                         className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-2 py-1 rounded transition-colors"
                       >
                         Stop
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleStop(s.id, s._type === 'transcoder')}
+                        className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded transition-colors"
+                      >
+                        Remove
                       </button>
                     )}
                   </div>
