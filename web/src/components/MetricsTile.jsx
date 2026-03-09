@@ -38,8 +38,17 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
   const speed  = current?.speed   ? current.speed   : null;
   const frame  = current?.frame   ? current.frame   : null;
 
+  const inputLocked  = fps > 0;
+  const outputActive = current?.bitrate > 0;
+
   return (
     <div className="bg-black/20 border border-white/5 rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-sm">
+
+      {/* Input / Output status row */}
+      <div className="grid grid-cols-2 gap-2">
+        <StatusPill label="INPUT"  locked={inputLocked}  activeLabel="LOCKED"    idleLabel="NO SIGNAL" />
+        <StatusPill label="OUTPUT" locked={outputActive} activeLabel="ACTIVE"    idleLabel="IDLE"      />
+      </div>
 
       {/* FFmpeg error banner */}
       {ffmpegError && (
@@ -48,22 +57,25 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
         </div>
       )}
 
-      {/* Input bitrate */}
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Input Bitrate</span>
-        <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : 'text-gray-600'}`}>
-          {inputMbps ? `${inputMbps} Mbps` : '—'}
-        </span>
-      </div>
-
-      {/* Bitrate sparkline — Recharts AreaChart */}
-      <div className="space-y-1">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Transport Bitrate</span>
+      {/* Input / Output bitrates */}
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Input</span>
+          <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : 'text-gray-600'}`}>
+            {inputMbps ? `${inputMbps} Mbps` : '—'}
+          </span>
+        </div>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Output</span>
           <span className={`font-mono text-sm font-bold ${mbps ? 'text-sky-400' : 'text-gray-600'}`}>
             {mbps ? `${mbps} Mbps` : '—'}
           </span>
         </div>
+      </div>
+
+      {/* Output bitrate sparkline */}
+      <div className="space-y-1">
+        <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Transport Bitrate</span>
         <ResponsiveContainer width="100%" height={36}>
           <AreaChart data={history} margin={{ top: 2, right: 0, bottom: 0, left: 0 }}>
             <defs>
@@ -155,6 +167,21 @@ function Metric({ label, value, color }) {
     <div>
       <div className="text-[10px] text-gray-600 uppercase tracking-wide mb-0.5">{label}</div>
       <div className={`font-mono font-semibold ${color}`}>{value}</div>
+    </div>
+  );
+}
+
+function StatusPill({ label, locked, activeLabel, idleLabel }) {
+  return (
+    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest
+      ${locked
+        ? 'bg-green-950/60 border-green-700/40 text-green-400'
+        : 'bg-gray-900/60  border-gray-700/40  text-gray-500'
+      }`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${locked ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+      <span className="text-gray-500 mr-0.5">{label}</span>
+      <span>{locked ? activeLabel : idleLabel}</span>
     </div>
   );
 }
