@@ -93,7 +93,9 @@ class SRTEncoder extends EventEmitter {
       // fifo_size: 10 MB receive buffer to handle bursts; overrun_nonfatal: keep
       // running on overflow rather than crashing (logs a warning instead)
       let inputUrl = `${this.input}${sep}fifo_size=10000000&overrun_nonfatal=1`;
-      if (this.inputLocalAddr) inputUrl += `&localaddr=${this.inputLocalAddr}`;
+      // Only append localaddr if it looks like a valid IP (not a stray character)
+      const validIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(this.inputLocalAddr);
+      if (this.inputLocalAddr && validIp) inputUrl += `&localaddr=${this.inputLocalAddr}`;
       // -f mpegts: force MPEG-TS demuxer so PAT/PMT/PIDs are parsed correctly
       // -avoid_negative_ts: normalise discontinuous timestamps from live UDP sources
       args.push(
