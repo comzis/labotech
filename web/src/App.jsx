@@ -37,6 +37,11 @@ export default function App() {
       case 'error':
         toast.error(`${id}: ${message}`, { duration: 8000 });
         break;
+      case 'etr290_alarm':
+        if (lastMessage.priority === 'p1') {
+          toast.error(`ETR290 P1: ${lastMessage.label}`, { duration: 6000 });
+        }
+        break;
       case 'switched':
         toast.warning(`${id}: failover activated`, { duration: 6000 });
         break;

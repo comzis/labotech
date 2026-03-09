@@ -11,10 +11,11 @@ const API_HOST = process.env.API_HOST || '10.67.18.29';
 const API_PORT = parseInt(process.env.API_PORT) || 4000;
 
 // Shared state maps
-const streams = new Map();  // id → SRTEncoder
-const transcoders = new Map(); // id → Transcoder
-const forwarders = new Map(); // id → MulticastForwarder
-const analysers = new Map(); // id → TSAnalyser
+const streams = new Map();       // id → SRTEncoder
+const transcoders = new Map();   // id → Transcoder
+const forwarders = new Map();    // id → MulticastForwarder
+const analysers = new Map();     // id → TSAnalyser
+const etr290monitors = new Map(); // id → ETR290Analyser
 
 function createApp(wss) {
   const app = express();
@@ -29,6 +30,7 @@ function createApp(wss) {
   app.use('/transcode', require('../routes/transcode')(transcoders, wss));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss));
   app.use('/analyse', require('../routes/analyse')(analysers, wss));
+  app.use('/etr290', require('../routes/etr290')(etr290monitors, wss));
   app.use('/pipeline', require('../routes/pipelines')(streams, transcoders, forwarders, wss));
   app.use('/scte35', require('../routes/scte35')());
 
@@ -76,6 +78,7 @@ function start() {
   app.use('/transcode', require('../routes/transcode')(transcoders, wss));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss));
   app.use('/analyse', require('../routes/analyse')(analysers, wss));
+  app.use('/etr290', require('../routes/etr290')(etr290monitors, wss));
   app.use('/pipeline', require('../routes/pipelines')(streams, transcoders, forwarders, wss));
   app.use('/scte35', require('../routes/scte35')());
 
@@ -105,7 +108,7 @@ function start() {
     console.log(`Labotech API listening on http://${API_HOST}:${API_PORT}`);
   });
 
-  return { server, wss, streams, transcoders, forwarders, analysers };
+  return { server, wss, streams, transcoders, forwarders, analysers, etr290monitors };
 }
 
-module.exports = { start, broadcastStats, streams, transcoders, forwarders, analysers };
+module.exports = { start, broadcastStats, streams, transcoders, forwarders, analysers, etr290monitors };
