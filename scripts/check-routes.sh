@@ -32,5 +32,13 @@ echo "--- Interface $NIC ---"
 ip link show "$NIC" 2>/dev/null | head -2 || echo "Interface not found"
 
 echo ""
+echo "--- IP addresses on $NIC ---"
+ip addr show "$NIC" 2>/dev/null | grep "inet " || echo "(none — IGMP joins will fail)"
+
+echo ""
 echo "--- All multicast routes ---"
 ip route show | grep "239\." || echo "(none)"
+
+echo ""
+echo "--- Active IGMP memberships ---"
+cat /proc/net/igmp 2>/dev/null | grep -v "^Idx" | awk '{print $1, $2, $4}' | head -20 || echo "(unavailable)"
