@@ -30,7 +30,18 @@ export default function EncoderForm({ onStarted }) {
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => {
+    if (k === 'outputMode') {
+      setForm(f => ({
+        ...f,
+        outputMode: v,
+        host: v === 'udp' || v === 'rtp' ? '239.100.25.29' : '',
+        port: v === 'udp' || v === 'rtp' ? '6501' : '9999',
+      }));
+    } else {
+      setForm(f => ({ ...f, [k]: v }));
+    }
+  };
 
   const addPair = () => setAudioPairs(p => [...p, { ...DEFAULT_PAIR, sourceIndex: p.length }]);
   const removePair = (i) => setAudioPairs(p => p.filter((_, idx) => idx !== i));
