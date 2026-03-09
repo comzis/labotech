@@ -27,10 +27,10 @@ Labotech manages broadcast-grade SRT encoding, 1080p→1080i transcoding, multic
 
 | Interface | Role | IP |
 |---|---|---|
-| `eno1` | Management — Web UI & API | `10.67.18.29` |
+| `eno1` | Management — Web UI & API | `<server-ip>` |
 | `eno2` | Multicast — no IP assigned | all `239.0.0.0/8` traffic |
 
-- **Web UI / API:** `http://10.67.18.29:4000`
+- **Web UI / API:** `http://<server-ip>:4000`
 - **Multicast subnet:** `239.100.25.0/26` (forward address `239.100.25.29`)
 
 ---
@@ -164,6 +164,8 @@ sudo systemctl disable --now ModemManager
 sudo systemctl disable --now avahi-daemon
 ```
 
+> **Note:** If you see `Failed to disable unit: Unit file avahi-daemon.service does not exist`, `avahi-daemon` is not installed — this is normal on a minimal Ubuntu Server image and can be safely ignored.
+
 ### 3.7 Hugepages (Optional — for high channel counts)
 
 Reduces TLB pressure when running 10+ simultaneous FFmpeg processes:
@@ -202,7 +204,7 @@ ulimit -r
 docker-compose up -d
 ```
 
-The UI is then available at `http://10.67.18.29:4000`.
+The UI is then available at `http://<server-ip>:4000`.
 
 ### Development (local Mac)
 
@@ -243,7 +245,7 @@ Click **Deploy New Broadcast Channel** to expand the Engine Configuration form.
 | Latency (ms) | SRT buffer — default `2000` ms |
 | Passphrase | Optional AES encryption key |
 | Encryption | AES-128 / AES-192 / AES-256 / None |
-| Adapter / Bind IP | Source NIC binding (use `10.67.18.29` for eno1) |
+| Adapter / Bind IP | Source NIC binding (use `<server-ip>` for eno1) |
 | Stream ID | Optional SRT stream identifier |
 
 **Audio Matrix** — configure up to 8 audio pairs:
@@ -384,6 +386,7 @@ Provides a real-time health overview of all active streams and transcoders.
 
 | Symptom | Cause | Fix |
 |---|---|---|
+| Cannot connect to UI | Wrong IP in browser | Use `http://<server-ip>:4000` where `<server-ip>` is your eno1 address |
 | Status shows **OFFLINE** | Backend not running | Run `npm start` or `docker-compose up -d` |
 | 500 errors on all API calls | Backend crashed or not started | Check terminal for errors; restart backend |
 | Blank page | Vite dev server not running | Run `cd web && npm run dev` |

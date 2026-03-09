@@ -1,6 +1,6 @@
 'use strict';
 
-// require('dotenv').config();
+require('dotenv').config();
 
 const express = require('express');
 const http = require('http');
@@ -8,7 +8,7 @@ const WebSocket = require('ws');
 const path = require('path');
 
 const API_HOST = process.env.API_HOST || '10.67.18.29';
-const API_PORT = parseInt(process.env.API_PORT) || 3000;
+const API_PORT = parseInt(process.env.API_PORT) || 4000;
 
 // Shared state maps
 const streams = new Map();  // id → SRTEncoder
