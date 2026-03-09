@@ -38,14 +38,30 @@ export default function StreamsPanel({ lastMessage }) {
     ...transcoders.map(t => ({ ...t, _type: 'transcoder' })),
   ];
 
+  const stopped = all.filter(s => !s.isRunning);
+
+  const clearStopped = async () => {
+    await Promise.all(stopped.map(s => handleStop(s.id, s._type === 'transcoder')));
+  };
+
   return (
     <div className="space-y-6">
       <EncoderForm onStarted={refresh} />
 
       <section>
-        <h2 className="text-sm text-gray-400 mb-3 uppercase tracking-widest">
-          Active Streams ({all.length})
-        </h2>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm text-gray-400 uppercase tracking-widest">
+            Active Streams ({all.length})
+          </h2>
+          {stopped.length > 0 && (
+            <button
+              onClick={clearStopped}
+              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-1 rounded transition-colors"
+            >
+              Clear Stopped ({stopped.length})
+            </button>
+          )}
+        </div>
 
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
         {error && <p className="text-red-400  text-sm">{error}</p>}
