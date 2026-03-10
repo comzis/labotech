@@ -131,9 +131,9 @@ function AlarmTable({ alarms }) {
 }
 
 const PROBE_MODES = [
-  { value: 'udp', label: 'UDP',  desc: 'Multicast/Unicast' },
   { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
+  { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
 ];
 
 function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
@@ -149,7 +149,7 @@ function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
 }
 
 export default function ETR290Panel({ lastMessage }) {
-  const [probeMode, setProbeMode] = useState('udp');
+  const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
   const [latency, setLatency] = useState('2000');
@@ -206,10 +206,10 @@ export default function ETR290Panel({ lastMessage }) {
           <div className="grid grid-cols-3 gap-4">
             <div className="col-span-2">
               <Field
-                label={probeMode === 'udp' ? 'Multicast / Unicast IP *' : 'Host *'}
+                label={probeMode === 'udp' || probeMode === 'rtp' ? 'Multicast / Unicast IP *' : 'Host *'}
                 value={host}
                 onChange={setHost}
-                placeholder={probeMode === 'udp' ? '239.100.25.29' : '10.67.18.29'}
+                placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.29' : '10.67.18.29'}
                 required={!activeId}
               />
             </div>

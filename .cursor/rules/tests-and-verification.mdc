@@ -1,0 +1,13 @@
+---
+description: Testing and verification expectations
+globs: "{test/**/*.js,package.json,web/package.json}"
+alwaysApply: false
+---
+
+# Testing and Verification
+
+- Run focused tests for changed backend modules and full test suite before release-sensitive changes.
+- Keep Jest scope limited to project tests; exclude temporary/worktree mirrors.
+- Avoid `--forceExit` as a default once open-handle issues are resolved.
+- Validate frontend production build (`web` Vite build) after UI/API contract changes.
+- When fixing bugs, add regression tests where practical.

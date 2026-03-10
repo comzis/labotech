@@ -10,9 +10,18 @@ const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 const SNMP_HOST          = process.env.SNMP_MANAGER_HOST || '10.67.18.1';
 const SYSLOG_HOST        = process.env.SYSLOG_HOST       || '10.67.18.1';
 const SYSLOG_PORT        = parseInt(process.env.SYSLOG_PORT) || 514;
+const SAFE_STREAM_ID_RE  = /^[A-Za-z0-9_-]{1,64}$/;
 
 if (!fs.existsSync(THUMBNAIL_DIR)) {
   fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
+}
+
+function sanitizeStreamId(streamId) {
+  const id = String(streamId || '');
+  if (!SAFE_STREAM_ID_RE.test(id)) {
+    throw new Error('Invalid stream id');
+  }
+  return id;
 }
 
 /**
@@ -23,7 +32,8 @@ if (!fs.existsSync(THUMBNAIL_DIR)) {
  */
 function captureThumbnail(streamId, inputUrl) {
   return new Promise((resolve, reject) => {
-    const outPath = path.join(THUMBNAIL_DIR, `${streamId}.jpg`);
+    const safeId = sanitizeStreamId(streamId);
+    const outPath = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
 
     // Build input URL with multicast-friendly options
     let src = inputUrl;
@@ -78,4 +88,4 @@ function sendSyslog(message, severity = 6) {
   client.send(buf, 0, buf.length, SYSLOG_PORT, SYSLOG_HOST, () => client.close());
 }
 
-module.exports = { captureThumbnail, sendSnmpTrap, sendSyslog, THUMBNAIL_DIR };
+module.exports = { captureThumbnail, sanitizeStreamId, sendSnmpTrap, sendSyslog, THUMBNAIL_DIR };

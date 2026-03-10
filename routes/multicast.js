@@ -44,19 +44,17 @@ module.exports = function(forwarders, wss, saveState = () => {}) {
       return res.status(409).json({ error: `Forwarder ${id} already exists` });
     }
 
-    const fwd = new MulticastForwarder({ id, sourceUrl, destIp, destPort, nic, ttl });
-
-    fwd.on('stats',   stats => broadcast({ type: 'multicast_stats', id, ...stats }));
-    fwd.on('error',   err   => broadcast({ type: 'error', id, message: err.message }));
-    fwd.on('stopped',       () => broadcast({ type: 'multicast_stopped', id }));
-
     try {
+      const fwd = new MulticastForwarder({ id, sourceUrl, destIp, destPort, nic, ttl });
+      fwd.on('stats',   stats => broadcast({ type: 'multicast_stats', id, ...stats }));
+      fwd.on('error',   err   => broadcast({ type: 'error', id, message: err.message }));
+      fwd.on('stopped',       () => broadcast({ type: 'multicast_stopped', id }));
       await fwd.start();
       forwarders.set(id, fwd);
       saveState();
       res.status(201).json(fwd.toJSON());
     } catch (err) {
-      res.status(500).json({ error: err.message });
+      res.status(400).json({ error: err.message });
     }
   });
 

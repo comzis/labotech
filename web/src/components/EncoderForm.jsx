@@ -122,15 +122,15 @@ export default function EncoderForm({ onStarted }) {
             <BentoCard icon={Server} title="Transport & Networking" className="md:col-span-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
-                <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="udp://239.0.0.1:5000" />
+                <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="rtp://239.0.0.1:5000 or srt://source:9999" />
                 <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Leave blank for eno2 multicast" />
 
                 {/* Output mode selector — spans full width */}
                 <div className="sm:col-span-2">
                   <SelectField label="Output Mode" value={form.outputMode} onChange={v => set('outputMode', v)} options={[
                     { value: 'srt', label: 'SRT — Secure Reliable Transport' },
-                    { value: 'udp', label: 'UDP — Multicast / Unicast MPEG-TS' },
                     { value: 'rtp', label: 'RTP — MPEG-TS over RTP' },
+                    { value: 'udp', label: 'UDP — Legacy Multicast / Unicast MPEG-TS' },
                   ]} />
                 </div>
 

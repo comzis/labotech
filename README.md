@@ -232,3 +232,11 @@ npm test
 | `transcoder.test.js` | 13 | Interlace presets, yadif filter, broadcast conversions |
 | `multicast.test.js` | 13 | Subnet validator, CIDR edge cases, URL building |
 | `ts-analyser.test.js` | 12 | PAT/PMT/PID parsing, orphan streams, continuous probing |
+
+---
+
+## Release Safety
+
+- Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
+- Deploy a fixed version tag/ref: `bash scripts/deploy-ref.sh <tag-or-ref>`
+- Roll back quickly to prior tag: `bash scripts/rollback-last-tag.sh`

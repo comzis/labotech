@@ -25,7 +25,7 @@ const DEFAULTS = {
 const OUTPUT_MODES = [
   { value: 'srt',  label: 'SRT',  desc: 'Haivision SRT' },
   { value: 'rtp',  label: 'RTP',  desc: 'RTP/MPEG-TS' },
-  { value: 'udp',  label: 'UDP',  desc: 'UDP Multicast' },
+  { value: 'udp',  label: 'UDP',  desc: 'Legacy Multicast' },
 ];
 
 // Framer Motion Animation Variants (Same as EncoderForm)
@@ -202,7 +202,7 @@ export default function TranscodePanel({ lastMessage }) {
                   </div>
                 </div>
                 <Field label="Stream ID *" placeholder="channel-1-transcoded" value={form.id} onChange={v => set('id', v)} required color="green" />
-                <Field label="Input Source *" placeholder="udp://239.0.0.1:5000" value={form.input} onChange={v => set('input', v)} required color="green" />
+                <Field label="Input Source *" placeholder="rtp://239.0.0.1:5000 or srt://source:9999" value={form.input} onChange={v => set('input', v)} required color="green" />
                 <div className="grid grid-cols-2 gap-4">
                   <Field
                     label={form.outputMode === 'srt' ? 'SRT Target Host *' : 'Destination IP *'}

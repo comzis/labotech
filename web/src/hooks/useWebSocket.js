@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 
 const WS_URL       = import.meta.env.DEV
   ? 'ws://127.0.0.1:4000'
-  : `ws://${window.location.host}`;
+  : `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}`;
 const BASE_DELAY   = 1000;   // 1s initial backoff
 const MAX_DELAY    = 30000;  // 30s ceiling — broadcast servers must always reconnect
 
@@ -12,6 +12,7 @@ export default function useWebSocket() {
   const wsRef    = useRef(null);
   const retries  = useRef(0);
   const timerRef = useRef(null);
+  const activeRef = useRef(true);
 
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
@@ -30,6 +31,7 @@ export default function useWebSocket() {
 
     ws.onclose = () => {
       setConnected(false);
+      if (!activeRef.current) return;
       // Exponential backoff — never give up (broadcast server may restart)
       const delay = Math.min(BASE_DELAY * Math.pow(1.5, retries.current), MAX_DELAY);
       retries.current++;
@@ -40,8 +42,10 @@ export default function useWebSocket() {
   }, []);
 
   useEffect(() => {
+    activeRef.current = true;
     connect();
     return () => {
+      activeRef.current = false;
       clearTimeout(timerRef.current);
       if (wsRef.current) wsRef.current.close();
     };

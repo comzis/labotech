@@ -3,7 +3,7 @@
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const path = require('path');
-const { THUMBNAIL_DIR } = require('./monitoring');
+const { THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 
 // ─── Bitrate normalisation ───────────────────────────────────────────────────
 // Accepts plain numbers and appends the correct unit so FFmpeg never sees
@@ -196,7 +196,7 @@ class SRTEncoder extends EventEmitter {
       ...this.buildInputArgs(),
     ];
 
-    const thumbPath = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
     const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 
     // ─── Copy / passthrough mode ─────────────────────────────────────────────

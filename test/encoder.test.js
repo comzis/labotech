@@ -388,4 +388,16 @@ describe('SRTEncoder', () => {
       expect(j.host).toBe('10.0.0.1');
     });
   });
+
+  describe('thumbnail id safety', () => {
+    test('throws for unsafe stream id when building ffmpeg args', () => {
+      const bad = new SRTEncoder({
+        id: '../escape',
+        input: 'udp://239.1.1.1:5000',
+        host: '10.0.0.1',
+        port: 9999,
+      });
+      expect(() => bad.buildFFmpegArgs()).toThrow(/Invalid stream id/);
+    });
+  });
 });

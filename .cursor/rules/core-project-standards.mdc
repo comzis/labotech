@@ -1,0 +1,15 @@
+---
+description: Core Labotech standards always applied
+alwaysApply: true
+---
+
+# Labotech Core Standards
+
+- Keep backend in plain Node.js ES6 with `require()`.
+- Use `child_process.spawn` or `execFile` for process calls; avoid shell string interpolation with untrusted input.
+- Keep API binding aligned with project contract (`API_HOST` management NIC and expected `API_PORT`).
+- Validate multicast destinations against `239.100.25.0/26` before starting any forward/route action.
+- Preserve event model for runtime classes: emit `started`, `stopped`, `error`, `stats`.
+- Prefer minimal, safe changes over broad refactors unless requested.
+- Do not introduce database/ORM state; runtime state stays in in-memory maps.
+- For multi-stage operations, use fail-safe behavior (validate first, rollback started stages on partial failure).

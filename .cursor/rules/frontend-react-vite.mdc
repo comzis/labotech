@@ -1,0 +1,14 @@
+---
+description: React and Vite frontend reliability standards
+globs: "web/src/**/*.{js,jsx}"
+alwaysApply: false
+---
+
+# Frontend Reliability Rules
+
+- Use protocol-safe WebSocket URLs (`wss` under HTTPS).
+- Handle API failures with user-facing feedback; avoid unhandled promise rejections.
+- Avoid unsafe optional chaining patterns that can still call methods on `undefined`.
+- Validate and normalize numeric form values before sending payloads.
+- Keep polling/websocket handlers scoped to active resource IDs when events are broadcast.
+- Maintain consistent API path usage with Vite proxy configuration.
