@@ -4,7 +4,7 @@ import PidBadge from './PidBadge';
 import StatusDot from './StatusDot';
 import ETR290Panel from './ETR290Panel';
 import { motion } from 'framer-motion';
-import { Search, Zap, Activity, ShieldAlert } from 'lucide-react';
+import { Search, Activity, ShieldAlert, Monitor } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 
@@ -35,6 +35,19 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   return url;
 }
 
+function formatFps(raw) {
+  if (!raw || typeof raw !== 'string' || !raw.includes('/')) return raw || null;
+  const [n, d] = raw.split('/').map(Number);
+  if (!d) return raw;
+  return (n / d).toFixed(3).replace(/\.?0+$/, '');
+}
+
+function countPids(result) {
+  if (!result) return 0;
+  const programCount = (result.programs || []).reduce((acc, p) => acc + ((p.streams || []).length), 0);
+  return programCount + ((result.orphanStreams || []).length);
+}
+
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -45,7 +58,7 @@ export default function TSAnalyser({ lastMessage }) {
   const [interval, setInterval] = useState(5000);
   const [subTab, setSubTab] = useState('structure');
 
-  const { result, loading, error, activeIds, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const { result, loading, error, activeIds, resultsById, decoderMeta, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
 
   useEffect(() => {
     refreshActives();
@@ -93,6 +106,15 @@ export default function TSAnalyser({ lastMessage }) {
           Structure
         </button>
         <button
+          onClick={() => setSubTab('multiview')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+            subTab === 'multiview' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
+          }`}
+        >
+          <Monitor className="w-4 h-4" strokeWidth={1.5} />
+          Multiview
+        </button>
+        <button
           onClick={() => setSubTab('etr290')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
             subTab === 'etr290' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -103,8 +125,8 @@ export default function TSAnalyser({ lastMessage }) {
         </button>
       </div>
 
-      {/* Structure sub-tab */}
-      <div style={{ display: subTab === 'structure' ? 'block' : 'none' }}>
+      {/* Structure + Multiview sub-tab */}
+      <div style={{ display: subTab === 'structure' || subTab === 'multiview' ? 'block' : 'none' }}>
         {/* Control Bento Card */}
         <BentoCard icon={Activity} title="Probe Configuration">
           <form onSubmit={handleProbe} className="space-y-4">
@@ -225,8 +247,8 @@ export default function TSAnalyser({ lastMessage }) {
           </form>
         </BentoCard>
 
-        {/* Results Matrix */}
-        {result && (
+        {/* Structure Matrix */}
+        {subTab === 'structure' && result && (
           <motion.div
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
@@ -237,9 +259,44 @@ export default function TSAnalyser({ lastMessage }) {
                 Packet Structure
               </h2>
               <div className="text-[10px] text-gray-500 font-mono">
-                PID count: {result.programs?.reduce((acc, p) => acc + (p.streams?.length || 0), 0) + (result.orphanStreams?.length || 0)}
+                PID count: {countPids(result)}
               </div>
             </div>
+
+            <BentoCard icon={ShieldAlert} title="DVB Professional Summary">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                <Stat label="Standard" value={result?.dvb?.standard || 'MPEG-TS / DVB-SI'} />
+                <Stat label="Service Count" value={String(result?.dvb?.serviceCount ?? (result.programs?.length || 0))} />
+                <Stat label="PID Count" value={String(result?.dvb?.pidCount ?? countPids(result))} />
+                <Stat label="Aggregate Bitrate" value={`${((result?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
+              </div>
+              {(result?.dvb?.services?.length || 0) > 0 && (
+                <div className="mt-4 overflow-x-auto">
+                  <table className="w-full text-xs font-mono">
+                    <thead>
+                      <tr className="text-gray-500 border-b border-white/10">
+                        <th className="text-left py-2">SID</th>
+                        <th className="text-left py-2">Service</th>
+                        <th className="text-left py-2">Provider</th>
+                        <th className="text-left py-2">PMT PID</th>
+                        <th className="text-left py-2">PCR PID</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {result.dvb.services.map((s, i) => (
+                        <tr key={`${s.serviceId}-${i}`} className="border-b border-white/5">
+                          <td className="py-2 text-gray-300">{s.serviceId}</td>
+                          <td className="py-2 text-gray-300">{s.serviceName || '-'}</td>
+                          <td className="py-2 text-gray-400">{s.serviceProvider || '-'}</td>
+                          <td className="py-2"><PidBadge pid={s.pmtPid} /></td>
+                          <td className="py-2"><PidBadge pid={s.pcrPid} /></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </BentoCard>
 
             <div className="grid grid-cols-1 gap-4">
               {result.programs?.map(prog => (
@@ -257,6 +314,30 @@ export default function TSAnalyser({ lastMessage }) {
               )}
             </div>
           </motion.div>
+        )}
+
+        {/* Multiview Matrix for all decoders */}
+        {subTab === 'multiview' && (
+          <div className="space-y-4 mt-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">Decoder Multiview</h2>
+              <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
+            </div>
+            {activeIds.length === 0 && (
+              <p className="text-gray-500 text-sm">No active decoders. Start decoders from Probe Configuration.</p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {activeIds.map((id) => (
+                <DecoderCard
+                  key={id}
+                  id={id}
+                  meta={decoderMeta[id]}
+                  result={resultsById[id]}
+                  onStop={() => stop(id)}
+                />
+              ))}
+            </div>
+          </div>
         )}
       </div>
 
@@ -304,10 +385,55 @@ function StreamRow({ stream: s }) {
       <span className={`w-12 font-semibold ${typeColor}`}>{s.codecType}</span>
       <span className="text-gray-300 w-16">{s.codecName}</span>
       {s.width && <span className="text-gray-500">{s.width}×{s.height}</span>}
-      {s.fps && <span className="text-gray-500">{s.fps}</span>}
+      {s.fps && <span className="text-gray-500">{formatFps(s.fps)} fps</span>}
       {s.sampleRate && <span className="text-gray-500">{s.sampleRate}Hz {s.channels}ch</span>}
       {s.bitrate && <span className="text-gray-500">{(s.bitrate / 1000000).toFixed(2)} Mbps</span>}
+      {s.streamType && <span className="text-gray-600">{s.streamType}</span>}
       {s.language && <span className="text-gray-600">[{s.language}]</span>}
+    </div>
+  );
+}
+
+function Stat({ label, value }) {
+  return (
+    <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
+      <div className="text-gray-200 font-mono mt-1">{value}</div>
+    </div>
+  );
+}
+
+function DecoderCard({ id, meta, result, onStop }) {
+  return (
+    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <StatusDot status="live" pulse />
+          <span className="font-mono text-sm text-gray-200">{id}</span>
+        </div>
+        <button
+          onClick={onStop}
+          className="text-[10px] font-bold uppercase bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded border border-red-500/20"
+        >
+          Stop
+        </button>
+      </div>
+      <div className="text-[11px] text-gray-500 font-mono truncate">{meta?.url || result?.url || '-'}</div>
+      <div className="grid grid-cols-3 gap-2 text-xs">
+        <Stat label="Programs" value={String(result?.programs?.length || 0)} />
+        <Stat label="PIDs" value={String(countPids(result))} />
+        <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+      </div>
+      {(result?.dvb?.services?.length || 0) > 0 && (
+        <div className="text-[11px] text-gray-400">
+          {result.dvb.services.slice(0, 2).map((s, idx) => (
+            <div key={`${id}-${idx}`} className="truncate">
+              SID {s.serviceId} - {s.serviceName || 'Unnamed'} ({s.serviceProvider || 'n/a'})
+            </div>
+          ))}
+          {result.dvb.services.length > 2 && <div className="text-gray-600">+{result.dvb.services.length - 2} more services</div>}
+        </div>
+      )}
     </div>
   );
 }
