@@ -171,7 +171,7 @@ export default function TranscodePanel({ lastMessage }) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Video Bitrate" placeholder="e.g. 8M" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} color="purple" />
+                  <Field label="Video Bitrate (Mbps)" placeholder="e.g. 10" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} color="purple" />
                   <Field label="Audio Bitrate" placeholder="e.g. 256k" value={form.audioBitrate} onChange={v => set('audioBitrate', v)} color="purple" />
                 </div>
                 <p className="text-[10px] text-gray-500 italic opacity-70">Leave bitrates empty to use preset defaults.</p>

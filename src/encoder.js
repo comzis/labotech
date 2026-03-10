@@ -3,6 +3,28 @@
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 
+// ─── Bitrate normalisation ───────────────────────────────────────────────────
+// Accepts plain numbers and appends the correct unit so FFmpeg never sees
+// a bare integer (which it would interpret as bits/s, not Mbps/kbps).
+//
+//   normBitrate('10',     'M') → '10M'      (10 Mbps)
+//   normBitrate('11.502', 'M') → '11502k'   (11.502 Mbps → kbps for precision)
+//   normBitrate('256',    'k') → '256k'     (256 kbps for audio)
+//   normBitrate('8M',     'M') → '8M'       (already has unit — untouched)
+//   normBitrate('256k',   'k') → '256k'     (already has unit — untouched)
+function normBitrate(val, defaultUnit = 'M') {
+  if (!val) return val;
+  const s = String(val).trim();
+  if (/[a-zA-Z]/.test(s)) return s;          // already has a unit suffix
+  const num = parseFloat(s);
+  if (isNaN(num)) return s;
+  if (defaultUnit === 'M') {
+    // Integer Mbps → append M; decimal Mbps → convert to kbps for FFmpeg precision
+    return Number.isInteger(num) ? `${num}M` : `${Math.round(num * 1000)}k`;
+  }
+  return `${Math.round(num)}${defaultUnit}`;  // audio: plain number = kbps
+}
+
 class SRTEncoder extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -17,7 +39,7 @@ class SRTEncoder extends EventEmitter {
     this.pbkeylen = options.pbkeylen || 16;
     this.adapter = options.adapter || null;
     this.streamId = options.streamId || null;
-    this.videoBitrate = options.videoBitrate || '8M';
+    this.videoBitrate = normBitrate(options.videoBitrate || '8M', 'M');
     this.videoCodec = options.videoCodec || 'libx264';
     this.preset = options.preset || 'medium';
     this.profile = options.profile || 'high';
@@ -49,7 +71,7 @@ class SRTEncoder extends EventEmitter {
       this.audioPairs = options.audioPairs.map((p, i) => ({
         sourceIndex: p.sourceIndex != null ? parseInt(p.sourceIndex) : 0,
         codec: p.codec || 'aac',
-        bitrate: p.bitrate || '256k',
+        bitrate: normBitrate(p.bitrate || '256k', 'k'),
         channels: p.channels != null ? parseInt(p.channels) : 2,
         language: p.language || null,
         // Per-pair PID; defaults to videoPid+1, videoPid+2, ... if not declared
@@ -58,7 +80,7 @@ class SRTEncoder extends EventEmitter {
     } else {
       this.audioPairs = null;
       // Legacy flat config — kept for backward compatibility
-      this.audioBitrate = options.audioBitrate || '256k';
+      this.audioBitrate = normBitrate(options.audioBitrate || '256k', 'k');
       this.audioCodec = options.audioCodec || 'aac';
       const ac = options.audioChannels || 'stereo';
       if (ac === 'mono') this.audioChannels = 1;

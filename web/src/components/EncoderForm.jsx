@@ -255,7 +255,7 @@ export default function EncoderForm({ onStarted }) {
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
                 <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
-                <Field label="Bitrate" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} />
+                <Field label="Bitrate (Mbps)" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} placeholder="e.g. 10" />
                 <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />
                 <SelectField label="Rate Mode" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
               </div>
