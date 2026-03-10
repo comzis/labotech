@@ -7,7 +7,7 @@ const { MulticastForwarder } = require('../src/multicast-forward');
 const DEFAULT_NIC    = process.env.MULTICAST_NIC             || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET  || '239.100.25.0/26';
 const DEFAULT_IP     = process.env.FORWARD_MULTICAST_IP      || '239.100.25.29';
-const MAX_FORWARDERS = parseInt(process.env.MAX_ACTIVE_FORWARDERS || '4');
+const MAX_FORWARDERS = parseInt(process.env.MAX_ACTIVE_FORWARDERS || '1');
 
 module.exports = function(forwarders, wss, saveState = () => {}) {
   const router = express.Router();
