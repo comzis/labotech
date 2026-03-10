@@ -39,23 +39,25 @@ function captureThumbnail(streamId, inputUrl) {
     let src = inputUrl;
     if (inputUrl.startsWith('udp://') || inputUrl.startsWith('rtp://')) {
       const sep = inputUrl.includes('?') ? '&' : '?';
-      src = `${inputUrl}${sep}timeout=3000000`; // 3s timeout
+      src = `${inputUrl}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=5000000`; // improve live TS reliability
     }
 
     const args = [
       '-y',
       '-hide_banner',
       '-loglevel', 'error',
-      '-fflags', '+genpts+discardcorrupt',
+      '-fflags', '+discardcorrupt',
+      '-analyzeduration', '5000000',
+      '-probesize', '5000000',
       '-i', src,
-      '-vframes', '1',
-      '-vf', 'scale=320:trunc(320/dar/2)*2',
+      '-frames:v', '1',
+      '-vf', 'thumbnail=60,scale=320:trunc(320/dar/2)*2',
       '-q:v', '5',
       outPath,
     ];
 
     const proc = spawn('ffmpeg', args);
-    const timer = setTimeout(() => { proc.kill('SIGTERM'); reject(new Error('Thumbnail timeout')); }, 8000);
+    const timer = setTimeout(() => { proc.kill('SIGTERM'); reject(new Error('Thumbnail timeout')); }, 12000);
     proc.on('exit', (code) => {
       clearTimeout(timer);
       if (code === 0) resolve(outPath);

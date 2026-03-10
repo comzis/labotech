@@ -42,6 +42,13 @@ function DecoderCard({ id, meta, result, onStop }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   const levelPct = audioPercent(result?.audioLevels);
+  const [thumbFailed, setThumbFailed] = useState(false);
+  const thumbSrc = result?.thumbnailUrl
+    ? `${result.thumbnailUrl}${result.thumbnailUrl.includes('?') ? '&' : '?'}r=${result?.probeTime || Date.now()}`
+    : null;
+  useEffect(() => {
+    setThumbFailed(false);
+  }, [result?.thumbnailUrl, result?.probeTime]);
 
   return (
     <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3">
@@ -58,11 +65,12 @@ function DecoderCard({ id, meta, result, onStop }) {
         </button>
       </div>
       <div className="relative aspect-video bg-gray-950 rounded-xl overflow-hidden border border-white/5">
-        {result?.thumbnailUrl ? (
+        {thumbSrc && !thumbFailed ? (
           <img
-            src={result.thumbnailUrl}
+            src={thumbSrc}
             alt={`${id} thumbnail`}
             className="w-full h-full object-contain"
+            onError={() => setThumbFailed(true)}
           />
         ) : (
           <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
