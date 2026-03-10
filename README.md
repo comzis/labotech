@@ -124,7 +124,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `EncoderForm` | Full encoder configuration: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
 | `TranscodePanel` | 1080p→1080i presets + broadcast preset slot selector |
 | `MulticastPanel` | `eno2` forwarder controls and subnet status |
-| `TSAnalyser` | PAT→PMT→PID tree, one-shot and continuous probing |
+| `TSAnalyser` | PAT→PMT→PID tree, DVB professional summary, one-shot probing, and multi-decoder continuous monitoring with multiview |
 | `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
@@ -152,6 +152,17 @@ The encoder supports full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13
 | `srt` | MPEG-TS over SRT (Haivision) | Contribution, low-latency delivery with ARQ |
 | `udp` | MPEG-TS over UDP (`pkt_size=1316`) | Multicast distribution, internal routing |
 | `rtp` | MPEG-TS over RTP (`rtp_mpegts`) | Standards-compliant RTP delivery |
+
+---
+
+## TS Analyser (Professional)
+
+The TS Analyser now includes professional-grade transport and DVB structure views:
+
+- **PID/program structure matrix** (PAT/PMT/PCR and per-stream details)
+- **DVB summary panel** with service count, PID count, stream breakdown, aggregate bitrate
+- **Service table** showing SID, service name/provider, PMT PID, PCR PID
+- **Decoder multiview** for all active continuous analysers with per-decoder stop control
 
 ---
 

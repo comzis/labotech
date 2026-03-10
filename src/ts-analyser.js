@@ -57,6 +57,7 @@ class TSAnalyser extends EventEmitter {
       pmtPid: prog.pmt_pid,
       pcrPid: prog.pcr_pid,
       name: prog.tags && prog.tags['service_name'] || null,
+      provider: prog.tags && prog.tags['service_provider'] || null,
       streams: (prog.streams || []).map(s => this._mapStream(s)),
     }));
 
@@ -68,20 +69,51 @@ class TSAnalyser extends EventEmitter {
       .filter(s => !programStreamIds.has(s.index))
       .map(s => this._mapStream(s));
 
+    const allStreams = programs.flatMap(p => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter(s => s.pid != null).length;
+    const serviceCount = programs.length;
+    const videoCount = allStreams.filter(s => s.codecType === 'video').length;
+    const audioCount = allStreams.filter(s => s.codecType === 'audio').length;
+    const dataCount = allStreams.filter(s => s.codecType === 'data').length;
+    const bitrateBps = allStreams.reduce((acc, s) => acc + (s.bitrate || 0), 0);
+
     return {
       url: this.url,
       probeTime: Date.now(),
       programs,
       orphanStreams,
+      dvb: {
+        standard: 'ISO/IEC 13818-1 MPEG-TS + ETSI EN 300 468 DVB-SI',
+        patPid: 0,
+        serviceCount,
+        pidCount,
+        streamBreakdown: { video: videoCount, audio: audioCount, data: dataCount },
+        bitrateBps,
+        services: programs.map(p => ({
+          serviceId: p.programId,
+          serviceName: p.name,
+          serviceProvider: p.provider,
+          pmtPid: p.pmtPid,
+          pcrPid: p.pcrPid,
+        })),
+      },
     };
   }
 
   _mapStream(s) {
+    const pid = s.id !== undefined ? s.id : null;
+    let streamType = null;
+    if (s.codec_tag_string && /^0x[0-9a-f]+$/i.test(s.codec_tag_string)) {
+      streamType = s.codec_tag_string;
+    }
+
     return {
       index: s.index,
       codecType: s.codec_type,
       codecName: s.codec_name,
-      pid: s.id !== undefined ? s.id : null,
+      pid,
+      pidHex: pid != null ? `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}` : null,
+      streamType,
       width: s.width || null,
       height: s.height || null,
       fps: s.avg_frame_rate || null,
