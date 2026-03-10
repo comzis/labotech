@@ -167,7 +167,7 @@ export default function EncoderForm({ onStarted }) {
 
                 {/* UDP / RTP — source NIC binding */}
                 {(form.outputMode === 'udp' || form.outputMode === 'rtp') &&
-                  <Field label="Local NIC / Source Address" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="10.67.18.29 (eno2)" />
+                  <Field label="Output NIC / IP" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="eno2" />
                 }
               </div>
             </BentoCard>

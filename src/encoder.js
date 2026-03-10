@@ -12,6 +12,15 @@ const { spawn } = require('child_process');
 //   normBitrate('256',    'k') → '256k'     (256 kbps for audio)
 //   normBitrate('8M',     'M') → '8M'       (already has unit — untouched)
 //   normBitrate('256k',   'k') → '256k'     (already has unit — untouched)
+// ─── NIC / localaddr helper ──────────────────────────────────────────────────
+// FFmpeg UDP/RTP URLs support two ways to bind the outgoing socket:
+//   interface=eno2     — by NIC name (works even with no IP on the NIC)
+//   localaddr=x.x.x.x — by IP address
+// Detect which to use based on whether the value looks like an IP or a name.
+function _nicParam(val) {
+  return /^\d+\.\d+/.test(val) ? `&localaddr=${val}` : `&interface=${val}`;
+}
+
 function normBitrate(val, defaultUnit = 'M') {
   if (!val) return val;
   const s = String(val).trim();
@@ -30,9 +39,14 @@ class SRTEncoder extends EventEmitter {
     super();
     this.id = options.id;
     this.input = options.input;
-    // Guard against the string "null" arriving from JSON form fields
+    // Guard against the string "null" arriving from JSON form fields.
+    // Strip any accidental URL scheme the user may have typed in the host
+    // field (e.g. "rtp://239.x.x.x" → "239.x.x.x") — the scheme is added
+    // by _buildOutputArgs, so a double prefix like rtp://rtp:// must be prevented.
     const rawHost = options.host;
-    this.host = (rawHost && rawHost !== 'null') ? rawHost : null;
+    let cleanHost = (rawHost && rawHost !== 'null') ? rawHost.trim() : null;
+    if (cleanHost) cleanHost = cleanHost.replace(/^[a-z][a-z0-9+\-.]*:\/\//i, '').split('/')[0] || null;
+    this.host = cleanHost;
     this.port = options.port || 9999;
     this.latency = options.latency || 2000;
     this.passphrase = options.passphrase || null;
@@ -343,14 +357,14 @@ class SRTEncoder extends EventEmitter {
     if (mode === 'udp') {
       // UDP multicast — pkt_size=1316 aligns TS packets (7 × 188 bytes) per UDP datagram
       let url = `udp://${this.host}:${this.port}?pkt_size=1316&ttl=${this.ttl}`;
-      if (this.localAddr) url += `&localaddr=${this.localAddr}`;
+      if (this.localAddr) url += _nicParam(this.localAddr);
       return ['-f', 'mpegts', ...dvb, ...pids, url];
     }
 
     if (mode === 'rtp') {
       // RTP encapsulation of full MPEG-TS (rtp_mpegts muxer)
       let url = `rtp://${this.host}:${this.port}?ttl=${this.ttl}`;
-      if (this.localAddr) url += `&localaddr=${this.localAddr}`;
+      if (this.localAddr) url += _nicParam(this.localAddr);
       return ['-f', 'rtp_mpegts', ...dvb, ...pids, url];
     }
 
