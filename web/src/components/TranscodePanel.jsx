@@ -19,6 +19,7 @@ const DEFAULTS = {
   audioBitrate: '',
   passphrase: '',
   outputMode: 'srt',
+  localAddr: '',
 };
 
 const OUTPUT_MODES = [
@@ -203,9 +204,19 @@ export default function TranscodePanel({ lastMessage }) {
                 <Field label="Stream ID *" placeholder="channel-1-transcoded" value={form.id} onChange={v => set('id', v)} required color="green" />
                 <Field label="Input Source *" placeholder="udp://239.0.0.1:5000" value={form.input} onChange={v => set('input', v)} required color="green" />
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Target Host *" placeholder="10.67.18.29" value={form.host} onChange={v => set('host', v)} required color="green" />
+                  <Field
+                    label={form.outputMode === 'srt' ? 'SRT Target Host *' : 'Destination IP *'}
+                    placeholder={form.outputMode === 'srt' ? '10.67.18.29' : '239.100.25.29'}
+                    value={form.host}
+                    onChange={v => set('host', v)}
+                    required
+                    color="green"
+                  />
                   <Field label="Port *" value={form.port} onChange={v => set('port', v)} type="number" required color="green" />
                 </div>
+                {(form.outputMode === 'udp' || form.outputMode === 'rtp') && (
+                  <Field label="Output NIC / IP" placeholder="eno2" value={form.localAddr} onChange={v => set('localAddr', v)} color="green" />
+                )}
                 {form.outputMode === 'srt' && (
                   <Field label="Passphrase" placeholder="Optional SRT passphrase" value={form.passphrase} onChange={v => set('passphrase', v)} color="green" />
                 )}
