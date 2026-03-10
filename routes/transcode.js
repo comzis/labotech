@@ -4,7 +4,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const Transcoder = require('../src/transcoder');
 
-module.exports = function (transcoders, wss) {
+module.exports = function (transcoders, wss, saveState = () => {}) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -79,6 +79,7 @@ module.exports = function (transcoders, wss) {
     try {
       transcoder.start();
       transcoders.set(id, transcoder);
+      saveState();
       res.status(201).json(transcoder.toJSON());
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -98,6 +99,7 @@ module.exports = function (transcoders, wss) {
     if (!t) return res.status(404).json({ error: 'Transcoder not found' });
     t.stop();
     transcoders.delete(req.params.id);
+    saveState();
     res.json({ stopped: req.params.id });
   });
 

@@ -8,7 +8,7 @@ const DEFAULT_NIC    = process.env.MULTICAST_NIC             || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET  || '239.100.25.0/26';
 const DEFAULT_IP     = process.env.FORWARD_MULTICAST_IP      || '239.100.25.29';
 
-module.exports = function(forwarders, wss) {
+module.exports = function(forwarders, wss, saveState = () => {}) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -53,6 +53,7 @@ module.exports = function(forwarders, wss) {
     try {
       await fwd.start();
       forwarders.set(id, fwd);
+      saveState();
       res.status(201).json(fwd.toJSON());
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -72,6 +73,7 @@ module.exports = function(forwarders, wss) {
     if (!fwd) return res.status(404).json({ error: 'Forwarder not found' });
     fwd.stop();
     forwarders.delete(req.params.id);
+    saveState();
     res.json({ stopped: req.params.id });
   });
 
