@@ -88,11 +88,13 @@ class MulticastForwarder extends EventEmitter {
       '-hide_banner',
       '-loglevel', 'warning',
       '-stats',
-      '-fflags', '+genpts+discardcorrupt',
+      '-fflags', '+discardcorrupt',
+      '-avoid_negative_ts', 'make_non_negative',
       '-i', srcUrl,
       '-c', 'copy',
       '-f', 'mpegts',
       '-mpegts_copyts', '1',   // preserve original TS timestamps + PAT/PMT
+      '-pcr_period', '20',     // PCR every 20 ms — within ETR290 2.3a 40 ms limit
       this.buildMulticastUrl(),
     ];
 
@@ -124,6 +126,7 @@ class MulticastForwarder extends EventEmitter {
     });
 
     this.emit('started', { id: this.id });
+    console.log(`[MulticastForwarder ${this.id}] output → udp://${this.destIp}:${this.destPort} via ${this.nic}`);
     return this;
   }
 

@@ -2,6 +2,8 @@
 
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
+const path = require('path');
+const { THUMBNAIL_DIR } = require('./monitoring');
 
 // ─── Bitrate normalisation ───────────────────────────────────────────────────
 // Accepts plain numbers and appends the correct unit so FFmpeg never sees
@@ -179,9 +181,9 @@ class SRTEncoder extends EventEmitter {
 
   // ─── Full FFmpeg argument chain ─────────────────────────────────────────────
   buildFFmpegArgs() {
-    // bufsize = 2× video bitrate. Use _parseBps() so '12000k', '8M', etc. all work.
+    // bufsize = 1× video bitrate (tighter CBR, less jitter — 2× was too loose for broadcast).
     const vbps = this._parseBps(this.videoBitrate);
-    const bufsize = vbps ? `${Math.round(vbps / 1e6 * 2)}M` : this.videoBitrate;
+    const bufsize = vbps ? `${Math.round(vbps / 1e6)}M` : this.videoBitrate;
 
     const effectiveMode = this.outputMode || (this.host ? 'srt' : 'null');
     // 'info' loglevel required for libsrt [srt-stats] lines; 'warning' elsewhere
@@ -194,8 +196,7 @@ class SRTEncoder extends EventEmitter {
       ...this.buildInputArgs(),
     ];
 
-    const { THUMBNAIL_DIR } = require('./monitoring');
-    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbPath = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
     const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 
     // ─── Copy / passthrough mode ─────────────────────────────────────────────
@@ -217,7 +218,9 @@ class SRTEncoder extends EventEmitter {
     // apply two separate simple filtergraphs to the same input stream).
     args.push(
       '-filter_complex',
-      `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
+      // setpts=PTS: pass input timestamps through unchanged — prevents DTS-out-of-order
+      // PTS errors (ETR290 P2) caused by filtergraph generating synthetic timestamps
+      `[0:v]scale=trunc(iw/2)*2:trunc(ih/2)*2,setpts=PTS,split=2[vout][vthumb];` +
       `[vthumb]fps=1/${thumbInterval},scale=320:-2[thumbout]`,
     );
 
@@ -236,6 +239,8 @@ class SRTEncoder extends EventEmitter {
       '-preset', this.preset,
       '-profile:v', this.profile,
       '-g', this.gopSize.toString(),
+      '-keyint_min', this.gopSize.toString(), // prevent early keyframes between GOPs
+      '-sc_threshold', '0',                   // disable scene-cut keyframes — CBR requires fixed GOP
       '-b:v', this.videoBitrate,
       '-pix_fmt', this.pixFmt,
     );
@@ -244,9 +249,9 @@ class SRTEncoder extends EventEmitter {
       // True CBR — VBV + HRD signalling (broadcast standard)
       args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize);
       if (this.videoCodec === 'libx264') {
-        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1');
+        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1:scenecut=0');
       } else if (this.videoCodec === 'libx265') {
-        args.push('-x265-params', 'hrd=1:nal-hrd=cbr:vbv-bufsize=' + Math.round(vbps / 1e3));
+        args.push('-x265-params', `hrd=1:nal-hrd=cbr:no-scenecut=1:vbv-bufsize=${Math.round(vbps / 1e3)}`);
       }
       // Other codecs (e.g. libx262, mpeg2video) rely on -maxrate + -bufsize alone
     } else {
@@ -276,6 +281,9 @@ class SRTEncoder extends EventEmitter {
     } else {
       args.push('-c:a', this.audioCodec, '-b:a', this.audioBitrate, '-ac', this.audioChannels.toString());
     }
+
+    // Prevent muxing queue overflow on high-bitrate streams (>= 8 Mbps)
+    args.push('-max_muxing_queue_size', '4096');
 
     // ─── DVB-compliant output ────────────────────────────────────────────────
     args.push(...this._buildOutputArgs(effectiveMode));
@@ -317,11 +325,10 @@ class SRTEncoder extends EventEmitter {
       '-mpegts_transport_stream_id', String(this.transportStreamId),
       // DVB/ETR 290: PAT+PMT every 100 ms
       '-pat_period', '0.1',
-      // PCR every 40 ms — the DVB maximum allowed interval. The FFmpeg default
-      // is 20 ms which causes ETR 290 PCR_repetition_error when any packet
-      // arrives slightly early (< 20 ms gap). 40 ms stays within spec and
-      // gives enough margin to prevent jitter-triggered repetition alarms.
-      '-pcr_period', '40',
+      // PCR every 20 ms — well within the ETR290 2.3a 40 ms limit.
+      // Explicit period prevents drift under encoder load that would push
+      // the interval past 40 ms and trigger PCR repetition alarms.
+      '-pcr_period', '20',
     ];
 
     // Enforce CBR mux rate so the TS carries constant bitrate stuffing packets.
