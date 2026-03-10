@@ -4,7 +4,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const SRTEncoder = require('../src/encoder');
 
-module.exports = function (streams, wss) {
+module.exports = function (streams, wss, saveState = () => {}) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -62,6 +62,7 @@ module.exports = function (streams, wss) {
     try {
       encoder.start();
       streams.set(id, encoder);
+      saveState();
       res.status(201).json(encoder.toJSON());
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -81,6 +82,7 @@ module.exports = function (streams, wss) {
     if (!encoder) return res.status(404).json({ error: 'Stream not found' });
     encoder.stop();
     streams.delete(req.params.id);
+    saveState();
     res.json({ stopped: req.params.id });
   });
 
