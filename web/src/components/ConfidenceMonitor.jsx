@@ -94,6 +94,9 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
   const [imgError, setImgError] = useState(false);
   const thumbUrl = `${THUMB_BASE}/${s.id}.jpg?t=${tick}`;
 
+  // Reset error on every tick so we retry the file after it's been written
+  useEffect(() => { setImgError(false); }, [tick]);
+
   // Prefer live WS bitrate; fall back to last REST-polled value
   const bitrate = liveBitrate ?? s.lastStats?.bitrate;
   const mbps = bitrate ? (bitrate / 1000).toFixed(2) : null;

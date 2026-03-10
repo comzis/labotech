@@ -1,7 +1,9 @@
 'use strict';
 
+const path = require('path');
 const SRTEncoder = require('./encoder');
 const BROADCAST_PRESETS = require('../config/presets.json');
+const { THUMBNAIL_DIR } = require('./monitoring');
 
 // PAL/NTSC/HFR interlacing presets
 const INTERLACE_PRESETS = {
@@ -77,11 +79,11 @@ class Transcoder extends SRTEncoder {
   buildFFmpegArgs() {
     const p = this._preset;
     const vbps = this._parseBps(this.videoBitrate);
-    const bufsize = vbps ? `${Math.round(vbps / 1e6 * 2)}M` : this.videoBitrate;
+    // 1× bitrate buffer: tighter CBR, less jitter. 2× was too loose for broadcast.
+    const bufsize = vbps ? `${Math.round(vbps / 1e6)}M` : this.videoBitrate;
 
     // Thumbnail interval
-    const { THUMBNAIL_DIR } = require('./monitoring');
-    const thumbPath = require('path').join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbPath = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
     const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 
     const args = [
@@ -91,7 +93,7 @@ class Transcoder extends SRTEncoder {
       ...this.buildInputArgs(),
       // filter_complex: interlace/deinterlace filter + split for thumbnail tee
       '-filter_complex',
-      `[0:v]${p.videoFilter},scale=trunc(iw/2)*2:trunc(ih/2)*2,split=2[vout][vthumb];` +
+      `[0:v]${p.videoFilter},scale=trunc(iw/2)*2:trunc(ih/2)*2,setpts=PTS,split=2[vout][vthumb];` +
       `[vthumb]fps=1/${thumbInterval},scale=320:-2[thumbout]`,
       '-map', '[vout]',
       '-map', '0:a?',
@@ -105,9 +107,9 @@ class Transcoder extends SRTEncoder {
     if (this.rateMode === 'cbr') {
       args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize);
       if (this.videoCodec === 'libx264') {
-        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1');
+        args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1:scenecut=0');
       } else if (this.videoCodec === 'libx265') {
-        args.push('-x265-params', 'hrd=1:nal-hrd=cbr:vbv-bufsize=' + Math.round(vbps / 1e3));
+        args.push('-x265-params', `hrd=1:nal-hrd=cbr:no-scenecut=1:vbv-bufsize=${Math.round(vbps / 1e3)}`);
       }
     } else {
       args.push('-bufsize', bufsize);
