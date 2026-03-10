@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import PidBadge from './PidBadge';
-import StatusDot from './StatusDot';
-import ETR290Panel from './ETR290Panel';
 import { motion } from 'framer-motion';
 import { Search, Activity, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
@@ -13,15 +11,6 @@ const PROBE_MODES = [
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
   { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
 ];
-const REFRESH_OPTIONS_MS = [
-  { value: 1000, label: '1 second' },
-  { value: 2000, label: '2 seconds' },
-  { value: 5000, label: '5 seconds' },
-  { value: 10000, label: '10 seconds' },
-  { value: 15000, label: '15 seconds' },
-  { value: 30000, label: '30 seconds' },
-];
-
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
   if (mode === 'udp') return `udp://${host}:${port}`;
@@ -54,15 +43,9 @@ export default function TSAnalyser({ lastMessage }) {
   const [port, setPort] = useState('');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
-  const [decoderId, setDecoderId] = useState('');
-  const [interval, setInterval] = useState(5000);
-  const [subTab, setSubTab] = useState('structure');
+  const [resultLocal, setResultLocal] = useState(null);
 
-  const { result, loading, error, activeIds, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
-
-  useEffect(() => {
-    refreshActives();
-  }, [refreshActives]);
+  const { loading, error, probe, onWsResult } = useTSAnalysis();
 
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
@@ -70,17 +53,15 @@ export default function TSAnalyser({ lastMessage }) {
 
   const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
 
-  const handleProbe = (e) => {
-    e.preventDefault();
-    if (builtUrl) probe(builtUrl);
-  };
-
-  const handleStartDecoder = (e) => {
+  const handleProbe = async (e) => {
     e.preventDefault();
     if (!builtUrl) return;
-    const id = decoderId || `decoder-${Date.now()}`;
-    startContinuous(id, builtUrl, parseInt(interval));
-    setDecoderId('');
+    try {
+      const r = await probe(builtUrl);
+      setResultLocal(r);
+    } catch (_) {
+      setResultLocal(null);
+    }
   };
 
   return (
@@ -94,33 +75,9 @@ export default function TSAnalyser({ lastMessage }) {
         <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Deep Packet Inspection & Service Validation</p>
       </div>
 
-      {/* Sub-tabs */}
-      <div className="flex gap-1 bg-black/20 p-1 rounded-xl border border-white/5 w-fit">
-        <button
-          onClick={() => setSubTab('structure')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            subTab === 'structure' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <Activity className="w-4 h-4" strokeWidth={1.5} />
-          Structure
-        </button>
-        <button
-          onClick={() => setSubTab('etr290')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            subTab === 'etr290' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <ShieldAlert className="w-4 h-4" strokeWidth={1.5} />
-          ETR 290
-        </button>
-      </div>
-
-      {/* Structure sub-tab */}
-      <div style={{ display: subTab === 'structure' ? 'block' : 'none' }}>
-        {/* Control Bento Card */}
-        <BentoCard icon={Activity} title="Probe Configuration">
-          <form onSubmit={handleProbe} className="space-y-4">
+      {/* Control Bento Card */}
+      <BentoCard icon={Activity} title="Single Decoder Probe">
+        <form onSubmit={handleProbe} className="space-y-4">
 
             {/* Protocol selector */}
             <div>
@@ -173,95 +130,43 @@ export default function TSAnalyser({ lastMessage }) {
               </div>
             )}
 
-            <div className="flex gap-4 items-center">
-              <button
-                type="submit"
-                disabled={loading || !builtUrl}
-                className="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/30 px-6 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50"
-              >
-                {loading ? 'Probing…' : 'One-shot'}
-              </button>
-              <button
-                type="button"
-                onClick={handleStartDecoder}
-                disabled={!builtUrl}
-                className="px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 disabled:opacity-50"
-              >
-                Start Decoder
-              </button>
-            </div>
+          <div className="flex gap-4 items-center">
+            <button
+              type="submit"
+              disabled={loading || !builtUrl}
+              className="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/30 px-6 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50"
+            >
+              {loading ? 'Probing…' : 'Probe Decoder'}
+            </button>
+          </div>
+          {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
+        </form>
+      </BentoCard>
 
-            <div className="grid grid-cols-2 gap-4">
-              <Field
-                label="Decoder ID (optional)"
-                value={decoderId}
-                onChange={setDecoderId}
-                placeholder="decoder-a"
-              />
-              <div>
-                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">
-                  Thumbnail Refresh
-                </label>
-                <select
-                  value={String(interval)}
-                  onChange={(e) => setInterval(parseInt(e.target.value, 10))}
-                  className="mt-1 w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50"
-                >
-                  {REFRESH_OPTIONS_MS.map(opt => (
-                    <option key={opt.value} value={opt.value} className="bg-midnight-surface">
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {activeIds.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs text-neon-cyan font-mono">Active Decoders ({activeIds.length})</div>
-                <div className="flex flex-wrap gap-2">
-                  {activeIds.map(id => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => stop(id)}
-                      className="flex items-center gap-2 text-xs bg-red-900/30 hover:bg-red-800/50 text-red-300 border border-red-500/20 px-2 py-1 rounded"
-                    >
-                      <StatusDot status="live" pulse />
-                      Stop {id}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-            {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
-          </form>
-        </BentoCard>
-
-        {/* Structure Matrix */}
-        {subTab === 'structure' && result && (
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="space-y-6 mt-6"
-          >
+      {/* Structure Matrix */}
+      {resultLocal && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-6"
+        >
             <div className="flex items-center justify-between">
               <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">
                 Packet Structure
               </h2>
               <div className="text-[10px] text-gray-500 font-mono">
-                PID count: {countPids(result)}
+                PID count: {countPids(resultLocal)}
               </div>
             </div>
 
             <BentoCard icon={ShieldAlert} title="DVB Professional Summary">
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
-                <Stat label="Standard" value={result?.dvb?.standard || 'MPEG-TS / DVB-SI'} />
-                <Stat label="Service Count" value={String(result?.dvb?.serviceCount ?? (result.programs?.length || 0))} />
-                <Stat label="PID Count" value={String(result?.dvb?.pidCount ?? countPids(result))} />
-                <Stat label="Aggregate Bitrate" value={`${((result?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
+                <Stat label="Standard" value={resultLocal?.dvb?.standard || 'MPEG-TS / DVB-SI'} />
+                <Stat label="Service Count" value={String(resultLocal?.dvb?.serviceCount ?? (resultLocal.programs?.length || 0))} />
+                <Stat label="PID Count" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
+                <Stat label="Aggregate Bitrate" value={`${((resultLocal?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
               </div>
-              {(result?.dvb?.services?.length || 0) > 0 && (
+              {(resultLocal?.dvb?.services?.length || 0) > 0 && (
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-xs font-mono">
                     <thead>
@@ -274,7 +179,7 @@ export default function TSAnalyser({ lastMessage }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {result.dvb.services.map((s, i) => (
+                      {resultLocal.dvb.services.map((s, i) => (
                         <tr key={`${s.serviceId}-${i}`} className="border-b border-white/5">
                           <td className="py-2 text-gray-300">{s.serviceId}</td>
                           <td className="py-2 text-gray-300">{s.serviceName || '-'}</td>
@@ -290,29 +195,22 @@ export default function TSAnalyser({ lastMessage }) {
             </BentoCard>
 
             <div className="grid grid-cols-1 gap-4">
-              {result.programs?.map(prog => (
+              {resultLocal.programs?.map(prog => (
                 <ProgramBlock key={prog.programId} prog={prog} />
               ))}
 
-              {result.orphanStreams?.length > 0 && (
+              {resultLocal.orphanStreams?.length > 0 && (
                 <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-5 relative overflow-hidden group">
                   <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
                   <h3 className="text-[11px] font-bold text-gray-400 uppercase tracking-widest mb-4">Orphan Matrix</h3>
                   <div className="space-y-1 relative z-10">
-                    {result.orphanStreams.map(s => <StreamRow key={s.index} stream={s} />)}
+                    {resultLocal.orphanStreams.map(s => <StreamRow key={s.index} stream={s} />)}
                   </div>
                 </div>
               )}
             </div>
-          </motion.div>
-        )}
-
-      </div>
-
-      {/* ETR 290 sub-tab — keep mounted to preserve state */}
-      <div style={{ display: subTab === 'etr290' ? 'block' : 'none' }}>
-        <ETR290Panel lastMessage={lastMessage} />
-      </div>
+        </motion.div>
+      )}
     </div>
   );
 }

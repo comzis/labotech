@@ -12,6 +12,23 @@ const MAX_FORWARDERS = parseInt(process.env.MAX_ACTIVE_FORWARDERS || '1');
 module.exports = function(forwarders, wss, saveState = () => {}) {
   const router = express.Router();
 
+  async function stopAndWait(instance, timeoutMs = 5000) {
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        instance.removeListener('stopped', onStopped);
+        resolve();
+      };
+      const onStopped = () => done();
+      const timer = setTimeout(done, timeoutMs);
+      instance.once('stopped', onStopped);
+      try { instance.stop(); } catch (_) { done(); }
+    });
+  }
+
   function broadcast(msg) {
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
@@ -79,10 +96,10 @@ module.exports = function(forwarders, wss, saveState = () => {}) {
   });
 
   // DELETE /multicast/forward/:id
-  router.delete('/forward/:id', (req, res) => {
+  router.delete('/forward/:id', async (req, res) => {
     const fwd = forwarders.get(req.params.id);
     if (!fwd) return res.status(404).json({ error: 'Forwarder not found' });
-    fwd.stop();
+    await stopAndWait(fwd);
     forwarders.delete(req.params.id);
     saveState();
     res.json({ stopped: req.params.id });

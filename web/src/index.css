@@ -2,16 +2,43 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Rack room background ─────────────────────────────────────────────────── */
 body {
-  @apply bg-gray-950 text-gray-100 font-mono;
+  background-color: #080808;
+  background-image:
+    radial-gradient(circle, #1c1c1c 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: #d0d0d0;
+  @apply font-sans;
 }
 
-/* Hide native number input spinners */
+/* ── Hide native number spinners ─────────────────────────────────────────── */
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; }
 
-/* Scrollbar */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { @apply bg-gray-900; }
-::-webkit-scrollbar-thumb { @apply bg-gray-700 rounded; }
+/* ── Scrollbar — rack rail style ─────────────────────────────────────────── */
+::-webkit-scrollbar        { width: 5px; height: 5px; }
+::-webkit-scrollbar-track  { background: #0f0f0f; border-left: 1px solid #1a1a1a; }
+::-webkit-scrollbar-thumb  { background: #2a2a2a; border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* ── Rack unit border radius override ────────────────────────────────────── */
+.rack-unit {
+  border-radius: 3px;
+}
+
+/* ── LED glow utility classes ─────────────────────────────────────────────── */
+.led-green  { box-shadow: 0 0 6px #00dd55, 0 0 14px rgba(0,221,85,0.4);  }
+.led-amber  { box-shadow: 0 0 6px #ffaa00, 0 0 14px rgba(255,170,0,0.4); }
+.led-red    { box-shadow: 0 0 6px #ff2233, 0 0 14px rgba(255,34,51,0.4); }
+.led-blue   { box-shadow: 0 0 6px #2299ff, 0 0 14px rgba(34,153,255,0.4);}
+.led-cyan   { box-shadow: 0 0 6px #00ddff, 0 0 14px rgba(0,221,255,0.4); }
+.led-purple { box-shadow: 0 0 6px #cc44ff, 0 0 14px rgba(204,68,255,0.4);}
+.led-teal   { box-shadow: 0 0 6px #00ddaa, 0 0 14px rgba(0,221,170,0.4); }
+
+/* ── Engraved label effect ────────────────────────────────────────────────── */
+.engraved {
+  color: #7a7a7a;
+  text-shadow: 0 1px 0 rgba(255,255,255,0.08);
+}

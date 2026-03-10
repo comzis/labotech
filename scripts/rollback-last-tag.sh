@@ -8,18 +8,22 @@ set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_DIR"
+DEPLOY_STATE_DIR=".deploy"
+PREVIOUS_REF_FILE="${DEPLOY_STATE_DIR}/previous_ref"
 
 if [[ $# -ge 1 ]]; then
   TARGET_TAG="$1"
+elif [[ -f "${PREVIOUS_REF_FILE}" ]]; then
+  TARGET_TAG="$(cat "${PREVIOUS_REF_FILE}")"
 else
   TARGET_TAG="$(git tag --sort=-version:refname | sed -n '2p')"
 fi
 
 if [[ -z "${TARGET_TAG:-}" ]]; then
-  echo "No rollback tag found. Provide one explicitly:"
+  echo "No rollback ref found. Provide one explicitly:"
   echo "  bash scripts/rollback-last-tag.sh <tag>"
   exit 1
 fi
 
-echo "==> Rolling back to tag: ${TARGET_TAG}"
+echo "==> Rolling back to ref: ${TARGET_TAG}"
 bash scripts/deploy-ref.sh "$TARGET_TAG"

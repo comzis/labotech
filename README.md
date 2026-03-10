@@ -9,7 +9,7 @@ Professional broadcast encoder and stream management application for an HPE DL36
 | Component | Detail |
 |---|---|
 | Server | HPE DL360, Ubuntu Server |
-| Management NIC | `eno1` → `10.67.18.30` → Web UI + API port `3000` |
+| Management NIC | `eno1` → `10.67.18.29` → Web UI + API port `4000` |
 | Multicast NIC | `eno2` → no IP → all `239.0.0.0/8` traffic |
 | Multicast subnet | `239.100.25.0/26` (default address `239.100.25.29`) |
 | Container | Docker with `network_mode: host` |
@@ -61,7 +61,7 @@ npm install && npm start
 cd web && npm install && npm run dev
 ```
 
-Web UI: `http://10.67.18.30:3000`
+Web UI: `http://10.67.18.29:4000`
 
 ---
 
@@ -102,7 +102,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder for ad marker injection. |
 | `monitoring.js` | — | Confidence thumbnail capture (ffmpeg), SNMP traps, syslog events. |
 | `filters.js` | — | FFmpeg filter chain builders: logo overlay, noise reduction, scale. |
-| `api.js` | — | Express server bound to `10.67.18.30:3000`. WebSocket broadcasts all encoder events. Serves React SPA from `web/dist/`. |
+| `api.js` | — | Express server bound to `10.67.18.29:4000`. WebSocket broadcasts all encoder events. Serves React SPA from `web/dist/`. |
 
 ### Routes (`routes/`)
 
@@ -204,12 +204,14 @@ The TS Analyser now includes professional-grade transport and DVB structure view
 Key variables:
 
 ```env
-API_HOST=10.67.18.30
-API_PORT=3000
+API_HOST=10.67.18.29
+API_PORT=4000
 MANAGEMENT_NIC=eno1
 MULTICAST_NIC=eno2
 FORWARD_MULTICAST_SUBNET=239.100.25.0/26
 FORWARD_MULTICAST_IP=239.100.25.29
+RESTORE_STREAMS_ON_BOOT=false
+RESTORE_TRANSCODERS_ON_BOOT=false
 RESTORE_FORWARDERS_ON_BOOT=false
 MAX_ACTIVE_FORWARDERS=1
 SRT_HOST=your.destination.server.com
@@ -227,7 +229,7 @@ SYSLOG_HOST=10.67.18.1
 - FFmpeg always via `child_process.spawn` — never `exec`
 - Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
 - All multicast addresses validated against `239.100.25.0/26` before use
-- API server always binds to `10.67.18.30` — never `0.0.0.0`
+- API server always binds to `10.67.18.29` — never `0.0.0.0`
 - All state in-memory `Map()` — no database, no ORM
 
 ---

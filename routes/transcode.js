@@ -7,6 +7,23 @@ const Transcoder = require('../src/transcoder');
 module.exports = function (transcoders, wss, saveState = () => {}) {
   const router = express.Router();
 
+  async function stopAndWait(instance, timeoutMs = 5000) {
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        instance.removeListener('stopped', onStopped);
+        resolve();
+      };
+      const onStopped = () => done();
+      const timer = setTimeout(done, timeoutMs);
+      instance.once('stopped', onStopped);
+      try { instance.stop(); } catch (_) { done(); }
+    });
+  }
+
   function broadcast(msg) {
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
@@ -42,8 +59,9 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
     const {
       id, input, host, port, latency,
       transcodePreset, broadcastPresetSlot,
-      videoBitrate, audioBitrate,
-      videoCodec, audioCodec, preset, passphrase, streamId,
+      videoBitrate, audioBitrate, audioPairs, audioChannels,
+      videoCodec, audioCodec, preset, profile, pixFmt, rateMode, gopSize, passphrase, streamId,
+      serviceId, transportStreamId, originalNetworkId, pmtPid, videoPid, serviceName, serviceProvider,
       outputMode, localAddr, ttl,
     } = req.body;
 
@@ -64,8 +82,9 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
       transcoder = new Transcoder({
         id, input, host, port, latency,
         transcodePreset, broadcastPresetSlot,
-        videoBitrate, audioBitrate,
-        videoCodec, audioCodec, preset, passphrase, streamId,
+        videoBitrate, audioBitrate, audioPairs, audioChannels,
+        videoCodec, audioCodec, preset, profile, pixFmt, rateMode, gopSize, passphrase, streamId,
+        serviceId, transportStreamId, originalNetworkId, pmtPid, videoPid, serviceName, serviceProvider,
         outputMode, localAddr, ttl,
       });
     } catch (err) {
@@ -94,10 +113,10 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
   });
 
   // DELETE /transcode/:id
-  router.delete('/:id', (req, res) => {
+  router.delete('/:id', async (req, res) => {
     const t = transcoders.get(req.params.id);
     if (!t) return res.status(404).json({ error: 'Transcoder not found' });
-    t.stop();
+    await stopAndWait(t);
     transcoders.delete(req.params.id);
     saveState();
     res.json({ stopped: req.params.id });
