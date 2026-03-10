@@ -44,6 +44,7 @@ module.exports = function (transcoders, wss) {
       transcodePreset, broadcastPresetSlot,
       videoBitrate, audioBitrate,
       videoCodec, audioCodec, preset, passphrase, streamId,
+      outputMode,
     } = req.body;
 
     if (!id || !input || !host || !port) {
@@ -53,6 +54,11 @@ module.exports = function (transcoders, wss) {
       return res.status(409).json({ error: `Transcoder ${id} already exists` });
     }
 
+    const validModes = ['srt', 'udp', 'rtp'];
+    if (outputMode && !validModes.includes(outputMode)) {
+      return res.status(400).json({ error: `outputMode must be one of: ${validModes.join(', ')}` });
+    }
+
     let transcoder;
     try {
       transcoder = new Transcoder({
@@ -60,6 +66,7 @@ module.exports = function (transcoders, wss) {
         transcodePreset, broadcastPresetSlot,
         videoBitrate, audioBitrate,
         videoCodec, audioCodec, preset, passphrase, streamId,
+        outputMode,
       });
     } catch (err) {
       return res.status(400).json({ error: err.message });
