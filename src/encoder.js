@@ -99,9 +99,12 @@ class SRTEncoder extends EventEmitter {
       const validIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(this.inputLocalAddr);
       if (this.inputLocalAddr && validIp) inputUrl += `&localaddr=${this.inputLocalAddr}`;
       // -f mpegts: force MPEG-TS demuxer so PAT/PMT/PIDs are parsed correctly
-      // -avoid_negative_ts: normalise discontinuous timestamps from live UDP sources
+      // +discardcorrupt: drop corrupt packets silently rather than crashing
+      // genpts is intentionally NOT set — live broadcast UDP sources carry valid
+      // PTS/DTS; regenerating them introduces small timestamp irregularities that
+      // propagate as PCR jitter in the output muxer.
       args.push(
-        '-fflags', '+genpts+discardcorrupt',
+        '-fflags', '+discardcorrupt',
         '-f', 'mpegts',
         '-i', inputUrl,
       );
@@ -276,8 +279,13 @@ class SRTEncoder extends EventEmitter {
       '-mpegts_start_pid',           String(this.videoPid),
       '-mpegts_original_network_id', String(this.originalNetworkId),
       '-mpegts_transport_stream_id', String(this.transportStreamId),
-      // DVB/ETR 290: PAT+PMT every 100 ms, ensures P1 tests pass
+      // DVB/ETR 290: PAT+PMT every 100 ms
       '-pat_period', '0.1',
+      // PCR every 40 ms — the DVB maximum allowed interval. The FFmpeg default
+      // is 20 ms which causes ETR 290 PCR_repetition_error when any packet
+      // arrives slightly early (< 20 ms gap). 40 ms stays within spec and
+      // gives enough margin to prevent jitter-triggered repetition alarms.
+      '-pcr_period', '40',
     ];
 
     // Enforce CBR mux rate so the TS carries constant bitrate stuffing packets.

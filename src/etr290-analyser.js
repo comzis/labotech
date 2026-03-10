@@ -60,7 +60,10 @@ class ETR290Analyser extends EventEmitter {
       '-hide_banner',
       '-loglevel', 'warning',
       '-err_detect', '+crccheck+careful',
-      '-fflags', '+genpts',
+      // +discardcorrupt only — genpts regenerates timestamps from decoded frame
+      // timing which introduces small irregularities that show up as PCR jitter
+      // alarms on the very stream we're trying to monitor cleanly.
+      '-fflags', '+discardcorrupt',
       '-i', this.url,
       '-f', 'null', '-',
     ];
@@ -77,16 +80,18 @@ class ETR290Analyser extends EventEmitter {
       }
     });
 
-    this._proc.on('exit', (code) => {
+    this._proc.on('exit', (code, signal) => {
       this.isRunning = false;
       this._proc = null;
       if (this._statusTimer) {
         clearInterval(this._statusTimer);
         this._statusTimer = null;
       }
-      if (code !== 0 && code !== null) {
+      // FFmpeg handles SIGTERM internally and exits with code 255 — treat as clean stop
+      if (code !== 0 && code !== null && !(this._stopping && code === 255) && signal !== 'SIGTERM') {
         this.emit('error', new Error(`FFmpeg exited with code ${code}`));
       }
+      this._stopping = false;
       this.emit('stopped', { id: this.id });
     });
 
@@ -145,6 +150,7 @@ class ETR290Analyser extends EventEmitter {
       this._statusTimer = null;
     }
     if (this._proc) {
+      this._stopping = true;
       this._proc.kill('SIGTERM');
       this._proc = null;
     }

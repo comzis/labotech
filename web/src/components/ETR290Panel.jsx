@@ -130,20 +130,44 @@ function AlarmTable({ alarms }) {
   );
 }
 
+const PROBE_MODES = [
+  { value: 'udp', label: 'UDP',  desc: 'Multicast/Unicast' },
+  { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
+  { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
+];
+
+function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
+  if (!host || !port) return '';
+  if (mode === 'udp') return `udp://${host}:${port}`;
+  if (mode === 'rtp') return `rtp://${host}:${port}`;
+  let url = `srt://${host}:${port}`;
+  const params = [];
+  if (latency)    params.push(`latency=${latency}`);
+  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (params.length) url += `?${params.join('&')}`;
+  return url;
+}
+
 export default function ETR290Panel({ lastMessage }) {
-  const [url, setUrl] = useState('');
+  const [probeMode, setProbeMode] = useState('udp');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('');
+  const [latency, setLatency] = useState('2000');
+  const [passphrase, setPassphrase] = useState('');
   const { status, activeId, error, start, stop, onWsMessage } = useETR290();
 
   useEffect(() => {
     if (lastMessage) onWsMessage(lastMessage);
   }, [lastMessage, onWsMessage]);
 
+  const builtUrl = buildMonitorUrl({ mode: probeMode, host, port, latency, passphrase });
+
   const handleToggle = (e) => {
     e.preventDefault();
     if (activeId) {
       stop();
-    } else if (url) {
-      start(`etr290-${Date.now()}`, url);
+    } else if (builtUrl) {
+      start(`etr290-${Date.now()}`, builtUrl);
     }
   };
 
@@ -155,19 +179,62 @@ export default function ETR290Panel({ lastMessage }) {
     <div className="space-y-6">
       {/* Control */}
       <BentoCard icon={ShieldAlert} title="ETR 290 Monitor">
-        <form onSubmit={handleToggle} className="flex gap-4 items-end">
-          <div className="flex-1">
-            <Field
-              label="Source URL *"
-              value={url}
-              onChange={setUrl}
-              placeholder="udp://239.x.x.x:port or srt://..."
-              required={!activeId}
-            />
+        <form onSubmit={handleToggle} className="space-y-4">
+
+          {/* Protocol selector */}
+          <div>
+            <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Protocol</label>
+            <div className="grid grid-cols-3 gap-2">
+              {PROBE_MODES.map(m => (
+                <button
+                  key={m.value}
+                  type="button"
+                  onClick={() => setProbeMode(m.value)}
+                  className={`px-3 py-2.5 rounded-xl border text-center transition-all ${probeMode === m.value
+                    ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white ring-1 ring-neon-cyan/50'
+                    : 'bg-black/30 border-white/10 text-gray-500 hover:border-white/20 hover:bg-black/40'
+                  }`}
+                >
+                  <div className="text-xs font-bold">{m.label}</div>
+                  <div className="text-[9px] opacity-60 mt-0.5 uppercase tracking-tighter">{m.desc}</div>
+                </button>
+              ))}
+            </div>
           </div>
+
+          {/* Host + Port */}
+          <div className="grid grid-cols-3 gap-4">
+            <div className="col-span-2">
+              <Field
+                label={probeMode === 'udp' ? 'Multicast / Unicast IP *' : 'Host *'}
+                value={host}
+                onChange={setHost}
+                placeholder={probeMode === 'udp' ? '239.100.25.29' : '10.67.18.29'}
+                required={!activeId}
+              />
+            </div>
+            <Field label="Port *" value={port} onChange={setPort} type="number" placeholder="5000" required={!activeId} />
+          </div>
+
+          {/* SRT-only options */}
+          {probeMode === 'srt' && (
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
+              <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="Optional" />
+            </div>
+          )}
+
+          {/* URL preview */}
+          {builtUrl && (
+            <div className="flex items-center gap-2 text-[11px] font-mono text-gray-500 bg-black/30 px-3 py-2 rounded-lg border border-white/5">
+              <span className="text-gray-600 shrink-0">URL:</span>
+              <span className="text-neon-cyan/70 truncate">{builtUrl}</span>
+            </div>
+          )}
+
           <button
             type="submit"
-            disabled={!url && !activeId}
+            disabled={!builtUrl && !activeId}
             className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
               activeId
                 ? 'bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30'
@@ -181,7 +248,7 @@ export default function ETR290Panel({ lastMessage }) {
         {activeId && (
           <div className="flex items-center gap-2 mt-3 text-xs text-neon-cyan font-mono animate-pulse">
             <StatusDot status="live" pulse />
-            Monitoring: {status?.url || url}
+            Monitoring: {status?.url || builtUrl}
           </div>
         )}
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
