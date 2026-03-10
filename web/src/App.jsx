@@ -8,6 +8,7 @@ import MulticastPanel from './components/MulticastPanel';
 import TSAnalyser from './components/TSAnalyser';
 import ConfidenceMonitor from './components/ConfidenceMonitor';
 import useWebSocket from './hooks/useWebSocket';
+import { getHealth } from './api';
 
 const TABS = [
   { id: 'streams',    label: 'Streams',    icon: Activity    },
@@ -17,9 +18,17 @@ const TABS = [
   { id: 'confidence', label: 'Confidence', icon: ShieldCheck },
 ];
 
+function levelClass(percent) {
+  if (percent == null) return 'text-gray-400';
+  if (percent >= 85) return 'text-red-400';
+  if (percent >= 65) return 'text-amber-300';
+  return 'text-green-400';
+}
+
 export default function App() {
   const [tab, setTab] = useState('streams');
   const { connected, lastMessage } = useWebSocket();
+  const [telemetry, setTelemetry] = useState(null);
 
   // ── Broadcast event toasts ──────────────────────────────────────────────────
   useEffect(() => {
@@ -49,6 +58,22 @@ export default function App() {
         break;
     }
   }, [lastMessage]);
+
+  useEffect(() => {
+    let mounted = true;
+    const load = async () => {
+      try {
+        const h = await getHealth();
+        if (mounted) setTelemetry(h.telemetry || null);
+      } catch (_) {}
+    };
+    load();
+    const timer = setInterval(load, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen bg-midnight-base text-gray-200 font-sans tracking-tight relative overflow-hidden flex flex-col">
@@ -103,13 +128,29 @@ export default function App() {
             })}
           </nav>
 
-          {/* Connection status — EBU traffic-light: green nominal, red fault */}
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold tracking-wider
-            ${connected
-              ? 'bg-green-500/10 border-green-500/20 text-green-400'
-              : 'bg-red-500/10  border-red-500/20  text-red-400'}`}>
-            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
-            {connected ? 'ONLINE' : 'OFFLINE'}
+          <div className="flex items-center gap-2">
+            {telemetry && (
+              <div className="hidden lg:flex items-center gap-2 text-[10px] font-mono text-gray-300 bg-black/20 border border-white/10 rounded-full px-3 py-1.5">
+                <span className={levelClass(telemetry.cpuPercent)}>
+                  CPU {telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : 'n/a'}
+                </span>
+                <span className="text-gray-600">|</span>
+                <span className={levelClass(telemetry.memoryPercent)}>
+                  MEM {telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : 'n/a'}
+                </span>
+                <span className="text-gray-600">|</span>
+                <span>{telemetry.memoryUsedMB || 0}/{telemetry.memoryTotalMB || 0} MB</span>
+              </div>
+            )}
+
+            {/* Connection status — EBU traffic-light: green nominal, red fault */}
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-xs font-semibold tracking-wider
+              ${connected
+                ? 'bg-green-500/10 border-green-500/20 text-green-400'
+                : 'bg-red-500/10  border-red-500/20  text-red-400'}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-green-400 animate-pulse' : 'bg-red-400'}`} />
+              {connected ? 'ONLINE' : 'OFFLINE'}
+            </div>
           </div>
         </div>
       </header>

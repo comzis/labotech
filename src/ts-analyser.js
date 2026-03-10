@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
+const { captureThumbnail } = require('./monitoring');
 
 class TSAnalyser extends EventEmitter {
   constructor(options = {}) {
@@ -32,13 +33,20 @@ class TSAnalyser extends EventEmitter {
       proc.stdout.on('data', d => { stdout += d.toString(); });
       proc.stderr.on('data', d => { stderr += d.toString(); });
 
-      proc.on('exit', (code) => {
+      proc.on('exit', async (code) => {
         if (code !== 0) {
           return reject(new Error(`ffprobe exited ${code}: ${stderr.trim()}`));
         }
         try {
           const raw = JSON.parse(stdout);
           const result = this.parseStructure(raw);
+          result.audioLevels = await this._probeAudioLevels();
+          try {
+            await captureThumbnail(this.id, this.url);
+            result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
+          } catch (_) {
+            // Thumbnail generation is best-effort for multiview cards.
+          }
           this.lastResult = result;
           this.emit('result', result);
           resolve(result);
@@ -82,6 +90,7 @@ class TSAnalyser extends EventEmitter {
       probeTime: Date.now(),
       programs,
       orphanStreams,
+      audioLevels: null,
       dvb: {
         standard: 'ISO/IEC 13818-1 MPEG-TS + ETSI EN 300 468 DVB-SI',
         patPid: 0,
@@ -98,6 +107,44 @@ class TSAnalyser extends EventEmitter {
         })),
       },
     };
+  }
+
+  _probeAudioLevels() {
+    return new Promise((resolve) => {
+      const args = [
+        '-hide_banner',
+        '-nostats',
+        '-loglevel', 'info',
+        '-t', '1.0',
+        '-i', this.url,
+        '-vn',
+        '-af', 'volumedetect',
+        '-f', 'null',
+        '-',
+      ];
+
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 3000);
+
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const mean = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/i);
+        const max = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
+        if (!mean && !max) return resolve(null);
+        resolve({
+          meanDb: mean ? parseFloat(mean[1]) : null,
+          maxDb: max ? parseFloat(max[1]) : null,
+        });
+      });
+    });
   }
 
   _mapStream(s) {
