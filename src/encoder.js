@@ -347,9 +347,13 @@ class SRTEncoder extends EventEmitter {
     this.process.on('exit', (code, signal) => {
       this.isRunning = false;
       this.process = null;
-      if (signal === 'SIGTERM' || code === 0) {
+      // FFmpeg handles SIGTERM internally and exits with code 255 rather than
+      // propagating the signal — treat 255 as a clean stop when we requested it.
+      if (signal === 'SIGTERM' || code === 0 || (this._stopping && code === 255)) {
+        this._stopping = false;
         this.emit('stopped', { id: this.id, code, signal });
       } else {
+        this._stopping = false;
         const context = (this._stderrBuffer || []).slice(-5).join(' | ');
         this.emit('error', new Error(`FFmpeg exited with code ${code}: ${context}`));
       }
@@ -365,7 +369,10 @@ class SRTEncoder extends EventEmitter {
   }
 
   stop() {
-    if (this.process && this.isRunning) this.process.kill('SIGTERM');
+    if (this.process && this.isRunning) {
+      this._stopping = true;
+      this.process.kill('SIGTERM');
+    }
   }
 
   // ─── Stats parsing ──────────────────────────────────────────────────────────

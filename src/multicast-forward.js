@@ -109,9 +109,11 @@ class MulticastForwarder extends EventEmitter {
     this.process.on('exit', (code, signal) => {
       this.isRunning = false;
       this.process = null;
-      if (signal === 'SIGTERM' || code === 0) {
+      if (signal === 'SIGTERM' || code === 0 || (this._stopping && code === 255)) {
+        this._stopping = false;
         this.emit('stopped', { id: this.id, code, signal });
       } else {
+        this._stopping = false;
         this.emit('error', new Error(`Forwarder FFmpeg exited with code ${code}`));
       }
     });
@@ -127,6 +129,7 @@ class MulticastForwarder extends EventEmitter {
 
   stop() {
     if (this.process && this.isRunning) {
+      this._stopping = true;
       this.process.kill('SIGTERM');
     }
   }
