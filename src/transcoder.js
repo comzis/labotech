@@ -99,9 +99,11 @@ class Transcoder extends SRTEncoder {
       '-map', '0:a?',
       '-c:v', this.videoCodec,
       '-preset', this.preset,
+      '-g', this.gopSize.toString(),
+      '-keyint_min', this.gopSize.toString(),
+      '-sc_threshold', '0',
       '-b:v', this.videoBitrate,
       '-pix_fmt', this.pixFmt,
-      '-flags', '+ildct+ilme',
     ];
 
     if (this.rateMode === 'cbr') {
@@ -137,6 +139,7 @@ class Transcoder extends SRTEncoder {
     }
 
     if (p.interlaced) {
+      args.push('-flags', '+ildct+ilme');
       args.push('-top', '1');
     }
 

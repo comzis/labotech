@@ -78,6 +78,20 @@ describe('Transcoder', () => {
       expect(args).toContain('+ildct+ilme');
     });
 
+    test('does not include interlace flags for deinterlace preset', () => {
+      const tc = new Transcoder({ ...baseOpts, transcodePreset: 'deinterlace' });
+      const args = tc.buildFFmpegArgs();
+      expect(args).not.toContain('+ildct+ilme');
+    });
+
+    test('sets fixed GOP controls in transcoder args', () => {
+      const tc = new Transcoder({ ...baseOpts, transcodePreset: 'pal' });
+      const args = tc.buildFFmpegArgs();
+      expect(args).toContain('-keyint_min');
+      expect(args).toContain('-sc_threshold');
+      expect(args).toContain('0');
+    });
+
     test('contains SRT URL', () => {
       const tc = new Transcoder({ ...baseOpts, transcodePreset: 'ntsc' });
       const args = tc.buildFFmpegArgs();
