@@ -15,8 +15,10 @@ export default function useTSAnalysis() {
     try {
       const r = await probeUrl(url);
       setResult(r);
+      return r;
     } catch (err) {
       setError(err.message);
+      throw err;
     } finally {
       setLoading(false);
     }
@@ -50,6 +52,7 @@ export default function useTSAnalysis() {
       setDecoderMeta(prev => ({ ...prev, [id]: { id, url, isRunning: true } }));
     } catch (err) {
       setError(err.message);
+      throw err;
     }
   }, []);
 

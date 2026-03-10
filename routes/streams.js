@@ -7,6 +7,23 @@ const SRTEncoder = require('../src/encoder');
 module.exports = function (streams, wss, saveState = () => {}) {
   const router = express.Router();
 
+  async function stopAndWait(instance, timeoutMs = 5000) {
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        instance.removeListener('stopped', onStopped);
+        resolve();
+      };
+      const onStopped = () => done();
+      const timer = setTimeout(done, timeoutMs);
+      instance.once('stopped', onStopped);
+      try { instance.stop(); } catch (_) { done(); }
+    });
+  }
+
   function broadcast(msg) {
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
@@ -77,10 +94,10 @@ module.exports = function (streams, wss, saveState = () => {}) {
   });
 
   // DELETE /streams/:id
-  router.delete('/:id', (req, res) => {
+  router.delete('/:id', async (req, res) => {
     const encoder = streams.get(req.params.id);
     if (!encoder) return res.status(404).json({ error: 'Stream not found' });
-    encoder.stop();
+    await stopAndWait(encoder);
     streams.delete(req.params.id);
     saveState();
     res.json({ stopped: req.params.id });

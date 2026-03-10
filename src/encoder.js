@@ -237,13 +237,14 @@ class SRTEncoder extends EventEmitter {
       '-pix_fmt', this.pixFmt,
     );
 
+    const x265Params = [];
     if (this.rateMode === 'cbr') {
       // True CBR — VBV + HRD signalling (broadcast standard)
       args.push('-maxrate', this.videoBitrate, '-bufsize', bufsize);
       if (this.videoCodec === 'libx264') {
         args.push('-x264-params', 'nal-hrd=cbr:force-cfr=1:scenecut=0');
       } else if (this.videoCodec === 'libx265') {
-        args.push('-x265-params', `hrd=1:nal-hrd=cbr:no-scenecut=1:vbv-bufsize=${Math.round(vbps / 1e3)}`);
+        x265Params.push(`hrd=1:nal-hrd=cbr:no-scenecut=1:vbv-bufsize=${Math.round(vbps / 1e3)}`);
       }
       // Other codecs (e.g. libx262, mpeg2video) rely on -maxrate + -bufsize alone
     } else {
@@ -252,16 +253,19 @@ class SRTEncoder extends EventEmitter {
     }
 
     // ─── Professional Metadata & HDR Signaling (DVB TS 101 154) ────────────
-    if (this.pixFmt && this.pixFmt.includes('10le')) {
+    if (this.videoCodec === 'libx265' && this.pixFmt && this.pixFmt.includes('10le')) {
       const colorPrimaries = this.colorPrimaries || 'bt2020';
       const colorTrc = this.colorTransfer || 'smpte2084';
       const colorSpace = this.colorSpace || 'bt2020nc';
       args.push(
         '-color_primaries', colorPrimaries,
         '-color_trc', colorTrc,
-        '-colorspace', colorSpace,
-        '-x265-params', `hdr-opt=1:repeat-headers=1:colorprim=${colorPrimaries}:transfer=${colorTrc}:colormatrix=${colorSpace}`
+        '-colorspace', colorSpace
       );
+      x265Params.push(`hdr-opt=1:repeat-headers=1:colorprim=${colorPrimaries}:transfer=${colorTrc}:colormatrix=${colorSpace}`);
+    }
+    if (x265Params.length > 0) {
+      args.push('-x265-params', x265Params.join(':'));
     }
 
     // ─── Audio encoding ─────────────────────────────────────────────────────

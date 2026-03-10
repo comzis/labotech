@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Activity, Settings2, Play, Tv2, Share2 } from 'lucide-react';
+import { Zap, Activity, Settings2, Tv2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
-import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopTranscoder } from '../api';
+import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopTranscoder, probeUrl } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 
@@ -15,8 +15,19 @@ const DEFAULTS = {
   port: '9999',
   transcodePreset: 'pal',
   broadcastPresetSlot: '',
+  standardProfile: 'dvb-hd',
   videoBitrate: '',
   audioBitrate: '',
+  videoCodec: '',
+  audioCodec: '',
+  audioPairsEnabled: false,
+  audioPairTemplate: 'custom',
+  audioPairs: [
+    { sourceIndex: '0', codec: 'aac', bitrate: '192k', channels: '2', language: 'eng' },
+    { sourceIndex: '1', codec: 'aac', bitrate: '192k', channels: '2', language: 'nat' },
+  ],
+  serviceName: '',
+  serviceProvider: '',
   passphrase: '',
   outputMode: 'srt',
   localAddr: '',
@@ -27,6 +38,36 @@ const OUTPUT_MODES = [
   { value: 'rtp',  label: 'RTP',  desc: 'RTP/MPEG-TS' },
   { value: 'udp',  label: 'UDP',  desc: 'Legacy Multicast' },
 ];
+
+const STANDARD_PROFILES = [
+  { value: 'dvb-hd', label: 'DVB HD (EBU Distribution)', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '8M', audioBitrate: '192k' },
+  { value: 'dvb-contribution', label: 'DVB Contribution 4:2:2', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '30M', audioBitrate: '384k' },
+  { value: 'dvb-hevc', label: 'DVB HEVC UHD', videoCodec: 'libx265', audioCodec: 'aac', videoBitrate: '20M', audioBitrate: '384k' },
+  { value: 'ebu-loudness-safe', label: 'EBU R128 Ready', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '256k' },
+  { value: 'passthrough', label: 'Pass-through / Remux', videoCodec: 'copy', audioCodec: 'copy', videoBitrate: '', audioBitrate: '' },
+];
+
+const AUDIO_PAIR_TEMPLATES = [
+  { value: 'custom', label: 'Custom (manual)' },
+  { value: 'eng-nat', label: 'ENG / NAT (2 pairs)' },
+  { value: 'me-ad', label: 'M&E / AD (2 pairs)' },
+];
+
+function buildTemplatePairs(template) {
+  if (template === 'eng-nat') {
+    return [
+      { sourceIndex: '0', codec: 'aac', bitrate: '192k', channels: '2', language: 'eng' },
+      { sourceIndex: '1', codec: 'aac', bitrate: '192k', channels: '2', language: 'nat' },
+    ];
+  }
+  if (template === 'me-ad') {
+    return [
+      { sourceIndex: '0', codec: 'aac', bitrate: '192k', channels: '2', language: 'mis' },
+      { sourceIndex: '1', codec: 'aac', bitrate: '128k', channels: '2', language: 'qad' },
+    ];
+  }
+  return null;
+}
 
 // Framer Motion Animation Variants (Same as EncoderForm)
 // Animations moved to BentoCard.jsx
@@ -39,6 +80,7 @@ export default function TranscodePanel({ lastMessage }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
+  const [importingPairs, setImportingPairs] = useState(false);
 
   const load = async () => {
     try {
@@ -66,14 +108,122 @@ export default function TranscodePanel({ lastMessage }) {
   }, [lastMessage]);
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const updateAudioPair = (idx, key, value) => {
+    setForm((prev) => ({
+      ...prev,
+      audioPairs: prev.audioPairs.map((pair, i) => (i === idx ? { ...pair, [key]: value } : pair)),
+    }));
+  };
+  const addAudioPair = () => {
+    setForm((prev) => {
+      if (prev.audioPairs.length >= 8) return prev;
+      return {
+        ...prev,
+        audioPairs: [
+          ...prev.audioPairs,
+          { sourceIndex: String(prev.audioPairs.length), codec: 'aac', bitrate: '192k', channels: '2', language: '' },
+        ],
+      };
+    });
+  };
+  const removeAudioPair = (idx) => {
+    setForm((prev) => {
+      if (prev.audioPairs.length <= 1) return prev;
+      return { ...prev, audioPairs: prev.audioPairs.filter((_, i) => i !== idx) };
+    });
+  };
+  const applyAudioPairTemplate = (templateValue) => {
+    setForm((prev) => {
+      const pairs = buildTemplatePairs(templateValue);
+      return {
+        ...prev,
+        audioPairTemplate: templateValue,
+        audioPairs: pairs || prev.audioPairs,
+      };
+    });
+  };
+
+  const handleImportAudioPairs = async () => {
+    if (!form.input) {
+      setError('Input Source is required to import audio pairs from TS.');
+      return;
+    }
+    setImportingPairs(true);
+    setError(null);
+    try {
+      const result = await probeUrl(form.input);
+      const audioStreams = (result?.programs || [])
+        .flatMap((program) => program.streams || [])
+        .filter((stream) => stream.codecType === 'audio');
+
+      if (audioStreams.length === 0) {
+        setError('No audio tracks detected in TS probe result.');
+        return;
+      }
+
+      const pairs = audioStreams.slice(0, 8).map((stream, idx) => {
+        const bitrateK = stream.bitrate ? `${Math.max(64, Math.round(stream.bitrate / 1000))}k` : '192k';
+        return {
+          sourceIndex: String(stream.index ?? idx),
+          codec: 'aac',
+          bitrate: bitrateK,
+          channels: String(stream.channels || 2),
+          language: stream.language || '',
+        };
+      });
+
+      setForm((prev) => ({
+        ...prev,
+        audioPairsEnabled: true,
+        audioPairTemplate: 'custom',
+        audioPairs: pairs,
+      }));
+      toast.success(`Imported ${pairs.length} audio pair${pairs.length > 1 ? 's' : ''} from TS probe`);
+    } catch (err) {
+      setError(`Audio pair import failed: ${err.message}`);
+    } finally {
+      setImportingPairs(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError(null);
     try {
-      const payload = { ...form, port: parseInt(form.port) };
+      const payload = { ...form, port: parseInt(form.port, 10) };
       if (payload.broadcastPresetSlot) payload.broadcastPresetSlot = parseInt(payload.broadcastPresetSlot);
+      if (payload.standardProfile) {
+        const profile = STANDARD_PROFILES.find(p => p.value === payload.standardProfile);
+        if (profile) {
+          payload.videoCodec = payload.videoCodec || profile.videoCodec;
+          payload.audioCodec = payload.audioCodec || profile.audioCodec;
+          if (!payload.videoBitrate && profile.videoBitrate) payload.videoBitrate = profile.videoBitrate;
+          if (!payload.audioBitrate && profile.audioBitrate) payload.audioBitrate = profile.audioBitrate;
+        }
+      }
+      if (payload.videoCodec === 'copy') {
+        payload.audioCodec = payload.audioCodec || 'copy';
+        payload.videoBitrate = null;
+        payload.audioBitrate = null;
+      }
+      if (payload.audioPairsEnabled) {
+        payload.audioPairs = (payload.audioPairs || [])
+          .slice(0, 8)
+          .map((pair, idx) => ({
+            sourceIndex: parseInt(pair.sourceIndex, 10) || idx,
+            codec: pair.codec || 'aac',
+            bitrate: pair.bitrate || '192k',
+            channels: parseInt(pair.channels, 10) || 2,
+            language: pair.language || undefined,
+          }));
+      } else {
+        delete payload.audioPairs;
+      }
+      delete payload.audioPairsEnabled;
+      delete payload.audioPairTemplate;
+      if (!payload.videoCodec) delete payload.videoCodec;
+      if (!payload.audioCodec) delete payload.audioCodec;
 
       await startTranscoder(payload);
       setForm(DEFAULTS);
@@ -105,9 +255,9 @@ export default function TranscodePanel({ lastMessage }) {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Activity className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-            Transcoder Workflow
+            Professional Transcoding
           </h1>
-          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Global Frame Transformation & Normalization</p>
+          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">DVB / EBU Service Conditioning and Delivery</p>
         </div>
         <button
           onClick={() => setOpen(o => !o)}
@@ -116,7 +266,7 @@ export default function TranscodePanel({ lastMessage }) {
             : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 hover:shadow-neon-purple/40'
             }`}
         >
-          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Create Transcoder</>}
+          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Create Broadcast Profile</>}
         </button>
       </div>
 
@@ -152,8 +302,21 @@ export default function TranscodePanel({ lastMessage }) {
             </BentoCard>
 
             {/* Step 2: Format Matrix */}
-            <BentoCard icon={Tv2} title="2. Format Matrix" className="border-neon-purple/20 bg-neon-purple/5">
+            <BentoCard icon={Tv2} title="2. DVB / EBU Profile Matrix" className="border-neon-purple/20 bg-neon-purple/5">
               <div className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Broadcast Standard Profile</label>
+                  <select
+                    value={form.standardProfile}
+                    onChange={e => set('standardProfile', e.target.value)}
+                    className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-sm text-gray-200 focus:outline-none focus:border-neon-purple/50 transition-all appearance-none cursor-pointer"
+                    style={{ backgroundImage: `url('data:image/svg+xml;utf8,<svg fill="%239ca3af" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>')`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px center' }}
+                  >
+                    {STANDARD_PROFILES.map(sp => (
+                      <option key={sp.value} value={sp.value} className="bg-midnight-surface">{sp.label}</option>
+                    ))}
+                  </select>
+                </div>
                 <div>
                   <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Preset Slot</label>
                   <select
@@ -172,10 +335,119 @@ export default function TranscodePanel({ lastMessage }) {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Video Codec</label>
+                    <select
+                      value={form.videoCodec}
+                      onChange={(e) => set('videoCodec', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200"
+                    >
+                      <option value="" className="bg-midnight-surface">Auto (from profile/slot)</option>
+                      <option value="libx264" className="bg-midnight-surface">H.264 (libx264)</option>
+                      <option value="libx265" className="bg-midnight-surface">H.265/HEVC (libx265)</option>
+                      <option value="copy" className="bg-midnight-surface">Pass-through (copy)</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Audio Codec</label>
+                    <select
+                      value={form.audioCodec}
+                      onChange={(e) => set('audioCodec', e.target.value)}
+                      className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200"
+                    >
+                      <option value="" className="bg-midnight-surface">Auto (from profile/slot)</option>
+                      <option value="aac" className="bg-midnight-surface">AAC-LC</option>
+                      <option value="mp2" className="bg-midnight-surface">MPEG-1 Layer II</option>
+                      <option value="ac3" className="bg-midnight-surface">AC-3</option>
+                      <option value="eac3" className="bg-midnight-surface">E-AC-3</option>
+                      <option value="copy" className="bg-midnight-surface">Pass-through (copy)</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
                   <Field label="Video Bitrate (Mbps)" placeholder="e.g. 10" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} color="purple" />
                   <Field label="Audio Bitrate" placeholder="e.g. 256k" value={form.audioBitrate} onChange={v => set('audioBitrate', v)} color="purple" />
                 </div>
-                <p className="text-[10px] text-gray-500 italic opacity-70">Leave bitrates empty to use preset defaults.</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Service Name (DVB)" placeholder="LABOTECH HD" value={form.serviceName} onChange={v => set('serviceName', v)} color="purple" />
+                  <Field label="Service Provider (DVB)" placeholder="LABOTECH" value={form.serviceProvider} onChange={v => set('serviceProvider', v)} color="purple" />
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-300">
+                  <input
+                    type="checkbox"
+                    checked={form.audioPairsEnabled}
+                    onChange={(e) => set('audioPairsEnabled', e.target.checked)}
+                    className="accent-purple-400"
+                  />
+                  Enable audio pairs (1 to 8 tracks)
+                </label>
+                {form.audioPairsEnabled && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="flex flex-col gap-1.5">
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">EBU Template (optional)</label>
+                        <select
+                          value={form.audioPairTemplate}
+                          onChange={(e) => applyAudioPairTemplate(e.target.value)}
+                          className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200"
+                        >
+                          {AUDIO_PAIR_TEMPLATES.map((tpl) => (
+                            <option key={tpl.value} value={tpl.value} className="bg-midnight-surface">{tpl.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="flex items-end gap-2">
+                        <button
+                          type="button"
+                          onClick={handleImportAudioPairs}
+                          disabled={importingPairs || !form.input}
+                          className="px-3 py-2 text-xs rounded-lg border border-neon-cyan/40 text-neon-cyan hover:bg-neon-cyan/10 disabled:opacity-50"
+                        >
+                          {importingPairs ? 'Importing...' : 'Import from TS'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={addAudioPair}
+                          disabled={form.audioPairs.length >= 8}
+                          className="px-3 py-2 text-xs rounded-lg border border-neon-purple/40 text-neon-purple hover:bg-neon-purple/10 disabled:opacity-50"
+                        >
+                          + Add Pair
+                        </button>
+                        <div className="text-[10px] text-gray-500">Pairs: {form.audioPairs.length}/8</div>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-gray-500">
+                      Templates are operator presets. TS can expose language tags when present, but not every source provides reliable metadata.
+                    </p>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {form.audioPairs.map((pair, idx) => (
+                        <div key={`pair-${idx}`} className="p-3 rounded-xl border border-white/10 bg-black/20 space-y-2">
+                          <div className="flex items-center justify-between">
+                            <div className="text-[10px] uppercase tracking-wider text-gray-400">Audio Pair {idx + 1}</div>
+                            <button
+                              type="button"
+                              onClick={() => removeAudioPair(idx)}
+                              disabled={form.audioPairs.length <= 1}
+                              className="text-[10px] px-2 py-1 rounded border border-red-500/30 text-red-300 disabled:opacity-40"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Field label="Source Index" value={pair.sourceIndex} onChange={v => updateAudioPair(idx, 'sourceIndex', v)} type="number" color="purple" />
+                            <Field label="Channels" value={pair.channels} onChange={v => updateAudioPair(idx, 'channels', v)} type="number" color="purple" />
+                          </div>
+                          <div className="grid grid-cols-2 gap-2">
+                            <Field label="Codec" value={pair.codec} onChange={v => updateAudioPair(idx, 'codec', v)} placeholder="aac|copy|ac3|eac3|mp2" color="purple" />
+                            <Field label="Bitrate" value={pair.bitrate} onChange={v => updateAudioPair(idx, 'bitrate', v)} placeholder="192k" color="purple" />
+                          </div>
+                          <Field label="Language" value={pair.language} onChange={v => updateAudioPair(idx, 'language', v)} placeholder="eng / nat / qad" color="purple" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <p className="text-[10px] text-gray-500 italic opacity-70">Leave codec/bitrates empty to use selected standard profile or preset slot defaults.</p>
               </div>
             </BentoCard>
 
@@ -238,7 +510,7 @@ export default function TranscodePanel({ lastMessage }) {
               disabled={loading}
               className="bg-gradient-to-r from-neon-purple to-purple-600 text-white font-bold px-10 py-3 rounded-xl shadow-lg hover:shadow-neon-purple/40 transition-all disabled:opacity-50"
             >
-              {loading ? 'Initializing Matrix...' : 'INITIATE TRANSCODE'}
+              {loading ? 'Initializing Broadcast Profile...' : 'Start Broadcast Transcoder'}
             </motion.button>
           </div>
         </motion.form>
@@ -248,7 +520,7 @@ export default function TranscodePanel({ lastMessage }) {
       <section>
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-sm text-gray-400 uppercase tracking-widest font-bold opacity-80">
-            Running Pipelines ({transcoders.length})
+            Active Broadcast Pipelines ({transcoders.length})
           </h2>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
@@ -274,8 +546,13 @@ export default function TranscodePanel({ lastMessage }) {
                   </button>
                 )}
               </div>
-              <div className="text-xs font-bold text-neon-purple/80 uppercase tracking-wide relative z-10">{t.presetName}</div>
+              <div className="text-xs font-bold text-neon-purple/80 uppercase tracking-wide relative z-10">{t.presetName || 'Custom'}</div>
               <div className="text-[11px] text-gray-500 truncate relative z-10 font-mono">{t.input}</div>
+              {t.encodeProfile && (
+                <div className="text-[10px] text-gray-500 font-mono relative z-10">
+                  {t.encodeProfile.videoCodec || '-'} / {(t.audioPairs?.[0]?.codec) || 'audio-auto'} / {t.encodeProfile.rateMode || 'cbr'}
+                </div>
+              )}
               {t.isRunning && <div className="relative z-10 pt-2"><MetricsTile id={t.id} stats={t.lastStats} lastMessage={lastMessage} /></div>}
             </motion.div>
           ))}

@@ -7,6 +7,14 @@ const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
 const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
 
+function isValidIpv4(ip) {
+  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip || ''))) return false;
+  return String(ip).split('.').every((octet) => {
+    const n = Number(octet);
+    return Number.isInteger(n) && n >= 0 && n <= 255;
+  });
+}
+
 function ipToInt(ip) {
   return ip.split('.').reduce((acc, octet) => (acc << 8) | parseInt(octet), 0) >>> 0;
 }
@@ -43,6 +51,9 @@ class MulticastForwarder extends EventEmitter {
 
   validateDestination() {
     if (!this.destIp) throw new Error('destIp is required');
+    if (!isValidIpv4(this.destIp)) {
+      throw new Error(`Invalid IPv4 destination: ${this.destIp}`);
+    }
     if (!isInSubnet(this.destIp, this.subnet)) {
       throw new Error(
         `Destination ${this.destIp} is not within allowed subnet ${this.subnet}`
@@ -181,4 +192,4 @@ class MulticastForwarder extends EventEmitter {
   }
 }
 
-module.exports = { MulticastForwarder, isInSubnet };
+module.exports = { MulticastForwarder, isInSubnet, isValidIpv4 };

@@ -16,6 +16,23 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
     });
   }
 
+  async function stopAndWait(instance, timeoutMs = 5000) {
+    await new Promise((resolve) => {
+      let settled = false;
+      const done = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        instance.removeListener('stopped', onStopped);
+        resolve();
+      };
+      const onStopped = () => done();
+      const timer = setTimeout(done, timeoutMs);
+      instance.once('stopped', onStopped);
+      try { instance.stop(); } catch (_) { done(); }
+    });
+  }
+
   /**
    * POST /pipeline
    * Creates a linked ingest → transcode → forward pipeline.
@@ -55,7 +72,7 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
       for (let i = started.length - 1; i >= 0; i--) {
         const s = started[i];
         try {
-          s.instance.stop();
+          await stopAndWait(s.instance);
         } catch (_) {}
         s.map.delete(s.id);
       }

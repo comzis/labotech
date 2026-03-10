@@ -48,7 +48,7 @@ Copy and configure the environment file:
 
 ```bash
 cp .env.example .env
-# .env is pre-configured for production — do not change API_HOST or API_PORT
+# .env has production defaults (API_HOST=10.67.18.29, API_PORT=4000); adjust only if your management IP differs
 ```
 
 ---

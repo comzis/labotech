@@ -11,7 +11,7 @@ const os = require('os');
 const persistence = require('./state-persistence');
 
 const API_HOST = process.env.API_HOST || '10.67.18.29';
-const API_PORT = parseInt(process.env.API_PORT) || 4000;
+const API_PORT = parseInt(process.env.API_PORT, 10) || 4000;
 
 // Shared state maps
 const streams = new Map();       // id → SRTEncoder
@@ -116,6 +116,8 @@ function saveState() {
 async function restoreState(wss) {
   const state = persistence.load();
   if (!state) return;
+  const restoreStreams = process.env.RESTORE_STREAMS_ON_BOOT === 'true';
+  const restoreTranscoders = process.env.RESTORE_TRANSCODERS_ON_BOOT === 'true';
   const restoreForwarders = process.env.RESTORE_FORWARDERS_ON_BOOT === 'true';
 
   const SRTEncoder          = require('./encoder');
@@ -127,35 +129,43 @@ async function restoreState(wss) {
     wss.clients.forEach(c => { if (c.readyState === 1) c.send(data); });
   }
 
-  for (const cfg of (state.streams || [])) {
-    if (streams.has(cfg.id)) continue;
-    try {
-      const enc = new SRTEncoder(cfg);
-      enc.on('stats',    s   => broadcast({ type: 'stats',    id: cfg.id, ...s }));
-      enc.on('srtStats', s   => broadcast({ type: 'srtStats', id: cfg.id, ...s }));
-      enc.on('error',    err => broadcast({ type: 'error',    id: cfg.id, message: err.message }));
-      enc.on('stopped',  ()  => broadcast({ type: 'stopped',  id: cfg.id }));
-      enc.start();
-      streams.set(cfg.id, enc);
-      console.log(`[state] Restored stream: ${cfg.id}`);
-    } catch (err) {
-      console.error(`[state] Failed to restore stream ${cfg.id}:`, err.message);
+  if (restoreStreams) {
+    for (const cfg of (state.streams || [])) {
+      if (streams.has(cfg.id)) continue;
+      try {
+        const enc = new SRTEncoder(cfg);
+        enc.on('stats',    s   => broadcast({ type: 'stats',    id: cfg.id, ...s }));
+        enc.on('srtStats', s   => broadcast({ type: 'srtStats', id: cfg.id, ...s }));
+        enc.on('error',    err => broadcast({ type: 'error',    id: cfg.id, message: err.message }));
+        enc.on('stopped',  ()  => broadcast({ type: 'stopped',  id: cfg.id }));
+        enc.start();
+        streams.set(cfg.id, enc);
+        console.log(`[state] Restored stream: ${cfg.id}`);
+      } catch (err) {
+        console.error(`[state] Failed to restore stream ${cfg.id}:`, err.message);
+      }
     }
+  } else if ((state.streams || []).length > 0) {
+    console.log('[state] Stream restore skipped (set RESTORE_STREAMS_ON_BOOT=true to enable)');
   }
 
-  for (const cfg of (state.transcoders || [])) {
-    if (transcoders.has(cfg.id)) continue;
-    try {
-      const t = new Transcoder(cfg);
-      t.on('stats',   s   => broadcast({ type: 'transcode_stats',    id: cfg.id, ...s }));
-      t.on('error',   err => broadcast({ type: 'error',              id: cfg.id, message: err.message }));
-      t.on('stopped', ()  => broadcast({ type: 'transcode_stopped',  id: cfg.id }));
-      t.start();
-      transcoders.set(cfg.id, t);
-      console.log(`[state] Restored transcoder: ${cfg.id}`);
-    } catch (err) {
-      console.error(`[state] Failed to restore transcoder ${cfg.id}:`, err.message);
+  if (restoreTranscoders) {
+    for (const cfg of (state.transcoders || [])) {
+      if (transcoders.has(cfg.id)) continue;
+      try {
+        const t = new Transcoder(cfg);
+        t.on('stats',   s   => broadcast({ type: 'transcode_stats',    id: cfg.id, ...s }));
+        t.on('error',   err => broadcast({ type: 'error',              id: cfg.id, message: err.message }));
+        t.on('stopped', ()  => broadcast({ type: 'transcode_stopped',  id: cfg.id }));
+        t.start();
+        transcoders.set(cfg.id, t);
+        console.log(`[state] Restored transcoder: ${cfg.id}`);
+      } catch (err) {
+        console.error(`[state] Failed to restore transcoder ${cfg.id}:`, err.message);
+      }
     }
+  } else if ((state.transcoders || []).length > 0) {
+    console.log('[state] Transcoder restore skipped (set RESTORE_TRANSCODERS_ON_BOOT=true to enable)');
   }
 
   if (restoreForwarders) {

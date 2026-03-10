@@ -1,6 +1,6 @@
 const BASE = '';
 
-async function request(method, path, body) {
+async function requestDetailed(method, path, body) {
   const opts = {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -15,8 +15,17 @@ async function request(method, path, body) {
     const text = await res.text();
     data = text ? { error: text } : {};
   }
-  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-  return data;
+  return {
+    ok: res.ok,
+    status: res.status,
+    data,
+  };
+}
+
+async function request(method, path, body) {
+  const result = await requestDetailed(method, path, body);
+  if (!result.ok) throw new Error(result.data.error || `HTTP ${result.status}`);
+  return result.data;
 }
 
 // Streams
@@ -53,3 +62,6 @@ export const stopETR290 = (id) => request('DELETE', `/etr290/${id}`);
 
 // Health
 export const getHealth = () => request('GET', '/health');
+
+// Generic (for API Explorer / tools)
+export const apiRequestDetailed = (method, path, body) => requestDetailed(method, path, body);

@@ -1,8 +1,9 @@
-import React, { useEffect } from 'react';
-import { Monitor } from 'lucide-react';
+import React, { useEffect, useState } from 'react';
+import { Monitor, Plus } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
+import { Field } from './ui/MatrixField';
 
 function countPids(result) {
   if (!result) return 0;
@@ -14,6 +15,18 @@ function audioPercent(levels) {
   if (!levels || levels.meanDb == null) return 0;
   const v = Math.max(-60, Math.min(0, levels.meanDb));
   return Math.round(((v + 60) / 60) * 100);
+}
+
+function buildProbeUrl({ mode, host, port, latency, passphrase }) {
+  if (!host || !port) return '';
+  if (mode === 'udp') return `udp://${host}:${port}`;
+  if (mode === 'rtp') return `rtp://${host}:${port}`;
+  let url = `srt://${host}:${port}`;
+  const params = [];
+  if (latency) params.push(`latency=${latency}`);
+  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (params.length) url += `?${params.join('&')}`;
+  return url;
 }
 
 function Stat({ label, value }) {
@@ -86,7 +99,15 @@ function DecoderCard({ id, meta, result, onStop }) {
 }
 
 export default function DecoderMultiviewPanel({ lastMessage }) {
-  const { activeIds, resultsById, decoderMeta, refreshActives, stop, onWsResult } = useTSAnalysis();
+  const { activeIds, resultsById, decoderMeta, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const [openCreate, setOpenCreate] = useState(false);
+  const [mode, setMode] = useState('rtp');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('6501');
+  const [decoderId, setDecoderId] = useState('');
+  const [interval, setInterval] = useState('5000');
+  const [latency, setLatency] = useState('2000');
+  const [passphrase, setPassphrase] = useState('');
 
   useEffect(() => {
     refreshActives();
@@ -96,19 +117,80 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     if (lastMessage) onWsResult(lastMessage);
   }, [lastMessage, onWsResult]);
 
+  const probeUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
+
+  const handleCreate = async () => {
+    if (!probeUrl) return;
+    const id = decoderId || `decoder-${Date.now()}`;
+    try {
+      await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
+      setOpenCreate(false);
+      setDecoderId('');
+    } catch (_) {
+      // Hook exposes error state; keep form open for correction/retry.
+    }
+  };
+
   return (
     <div className="space-y-6 font-sans">
       <BentoCard icon={Monitor} title="Decoder Multiview">
         <div className="flex items-center justify-between">
           <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">All Active Decoders</h2>
-          <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
+          <div className="flex items-center gap-3">
+            <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
+            <button
+              onClick={() => setOpenCreate(v => !v)}
+              className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+            >
+              <Plus className="w-3 h-3" />
+              Decoder
+            </button>
+          </div>
         </div>
 
-        {activeIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from TS Analyser tab.</p>
+        {openCreate && (
+          <div className="mt-4 p-3 rounded-xl border border-white/10 bg-black/20 space-y-3">
+            <div className="grid grid-cols-3 gap-2">
+              {['rtp', 'srt', 'udp'].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setMode(v)}
+                  className={`px-3 py-2 rounded-lg text-xs border ${mode === v ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white' : 'bg-black/30 border-white/10 text-gray-400'}`}
+                >
+                  {v.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.100.25.29" />
+              <Field label="Port" value={port} onChange={setPort} type="number" placeholder="6501" />
+              <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
+              <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />
+            </div>
+            {mode === 'srt' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
+                <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="optional" />
+              </div>
+            )}
+            <div className="text-[11px] text-gray-500 font-mono truncate">{probeUrl || 'Fill host/port to build decoder URL'}</div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleCreate}
+                disabled={!probeUrl}
+                className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
+              >
+                Add Tile
+              </button>
+            </div>
+          </div>
         )}
 
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mt-4">
+        {activeIds.length === 0 && (
+          <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from Decoder tab.</p>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 xl:grid-cols-4 2xl:grid-cols-5 gap-4 mt-4">
           {activeIds.map((id) => (
             <DecoderCard
               key={id}
