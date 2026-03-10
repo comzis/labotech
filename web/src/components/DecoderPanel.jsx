@@ -93,9 +93,8 @@ export default function DecoderPanel({ lastMessage }) {
   const selectedResult = useMemo(() => {
     if (selectedId && resultsById[selectedId]) return resultsById[selectedId];
     if (result) return result;
-    if (activeIds[0] && resultsById[activeIds[0]]) return resultsById[activeIds[0]];
     return null;
-  }, [selectedId, resultsById, result, activeIds]);
+  }, [selectedId, resultsById, result]);
 
   const startDecoder = async () => {
     if (!builtUrl) return;
@@ -217,10 +216,16 @@ export default function DecoderPanel({ lastMessage }) {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
-          <Stat label="Service Count" value={String(selectedResult?.dvb?.serviceCount || selectedResult?.programs?.length || 0)} />
-          <Stat label="PID Count" value={String(selectedResult?.dvb?.pidCount || 0)} />
-          <Stat label="Bitrate" value={`${(((selectedResult?.dvb?.bitrateBps || 0) / 1e6)).toFixed(2)} Mbps`} />
+          <Stat label="Service Count" value={selectedResult ? String(selectedResult?.dvb?.serviceCount || selectedResult?.programs?.length || 0) : '-'} />
+          <Stat label="PID Count" value={selectedResult ? String(selectedResult?.dvb?.pidCount || 0) : '-'} />
+          <Stat label="Bitrate" value={selectedResult ? `${(((selectedResult?.dvb?.bitrateBps || 0) / 1e6)).toFixed(2)} Mbps` : '-'} />
         </div>
+
+        {!selectedResult && (
+          <div className="mt-3 text-xs text-gray-500">
+            Select a decoder chip above or provision a decoder in this tab to display DVB metrics.
+          </div>
+        )}
 
         {(selectedResult?.dvb?.services || []).length > 0 && (
           <div className="mt-4 overflow-x-auto">

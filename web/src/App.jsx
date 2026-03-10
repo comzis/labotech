@@ -112,7 +112,7 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
-        <div className="max-w-screen-xl mx-auto px-5 h-14 flex items-center gap-4">
+        <div className="max-w-[1800px] mx-auto px-6 h-[68px] flex items-center gap-5">
 
           {/* Logo / product ID */}
           <div className="flex items-center gap-3 shrink-0">
@@ -141,7 +141,7 @@ export default function App() {
           <div style={{ width: '1px', height: '28px', background: 'linear-gradient(180deg, transparent, #333, transparent)' }} />
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
-          <nav className="flex items-center gap-1 flex-1 overflow-x-auto">
+          <nav className="flex items-center gap-2 flex-1 overflow-x-auto">
             {TABS.map(t => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -149,7 +149,7 @@ export default function App() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className="flex flex-col items-center gap-1 px-3 py-1.5 rounded-sm transition-all duration-100 shrink-0 relative"
+                  className="flex flex-col items-center gap-1.5 px-4 py-2 rounded-sm transition-all duration-100 shrink-0 relative"
                   style={isActive ? {
                     background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
                     border: `1px solid ${t.led}44`,
@@ -162,7 +162,7 @@ export default function App() {
                 >
                   {/* LED indicator above icon */}
                   <div
-                    className="w-1.5 h-1.5 rounded-full"
+                    className="w-2 h-2 rounded-full"
                     style={isActive ? {
                       background: `radial-gradient(circle at 40% 30%, #ffffff55, ${t.led})`,
                       boxShadow: `0 0 4px ${t.led}, 0 0 8px ${t.led}88`,
@@ -172,12 +172,12 @@ export default function App() {
                     }}
                   />
                   <Icon
-                    className="w-3.5 h-3.5"
+                    className="w-4 h-4"
                     strokeWidth={isActive ? 2 : 1.5}
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   />
                   <span
-                    className="text-[8px] font-bold uppercase tracking-widest leading-none whitespace-nowrap"
+                    className="text-[10px] font-bold uppercase tracking-[0.14em] leading-none whitespace-nowrap"
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   >
                     {t.label}
@@ -257,7 +257,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-20 mb-10 max-w-screen-xl w-full mx-auto px-5 relative">
+      <main className="flex-1 mt-24 mb-10 max-w-[1800px] w-full mx-auto px-6 relative">
         {/* Subtle rack-rail side lines */}
         <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
           style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
