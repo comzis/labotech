@@ -135,6 +135,17 @@ export default function App() {
                 Broadcast Engine · HPE DL360
               </div>
             </div>
+            <div
+              className="hidden xl:flex flex-col px-2.5 py-1 rounded-sm font-mono"
+              style={{
+                background: '#0a0a0a',
+                border: '1px solid #1f1f1f',
+                boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.65)',
+              }}
+            >
+              <span className="text-[9px] uppercase tracking-widest text-amber-300">Powered by Docker</span>
+              <span className="text-[9px] text-gray-500">Prod: docker compose up -d</span>
+            </div>
           </div>
 
           {/* Divider */}
