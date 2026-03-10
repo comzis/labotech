@@ -18,7 +18,14 @@ const DEFAULTS = {
   videoBitrate: '',
   audioBitrate: '',
   passphrase: '',
+  outputMode: 'srt',
 };
+
+const OUTPUT_MODES = [
+  { value: 'srt',  label: 'SRT',  desc: 'Haivision SRT' },
+  { value: 'rtp',  label: 'RTP',  desc: 'RTP/MPEG-TS' },
+  { value: 'udp',  label: 'UDP',  desc: 'UDP Multicast' },
+];
 
 // Framer Motion Animation Variants (Same as EncoderForm)
 // Animations moved to BentoCard.jsx
@@ -174,12 +181,34 @@ export default function TranscodePanel({ lastMessage }) {
             {/* Step 3: Destination Matrix */}
             <BentoCard icon={Share2} title="3. Destination Matrix" className="border-neon-green/20 bg-neon-green/5">
               <div className="space-y-4">
+                <div>
+                  <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Output Mode</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {OUTPUT_MODES.map(m => (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => set('outputMode', m.value)}
+                        className={`px-3 py-2.5 rounded-xl border text-center transition-all ${form.outputMode === m.value
+                          ? 'bg-neon-green/20 border-neon-green/50 text-white ring-1 ring-neon-green/50'
+                          : 'bg-black/30 border-white/10 text-gray-500 hover:border-white/20 hover:bg-black/40'
+                        }`}
+                      >
+                        <div className="text-xs font-bold">{m.label}</div>
+                        <div className="text-[9px] opacity-60 mt-0.5 uppercase tracking-tighter">{m.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
                 <Field label="Stream ID *" placeholder="channel-1-transcoded" value={form.id} onChange={v => set('id', v)} required color="green" />
                 <Field label="Input Source *" placeholder="udp://239.0.0.1:5000" value={form.input} onChange={v => set('input', v)} required color="green" />
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Target Host *" placeholder="10.67.18.29" value={form.host} onChange={v => set('host', v)} required color="green" />
                   <Field label="Port *" value={form.port} onChange={v => set('port', v)} type="number" required color="green" />
                 </div>
+                {form.outputMode === 'srt' && (
+                  <Field label="Passphrase" placeholder="Optional SRT passphrase" value={form.passphrase} onChange={v => set('passphrase', v)} color="green" />
+                )}
               </div>
             </BentoCard>
           </motion.div>

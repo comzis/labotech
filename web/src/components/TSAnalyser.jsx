@@ -8,8 +8,31 @@ import { Search, Zap, Activity, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 
+const PROBE_MODES = [
+  { value: 'udp', label: 'UDP',  desc: 'Multicast/Unicast' },
+  { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
+  { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
+];
+
+function buildProbeUrl({ mode, host, port, latency, passphrase }) {
+  if (!host || !port) return '';
+  if (mode === 'udp') return `udp://${host}:${port}`;
+  if (mode === 'rtp') return `rtp://${host}:${port}`;
+  // SRT
+  let url = `srt://${host}:${port}`;
+  const params = [];
+  if (latency)    params.push(`latency=${latency}`);
+  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (params.length) url += `?${params.join('&')}`;
+  return url;
+}
+
 export default function TSAnalyser({ lastMessage }) {
-  const [url, setUrl] = useState('');
+  const [probeMode, setProbeMode] = useState('udp');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('');
+  const [latency, setLatency] = useState('2000');
+  const [passphrase, setPassphrase] = useState('');
   const [contId, setContId] = useState('');
   const [interval, setInterval] = useState(5000);
   const [subTab, setSubTab] = useState('structure');
@@ -20,9 +43,11 @@ export default function TSAnalyser({ lastMessage }) {
     if (lastMessage) onWsResult(lastMessage);
   }, [lastMessage, onWsResult]);
 
+  const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
+
   const handleProbe = (e) => {
     e.preventDefault();
-    if (url) probe(url);
+    if (builtUrl) probe(builtUrl);
   };
 
   const handleContinuous = (e) => {
@@ -30,7 +55,7 @@ export default function TSAnalyser({ lastMessage }) {
     if (activeId) {
       stop();
     } else {
-      startContinuous(contId || `analyser-${Date.now()}`, url, parseInt(interval));
+      startContinuous(contId || `analyser-${Date.now()}`, builtUrl, parseInt(interval));
     }
   };
 
@@ -72,19 +97,62 @@ export default function TSAnalyser({ lastMessage }) {
         {/* Control Bento Card */}
         <BentoCard icon={Activity} title="Probe Configuration">
           <form onSubmit={handleProbe} className="space-y-4">
-            <div className="flex gap-4 items-end">
-              <div className="flex-1">
+
+            {/* Protocol selector */}
+            <div>
+              <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Protocol</label>
+              <div className="grid grid-cols-3 gap-2">
+                {PROBE_MODES.map(m => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setProbeMode(m.value)}
+                    className={`px-3 py-2.5 rounded-xl border text-center transition-all ${probeMode === m.value
+                      ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white ring-1 ring-neon-cyan/50'
+                      : 'bg-black/30 border-white/10 text-gray-500 hover:border-white/20 hover:bg-black/40'
+                    }`}
+                  >
+                    <div className="text-xs font-bold">{m.label}</div>
+                    <div className="text-[9px] opacity-60 mt-0.5 uppercase tracking-tighter">{m.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Host + Port */}
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2">
                 <Field
-                  label="Source URL *"
-                  value={url}
-                  onChange={setUrl}
-                  placeholder="udp://239.x.x.x:port or srt://..."
+                  label={probeMode === 'udp' ? 'Multicast / Unicast IP *' : 'Host *'}
+                  value={host}
+                  onChange={setHost}
+                  placeholder={probeMode === 'udp' ? '239.100.25.29' : '10.67.18.29'}
                   required
                 />
               </div>
+              <Field label="Port *" value={port} onChange={setPort} type="number" placeholder="5000" required />
+            </div>
+
+            {/* SRT-only options */}
+            {probeMode === 'srt' && (
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
+                <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="Optional" />
+              </div>
+            )}
+
+            {/* Built URL preview */}
+            {builtUrl && (
+              <div className="flex items-center gap-2 text-[11px] font-mono text-gray-500 bg-black/30 px-3 py-2 rounded-lg border border-white/5">
+                <span className="text-gray-600 shrink-0">URL:</span>
+                <span className="text-neon-cyan/70 truncate">{builtUrl}</span>
+              </div>
+            )}
+
+            <div className="flex gap-4 items-center">
               <button
                 type="submit"
-                disabled={loading || !url}
+                disabled={loading || !builtUrl}
                 className="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/30 px-6 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50"
               >
                 {loading ? 'Probing…' : 'One-shot'}
@@ -92,7 +160,7 @@ export default function TSAnalyser({ lastMessage }) {
               <button
                 type="button"
                 onClick={handleContinuous}
-                disabled={!url && !activeId}
+                disabled={!builtUrl && !activeId}
                 className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${activeId
                   ? 'bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30'
                   : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20'
