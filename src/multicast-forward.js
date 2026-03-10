@@ -34,7 +34,10 @@ class MulticastForwarder extends EventEmitter {
   }
 
   buildMulticastUrl() {
-    return `udp://${this.destIp}:${this.destPort}?pkt_size=1316&ttl=${this.ttl}&localaddr=0.0.0.0`;
+    // Use 'interface' (NIC name) not 'localaddr' (IP) — eno2 has no IP assigned.
+    // localaddr=0.0.0.0 lets the OS pick the default route (eno1/management),
+    // so multicast packets never reach eno2 and the VB330 probe gets no lock.
+    return `udp://${this.destIp}:${this.destPort}?pkt_size=1316&ttl=${this.ttl}&interface=${this.nic}`;
   }
 
   validateDestination() {

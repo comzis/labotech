@@ -277,6 +277,14 @@ class SRTEncoder extends EventEmitter {
       // DVB/ETR 290: PAT+PMT every 100 ms, ensures P1 tests pass
       '-pat_period', '0.1',
     ];
+
+    // Enforce CBR mux rate so the TS carries constant bitrate stuffing packets.
+    // Without -muxrate the mpegts muxer runs VBR regardless of video codec settings.
+    const muxrate = this._calcMuxrate();
+    if (muxrate && this.rateMode === 'cbr') {
+      args.push('-muxrate', String(muxrate));
+    }
+
     if (this.serviceName)     args.push('-metadata', `service_name=${this.serviceName}`);
     if (this.serviceProvider) args.push('-metadata', `service_provider=${this.serviceProvider}`);
     return args;
