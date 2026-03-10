@@ -9,10 +9,19 @@ import { Field } from './ui/MatrixField';
 
 const DEFAULTS = {
   id: '',
-  sourceUrl: '',
+  sourceMode: 'rtp',
+  sourceHost: '',
+  sourcePort: '5000',
   destIp: '',
   destPort: '1234',
 };
+
+function buildSourceUrl({ sourceMode, sourceHost, sourcePort }) {
+  if (!sourceHost || !sourcePort) return '';
+  if (sourceMode === 'rtp') return `rtp://${sourceHost}:${sourcePort}`;
+  if (sourceMode === 'srt') return `srt://${sourceHost}:${sourcePort}?mode=listener&latency=2000`;
+  return `udp://${sourceHost}:${sourcePort}`;
+}
 
 export default function MulticastPanel({ lastMessage }) {
   const [config, setConfig] = useState(null);
@@ -41,7 +50,14 @@ export default function MulticastPanel({ lastMessage }) {
     setLoading(true);
     setError(null);
     try {
-      await startForwarder({ ...form, destPort: parseInt(form.destPort) });
+      const sourceUrl = buildSourceUrl(form);
+      if (!sourceUrl) throw new Error('Source host and source port are required');
+      await startForwarder({
+        id: form.id,
+        sourceUrl,
+        destIp: form.destIp,
+        destPort: parseInt(form.destPort),
+      });
       setForm(DEFAULTS);
       setOpen(false);
       load();
@@ -112,7 +128,27 @@ export default function MulticastPanel({ lastMessage }) {
               <BentoCard icon={Globe} title="Source Configuration" accentColor="green">
                 <div className="space-y-4">
                   <Field label="Forwarder ID *" value={form.id} onChange={v => set('id', v)} required color="green" />
-                  <Field label="Source URL *" value={form.sourceUrl} onChange={v => set('sourceUrl', v)} required color="green" placeholder="udp://239.x.x.x:port" />
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Source Protocol</label>
+                      <select
+                        value={form.sourceMode}
+                        onChange={e => set('sourceMode', e.target.value)}
+                        className="mt-1 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
+                      >
+                        <option value="rtp">RTP</option>
+                        <option value="srt">SRT</option>
+                        <option value="udp">UDP (Legacy)</option>
+                      </select>
+                    </div>
+                    <div className="col-span-2">
+                      <Field label="Source Host / IP *" value={form.sourceHost} onChange={v => set('sourceHost', v)} required color="green" placeholder="239.100.25.10" />
+                    </div>
+                  </div>
+                  <Field label="Source Port *" value={form.sourcePort} onChange={v => set('sourcePort', v)} type="number" required color="green" placeholder="5000" />
+                  <div className="text-[10px] text-gray-500 font-mono bg-black/20 border border-white/5 rounded px-2 py-1.5">
+                    {buildSourceUrl(form) || 'Source URL preview'}
+                  </div>
                 </div>
               </BentoCard>
 

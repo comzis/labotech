@@ -65,6 +65,11 @@ describe('MulticastForwarder', () => {
     expect(() => f.validateDestination()).not.toThrow();
   });
 
+  test('validateNic rejects unsafe interface names', () => {
+    const f = new MulticastForwarder({ ...baseOpts, nic: 'eno2;rm -rf /' });
+    expect(() => f.validateNic()).toThrow(/Invalid NIC name/);
+  });
+
   test('toJSON returns correct fields', () => {
     const f = new MulticastForwarder(baseOpts);
     const j = f.toJSON();

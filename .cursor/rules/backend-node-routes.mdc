@@ -1,0 +1,15 @@
+---
+description: Backend route and process safety for Node code
+globs: "{src,routes}/**/*.js"
+alwaysApply: false
+---
+
+# Backend Safety and Consistency
+
+- Validate request payloads early and return actionable 4xx errors for invalid input.
+- Never pass user-provided values into shell command strings.
+- Prefer `spawn`/`execFile` with argument arrays for OS commands.
+- For start/stop orchestration, ensure cleanup on downstream failure.
+- Keep WebSocket message types explicit and stable.
+- Avoid duplicate logic when helper functions already exist.
+- Add or update tests for route behavior when changing request validation or orchestration logic.

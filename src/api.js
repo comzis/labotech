@@ -33,7 +33,7 @@ function createApp(wss) {
   app.use('/multicast', require('../routes/multicast')(forwarders, wss));
   app.use('/analyse', require('../routes/analyse')(analysers, wss));
   app.use('/etr290', require('../routes/etr290')(etr290monitors, wss));
-  app.use('/pipeline', require('../routes/pipelines')(streams, transcoders, forwarders, wss));
+  app.use('/pipeline', require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState));
   app.use('/scte35', require('../routes/scte35')());
 
   app.get('/health', (req, res) => {
@@ -146,7 +146,7 @@ function start() {
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState));
   app.use('/analyse',   require('../routes/analyse')(analysers, wss));
   app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss));
-  app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss));
+  app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState));
   app.use('/scte35',    require('../routes/scte35')());
 
   app.get('/health', (req, res) => {

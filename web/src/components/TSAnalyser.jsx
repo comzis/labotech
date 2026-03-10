@@ -9,9 +9,17 @@ import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 
 const PROBE_MODES = [
-  { value: 'udp', label: 'UDP',  desc: 'Multicast/Unicast' },
   { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
+  { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
+];
+const REFRESH_OPTIONS_MS = [
+  { value: 1000, label: '1 second' },
+  { value: 2000, label: '2 seconds' },
+  { value: 5000, label: '5 seconds' },
+  { value: 10000, label: '10 seconds' },
+  { value: 15000, label: '15 seconds' },
+  { value: 30000, label: '30 seconds' },
 ];
 
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
@@ -28,16 +36,20 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
 }
 
 export default function TSAnalyser({ lastMessage }) {
-  const [probeMode, setProbeMode] = useState('udp');
+  const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
-  const [contId, setContId] = useState('');
+  const [decoderId, setDecoderId] = useState('');
   const [interval, setInterval] = useState(5000);
   const [subTab, setSubTab] = useState('structure');
 
-  const { result, loading, error, activeId, probe, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const { result, loading, error, activeIds, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+
+  useEffect(() => {
+    refreshActives();
+  }, [refreshActives]);
 
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
@@ -50,13 +62,12 @@ export default function TSAnalyser({ lastMessage }) {
     if (builtUrl) probe(builtUrl);
   };
 
-  const handleContinuous = (e) => {
+  const handleStartDecoder = (e) => {
     e.preventDefault();
-    if (activeId) {
-      stop();
-    } else {
-      startContinuous(contId || `analyser-${Date.now()}`, builtUrl, parseInt(interval));
-    }
+    if (!builtUrl) return;
+    const id = decoderId || `decoder-${Date.now()}`;
+    startContinuous(id, builtUrl, parseInt(interval));
+    setDecoderId('');
   };
 
   return (
@@ -123,10 +134,10 @@ export default function TSAnalyser({ lastMessage }) {
             <div className="grid grid-cols-3 gap-4">
               <div className="col-span-2">
                 <Field
-                  label={probeMode === 'udp' ? 'Multicast / Unicast IP *' : 'Host *'}
+                  label={probeMode === 'udp' || probeMode === 'rtp' ? 'Multicast / Unicast IP *' : 'Host *'}
                   value={host}
                   onChange={setHost}
-                  placeholder={probeMode === 'udp' ? '239.100.25.29' : '10.67.18.29'}
+                  placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.29' : '10.67.18.29'}
                   required
                 />
               </div>
@@ -159,21 +170,55 @@ export default function TSAnalyser({ lastMessage }) {
               </button>
               <button
                 type="button"
-                onClick={handleContinuous}
-                disabled={!builtUrl && !activeId}
-                className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${activeId
-                  ? 'bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30'
-                  : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20'
-                  } disabled:opacity-50`}
+                onClick={handleStartDecoder}
+                disabled={!builtUrl}
+                className="px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 disabled:opacity-50"
               >
-                {activeId ? 'Stop Continuous' : 'Start Continuous'}
+                Start Decoder
               </button>
             </div>
 
-            {activeId && (
-              <div className="flex items-center gap-2 text-xs text-neon-cyan font-mono animate-pulse">
-                <StatusDot status="live" pulse />
-                Active Analysis: {activeId}
+            <div className="grid grid-cols-2 gap-4">
+              <Field
+                label="Decoder ID (optional)"
+                value={decoderId}
+                onChange={setDecoderId}
+                placeholder="decoder-a"
+              />
+              <div>
+                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">
+                  Thumbnail Refresh
+                </label>
+                <select
+                  value={String(interval)}
+                  onChange={(e) => setInterval(parseInt(e.target.value, 10))}
+                  className="mt-1 w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-neon-cyan/50"
+                >
+                  {REFRESH_OPTIONS_MS.map(opt => (
+                    <option key={opt.value} value={opt.value} className="bg-midnight-surface">
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {activeIds.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs text-neon-cyan font-mono">Active Decoders ({activeIds.length})</div>
+                <div className="flex flex-wrap gap-2">
+                  {activeIds.map(id => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => stop(id)}
+                      className="flex items-center gap-2 text-xs bg-red-900/30 hover:bg-red-800/50 text-red-300 border border-red-500/20 px-2 py-1 rounded"
+                    >
+                      <StatusDot status="live" pulse />
+                      Stop {id}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
             {error && <p className="text-red-400 text-sm font-medium">{error}</p>}

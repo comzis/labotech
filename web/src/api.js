@@ -7,7 +7,14 @@ async function request(method, path, body) {
   };
   if (body) opts.body = JSON.stringify(body);
   const res = await fetch(`${BASE}${path}`, opts);
-  const data = await res.json();
+  const contentType = res.headers.get('content-type') || '';
+  let data = null;
+  if (contentType.includes('application/json')) {
+    data = await res.json();
+  } else {
+    const text = await res.text();
+    data = text ? { error: text } : {};
+  }
   if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
   return data;
 }
@@ -33,6 +40,7 @@ export const stopForwarder = (id) => request('DELETE', `/multicast/forward/${id}
 
 // Analyse
 export const probeUrl = (url) => request('GET', `/analyse?url=${encodeURIComponent(url)}`);
+export const getAnalysers = () => request('GET', '/analyse');
 export const startAnalyser = (body) => request('POST', '/analyse/start', body);
 export const getAnalyser = (id) => request('GET', `/analyse/${id}`);
 export const stopAnalyser = (id) => request('DELETE', `/analyse/${id}`);

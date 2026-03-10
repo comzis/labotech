@@ -17,7 +17,10 @@ module.exports = function(analysers, wss) {
   // GET /analyse?url=...  (one-shot probe)
   router.get('/', async (req, res) => {
     const { url } = req.query;
-    if (!url) return res.status(400).json({ error: 'url query parameter required' });
+    // If no url is provided, return active analysers list
+    if (!url) {
+      return res.json([...analysers.values()].map(a => a.toJSON()));
+    }
 
     const analyser = new TSAnalyser({ url });
     try {

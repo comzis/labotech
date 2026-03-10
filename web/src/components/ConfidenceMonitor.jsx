@@ -7,6 +7,7 @@ import { ShieldCheck, Monitor } from 'lucide-react';
 
 const THUMB_BASE = '/logs/thumbnails';
 const REFRESH_MS = parseInt(import.meta.env?.VITE_THUMB_INTERVAL_MS) || 5000;
+const formatPidHex = (pid) => (pid == null ? 'N/A' : `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
 
 export default function ConfidenceMonitor({ lastMessage }) {
   const [streams, setStreams] = useState([]);
@@ -161,7 +162,7 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
           {/* SID + Video PID */}
           {dvb && (
             <div className="text-[9px] text-gray-500 font-mono">
-              SID {dvb.serviceId} • VPID 0x{dvb.videoPid?.toString(16).toUpperCase().padStart(4, '0')}
+              SID {dvb.serviceId} • VPID {formatPidHex(dvb.videoPid)}
             </div>
           )}
         </div>

@@ -3,7 +3,7 @@
 const path = require('path');
 const SRTEncoder = require('./encoder');
 const BROADCAST_PRESETS = require('../config/presets.json');
-const { THUMBNAIL_DIR } = require('./monitoring');
+const { THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 
 // PAL/NTSC/HFR interlacing presets
 const INTERLACE_PRESETS = {
@@ -83,7 +83,7 @@ class Transcoder extends SRTEncoder {
     const bufsize = vbps ? `${Math.round(vbps / 1e6)}M` : this.videoBitrate;
 
     // Thumbnail interval
-    const thumbPath = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
+    const thumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
     const thumbInterval = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 
     const args = [

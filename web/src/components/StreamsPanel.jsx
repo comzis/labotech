@@ -13,6 +13,7 @@ const MODE_STYLE = {
   udp: 'bg-orange-900/60 text-orange-300 border-orange-700/40',
   rtp: 'bg-violet-900/60 text-violet-300 border-violet-700/40',
 };
+const formatPidHex = (pid) => (pid == null ? 'N/A' : `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
 
 export default function StreamsPanel({ lastMessage }) {
   const { streams, transcoders, loading, error, refresh } = useStreams();
@@ -150,7 +151,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <span>→ {s.host}:{s.port}</span>
                   {dvb && (
                     <span className="text-gray-700">
-                      SID {dvb.serviceId} · V:{`0x${dvb.videoPid?.toString(16).toUpperCase().padStart(4, '0')}`}
+                      SID {dvb.serviceId} · V:{formatPidHex(dvb.videoPid)}
                     </span>
                   )}
                 </div>
@@ -160,7 +161,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <div className="flex flex-wrap gap-1">
                     {s.audioPairs.map((p, i) => (
                       <span key={i} className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
-                        A{i} {p.codec} {`0x${p.pid?.toString(16).toUpperCase().padStart(4, '0')}`}
+                        A{i} {p.codec} {formatPidHex(p.pid)}
                         {p.language ? ` [${p.language}]` : ''}
                       </span>
                     ))}

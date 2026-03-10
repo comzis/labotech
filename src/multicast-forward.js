@@ -1,10 +1,11 @@
 'use strict';
 
 const { EventEmitter } = require('events');
-const { spawn, exec } = require('child_process');
+const { spawn } = require('child_process');
 
 const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
+const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
 
 function ipToInt(ip) {
   return ip.split('.').reduce((acc, octet) => (acc << 8) | parseInt(octet), 0) >>> 0;
@@ -49,25 +50,38 @@ class MulticastForwarder extends EventEmitter {
     }
   }
 
-  checkMulticastRoute() {
+  validateNic() {
+    if (!this.nic || !SAFE_NIC_RE.test(String(this.nic))) {
+      throw new Error('Invalid NIC name');
+    }
+  }
+
+  _runIp(args) {
     return new Promise((resolve, reject) => {
-      exec(`ip route show ${this.subnet} dev ${this.nic}`, (err, stdout) => {
-        if (err) return resolve(false);
-        resolve(stdout.trim().length > 0);
+      const proc = spawn('ip', args);
+      let stdout = '';
+      let stderr = '';
+
+      proc.stdout.on('data', d => { stdout += d.toString(); });
+      proc.stderr.on('data', d => { stderr += d.toString(); });
+      proc.on('error', reject);
+      proc.on('exit', (code) => {
+        if (code === 0) resolve({ stdout, stderr });
+        else reject(new Error(stderr.trim() || `ip ${args.join(' ')} failed (${code})`));
       });
     });
   }
 
+  checkMulticastRoute() {
+    return this
+      ._runIp(['route', 'show', this.subnet, 'dev', this.nic])
+      .then(({ stdout }) => stdout.trim().length > 0)
+      .catch(() => false);
+  }
+
   ensureMulticastRoute() {
-    return new Promise((resolve, reject) => {
-      exec(
-        `ip route add ${this.subnet} dev ${this.nic} 2>/dev/null || true`,
-        (err) => {
-          if (err) return reject(err);
-          resolve();
-        }
-      );
-    });
+    // route replace is idempotent and avoids shell fallback patterns
+    return this._runIp(['route', 'replace', this.subnet, 'dev', this.nic]).then(() => {});
   }
 
   async start() {
@@ -75,6 +89,7 @@ class MulticastForwarder extends EventEmitter {
       throw new Error(`Forwarder ${this.id} is already running`);
     }
 
+    this.validateNic();
     this.validateDestination();
     await this.ensureMulticastRoute();
 
