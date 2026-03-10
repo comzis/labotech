@@ -185,7 +185,9 @@ class SRTEncoder extends EventEmitter {
     // Map video for main output via filter_complex, plus audio
     args.push('-map', '[vout]');
     if (this.audioPairs) {
-      this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}`));
+      // Trailing '?' makes FFmpeg skip the map silently if the source index
+      // doesn't exist, rather than aborting with exit code 234.
+      this.audioPairs.forEach(p => args.push('-map', `0:a:${p.sourceIndex}?`));
     } else {
       args.push('-map', '0:a?'); // '?' = non-fatal if no audio stream present
     }

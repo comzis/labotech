@@ -162,8 +162,8 @@ describe('SRTEncoder', () => {
       // Explicit stream mapping via filter_complex + audio pairs
       expect(args).toContain('-map');
       expect(args).toContain('[vout]');
-      expect(args).toContain('0:a:0');
-      expect(args).toContain('0:a:1');
+      expect(args).toContain('0:a:0?');
+      expect(args).toContain('0:a:1?');
       // Per-pair codec
       expect(args).toContain('-c:a:0');
       expect(args).toContain('aac');
