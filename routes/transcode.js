@@ -44,7 +44,7 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
       transcodePreset, broadcastPresetSlot,
       videoBitrate, audioBitrate,
       videoCodec, audioCodec, preset, passphrase, streamId,
-      outputMode,
+      outputMode, localAddr, ttl,
     } = req.body;
 
     if (!id || !input || !host || !port) {
@@ -66,7 +66,7 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
         transcodePreset, broadcastPresetSlot,
         videoBitrate, audioBitrate,
         videoCodec, audioCodec, preset, passphrase, streamId,
-        outputMode,
+        outputMode, localAddr, ttl,
       });
     } catch (err) {
       return res.status(400).json({ error: err.message });
