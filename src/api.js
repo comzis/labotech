@@ -116,6 +116,7 @@ function saveState() {
 async function restoreState(wss) {
   const state = persistence.load();
   if (!state) return;
+  const restoreForwarders = process.env.RESTORE_FORWARDERS_ON_BOOT === 'true';
 
   const SRTEncoder          = require('./encoder');
   const Transcoder          = require('./transcoder');
@@ -157,19 +158,23 @@ async function restoreState(wss) {
     }
   }
 
-  for (const cfg of (state.forwarders || [])) {
-    if (forwarders.has(cfg.id)) continue;
-    try {
-      const fwd = new MulticastForwarder(cfg);
-      fwd.on('stats',   s   => broadcast({ type: 'multicast_stats',    id: cfg.id, ...s }));
-      fwd.on('error',   err => broadcast({ type: 'error',              id: cfg.id, message: err.message }));
-      fwd.on('stopped', ()  => broadcast({ type: 'multicast_stopped',  id: cfg.id }));
-      await fwd.start();
-      forwarders.set(cfg.id, fwd);
-      console.log(`[state] Restored forwarder: ${cfg.id}`);
-    } catch (err) {
-      console.error(`[state] Failed to restore forwarder ${cfg.id}:`, err.message);
+  if (restoreForwarders) {
+    for (const cfg of (state.forwarders || [])) {
+      if (forwarders.has(cfg.id)) continue;
+      try {
+        const fwd = new MulticastForwarder(cfg);
+        fwd.on('stats',   s   => broadcast({ type: 'multicast_stats',    id: cfg.id, ...s }));
+        fwd.on('error',   err => broadcast({ type: 'error',              id: cfg.id, message: err.message }));
+        fwd.on('stopped', ()  => broadcast({ type: 'multicast_stopped',  id: cfg.id }));
+        await fwd.start();
+        forwarders.set(cfg.id, fwd);
+        console.log(`[state] Restored forwarder: ${cfg.id}`);
+      } catch (err) {
+        console.error(`[state] Failed to restore forwarder ${cfg.id}:`, err.message);
+      }
     }
+  } else if ((state.forwarders || []).length > 0) {
+    console.log('[state] Forwarder restore skipped (set RESTORE_FORWARDERS_ON_BOOT=true to enable)');
   }
 }
 

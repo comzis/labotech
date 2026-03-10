@@ -105,7 +105,7 @@ export default function TranscodePanel({ lastMessage }) {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Activity className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-            Transcode Engine
+            Transcoder Workflow
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Global Frame Transformation & Normalization</p>
         </div>
@@ -116,7 +116,7 @@ export default function TranscodePanel({ lastMessage }) {
             : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 hover:shadow-neon-purple/40'
             }`}
         >
-          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Deploy Transcoder</>}
+          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Create Transcoder</>}
         </button>
       </div>
 

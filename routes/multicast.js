@@ -7,6 +7,7 @@ const { MulticastForwarder } = require('../src/multicast-forward');
 const DEFAULT_NIC    = process.env.MULTICAST_NIC             || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET  || '239.100.25.0/26';
 const DEFAULT_IP     = process.env.FORWARD_MULTICAST_IP      || '239.100.25.29';
+const MAX_FORWARDERS = parseInt(process.env.MAX_ACTIVE_FORWARDERS || '4');
 
 module.exports = function(forwarders, wss, saveState = () => {}) {
   const router = express.Router();
@@ -42,6 +43,18 @@ module.exports = function(forwarders, wss, saveState = () => {}) {
     }
     if (forwarders.has(id)) {
       return res.status(409).json({ error: `Forwarder ${id} already exists` });
+    }
+    if (forwarders.size >= MAX_FORWARDERS) {
+      return res.status(429).json({ error: `Forwarder limit reached (${MAX_FORWARDERS}). Preventing eno2 flooding.` });
+    }
+
+    const targetPort = parseInt(destPort || 1234);
+    const targetNic = nic || DEFAULT_NIC;
+    const duplicate = [...forwarders.values()].some(f =>
+      f.destIp === destIp && parseInt(f.destPort) === targetPort && f.nic === targetNic
+    );
+    if (duplicate) {
+      return res.status(409).json({ error: `Forwarding to ${destIp}:${targetPort} on ${targetNic} already exists` });
     }
 
     try {

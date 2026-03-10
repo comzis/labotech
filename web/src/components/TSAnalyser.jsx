@@ -4,7 +4,7 @@ import PidBadge from './PidBadge';
 import StatusDot from './StatusDot';
 import ETR290Panel from './ETR290Panel';
 import { motion } from 'framer-motion';
-import { Search, Activity, ShieldAlert, Monitor } from 'lucide-react';
+import { Search, Activity, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 
@@ -48,13 +48,6 @@ function countPids(result) {
   return programCount + ((result.orphanStreams || []).length);
 }
 
-function audioPercent(levels) {
-  if (!levels || levels.meanDb == null) return 0;
-  // Map -60..0 dB to 0..100%
-  const v = Math.max(-60, Math.min(0, levels.meanDb));
-  return Math.round(((v + 60) / 60) * 100);
-}
-
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -65,7 +58,7 @@ export default function TSAnalyser({ lastMessage }) {
   const [interval, setInterval] = useState(5000);
   const [subTab, setSubTab] = useState('structure');
 
-  const { result, loading, error, activeIds, resultsById, decoderMeta, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const { result, loading, error, activeIds, probe, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
 
   useEffect(() => {
     refreshActives();
@@ -113,15 +106,6 @@ export default function TSAnalyser({ lastMessage }) {
           Structure
         </button>
         <button
-          onClick={() => setSubTab('multiview')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-            subTab === 'multiview' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
-          }`}
-        >
-          <Monitor className="w-4 h-4" strokeWidth={1.5} />
-          Multiview
-        </button>
-        <button
           onClick={() => setSubTab('etr290')}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
             subTab === 'etr290' ? 'bg-white/10 text-white' : 'text-gray-400 hover:text-white hover:bg-white/5'
@@ -132,8 +116,8 @@ export default function TSAnalyser({ lastMessage }) {
         </button>
       </div>
 
-      {/* Structure + Multiview sub-tab */}
-      <div style={{ display: subTab === 'structure' || subTab === 'multiview' ? 'block' : 'none' }}>
+      {/* Structure sub-tab */}
+      <div style={{ display: subTab === 'structure' ? 'block' : 'none' }}>
         {/* Control Bento Card */}
         <BentoCard icon={Activity} title="Probe Configuration">
           <form onSubmit={handleProbe} className="space-y-4">
@@ -323,29 +307,6 @@ export default function TSAnalyser({ lastMessage }) {
           </motion.div>
         )}
 
-        {/* Multiview Matrix for all decoders */}
-        {subTab === 'multiview' && (
-          <div className="space-y-4 mt-6">
-            <div className="flex items-center justify-between">
-              <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">Decoder Multiview</h2>
-              <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
-            </div>
-            {activeIds.length === 0 && (
-              <p className="text-gray-500 text-sm">No active decoders. Start decoders from Probe Configuration.</p>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {activeIds.map((id) => (
-                <DecoderCard
-                  key={id}
-                  id={id}
-                  meta={decoderMeta[id]}
-                  result={resultsById[id]}
-                  onStop={() => stop(id)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
       </div>
 
       {/* ETR 290 sub-tab — keep mounted to preserve state */}
@@ -406,76 +367,6 @@ function Stat({ label, value }) {
     <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
       <div className="text-gray-200 font-mono mt-1">{value}</div>
-    </div>
-  );
-}
-
-function DecoderCard({ id, meta, result, onStop }) {
-  const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
-  const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
-  const levelPct = audioPercent(result?.audioLevels);
-
-  return (
-    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <StatusDot status="live" pulse />
-          <span className="font-mono text-sm text-gray-200">{id}</span>
-        </div>
-        <button
-          onClick={onStop}
-          className="text-[10px] font-bold uppercase bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded border border-red-500/20"
-        >
-          Stop
-        </button>
-      </div>
-      <div className="relative aspect-video bg-gray-950 rounded-xl overflow-hidden border border-white/5">
-        {result?.thumbnailUrl ? (
-          <img
-            src={result.thumbnailUrl}
-            alt={`${id} thumbnail`}
-            className="w-full h-full object-contain"
-          />
-        ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
-            No thumbnail yet
-          </div>
-        )}
-      </div>
-      <div className="text-[11px] text-gray-500 font-mono truncate">{meta?.url || result?.url || '-'}</div>
-      <div className="text-xs text-gray-300">
-        <span className="text-gray-500">Service:</span> {primaryService}
-        {serviceProvider ? <span className="text-gray-500"> · {serviceProvider}</span> : null}
-      </div>
-      <div>
-        <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
-          <span>Audio Level</span>
-          <span className="font-mono">
-            {result?.audioLevels?.meanDb != null ? `${result.audioLevels.meanDb.toFixed(1)} dB` : 'n/a'}
-          </span>
-        </div>
-        <div className="h-2 rounded bg-black/30 border border-white/10 overflow-hidden">
-          <div
-            className={`h-full ${levelPct > 75 ? 'bg-red-500' : levelPct > 45 ? 'bg-amber-400' : 'bg-green-500'}`}
-            style={{ width: `${levelPct}%` }}
-          />
-        </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <Stat label="Programs" value={String(result?.programs?.length || 0)} />
-        <Stat label="PIDs" value={String(countPids(result))} />
-        <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
-      </div>
-      {(result?.dvb?.services?.length || 0) > 0 && (
-        <div className="text-[11px] text-gray-400">
-          {result.dvb.services.slice(0, 2).map((s, idx) => (
-            <div key={`${id}-${idx}`} className="truncate">
-              SID {s.serviceId} - {s.serviceName || 'Unnamed'} ({s.serviceProvider || 'n/a'})
-            </div>
-          ))}
-          {result.dvb.services.length > 2 && <div className="text-gray-600">+{result.dvb.services.length - 2} more services</div>}
-        </div>
-      )}
     </div>
   );
 }

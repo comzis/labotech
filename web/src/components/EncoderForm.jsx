@@ -93,7 +93,7 @@ export default function EncoderForm({ onStarted }) {
           <div className="w-10 h-10 rounded-full bg-neon-cyan/20 flex items-center justify-center group-hover:bg-neon-cyan/30 transition-colors">
             <Zap className="w-5 h-5 text-neon-cyan" strokeWidth={1.5} />
           </div>
-          <span className="text-gray-200 font-semibold tracking-wide text-lg">Deploy New Broadcast Channel</span>
+          <span className="text-gray-200 font-semibold tracking-wide text-lg">Create Encoder Instance</span>
         </motion.button>
       )}
 
@@ -109,10 +109,10 @@ export default function EncoderForm({ onStarted }) {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <Settings2 className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-              Engine Configuration
+              Encoder Configuration
             </h2>
             <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors text-sm font-medium">
-              ✕ Cancel Deployment
+              ✕ Cancel
             </button>
           </div>
 
@@ -284,7 +284,7 @@ export default function EncoderForm({ onStarted }) {
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  INITIATE ENGINE
+                  START ENCODER
                 </>
               )}
             </motion.button>

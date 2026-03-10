@@ -41,6 +41,7 @@ export default function StreamsPanel({ lastMessage }) {
     ...transcoders.map(t => ({ ...t, _type: 'transcoder' })),
   ];
 
+  const running = all.filter(s => s.isRunning);
   const stopped = all.filter(s => !s.isRunning);
 
   const clearStopped = async () => {
@@ -54,7 +55,7 @@ export default function StreamsPanel({ lastMessage }) {
       <section>
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-sm text-gray-400 uppercase tracking-widest">
-            Active Streams ({all.length})
+            Runtime Processes (Running {running.length} / Total {all.length})
           </h2>
           {stopped.length > 0 && (
             <button
@@ -107,14 +108,14 @@ export default function StreamsPanel({ lastMessage }) {
                         onClick={() => handleStop(s.id, s._type === 'transcoder')}
                         className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-2 py-1 rounded transition-colors"
                       >
-                        Stop
+                        Stop Process
                       </button>
                     ) : (
                       <button
                         onClick={() => handleStop(s.id, s._type === 'transcoder')}
                         className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded transition-colors"
                       >
-                        Remove
+                        Delete
                       </button>
                     )}
                   </div>

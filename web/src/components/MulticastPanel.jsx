@@ -80,7 +80,7 @@ export default function MulticastPanel({ lastMessage }) {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Network className="w-6 h-6 text-neon-green" strokeWidth={1.5} />
-            Multicast Matrix
+            Forwarder Workflow
           </h1>
           <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Network Distribution & Group Forwarding</p>
         </div>
