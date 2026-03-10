@@ -37,7 +37,7 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
     const {
       id, input, srtHost, srtPort, transcodePreset,
       multicastDestIp, multicastPort, videoBitrate,
-      audioBitrate, passphrase,
+      audioBitrate, passphrase, enableForward,
     } = req.body;
 
     if (!id || !input || !srtHost || !srtPort) {
@@ -104,8 +104,8 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
       }
     }
 
-    // Stage 3: Multicast forward (optional)
-    if (multicastDestIp) {
+    // Stage 3: Multicast forward (explicit opt-in only)
+    if (multicastDestIp && enableForward === true) {
       const fwdId = `${id}-fwd`;
       if (!forwarders.has(fwdId)) {
         const sourcePort = transcodePreset ? srtPortNum + 1 : srtPortNum;
@@ -124,6 +124,8 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
           return rollback(err);
         }
       }
+    } else if (multicastDestIp && enableForward !== true) {
+      results.stages.push({ stage: 'multicast', skipped: true, reason: 'enableForward must be true to start forwarding' });
     }
 
     saveState();

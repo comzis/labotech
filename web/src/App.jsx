@@ -1,20 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, Radio, Network, Search, ShieldCheck } from 'lucide-react';
+import { Activity, Radio, Network, Search, ShieldCheck, Monitor } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import StreamsPanel from './components/StreamsPanel';
 import TranscodePanel from './components/TranscodePanel';
 import MulticastPanel from './components/MulticastPanel';
 import TSAnalyser from './components/TSAnalyser';
 import ConfidenceMonitor from './components/ConfidenceMonitor';
+import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
 import useWebSocket from './hooks/useWebSocket';
 import { getHealth } from './api';
 
 const TABS = [
-  { id: 'streams',    label: 'Streams',    icon: Activity    },
-  { id: 'transcode',  label: 'Transcode',  icon: Radio       },
-  { id: 'multicast',  label: 'Multicast',  icon: Network     },
-  { id: 'analyse',    label: 'TS Analyser',icon: Search      },
+  { id: 'streams',    label: 'Runtime',    icon: Activity    },
+  { id: 'transcode',  label: 'Transcoder', icon: Radio       },
+  { id: 'multicast',  label: 'Forwarding', icon: Network     },
+  { id: 'analyse',    label: 'TS Analysis',icon: Search      },
+  { id: 'decoders',   label: 'Multiview',  icon: Monitor     },
   { id: 'confidence', label: 'Confidence', icon: ShieldCheck },
 ];
 
@@ -161,6 +163,7 @@ export default function App() {
         <div style={{ display: tab === 'transcode'  ? 'block' : 'none' }}><TranscodePanel   lastMessage={lastMessage} /></div>
         <div style={{ display: tab === 'multicast'  ? 'block' : 'none' }}><MulticastPanel   lastMessage={lastMessage} /></div>
         <div style={{ display: tab === 'analyse'    ? 'block' : 'none' }}><TSAnalyser        lastMessage={lastMessage} /></div>
+        <div style={{ display: tab === 'decoders'   ? 'block' : 'none' }}><DecoderMultiviewPanel lastMessage={lastMessage} /></div>
         <div style={{ display: tab === 'confidence' ? 'block' : 'none' }}><ConfidenceMonitor lastMessage={lastMessage} /></div>
       </main>
     </div>
