@@ -130,6 +130,17 @@ describe('SRTEncoder', () => {
       enc.parseStats('Input #0, mpegts, from ...');
       expect(received).toHaveLength(0);
     });
+
+    test('preserves multiple audio input streams by source index', () => {
+      enc.parseStats('  Stream #0:0[0x100]: Video: h264 (High), yuv420p, 1920x1080, 25 fps');
+      enc.parseStats('  Stream #0:1[0x101]: Audio: mp2, 48000 Hz, stereo, fltp, 256 kb/s');
+      enc.parseStats('  Stream #0:2[0x102]: Audio: aac, 48000 Hz, stereo, fltp, 128 kb/s');
+
+      expect(enc.inputStreams).toHaveLength(3);
+      const audioTracks = enc.inputStreams.filter(s => s.kind === 'audio');
+      expect(audioTracks).toHaveLength(2);
+      expect(audioTracks.map(s => s.sourceIndex).sort()).toEqual([1, 2]);
+    });
   });
 
   describe('audioPairs', () => {

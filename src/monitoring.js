@@ -1,6 +1,6 @@
 'use strict';
 
-const { spawn, exec } = require('child_process');
+const { spawn, execFile } = require('child_process');
 const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
@@ -70,10 +70,17 @@ function captureThumbnail(streamId, inputUrl) {
  * Falls back gracefully if snmptrap is not installed.
  */
 function sendSnmpTrap(oid, value, type = 's') {
-  exec(
-    `snmptrap -v 2c -c public ${SNMP_HOST} '' ${oid} ${oid} ${type} "${value}" 2>/dev/null`,
-    () => {}  // fire-and-forget
-  );
+  const args = [
+    '-v', '2c',
+    '-c', 'public',
+    SNMP_HOST,
+    '',
+    String(oid),
+    String(oid),
+    String(type),
+    String(value),
+  ];
+  execFile('snmptrap', args, () => {}); // fire-and-forget
 }
 
 /**

@@ -161,17 +161,9 @@ class SRTEncoder extends EventEmitter {
 
   // ─── SRT caller URL with Haivision stats parameters ────────────────────────
   buildSRTUrl() {
-    let url;
-
-    if (this.host && this.host.startsWith('srt://')) {
-      // User supplied a full SRT URL — use it directly, inject stats params
-      const separator = this.host.includes('?') ? '&' : '?';
-      url = `${this.host}${separator}stats=1&statsintvl=1`;
-    } else {
-      // Build URL from host + port
-      // stats=1 + statsintvl=1 tells libsrt to emit periodic [srt-stats] lines
-      url = `srt://${this.host}:${this.port}?mode=caller&latency=${this.latency}&stats=1&statsintvl=1`;
-    }
+    // Host is sanitized in constructor; always build canonical SRT URL here.
+    // stats=1 + statsintvl=1 tells libsrt to emit periodic [srt-stats] lines.
+    let url = `srt://${this.host}:${this.port}?mode=caller&latency=${this.latency}&stats=1&statsintvl=1`;
 
     if (this.passphrase) url += `&passphrase=${encodeURIComponent(this.passphrase)}&pbkeylen=${this.pbkeylen}`;
     if (this.streamId) url += `&streamid=${encodeURIComponent(this.streamId)}`;
@@ -444,10 +436,11 @@ class SRTEncoder extends EventEmitter {
     const mStream = line.match(/Stream #0:(\d+).*?:\s*(Video|Audio|Data):\s*([^\s,]+)(.*)/i);
     if (mStream) {
       if (!this.inputStreams) this.inputStreams = [];
+      const sourceIndex = parseInt(mStream[1], 10);
       const kind = mStream[2].toLowerCase();
       const codec = mStream[3];
       const detail = mStream[4].trim();
-      const entry = { kind, codec, detail };
+      const entry = { sourceIndex, kind, codec, detail };
       // Resolution + fps for video
       const mRes = detail.match(/(\d{3,4})x(\d{3,4})/);
       const mFpsD = detail.match(/([\d.]+)\s*fps/);
@@ -456,8 +449,9 @@ class SRTEncoder extends EventEmitter {
       // Sample rate + channels for audio
       const mSr = detail.match(/([\d]+)\s*Hz/);
       if (mSr) entry.sampleRate = parseInt(mSr[1]);
-      // Replace existing entry for same stream index or append
-      const idx = this.inputStreams.findIndex(s => s.kind === kind);
+      // Replace existing entry for same source stream index or append.
+      // This preserves multiple audio tracks from the same input.
+      const idx = this.inputStreams.findIndex(s => s.sourceIndex === sourceIndex);
       if (idx >= 0) this.inputStreams[idx] = entry; else this.inputStreams.push(entry);
       this.emit('stats', { inputStreams: this.inputStreams });
     }
