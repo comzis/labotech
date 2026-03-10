@@ -35,7 +35,7 @@ export default function EncoderForm({ onStarted }) {
       setForm(f => ({
         ...f,
         outputMode: v,
-        host: v === 'udp' || v === 'rtp' ? '239.100.25.29' : '',
+        host: '',
         port: v === 'udp' || v === 'rtp' ? '6501' : '9999',
       }));
     } else {
@@ -251,6 +251,9 @@ export default function EncoderForm({ onStarted }) {
 
             {/* Bento Card 4: Video Matrix (full width) */}
             <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-3 border-neon-purple/20 bg-neon-purple/5">
+              <div className="mb-3 text-[11px] text-amber-300/90 font-semibold tracking-wide">
+                GPU please 🙂 - CPU is working overtime.
+              </div>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
