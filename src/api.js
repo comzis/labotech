@@ -6,6 +6,7 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
+const os = require('os');
 
 const persistence = require('./state-persistence');
 
@@ -18,6 +19,56 @@ const transcoders = new Map();   // id → Transcoder
 const forwarders = new Map();    // id → MulticastForwarder
 const analysers = new Map();     // id → TSAnalyser
 const etr290monitors = new Map(); // id → ETR290Analyser
+
+let _lastCpuSample = null;
+
+function _sampleCpuPercent() {
+  const cpus = os.cpus();
+  if (!cpus || cpus.length === 0) return null;
+
+  const totals = cpus.map(c => {
+    const t = c.times;
+    const total = t.user + t.nice + t.sys + t.idle + t.irq;
+    return { total, idle: t.idle };
+  });
+
+  if (!_lastCpuSample) {
+    _lastCpuSample = totals;
+    return null;
+  }
+
+  let totalDiff = 0;
+  let idleDiff = 0;
+  for (let i = 0; i < totals.length; i++) {
+    totalDiff += (totals[i].total - _lastCpuSample[i].total);
+    idleDiff += (totals[i].idle - _lastCpuSample[i].idle);
+  }
+  _lastCpuSample = totals;
+  if (totalDiff <= 0) return null;
+  return Number((((totalDiff - idleDiff) / totalDiff) * 100).toFixed(1));
+}
+
+function getHealthPayload() {
+  const totalMem = os.totalmem();
+  const freeMem = os.freemem();
+  const usedMem = totalMem - freeMem;
+  const cpuPercent = _sampleCpuPercent();
+
+  return {
+    status: 'ok',
+    uptime: process.uptime(),
+    streams: streams.size + transcoders.size,
+    telemetry: {
+      cpuPercent,
+      load1m: Number(os.loadavg()[0].toFixed(2)),
+      memoryPercent: Number(((usedMem / totalMem) * 100).toFixed(1)),
+      memoryUsedMB: Math.round(usedMem / (1024 * 1024)),
+      memoryTotalMB: Math.round(totalMem / (1024 * 1024)),
+      processRssMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
+      heapUsedMB: Math.round(process.memoryUsage().heapUsed / (1024 * 1024)),
+    },
+  };
+}
 
 function createApp(wss) {
   const app = express();
@@ -37,11 +88,7 @@ function createApp(wss) {
   app.use('/scte35', require('../routes/scte35')());
 
   app.get('/health', (req, res) => {
-    res.json({
-      status: 'ok',
-      uptime: process.uptime(),
-      streams: streams.size + transcoders.size,
-    });
+    res.json(getHealthPayload());
   });
 
   // Fallback → SPA
@@ -150,11 +197,7 @@ function start() {
   app.use('/scte35',    require('../routes/scte35')());
 
   app.get('/health', (req, res) => {
-    res.json({
-      status: 'ok',
-      uptime: process.uptime(),
-      streams: streams.size + transcoders.size,
-    });
+    res.json(getHealthPayload());
   });
 
   app.get('*', (req, res) => {

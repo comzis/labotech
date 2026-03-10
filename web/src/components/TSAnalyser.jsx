@@ -48,6 +48,13 @@ function countPids(result) {
   return programCount + ((result.orphanStreams || []).length);
 }
 
+function audioPercent(levels) {
+  if (!levels || levels.meanDb == null) return 0;
+  // Map -60..0 dB to 0..100%
+  const v = Math.max(-60, Math.min(0, levels.meanDb));
+  return Math.round(((v + 60) / 60) * 100);
+}
+
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -404,6 +411,10 @@ function Stat({ label, value }) {
 }
 
 function DecoderCard({ id, meta, result, onStop }) {
+  const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
+  const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  const levelPct = audioPercent(result?.audioLevels);
+
   return (
     <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3">
       <div className="flex items-center justify-between">
@@ -418,7 +429,38 @@ function DecoderCard({ id, meta, result, onStop }) {
           Stop
         </button>
       </div>
+      <div className="relative aspect-video bg-gray-950 rounded-xl overflow-hidden border border-white/5">
+        {result?.thumbnailUrl ? (
+          <img
+            src={result.thumbnailUrl}
+            alt={`${id} thumbnail`}
+            className="w-full h-full object-contain"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
+            No thumbnail yet
+          </div>
+        )}
+      </div>
       <div className="text-[11px] text-gray-500 font-mono truncate">{meta?.url || result?.url || '-'}</div>
+      <div className="text-xs text-gray-300">
+        <span className="text-gray-500">Service:</span> {primaryService}
+        {serviceProvider ? <span className="text-gray-500"> · {serviceProvider}</span> : null}
+      </div>
+      <div>
+        <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
+          <span>Audio Level</span>
+          <span className="font-mono">
+            {result?.audioLevels?.meanDb != null ? `${result.audioLevels.meanDb.toFixed(1)} dB` : 'n/a'}
+          </span>
+        </div>
+        <div className="h-2 rounded bg-black/30 border border-white/10 overflow-hidden">
+          <div
+            className={`h-full ${levelPct > 75 ? 'bg-red-500' : levelPct > 45 ? 'bg-amber-400' : 'bg-green-500'}`}
+            style={{ width: `${levelPct}%` }}
+          />
+        </div>
+      </div>
       <div className="grid grid-cols-3 gap-2 text-xs">
         <Stat label="Programs" value={String(result?.programs?.length || 0)} />
         <Stat label="PIDs" value={String(countPids(result))} />
