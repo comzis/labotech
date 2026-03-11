@@ -15,7 +15,8 @@
 7. [Multicast Panel](#7-multicast-panel)
 8. [TS Analyser](#8-ts-analyser)
 9. [Confidence Monitor](#9-confidence-monitor)
-10. [Troubleshooting](#10-troubleshooting)
+10. [Engineering Support Manual](#10-engineering-support-manual)
+11. [Troubleshooting](#11-troubleshooting)
 
 ---
 
@@ -391,7 +392,15 @@ Provides a real-time health overview of all active streams and transcoders.
 
 ---
 
-## 10. Troubleshooting
+## 10. Engineering Support Manual
+
+For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Stream View timeline operation, multiview refresh behavior, and production troubleshooting workflows, use:
+
+- `docs/engineering-support-manual.md`
+
+---
+
+## 11. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|

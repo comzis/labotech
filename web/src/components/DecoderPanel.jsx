@@ -138,6 +138,47 @@ function EtrPriorityBlock({ title, checks, status, counts }) {
   );
 }
 
+function formatUtc(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toISOString().replace('T', ' ').replace('Z', ' UTC');
+}
+
+function AlarmTimeline({ alarms }) {
+  if (!alarms?.length) {
+    return <div className="text-xs text-gray-500 px-3 py-3">No recent timeline events.</div>;
+  }
+  const sorted = [...alarms]
+    .filter((a) => a?.time)
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  return (
+    <div className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/20 p-2">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Live Timeline (UTC)</div>
+      <div className="space-y-2">
+        {sorted.map((alarm, idx) => {
+          const pri = (alarm.priority || '-').toUpperCase();
+          const priClass = pri === 'P1'
+            ? 'text-red-300 border-red-500/30 bg-red-900/20'
+            : pri === 'P2'
+              ? 'text-amber-300 border-amber-500/30 bg-amber-900/20'
+              : 'text-sky-300 border-sky-500/30 bg-sky-900/20';
+          return (
+            <div key={`${alarm.time || idx}-${idx}`} className="rounded border border-white/10 bg-black/30 p-2">
+              <div className="flex items-center justify-between">
+                <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${priClass}`}>{pri}</span>
+                <span className="text-[10px] text-gray-500 font-mono">{formatUtc(alarm.time)}</span>
+              </div>
+              <div className="text-xs text-gray-300 font-mono mt-1">{alarm.label || '-'}</div>
+              <div className="text-[11px] text-gray-500">{alarm.message || '-'}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function DecoderPanel({ lastMessage }) {
   const [mode, setMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -177,19 +218,38 @@ export default function DecoderPanel({ lastMessage }) {
   }, [lastMessage, onWsResult, etr]);
 
   const builtUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
-  const metrics = qualityMetrics(etr.status);
-  const etrCounts = etr.status?.counts || {};
-  const etrState = etr.status?.status || {};
+  const selectedMonitorId = selectedId ? `etr-${selectedId}` : etr.activeId;
+  const selectedEtrStatus = selectedMonitorId ? (etr.statusById?.[selectedMonitorId] || null) : etr.status;
+  const metrics = qualityMetrics(selectedEtrStatus);
+  const etrCounts = selectedEtrStatus?.counts || {};
+  const etrState = selectedEtrStatus?.status || {};
   const p1Critical = ETR_CHECKS.p1.some((c) => etrState[c.id] === 'error');
   const p2Warning = ETR_CHECKS.p2.some((c) => etrState[c.id] === 'error');
 
   const selectedResult = useMemo(() => {
-    if (selectedId && resultsById[selectedId]) return resultsById[selectedId];
+    if (selectedId) {
+      if (resultsById[selectedId]) return resultsById[selectedId];
+      if (result?.id === selectedId) return result;
+      return null;
+    }
     if (result) return result;
     return null;
   }, [selectedId, resultsById, result]);
   const selectedPidRows = useMemo(() => collectPidRows(selectedResult), [selectedResult]);
   const resolvedPidCount = selectedPidRows.filter(r => r.pid != null).length;
+
+  useEffect(() => {
+    if (!selectedId) return;
+    const monitorId = `etr-${selectedId}`;
+    if (etr.activeIds?.includes(monitorId) && etr.activeId !== monitorId) {
+      etr.setActiveId(monitorId);
+    }
+  }, [selectedId, etr]);
+
+  useEffect(() => {
+    if (selectedId) return;
+    if (activeIds.length > 0) setSelectedId(activeIds[0]);
+  }, [activeIds, selectedId]);
 
   const startDecoder = async () => {
     if (!builtUrl) return;
@@ -315,13 +375,20 @@ export default function DecoderPanel({ lastMessage }) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
           <Stat label="Service Count" value={selectedResult ? String(selectedResult?.dvb?.serviceCount || selectedResult?.programs?.length || 0) : '-'} />
-          <Stat label="PID Count" value={selectedResult ? String(selectedResult?.dvb?.pidCount || resolvedPidCount || selectedPidRows.length || 0) : '-'} />
+          <Stat label="PID Count" value={selectedResult ? String(resolvedPidCount || selectedResult?.dvb?.pidCount || 0) : '-'} />
           <Stat label="Bitrate" value={selectedResult ? `${(((selectedResult?.dvb?.bitrateBps || 0) / 1e6)).toFixed(2)} Mbps` : '-'} />
         </div>
+        {selectedResult?.dvb?.bitrateSource && (
+          <div className="mt-1 text-[10px] text-gray-500">
+            TS bitrate source: {selectedResult.dvb.bitrateSource}
+          </div>
+        )}
 
         {!selectedResult && (
           <div className="mt-3 text-xs text-gray-500">
-            Select a decoder chip above or provision a decoder in this tab to display DVB metrics.
+            {selectedId
+              ? 'Decoder selected. Waiting for first probe sample (depends on refresh interval and probe duration).'
+              : 'Select a decoder chip above or provision a decoder in this tab to display DVB metrics.'}
           </div>
         )}
 
@@ -391,7 +458,7 @@ export default function DecoderPanel({ lastMessage }) {
           </div>
         )}
 
-        {etr.status && (
+        {selectedEtrStatus && (
           <>
             <div className={`mt-4 flex items-center gap-2 text-xs px-3 py-2 rounded-lg border ${
               p1Critical
@@ -407,7 +474,7 @@ export default function DecoderPanel({ lastMessage }) {
                   ? 'ETR290 WARNING - Priority 2 errors present'
                   : 'ETR290 NOMINAL - All monitored checks passing'}
               <span className="ml-auto font-mono">
-                {(etr.status?.recentAlarms || []).length} alarm{(etr.status?.recentAlarms || []).length === 1 ? '' : 's'}
+                {(selectedEtrStatus?.recentAlarms || []).length} alarm{(selectedEtrStatus?.recentAlarms || []).length === 1 ? '' : 's'}
               </span>
             </div>
 
@@ -420,7 +487,7 @@ export default function DecoderPanel({ lastMessage }) {
             <div className="mt-3">
               <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">ETR Alarm Log</div>
               <div className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/20">
-                {(etr.status?.recentAlarms || []).length === 0 ? (
+                {(selectedEtrStatus?.recentAlarms || []).length === 0 ? (
                   <div className="text-xs text-gray-500 px-3 py-3">No alarms in current window.</div>
                 ) : (
                   <table className="w-full text-xs font-mono">
@@ -433,7 +500,7 @@ export default function DecoderPanel({ lastMessage }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {(etr.status?.recentAlarms || []).map((alarm, idx) => (
+                      {(selectedEtrStatus?.recentAlarms || []).map((alarm, idx) => (
                         <tr key={`${alarm.time || idx}-${idx}`} className="border-b border-white/5">
                           <td className="py-1.5 px-2 text-gray-400">{alarm.time ? new Date(alarm.time).toLocaleTimeString() : '-'}</td>
                           <td className={`py-1.5 px-2 ${alarm.priority === 'p1' ? 'text-red-300' : alarm.priority === 'p2' ? 'text-amber-300' : 'text-sky-300'}`}>
@@ -446,6 +513,9 @@ export default function DecoderPanel({ lastMessage }) {
                     </tbody>
                   </table>
                 )}
+              </div>
+              <div className="mt-2">
+                <AlarmTimeline alarms={selectedEtrStatus?.recentAlarms || []} />
               </div>
             </div>
           </>

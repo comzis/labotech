@@ -12,8 +12,12 @@ function countPids(result) {
 }
 
 function resolveDisplayBitrateMbps(result) {
-  const formatBitrate = result?.dvb?.formatBitrateBps;
-  if (formatBitrate != null && formatBitrate > 0) return formatBitrate / 1e6;
+  // dvb.bitrateBps is the backend's best value: measured TS rate > format rate > ES sum.
+  // Never use formatBitrateBps directly — ffprobe's format-level estimate is unreliable
+  // for live RTP/UDP multicast (typically reports only decoded ES bitrate, not full TS rate).
+  const bps = result?.dvb?.bitrateBps;
+  if (bps != null && bps > 0) return bps / 1e6;
+  // Last-resort: sum individual ES bitrates (always an undercount)
   const total = (result?.programs || [])
     .flatMap(p => p.streams || [])
     .reduce((sum, s) => sum + (s.bitrate || 0), 0);
@@ -50,7 +54,17 @@ function Stat({ label, value }) {
   );
 }
 
-function DecoderCard({ id, meta, result, onStop }) {
+function updateAgeInfo(probeTime, nowMs, engineerMode = true) {
+  if (!probeTime) {
+    return { ageSec: null, label: engineerMode ? 'awaiting telemetry' : 'no sample yet', color: '#777' };
+  }
+  const ageSec = Math.max(0, Math.floor((nowMs - probeTime) / 1000));
+  if (ageSec <= 2) return { ageSec, label: engineerMode ? 'fresh silicon' : 'live', color: '#00dd55' };
+  if (ageSec <= 6) return { ageSec, label: engineerMode ? 'cache warming' : 'delayed', color: '#ffaa00' };
+  return { ageSec, label: engineerMode ? 'radio silence' : 'stale', color: '#ff2233' };
+}
+
+function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   const levelPct = audioPercent(result?.audioLevels);
@@ -63,6 +77,7 @@ function DecoderCard({ id, meta, result, onStop }) {
   }, [result?.thumbnailUrl, result?.probeTime]);
 
   const hasThumb = thumbSrc && !thumbFailed;
+  const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
 
   return (
     <div
@@ -114,6 +129,12 @@ function DecoderCard({ id, meta, result, onStop }) {
       {/* Info panel */}
       <div className="p-2.5 space-y-2" style={{ background: '#141414' }}>
         <div className="text-[10px] font-mono truncate engraved">{meta?.url || result?.url || '-'}</div>
+        <div
+          className="text-[10px] font-mono uppercase tracking-wider"
+          style={{ color: freshness.color }}
+        >
+          update age: {freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - {freshness.label}
+        </div>
         <div className="text-[11px] text-gray-300 font-mono truncate">
           <span className="engraved">SVC </span>{primaryService}
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
@@ -158,9 +179,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('6501');
   const [decoderId, setDecoderId] = useState('');
-  const [interval, setInterval] = useState('5000');
+  const [interval, setInterval] = useState('2000');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [engineerMode, setEngineerMode] = useState(true);
 
   useEffect(() => {
     refreshActives();
@@ -169,6 +192,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
   }, [lastMessage, onWsResult]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const probeUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
 
@@ -191,6 +219,16 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">All Active Decoders</h2>
           <div className="flex items-center gap-3">
             <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
+            <button
+              onClick={() => setEngineerMode((v) => !v)}
+              className={`text-xs px-2 py-1 rounded border ${
+                engineerMode
+                  ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
+                  : 'border-white/10 text-gray-400 bg-black/20'
+              }`}
+            >
+              Engineer Mode: {engineerMode ? 'ON' : 'OFF'}
+            </button>
             <button
               onClick={() => setOpenCreate(v => !v)}
               className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
@@ -218,7 +256,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.100.25.29" />
               <Field label="Port" value={port} onChange={setPort} type="number" placeholder="6501" />
               <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
-              <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />
+              <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="2000" />
             </div>
             {mode === 'srt' && (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -231,10 +269,13 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               <button
                 onClick={handleCreate}
                 disabled={!probeUrl}
-                className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
+              className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
               >
                 Add Tile
               </button>
+            </div>
+            <div className="text-[10px] text-gray-500">
+              Continuous probe cadence is target-based. Heavy bitrate/SI sampling runs every few cycles to reduce multiview lag.
             </div>
           </div>
         )}
@@ -251,6 +292,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               meta={decoderMeta[id]}
               result={resultsById[id]}
               onStop={() => stop(id)}
+              nowMs={nowMs}
+              engineerMode={engineerMode}
             />
           ))}
         </div>
