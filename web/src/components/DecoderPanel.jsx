@@ -188,6 +188,8 @@ export default function DecoderPanel({ lastMessage }) {
     if (result) return result;
     return null;
   }, [selectedId, resultsById, result]);
+  const selectedPidRows = useMemo(() => collectPidRows(selectedResult), [selectedResult]);
+  const resolvedPidCount = selectedPidRows.filter(r => r.pid != null).length;
 
   const startDecoder = async () => {
     if (!builtUrl) return;
@@ -313,7 +315,7 @@ export default function DecoderPanel({ lastMessage }) {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-3">
           <Stat label="Service Count" value={selectedResult ? String(selectedResult?.dvb?.serviceCount || selectedResult?.programs?.length || 0) : '-'} />
-          <Stat label="PID Count" value={selectedResult ? String(selectedResult?.dvb?.pidCount || 0) : '-'} />
+          <Stat label="PID Count" value={selectedResult ? String(selectedResult?.dvb?.pidCount || resolvedPidCount || selectedPidRows.length || 0) : '-'} />
           <Stat label="Bitrate" value={selectedResult ? `${(((selectedResult?.dvb?.bitrateBps || 0) / 1e6)).toFixed(2)} Mbps` : '-'} />
         </div>
 
@@ -366,7 +368,7 @@ export default function DecoderPanel({ lastMessage }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {collectPidRows(selectedResult).map((row, idx) => (
+                  {selectedPidRows.map((row, idx) => (
                     <tr key={`${row.programId}-${row.pid}-${idx}`} className="border-b border-white/5">
                       <td className="py-1.5 px-2 text-gray-300">{row.programId === 'orphan' ? 'Orphan' : row.programId}</td>
                       <td className="py-1.5 px-2 text-gray-300">{formatPidDisplay(row.pid, row.pidHex)}</td>

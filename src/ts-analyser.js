@@ -41,13 +41,19 @@ class TSAnalyser extends EventEmitter {
         try {
           const raw = JSON.parse(stdout);
           let result = this.parseStructure(raw);
-          if ((result?.dvb?.pidCount || 0) === 0) {
-            // Some RTP/TS sources omit stream ids in ffprobe JSON. Fallback to
-            // ffmpeg banner parsing where stream lines usually contain [0xPID].
-            const pidMap = await this._probeStreamPidsFromFfmpeg();
-            result = this._applyPidMap(result, pidMap);
+          // Some RTP/TS sources omit ids for all or part of program streams.
+          // Always attempt PID backfill from ffmpeg banner lines and patch any gaps.
+          const pidMap = await this._probeStreamPidsFromFfmpeg();
+          result = this._applyPidMap(result, pidMap);
+          const [measuredBitrateBps, audioLevels] = await Promise.all([
+            this._probeTransportBitrateBps(),
+            this._probeAudioLevels(),
+          ]);
+          if (measuredBitrateBps && measuredBitrateBps > 0) {
+            result.dvb.measuredBitrateBps = measuredBitrateBps;
+            result.dvb.bitrateBps = measuredBitrateBps;
           }
-          result.audioLevels = await this._probeAudioLevels();
+          result.audioLevels = audioLevels;
           try {
             await captureThumbnail(this.id, this.url);
             result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
@@ -166,6 +172,51 @@ class TSAnalyser extends EventEmitter {
     });
   }
 
+  _probeTransportBitrateBps() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this.url);
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-progress', 'pipe:2',
+        '-t', '2.0',
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'mpegts',
+        '-y',
+        '/dev/null',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 7000);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        let totalSize = 0;
+        let outTimeUs = 0;
+        for (const line of stderr.split('\n')) {
+          const [k, v] = line.split('=');
+          if (!k || v == null) continue;
+          if (k.trim() === 'total_size') totalSize = parseInt(v.trim(), 10) || totalSize;
+          if (k.trim() === 'out_time_us') outTimeUs = parseInt(v.trim(), 10) || outTimeUs;
+          if (k.trim() === 'out_time_ms') outTimeUs = parseInt(v.trim(), 10) || outTimeUs;
+        }
+        if (!totalSize || !outTimeUs) return resolve(null);
+        const seconds = outTimeUs / 1e6;
+        if (!seconds || !Number.isFinite(seconds)) return resolve(null);
+        const bps = Math.round((totalSize * 8) / seconds);
+        resolve(Number.isFinite(bps) && bps > 0 ? bps : null);
+      });
+    });
+  }
+
   _mapStream(s) {
     const pid = this._normalizePid(s.id);
     let streamType = null;
@@ -237,11 +288,14 @@ class TSAnalyser extends EventEmitter {
 
   _probeStreamPidsFromFfmpeg() {
     return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this.url);
       const args = [
         '-hide_banner',
         '-loglevel', 'info',
-        '-t', '1.0',
-        '-i', this.url,
+        '-analyzeduration', '7000000',
+        '-probesize', '7000000',
+        '-t', '3.0',
+        '-i', inputUrl,
         '-map', '0',
         '-f', 'null',
         '-',
@@ -250,7 +304,7 @@ class TSAnalyser extends EventEmitter {
       let stderr = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 3500);
+      }, 9000);
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('error', () => {
         clearTimeout(timeout);
@@ -263,7 +317,10 @@ class TSAnalyser extends EventEmitter {
         for (const line of lines) {
           // Example:
           // Stream #0:0[0x200]: Video: h264 ...
-          const m = line.match(/Stream #\d+:(\d+)\[0x([0-9a-f]+)\]/i);
+          // Alternative:
+          // Stream #0:0(und): Video: ... [0x200]
+          const m = line.match(/Stream #\d+:(\d+)\[0x([0-9a-f]+)\]/i)
+            || line.match(/Stream #\d+:(\d+).*?\[0x([0-9a-f]+)\]/i);
           if (!m) continue;
           const idx = parseInt(m[1], 10);
           const pid = parseInt(m[2], 16);
@@ -305,6 +362,13 @@ class TSAnalyser extends EventEmitter {
         pidCount,
       },
     };
+  }
+
+  _withLiveInputHints(url) {
+    if (!url) return url;
+    if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
   }
 
   startContinuous() {
