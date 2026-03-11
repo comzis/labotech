@@ -34,9 +34,26 @@ function getThumbnailCaptureSettings() {
   // high: better multiview detail, more CPU
   // low: lower CPU footprint, more compression artifacts
   if (THUMBNAIL_QUALITY_PROFILE === 'low') {
-    return { width: 320, qv: 6 };
+    return {
+      width: 320,
+      qv: 5,
+      pick: 3,
+      scaler: 'bilinear',
+      deblock: false,
+      denoise: null,
+    };
   }
-  return { width: 640, qv: 3 };
+  return {
+    width: 640,
+    qv: 2,
+    pick: 4,
+    scaler: 'lanczos',
+    // pp=de applies H.264-style loop deblocking as a post-processing pass,
+    // smoothing DCT block boundaries before JPEG encode.
+    deblock: true,
+    // Temporal+spatial denoise: reduces compression noise between block boundaries.
+    denoise: 'hqdn3d=2:2:6:6',
+  };
 }
 
 function _doCaptureThumbnail(streamId, inputUrl) {
@@ -60,15 +77,26 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       '-loglevel', 'error',
       '-fflags', '+discardcorrupt+genpts',
       '-err_detect', 'ignore_err',
-      '-analyzeduration', '3000000',
+      // Skip non-reference (B) frames at the decoder level — eliminates the most
+      // common cause of macroblocking: P/B frames decoded before their I-frame ref.
+      '-skip_frame', 'noref',
+      '-analyzeduration', '4000000',
       '-probesize', '5000000',
       '-rtbufsize', '128M',
       '-i', src,
       '-frames:v', '1',
-      // thumbnail=4 at fps=4 buffers 1s of frames and picks the best keyframe.
-      // Much faster than the previous thumbnail=24 at fps=8 (3s buffer).
-      // bilinear is sufficient for a confidence monitor thumbnail.
-      '-vf', `fps=4,thumbnail=4,scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=bilinear`,
+      '-vf', [
+        // Select only I-frames: guarantees a fully self-contained decode,
+        // no missing reference frames, zero B-frame artefacts.
+        `select=eq(pict_type\\,I)`,
+        `thumbnail=${capture.pick}`,
+        // Deblock post-processing: smooths DCT block boundaries on the selected
+        // frame before JPEG encode. Reduces residual macroblock visibility from
+        // source compression even on clean I-frames.
+        capture.deblock ? 'pp=de/de' : null,
+        `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+        capture.denoise || null,
+      ].filter(Boolean).join(','),
       '-f', 'image2',
       '-q:v', String(capture.qv),
       tmpPath,  // write to .tmp first — atomic rename prevents corrupt browser reads
