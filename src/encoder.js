@@ -520,9 +520,13 @@ class SRTEncoder extends EventEmitter {
           self.emit('stats', { inputBitrate: kbps });
         }
         self._setInputBitrateMeasuring(false);
-        if (!cancelled && self.isRunning) {
+        // Only reschedule if measurement was inconclusive (kbps still null).
+        // Once a value is confirmed, stop consuming resources.
+        if (!cancelled && self.isRunning && !self.inputBitrate) {
           self._setInputBitrateMeasuring(true);
           watcherTimer = setTimeout(runOnce, 30000);
+        } else if (typeof self._stopInputBitrateWatcher === 'function') {
+          self._stopInputBitrateWatcher();
         }
       });
     };
