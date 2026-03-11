@@ -92,6 +92,7 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
     }
 
     transcoder.on('stats', stats => broadcast({ type: 'transcode_stats', id, ...stats }));
+    transcoder.on('info', msg => broadcast({ type: 'info', id, message: msg.message, inputBitrate: msg.inputBitrate, inputBitrateWatchAttempts: msg.inputBitrateWatchAttempts }));
     transcoder.on('error', err => broadcast({ type: 'error', id, message: err.message }));
     transcoder.on('stopped', () => broadcast({ type: 'transcode_stopped', id }));
 

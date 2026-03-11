@@ -432,5 +432,31 @@ describe('SRTEncoder', () => {
       const json = testEnc.toJSON();
       expect(json.inputBitrateWatchAttempts).toBe(4);
     });
+
+    test('increments counter each time runOnce fires', (done) => {
+      const testEnc = new SRTEncoder({ id: 'watcher-inc', input: 'udp://239.1.1.1:5000' });
+      testEnc.isRunning = true;
+      let attempts = 0;
+
+      testEnc._startInputBitrateWatcher = function () {
+        testEnc._inputBitrateWatchAttempts += 1;
+        testEnc.emit('stats', { inputBitrateWatchAttempts: testEnc._inputBitrateWatchAttempts });
+      };
+
+      testEnc.on('stats', (s) => {
+        if (s.inputBitrateWatchAttempts != null) {
+          attempts += 1;
+          if (attempts >= 2) {
+            expect(testEnc._inputBitrateWatchAttempts).toBe(2);
+            expect(testEnc.toJSON().inputBitrateWatchAttempts).toBe(2);
+            done();
+          } else {
+            testEnc._startInputBitrateWatcher();
+          }
+        }
+      });
+
+      testEnc._startInputBitrateWatcher();
+    });
   });
 });

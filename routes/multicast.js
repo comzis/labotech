@@ -77,6 +77,7 @@ module.exports = function(forwarders, wss, saveState = () => {}) {
     try {
       const fwd = new MulticastForwarder({ id, sourceUrl, destIp, destPort, nic, ttl });
       fwd.on('stats',   stats => broadcast({ type: 'multicast_stats', id, ...stats }));
+      fwd.on('info',    msg   => broadcast({ type: 'info', id, message: msg.message, inputBitrate: msg.inputBitrate, inputBitrateWatchAttempts: msg.inputBitrateWatchAttempts }));
       fwd.on('error',   err   => broadcast({ type: 'error', id, message: err.message }));
       fwd.on('stopped',       () => broadcast({ type: 'multicast_stopped', id }));
       await fwd.start();
