@@ -3,7 +3,7 @@ import { getMulticastConfig, getForwarders, startForwarder, stopForwarder } from
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Network, Zap, Settings2, Globe, Share2 } from 'lucide-react';
+import { Network, Settings2, Globe, Share2 } from 'lucide-react';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 
@@ -86,12 +86,12 @@ export default function MulticastPanel({ lastMessage }) {
         </div>
         <button
           onClick={() => setOpen(o => !o)}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${open
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all ${open
             ? 'bg-gray-800 text-gray-400 hover:text-white border border-white/10'
-            : 'bg-gradient-to-r from-neon-green to-green-600 text-white shadow-lg shadow-neon-green/20 hover:shadow-neon-green/40'
+            : 'bg-gradient-to-r from-neon-green/25 to-green-600/25 border border-neon-green/35 text-green-100 shadow-lg shadow-neon-green/15 hover:shadow-neon-green/30'
             }`}
         >
-          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Deploy Forwarder</>}
+          {open ? 'Cancel' : <><Share2 className="w-4 h-4" /> Deploy Forwarder</>}
         </button>
       </div>
 

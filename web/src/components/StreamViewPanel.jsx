@@ -298,14 +298,14 @@ export default function StreamViewPanel({ lastMessage }) {
   return (
     <div className="space-y-6 font-sans">
       <BentoCard icon={Activity} title="Stream View">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <div className="text-xs text-gray-400">Live horizontal UTC timeline by monitor/analyser lane</div>
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div className="text-[11px] text-gray-400">Live horizontal UTC timeline by monitor/analyser lane</div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {WINDOW_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setWindowMs(opt.value)}
-                className={`text-xs px-2.5 py-1 rounded border ${
+                className={`text-[11px] px-2 py-0.5 rounded border ${
                   windowMs === opt.value
                     ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
                     : 'border-white/10 text-gray-400 bg-black/20'
@@ -316,7 +316,7 @@ export default function StreamViewPanel({ lastMessage }) {
             ))}
             <button
               onClick={() => setScaleMode((m) => (m === 'normalized' ? 'absolute' : 'normalized'))}
-              className={`text-xs px-2.5 py-1 rounded border ${
+              className={`text-[11px] px-2 py-0.5 rounded border ${
                 scaleMode === 'absolute'
                   ? 'border-amber-500/50 text-amber-300 bg-amber-900/20'
                   : 'border-white/10 text-gray-400 bg-black/20'
@@ -326,7 +326,7 @@ export default function StreamViewPanel({ lastMessage }) {
             </button>
             <button
               onClick={() => setFreezeCursor((v) => !v)}
-              className={`text-xs px-2.5 py-1 rounded border ${
+              className={`text-[11px] px-2 py-0.5 rounded border ${
                 freezeCursor
                   ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
                   : 'border-white/10 text-gray-400 bg-black/20'
@@ -336,7 +336,7 @@ export default function StreamViewPanel({ lastMessage }) {
             </button>
           </div>
         </div>
-        <div className="mb-2 flex items-center gap-3 text-[10px] text-gray-500 font-mono">
+        <div className="mb-1.5 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono">
           <span className="inline-flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
             alarm
@@ -348,7 +348,7 @@ export default function StreamViewPanel({ lastMessage }) {
 
         <div
           className="relative rounded-xl border border-white/10 bg-black/30 overflow-hidden"
-          style={{ height: `${Math.max(180, 90 + laneIds.length * 34)}px` }}
+          style={{ height: `${Math.max(160, 76 + laneIds.length * 28)}px` }}
           onMouseMove={(e) => {
             if (freezeCursor) return;
             const rect = e.currentTarget.getBoundingClientRect();
@@ -365,8 +365,8 @@ export default function StreamViewPanel({ lastMessage }) {
             if (!freezeCursor) setMouseX(null);
           }}
         >
-          <div className="absolute left-2 top-2 text-[10px] text-gray-500 font-mono">{toUtc(timeStart)}</div>
-          <div className="absolute right-2 top-2 text-[10px] text-gray-500 font-mono">{toUtc(timeEnd)}</div>
+          <div className="absolute left-2 top-1.5 text-[9px] text-gray-500 font-mono">{toUtc(timeStart)}</div>
+          <div className="absolute right-2 top-1.5 text-[9px] text-gray-500 font-mono">{toUtc(timeEnd)}</div>
 
           {/* Current UTC position line */}
           <div className="absolute top-0 bottom-0 border-l border-neon-cyan/70" style={{ left: '100%' }} />
@@ -382,7 +382,7 @@ export default function StreamViewPanel({ lastMessage }) {
             </div>
           ) : (
             laneIds.map((id, laneIdx) => {
-              const y = 52 + laneIdx * 34;
+              const y = 44 + laneIdx * 28;
               const laneEventAtPointer = lanePointerStatus.find((row) => row.id === id)?.event || null;
               const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
               return (
@@ -391,7 +391,7 @@ export default function StreamViewPanel({ lastMessage }) {
                     className="absolute left-0 right-0 h-px"
                     style={{ top: `${y}px`, background: laneLineById[id] || lineColor }}
                   />
-                  <div className="absolute left-2 -translate-y-1/2 text-[10px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
+                  <div className="absolute left-2 -translate-y-1/2 text-[9px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
                     {id}
                   </div>
                   {(laneMap[id] || []).filter((e) => e.category === 'etr290_alarm').map((e) => (
