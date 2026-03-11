@@ -409,14 +409,18 @@ describe('SRTEncoder', () => {
   });
 
   describe('thumbnail id safety', () => {
-    test('throws for unsafe stream id when building ffmpeg args', () => {
+    test('normalizes unsafe stream id when building ffmpeg args', () => {
       const bad = new SRTEncoder({
         id: '../escape',
         input: 'udp://239.1.1.1:5000',
         host: '10.0.0.1',
         port: 9999,
       });
-      expect(() => bad.buildFFmpegArgs()).toThrow(/Invalid stream id/);
+      const args = bad.buildFFmpegArgs();
+      const thumbPath = args[args.length - 1];
+      expect(thumbPath).toContain('/logs/thumbnails/');
+      expect(thumbPath).toMatch(/\.jpg$/);
+      expect(thumbPath).not.toContain('..');
     });
   });
 
