@@ -191,6 +191,8 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **ETR input bind IP** for RTP/UDP monitor URLs, so operators can pin monitoring to the intended interface path
 - **ETR parser diagnostics** (matched lines and last match time) to verify monitor activity against live faults
 - **IAT sniffer diagnostics** (attempted, capture method, sample count, error) for NIC-capture visibility
+- **Transport integrity checks** for timestamp discontinuities and continuity counter (CC) errors
+- **Composite health model** (`dvb.health`) including score, severity, and reasons for operator triage
 
 ---
 
@@ -200,7 +202,6 @@ LABOTECH supports Dolby E via an optional external decoder adapter in the TS ana
 
 - Adapter is non-fatal: if disabled/unavailable, standard TS analysis continues.
 - Use a Linux executable/script for decoder integration.
-- Windows DLL files are not directly runnable by the Ubuntu Node.js service.
 
 Environment variables (`.env`):
 
@@ -241,9 +242,9 @@ For deployment checks and troubleshooting runbook, see `docs/engineering-support
 
 `Live View` provides a UTC timeline that correlates analyser and ETR events in one place:
 
-- **Lane markers by type**: alarm (red dot), status sample (cyan tick), analyse sample (green square)
+- **Duration block timeline**: compact color-coded line blocks represent event persistence by category/severity
 - **Lane line severity at pointer**: lane baseline color reflects current severity near pointer (critical/warning/ok)
-- **Pointer popup**: selected lane + pointer UTC + nearest event + nearby ETR alarms (`±30s`)
+- **Dynamic pointer popup**: follows cursor quadrants to reduce lane occlusion while inspecting nearby evidence
 - **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
 - **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
 
