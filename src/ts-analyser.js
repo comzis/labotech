@@ -4,6 +4,16 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const { captureThumbnail } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
+let _multicastConfig = null;
+function _getNicName() {
+  if (_multicastConfig) return _multicastConfig.nic || 'eno2';
+  try {
+    _multicastConfig = require('../config/multicast.json');
+    return _multicastConfig.nic || 'eno2';
+  } catch (_) {
+    return 'eno2';
+  }
+}
 
 class TSAnalyser extends EventEmitter {
   constructor(options = {}) {
@@ -81,8 +91,8 @@ class TSAnalyser extends EventEmitter {
             },
             iatSniffer: {
               attempted: Boolean(this._iatSniffer),
-              captureMethod: this._iatSniffer?.captureMethod || 'unavailable',
-              sampleCount: this._iatSniffer?.getMetrics?.()?.sampleCount ?? 0,
+              captureMethod: nicMetrics?.captureMethod ?? (this._iatSniffer?.captureMethod || 'unavailable'),
+              sampleCount: nicMetrics?.sampleCount ?? 0,
               error: this._iatSniffer?.lastError || null,
             },
           };
@@ -950,7 +960,7 @@ class TSAnalyser extends EventEmitter {
     if (this.isRunning) return;
     this.isRunning = true;
     if (!this._iatSniffer) {
-      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url });
+      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: _getNicName() });
       this._iatSniffer.start();
     }
 
