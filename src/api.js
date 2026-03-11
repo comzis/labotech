@@ -135,6 +135,7 @@ async function restoreState(wss) {
       try {
         const enc = new SRTEncoder(cfg);
         enc.on('stats',    s   => broadcast({ type: 'stats',    id: cfg.id, ...s }));
+        enc.on('info',     msg => broadcast({ type: 'info',     id: cfg.id, message: msg.message, inputBitrate: msg.inputBitrate, inputBitrateWatchAttempts: msg.inputBitrateWatchAttempts }));
         enc.on('srtStats', s   => broadcast({ type: 'srtStats', id: cfg.id, ...s }));
         enc.on('error',    err => broadcast({ type: 'error',    id: cfg.id, message: err.message }));
         enc.on('stopped',  ()  => broadcast({ type: 'stopped',  id: cfg.id }));

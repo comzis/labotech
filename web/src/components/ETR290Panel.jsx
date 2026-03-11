@@ -263,6 +263,7 @@ export default function ETR290Panel({ lastMessage }) {
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [dvbByMonitorId, setDvbByMonitorId] = useState({});
+  const [captureNic, setCaptureNic] = useState('');
   const { status, statusById, activeId, activeIds, error, start, stop, setActiveId, refreshActives, onWsMessage } = useETR290();
 
   useEffect(() => {
@@ -309,7 +310,7 @@ export default function ETR290Panel({ lastMessage }) {
     if (builtUrl) {
       const id = `etr290-${Date.now()}`;
       try {
-        await start(id, builtUrl);
+        await start(id, builtUrl, captureNic || undefined);
         const dvb = await probeUrl(builtUrl);
         setDvbByMonitorId(prev => ({ ...prev, [id]: dvb }));
       } catch (_) {}
@@ -393,6 +394,12 @@ export default function ETR290Panel({ lastMessage }) {
           {(probeMode === 'udp' || probeMode === 'rtp') && (
             <div className="grid grid-cols-2 gap-4">
               <Field label="Input Bind IP (eno2 IP)" value={bindIp} onChange={setBindIp} placeholder="10.67.18.29 (optional)" />
+              <Field
+                label="Capture NIC (optional)"
+                value={captureNic}
+                onChange={setCaptureNic}
+                placeholder="eno2 (default from config)"
+              />
             </div>
           )}
 

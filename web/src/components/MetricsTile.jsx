@@ -17,6 +17,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
   const [inputBitrateMeasuring, setInputBitrateMeasuring] = useState(Boolean(initInputBitrateMeasuring));
   const [inputStreams, setInputStreams] = useState(null);
   const [ffmpegError,  setFfmpegError]  = useState(null);
+  const [infoMessage, setInfoMessage] = useState(null);
 
   useEffect(() => {
     if (!lastMessage) return;
@@ -37,6 +38,10 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
     }
     if (lastMessage.type === 'error' && lastMessage.id === id) {
       setFfmpegError(lastMessage.message);
+    }
+    if (lastMessage.type === 'info' && lastMessage.id === id) {
+      setInfoMessage(lastMessage.message);
+      setTimeout(() => setInfoMessage(null), 8000);
     }
   }, [lastMessage, id]);
 
@@ -72,6 +77,11 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
       {ffmpegError && (
         <div className="bg-red-950/60 border border-red-700/40 rounded-lg px-3 py-2 text-[10px] text-red-300 font-mono break-all">
           {ffmpegError}
+        </div>
+      )}
+      {infoMessage && (
+        <div className="bg-sky-950/60 border border-sky-700/40 rounded-lg px-3 py-2 text-[10px] text-sky-300 font-mono break-all">
+          {infoMessage}
         </div>
       )}
 

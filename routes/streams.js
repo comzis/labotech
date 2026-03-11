@@ -85,6 +85,7 @@ module.exports = function (streams, wss, saveState = () => {}) {
     });
 
     encoder.on('stats', stats => broadcast({ type: 'stats', id, ...stats }));
+    encoder.on('info', info => broadcast({ type: 'info', id, ...info }));
     encoder.on('srtStats', srt => broadcast({ type: 'srtStats', id, ...srt }));
     encoder.on('error', err => broadcast({ type: 'error', id, message: err.message }));
     encoder.on('stopped', () => broadcast({ type: 'stopped', id }));

@@ -301,4 +301,37 @@ describe('TSAnalyser', () => {
       expect(analyser.isRunning).toBe(false);
     });
   });
+
+  describe('_getNicName()', () => {
+    afterEach(() => {
+      jest.resetModules();
+      jest.dontMock('../config/multicast.json');
+    });
+
+    test('returns eno2 as default when config/multicast.json is missing', () => {
+      jest.resetModules();
+      jest.doMock('../config/multicast.json', () => {
+        throw new Error('ENOENT');
+      });
+      const TSA = require('../src/ts-analyser');
+      TSA._resetNicNameCache();
+      expect(TSA._getNicName()).toBe('eno2');
+    });
+
+    test('returns nic field from multicast config when available', () => {
+      const TSA = require('../src/ts-analyser');
+      TSA._resetNicNameCache();
+      const result = TSA._getNicName();
+      expect(typeof result).toBe('string');
+      expect(result.length).toBeGreaterThan(0);
+    });
+
+    test('falls back to eno2 when nic field absent from config', () => {
+      jest.resetModules();
+      jest.doMock('../config/multicast.json', () => ({ subnet: '239.0.0.0/8' }));
+      const TSA = require('../src/ts-analyser');
+      TSA._resetNicNameCache();
+      expect(TSA._getNicName()).toBe('eno2');
+    });
+  });
 });

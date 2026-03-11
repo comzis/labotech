@@ -213,6 +213,7 @@ export default function DecoderPanel({ lastMessage }) {
   const [decoderId, setDecoderId] = useState('');
   const [interval, setInterval] = useState(5000);
   const [addToMultiview, setAddToMultiview] = useState(true);
+  const [captureNic, setCaptureNic] = useState('');
   const [selectedId, setSelectedId] = useState('');
 
   const {
@@ -284,11 +285,11 @@ export default function DecoderPanel({ lastMessage }) {
     setSelectedId(id);
     try {
       if (addToMultiview) {
-        await startContinuous(id, builtUrl, parseInt(interval, 10) || 5000);
+        await startContinuous(id, builtUrl, parseInt(interval, 10) || 5000, captureNic || undefined);
       } else {
         await probe(builtUrl);
       }
-      await etr.start(`etr-${id}`, builtUrl);
+      await etr.start(`etr-${id}`, builtUrl, captureNic || undefined);
       setDecoderId('');
     } catch (_) {
       // Errors are surfaced by hooks; keep form state so operator can retry.
@@ -324,6 +325,12 @@ export default function DecoderPanel({ lastMessage }) {
           <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.100.25.29" />
           <Field label="Port" value={port} onChange={setPort} type="number" placeholder="6501" />
           <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
+          <Field
+            label="Capture NIC (optional)"
+            value={captureNic}
+            onChange={setCaptureNic}
+            placeholder="eno2 (default from config)"
+          />
           <div>
             <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Refresh</label>
             <select

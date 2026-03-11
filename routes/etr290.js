@@ -21,11 +21,11 @@ module.exports = function (etr290monitors, wss) {
 
   // POST /etr290/start
   router.post('/start', (req, res) => {
-    const { id, url } = req.body;
+    const { id, url, nicName } = req.body;
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (etr290monitors.has(id)) return res.status(409).json({ error: `ETR290 monitor ${id} already exists` });
 
-    const mon = new ETR290Analyser({ id, url });
+    const mon = new ETR290Analyser({ id, url, nicName: nicName || undefined });
 
     mon.on('etr290', status => broadcast({ type: 'etr290_status', id, ...status }));
     mon.on('alarm',  alarm  => broadcast({ type: 'etr290_alarm',  id, ...alarm  }));

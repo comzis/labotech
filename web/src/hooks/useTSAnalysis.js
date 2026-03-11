@@ -44,10 +44,10 @@ export default function useTSAnalysis() {
     } catch (_) {}
   }, []);
 
-  const startContinuous = useCallback(async (id, url, interval) => {
+  const startContinuous = useCallback(async (id, url, interval, nicName) => {
     setError(null);
     try {
-      await startAnalyser({ id, url, interval });
+      await startAnalyser({ id, url, interval, ...(nicName ? { nicName } : {}) });
       setActiveIds(ids => (ids.includes(id) ? ids : [...ids, id]));
       setDecoderMeta(prev => ({ ...prev, [id]: { id, url, isRunning: true } }));
     } catch (err) {
