@@ -94,6 +94,36 @@ function laneColorForEvent(event) {
   return '#66ccff66';
 }
 
+function colorForLaneSeverity(severity) {
+  if (severity === 'critical') return '#ff2233';
+  if (severity === 'warning') return '#ffaa00';
+  if (severity === 'ok') return '#00dd55';
+  return '#66ccff';
+}
+
+function buildLaneGradient(events, timeStart, windowMs) {
+  if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) {
+    return 'linear-gradient(90deg, #00dd5530 0%, #00dd5530 100%)';
+  }
+  const sorted = [...events].sort((a, b) => a.ts - b.ts);
+  let currentSeverity = 'ok';
+  for (const e of sorted) {
+    if (e.ts <= timeStart) currentSeverity = e.severity || currentSeverity;
+    else break;
+  }
+  const parts = [`${colorForLaneSeverity(currentSeverity)}66 0%`];
+  for (const e of sorted) {
+    if (e.ts < timeStart || e.ts > timeStart + windowMs) continue;
+    const x = Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100));
+    const nextSeverity = e.severity || currentSeverity;
+    parts.push(`${colorForLaneSeverity(currentSeverity)}66 ${x}%`);
+    parts.push(`${colorForLaneSeverity(nextSeverity)}66 ${x}%`);
+    currentSeverity = nextSeverity;
+  }
+  parts.push(`${colorForLaneSeverity(currentSeverity)}66 100%`);
+  return `linear-gradient(90deg, ${parts.join(', ')})`;
+}
+
 function num(v, digits = 3) {
   return typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : null;
 }
@@ -257,6 +287,14 @@ export default function StreamViewPanel({ lastMessage }) {
     };
   };
 
+  const laneLineById = useMemo(() => {
+    const out = {};
+    for (const id of laneIds) {
+      out[id] = buildLaneGradient(laneMap[id] || [], timeStart, windowMs);
+    }
+    return out;
+  }, [laneIds, laneMap, timeStart, windowMs]);
+
   return (
     <div className="space-y-6 font-sans">
       <BentoCard icon={Activity} title="Stream View">
@@ -303,14 +341,9 @@ export default function StreamViewPanel({ lastMessage }) {
             <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
             alarm
           </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-3 rounded-[1px] bg-neon-cyan" />
-            status sample
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-sm bg-green-500" />
-            analyse sample
-          </span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-green-500" /> nominal</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-amber-500" /> major</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-red-500" /> critical</span>
         </div>
 
         <div
@@ -354,21 +387,22 @@ export default function StreamViewPanel({ lastMessage }) {
               const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
               return (
                 <div key={id}>
-                  <div className="absolute left-0 right-0 h-px" style={{ top: `${y}px`, background: lineColor }} />
+                  <div
+                    className="absolute left-0 right-0 h-px"
+                    style={{ top: `${y}px`, background: laneLineById[id] || lineColor }}
+                  />
                   <div className="absolute left-2 -translate-y-1/2 text-[10px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
                     {id}
                   </div>
-                  {(laneMap[id] || []).map((e) => (
+                  {(laneMap[id] || []).filter((e) => e.category === 'etr290_alarm').map((e) => (
                     <div
                       key={e.key}
-                      className={`absolute -translate-x-1/2 -translate-y-1/2 border ${
-                        e.category === 'etr290_status' ? 'rounded-[1px]' : e.category === 'analyse_result' ? 'rounded-sm' : 'rounded-full'
-                      }`}
+                      className="absolute -translate-x-1/2 -translate-y-1/2 border rounded-full"
                       style={{
                         left: `${e.xPct}%`,
                         top: `${y}px`,
-                        width: e.category === 'etr290_alarm' ? '10px' : e.category === 'etr290_status' ? '2px' : '8px',
-                        height: e.category === 'etr290_alarm' ? '10px' : e.category === 'etr290_status' ? '12px' : '8px',
+                        width: '10px',
+                        height: '10px',
                         background: colorForSeverity(e.severity),
                         borderColor: `${colorForSeverity(e.severity)}77`,
                         boxShadow: `0 0 8px ${colorForSeverity(e.severity)}88`,
@@ -479,6 +513,25 @@ export default function StreamViewPanel({ lastMessage }) {
                 return (
                   <div key={`forensic-${id}`} className="rounded border border-white/10 bg-black/30 p-2">
                     <div className="font-mono text-gray-300 mb-2">{id}</div>
+                    {(() => {
+                      const cm = lane?.latest?.evidence?.probeDiagnostics?.iatSniffer?.captureMethod;
+                      if (!cm) return null;
+                      const isNic = cm === 'tshark' || cm === 'tcpdump';
+                      return (
+                        <span
+                          className={`inline-block mb-1 text-[9px] font-mono px-1.5 py-0.5 rounded border ${
+                            isNic
+                              ? 'text-neon-cyan border-neon-cyan/30 bg-neon-cyan/10'
+                              : 'text-amber-400 border-amber-500/30 bg-amber-900/20'
+                          }`}
+                          title={isNic
+                            ? `Packet capture via ${cm} - NIC-level IAT (BORO-grade)`
+                            : 'IAT derived from stream analyser - install tshark or tcpdump for NIC-capture'}
+                        >
+                          {isNic ? `NIC-capture (${cm})` : 'analyser-derived'}
+                        </span>
+                      );
+                    })()}
                     {!lane || lane.samples.length === 0 ? (
                       <div className="text-gray-500">No analyse samples yet for this lane.</div>
                     ) : !hasForensicMetrics ? (

@@ -111,7 +111,18 @@ function collectPidRows(result) {
       bitrate: stream.bitrate || 0,
     });
   });
-  return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+  const sorted = rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+  const totalBps = result?.dvb?.bitrateBps || 0;
+  const knownBps = sorted.reduce((acc, row) => acc + (row.bitrate || 0), 0);
+  const unresolved = Math.max(0, totalBps - knownBps);
+  if (unresolved > 0) {
+    const firstVideo = sorted.find((row) => row.codecType === 'video' && (!row.bitrate || row.bitrate <= 0));
+    if (firstVideo) {
+      firstVideo.bitrate = unresolved;
+      firstVideo.bitrateEstimated = true;
+    }
+  }
+  return sorted;
 }
 
 function formatPidDisplay(pid, pidHex) {
@@ -473,7 +484,21 @@ export default function DecoderPanel({ lastMessage }) {
                       <td className="py-1.5 px-2 text-gray-400">{row.streamType}</td>
                       <td className="py-1.5 px-2 text-gray-400">{row.sourceIndex ?? '-'}</td>
                       <td className="py-1.5 px-2 text-gray-400">{row.language}</td>
-                      <td className="py-1.5 px-2 text-gray-400">{row.bitrate > 0 ? `${(row.bitrate / 1e6).toFixed(2)} Mbps` : '-'}</td>
+                      <td className="py-1.5 px-2 text-gray-400">
+                        {row.bitrate > 0
+                          ? <>
+                              {(row.bitrate / 1e6).toFixed(2)} Mbps
+                              {row.bitrateEstimated && (
+                                <span
+                                  className="ml-1 text-[9px] text-amber-400 font-mono"
+                                  title="Estimated: TS container bitrate minus sum of resolved PID bitrates"
+                                >
+                                  (est.)
+                                </span>
+                              )}
+                            </>
+                          : '-'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

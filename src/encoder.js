@@ -111,6 +111,18 @@ class SRTEncoder extends EventEmitter {
     this.lastStats = null;   // FFmpeg encode metrics
     this.srtStats = null;   // Haivision libsrt connection stats
     this.startTime = null;
+    this.inputBitrate = null;
+    this.inputBitrateSource = null;
+    this._stopInputBitrateWatcher = null;
+    this._bitrateWatcherProc = null;
+    this._inputBitrateMeasuring = false;
+  }
+
+  _setInputBitrateMeasuring(measuring) {
+    const next = Boolean(measuring);
+    if (this._inputBitrateMeasuring === next) return;
+    this._inputBitrateMeasuring = next;
+    this.emit('stats', { inputBitrateMeasuring: next });
   }
 
   // ─── Input type detection ───────────────────────────────────────────────────
@@ -395,6 +407,9 @@ class SRTEncoder extends EventEmitter {
 
     this.process.on('exit', (code, signal) => {
       this.isRunning = false;
+      if (typeof this._stopInputBitrateWatcher === 'function') {
+        this._stopInputBitrateWatcher();
+      }
       this.process = null;
       // FFmpeg handles SIGTERM internally and exits with code 255 rather than
       // propagating the signal — treat 255 as a clean stop when we requested it.
@@ -414,14 +429,120 @@ class SRTEncoder extends EventEmitter {
     });
 
     this.emit('started', { id: this.id, input: this.input });
+    const inputType = this.detectInputType(this.input);
+    if ((inputType === 'udp' || inputType === 'rtp' || inputType === 'srt') && !this.inputBitrate) {
+      this._startInputBitrateWatcher();
+    }
     return this;
   }
 
   stop() {
     if (this.process && this.isRunning) {
+      if (typeof this._stopInputBitrateWatcher === 'function') {
+        this._stopInputBitrateWatcher();
+      }
       this._stopping = true;
       this.process.kill('SIGTERM');
     }
+  }
+
+  _startInputBitrateWatcher() {
+    const self = this;
+    if (typeof self._stopInputBitrateWatcher === 'function') return;
+
+    let watcherProc = null;
+    let watcherTimer = null;
+    let cancelled = false;
+
+    const runOnce = () => {
+      if (cancelled || !self.isRunning) return;
+      const watchInputType = self.detectInputType(self.input);
+      const inputFflags = (watchInputType === 'udp' || watchInputType === 'rtp')
+        ? ['-fflags', '+discardcorrupt+genpts']
+        : ['-fflags', '+discardcorrupt'];
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'error',
+        ...inputFflags,
+        '-analyzeduration', '1000000',
+        '-probesize', '2000000',
+        '-progress', 'pipe:2',
+        '-t', '4',
+        '-i', self.input,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'mpegts',
+        '-y', '/dev/null',
+      ];
+      watcherProc = spawn('ffmpeg', args);
+      self._bitrateWatcherProc = watcherProc;
+      let stderr = '';
+      const killTimer = setTimeout(() => {
+        try { watcherProc.kill('SIGTERM'); } catch (_) {}
+      }, 12000);
+      watcherProc.stderr.on('data', (d) => { stderr += d.toString(); });
+      watcherProc.on('error', () => {
+        clearTimeout(killTimer);
+      });
+      watcherProc.on('exit', () => {
+        clearTimeout(killTimer);
+        self._bitrateWatcherProc = null;
+        if (cancelled) return;
+        let totalSize = 0;
+        let outTimeUs = 0;
+        let progressKbps = 0;
+        for (const line of stderr.split('\n')) {
+          const eq = line.indexOf('=');
+          if (eq < 0) continue;
+          const k = line.slice(0, eq).trim();
+          const v = line.slice(eq + 1).trim();
+          if (k === 'total_size') totalSize = parseInt(v, 10) || totalSize;
+          if (k === 'out_time_us') outTimeUs = parseInt(v, 10) || outTimeUs;
+          if (k === 'bitrate') {
+            const m = v.match(/([\d.]+)\s*kbits/i);
+            if (m) progressKbps = parseFloat(m[1]) || progressKbps;
+          }
+        }
+        let kbps = null;
+        if (totalSize > 0 && outTimeUs > 0) {
+          const secs = outTimeUs / 1e6;
+          if (Number.isFinite(secs) && secs > 0.5) kbps = Math.round((totalSize * 8) / secs / 1000);
+        }
+        if (!kbps && progressKbps > 0) kbps = Math.round(progressKbps);
+        if (
+          kbps &&
+          kbps > 0 &&
+          self.isRunning &&
+          self.inputBitrateSource !== 'stream-descriptor'
+        ) {
+          self.inputBitrate = kbps;
+          self.inputBitrateSource = 'bitrate-watcher';
+          self.emit('stats', { inputBitrate: kbps });
+        }
+        self._setInputBitrateMeasuring(false);
+        if (!cancelled && self.isRunning) {
+          self._setInputBitrateMeasuring(true);
+          watcherTimer = setTimeout(runOnce, 30000);
+        }
+      });
+    };
+
+    self._setInputBitrateMeasuring(true);
+    runOnce();
+    self._stopInputBitrateWatcher = () => {
+      cancelled = true;
+      self._setInputBitrateMeasuring(false);
+      if (watcherTimer) {
+        clearTimeout(watcherTimer);
+        watcherTimer = null;
+      }
+      if (watcherProc) {
+        try { watcherProc.kill('SIGTERM'); } catch (_) {}
+        watcherProc = null;
+      }
+      self._bitrateWatcherProc = null;
+      self._stopInputBitrateWatcher = null;
+    };
   }
 
   // ─── Stats parsing ──────────────────────────────────────────────────────────
@@ -438,7 +559,9 @@ class SRTEncoder extends EventEmitter {
       if (unit.startsWith('m')) kbps = raw * 1000;
       if (Number.isFinite(kbps) && kbps > 0) {
         this.inputBitrate = kbps;
+        this.inputBitrateSource = 'stream-descriptor';
         this.emit('stats', { inputBitrate: this.inputBitrate });
+        if (typeof this._stopInputBitrateWatcher === 'function') this._stopInputBitrateWatcher();
       }
     }
 
@@ -461,11 +584,22 @@ class SRTEncoder extends EventEmitter {
       // Sample rate + channels for audio
       const mSr = detail.match(/([\d]+)\s*Hz/);
       if (mSr) entry.sampleRate = parseInt(mSr[1]);
+      const mBrK = detail.match(/([\d.]+)\s*kb\/s/i) || detail.match(/([\d.]+)\s*kbits\/s/i);
+      const mBrM = detail.match(/([\d.]+)\s*mb\/s/i) || detail.match(/([\d.]+)\s*mbits\/s/i);
+      if (mBrK) entry.bitrateKbps = parseFloat(mBrK[1]);
+      if (mBrM) entry.bitrateKbps = parseFloat(mBrM[1]) * 1000;
       // Replace existing entry for same source stream index or append.
       // This preserves multiple audio tracks from the same input.
       const idx = this.inputStreams.findIndex(s => s.sourceIndex === sourceIndex);
       if (idx >= 0) this.inputStreams[idx] = entry; else this.inputStreams.push(entry);
+      const summedKbps = this.inputStreams.reduce((acc, s) => acc + (s.bitrateKbps || 0), 0);
+      if (summedKbps > 0) {
+        this.inputBitrate = summedKbps;
+        this.inputBitrateSource = 'stream-descriptor';
+        if (typeof this._stopInputBitrateWatcher === 'function') this._stopInputBitrateWatcher();
+      }
       this.emit('stats', { inputStreams: this.inputStreams });
+      if (this.inputBitrate) this.emit('stats', { inputBitrate: this.inputBitrate });
     }
 
     // ── 1. FFmpeg encode progress ────────────────────────────────────────────
@@ -486,6 +620,16 @@ class SRTEncoder extends EventEmitter {
     if (Object.keys(encStats).length > 0) {
       this.lastStats = { ...this.lastStats, ...encStats };
       this.emit('stats', { ...encStats });
+    }
+    if (
+      this.videoCodec === 'copy' &&
+      encStats.bitrate &&
+      encStats.bitrate > 0 &&
+      !this.inputBitrate
+    ) {
+      this.inputBitrate = Math.round(encStats.bitrate);
+      this.inputBitrateSource = 'proxy-output';
+      this.emit('stats', { inputBitrate: this.inputBitrate });
     }
 
     // ── 2. Haivision libsrt statistics ──────────────────────────────────────
@@ -519,6 +663,17 @@ class SRTEncoder extends EventEmitter {
       if (Object.keys(srt).length > 0) {
         this.srtStats = srt;
         this.emit('srtStats', srt);
+        // srt-stats rateMbps is the OUTPUT SRT send rate.
+        // Only use it as an input-bitrate proxy when no direct measurement is available.
+        if (srt.rateMbps && srt.rateMbps > 0) {
+          const kbps = Math.round(srt.rateMbps * 1000);
+          const noDirectMeasure = !this.inputBitrateSource || this.inputBitrateSource === 'srt-stats';
+          if (noDirectMeasure && kbps !== this.inputBitrate) {
+            this.inputBitrate = kbps;
+            this.inputBitrateSource = 'srt-stats';
+            this.emit('stats', { inputBitrate: this.inputBitrate });
+          }
+        }
       }
     }
   }
@@ -535,6 +690,8 @@ class SRTEncoder extends EventEmitter {
       startTime: this.startTime,
       lastStats: this.lastStats,
       inputBitrate: this.inputBitrate || null,
+      inputBitrateSource: this.inputBitrateSource || null,
+      inputBitrateMeasuring: Boolean(this._inputBitrateMeasuring),
       inputStreams: this.inputStreams || null,
       srtStats: this.srtStats,
       encodeProfile: {

@@ -6,7 +6,7 @@ This manual is the operator and engineering runbook for LABOTECH support workflo
 
 - Safe deployment and rollback
 - Decoder and multiview refresh behavior
-- TS analysis accuracy path (`tsduck` preferred, fallback supported)
+- TS analysis accuracy path (NIC-capture preferred for arrival telemetry, `tsduck` and metadata fallback supported)
 - Stream View timeline usage
 - Common production troubleshooting patterns
 
@@ -65,15 +65,22 @@ sudo journalctl -u labotech -n 200 --no-pager
 
 LABOTECH uses a layered approach:
 
-1. `tsduck` (`tsanalyze --json`) for best transport-level accuracy
-2. FFmpeg transport bitrate probe as fallback
-3. ffprobe metadata paths for compatibility
+1. NIC packet-capture worker (`IATSniffer`) using `tshark` or `tcpdump` for IAT/jitter/loss telemetry in continuous mode
+2. `tsduck` (`tsanalyze --json`) for transport/SI enrichment
+3. FFmpeg transport bitrate probe as fallback
+4. ffprobe metadata paths for compatibility
 
 The UI labels bitrate provenance with `dvb.bitrateSource`:
 
 - `tsduck` (preferred)
 - `measured` (FFmpeg remux timing)
 - `format` or `streams` (fallback metadata paths)
+
+Arrival telemetry provenance is exposed with `dvb.arrival.captureMethod`:
+
+- `tshark` or `tcpdump` when NIC capture is active
+- `tsduck` when analyser-derived arrival telemetry is used
+- `unavailable` when capture tools are missing
 
 ### Current behavior in continuous mode
 
@@ -87,7 +94,26 @@ This reduces perceived UI lag while preserving periodic ground-truth sampling.
 
 ---
 
-## 3) `tsduck` Installation
+## 3) Capture Tool and `tsduck` Installation
+
+### NIC capture tools (`tshark` / `tcpdump`)
+
+Install one of the packet-capture tools for analyser IAT forensics:
+
+```bash
+sudo apt update
+sudo apt install -y tshark tcpdump
+```
+
+Verify:
+
+```bash
+which tshark || which tcpdump
+```
+
+If neither tool is installed, LABOTECH remains operational and marks arrival telemetry as analyser-derived/unavailable in diagnostics.
+
+### `tsduck` installation
 
 ### APT package available
 
@@ -136,6 +162,12 @@ Note: LABOTECH remains operational without `tsduck`; it will use fallback probes
 - Mouse crosshair and pointer UTC
 - Lane status at pointer
 - Event evidence panel (bitrate source, SI compliance, arrival metrics)
+- Pointer popup with lane-specific nearby ETR errors (`±30s`)
+- Marker legend:
+  - alarm = red dot
+  - ETR status = cyan tick
+  - analyser sample = green square
+- Lane baseline color at pointer reflects local severity (critical/warning/ok)
 
 ### Controls
 
@@ -145,6 +177,21 @@ Note: LABOTECH remains operational without `tsduck`; it will use fallback probes
   - `Absolute` (shared global scale across lanes)
 - Cursor mode:
   - `Freeze Cursor` to lock current UTC inspection point
+
+### Interpreting IAT/Jitter panels
+
+- IAT/jitter/loss values come from `dvb.arrival`.
+- If lane badge shows NIC capture (`tshark`/`tcpdump`), values are derived from raw packet timestamps on the selected NIC.
+- If lane badge shows analyser-derived, values come from analyser telemetry fallback.
+- If panel says telemetry is unavailable, check probe diagnostics shown in the same lane card:
+  - `tsduck attempted`
+  - `tsduck available`
+  - `tsduck ok`
+  - `tsduck error` (if any)
+  - `iatSniffer attempted`
+  - `iatSniffer captureMethod`
+  - `iatSniffer sampleCount`
+- Repeated identical status samples are intentionally de-noised in timeline plotting so the view does not look like a synthetic dotted line.
 
 ---
 
@@ -186,6 +233,7 @@ Toggle in Multiview header:
 - Priority blocks (P1/P2/P3)
 - Alarm log
 - Live UTC timeline
+- Monitor diagnostics (matched line count + last match UTC)
 
 ### DVB and PID reliability
 
@@ -201,6 +249,25 @@ If PID count or bitrate appears inconsistent:
 2. Check `bitrateSource` in UI.
 3. Validate `tsanalyze --version` on server.
 4. Verify analyser interval is not too aggressive for source/network conditions.
+
+PID inventory tables can show `(est.)` on bitrate cells. This marks TS remainder allocation to unresolved video PID rows (computed value, not direct per-PID measurement).
+
+### Encoder input bitrate provenance
+
+For live feeds where startup descriptors are missing, use `inputBitrateSource` to understand origin:
+
+- `srt-stats` for live SRT transport rate
+- `bitrate-watcher` for UDP/RTP periodic ffmpeg remux measurement
+- `proxy-output` for passthrough (`videoCodec=copy`) fallback
+- `stream-descriptor`/startup metadata when available
+
+### ETR monitor truthfulness checks
+
+1. Ensure monitor URL matches the exact path under test (host/port/protocol).
+2. For RTP/UDP, set `Input Bind IP` to pin monitor ingress path when required.
+3. Compare ETR UI diagnostics with backend logs:
+   - rising matched count and recent last-match time should align with observed faults.
+4. If transport faults are visible externally but not in UI, confirm monitor is attached to the same multicast group/interface as the external probe.
 
 ---
 

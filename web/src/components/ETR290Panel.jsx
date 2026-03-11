@@ -235,7 +235,18 @@ function collectPidRows(result) {
       bitrate: stream.bitrate || 0,
     });
   });
-  return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+  const sorted = rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+  const totalBps = result?.dvb?.bitrateBps || 0;
+  const knownBps = sorted.reduce((acc, row) => acc + (row.bitrate || 0), 0);
+  const unresolved = Math.max(0, totalBps - knownBps);
+  if (unresolved > 0) {
+    const firstVideo = sorted.find((row) => row.codecType === 'video' && (!row.bitrate || row.bitrate <= 0));
+    if (firstVideo) {
+      firstVideo.bitrate = unresolved;
+      firstVideo.bitrateEstimated = true;
+    }
+  }
+  return sorted;
 }
 
 function formatPidDisplay(pid, pidHex) {
@@ -523,7 +534,21 @@ export default function ETR290Panel({ lastMessage }) {
                       <td className="py-2 px-2 text-gray-300">{row.codecName}</td>
                       <td className="py-2 px-2 text-gray-400">{row.streamType}</td>
                       <td className="py-2 px-2 text-gray-400">{row.language}</td>
-                      <td className="py-2 px-2 text-gray-400">{row.bitrate > 0 ? `${(row.bitrate / 1e6).toFixed(2)} Mbps` : '-'}</td>
+                      <td className="py-2 px-2 text-gray-400">
+                        {row.bitrate > 0
+                          ? <>
+                              {(row.bitrate / 1e6).toFixed(2)} Mbps
+                              {row.bitrateEstimated && (
+                                <span
+                                  className="ml-1 text-[9px] text-amber-400 font-mono"
+                                  title="Estimated: TS container bitrate minus sum of resolved PID bitrates"
+                                >
+                                  (est.)
+                                </span>
+                              )}
+                            </>
+                          : '-'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -534,7 +559,17 @@ export default function ETR290Panel({ lastMessage }) {
           <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">Video Bitrate</div>
-              <div className="text-gray-200 font-mono mt-1">{`${videoBitrateMbps.toFixed(3)} Mbps`}</div>
+              <div className="text-gray-200 font-mono mt-1">
+                {`${videoBitrateMbps.toFixed(3)} Mbps`}
+                {selectedRows.some(r => r.codecType === 'video' && r.bitrateEstimated) && (
+                  <span
+                    className="ml-1 text-[9px] text-amber-400 font-mono"
+                    title="Video bitrate includes remainder allocation - not a per-PID measured value"
+                  >
+                    (est.)
+                  </span>
+                )}
+              </div>
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">Audio Bitrate</div>

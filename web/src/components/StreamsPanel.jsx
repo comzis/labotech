@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
 import { stopStream, stopTranscoder } from '../api';
@@ -8,6 +8,7 @@ import EncoderForm from './EncoderForm';
 import { motion } from 'framer-motion';
 
 const THUMB_BASE = '/logs/thumbnails';
+const EMBED_REFRESH_MS = parseInt(import.meta.env?.VITE_THUMB_INTERVAL_MS, 10) || 5000;
 // Output mode pill — colour-coded for quick identification at a glance
 const MODE_STYLE = {
   srt: 'bg-sky-900/60    text-sky-300    border-sky-700/40',
@@ -159,7 +160,16 @@ export default function StreamsPanel({ lastMessage }) {
                   )}
                 </div>
                 <div className="text-[11px] font-mono text-gray-500">
-                  Input bitrate: {s.inputBitrate ? `${(s.inputBitrate / 1000).toFixed(2)} Mbps` : 'pending sample'} · Output bitrate: {s.lastStats?.bitrate ? `${(s.lastStats.bitrate / 1000).toFixed(2)} Mbps` : 'pending sample'}
+                  Input bitrate: {s.inputBitrate
+                    ? `${(s.inputBitrate / 1000).toFixed(2)} Mbps${s.inputBitrateSource ? ` (${s.inputBitrateSource})` : ''}`
+                    : s.inputBitrateMeasuring
+                      ? 'measuring...'
+                      : s.isRunning
+                        ? 'pending'
+                        : '-'
+                  } · Output bitrate: {s.lastStats?.bitrate
+                    ? `${(s.lastStats.bitrate / 1000).toFixed(2)} Mbps`
+                    : s.isRunning ? 'pending' : '-'}
                 </div>
 
                 {/* Audio pairs summary */}
@@ -201,7 +211,13 @@ export default function StreamsPanel({ lastMessage }) {
 
                 {s.isRunning && (
                   <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
-                    <MetricsTile id={s.id} stats={s.lastStats} inputBitrate={s.inputBitrate} lastMessage={lastMessage} />
+                    <MetricsTile
+                      id={s.id}
+                      stats={s.lastStats}
+                      inputBitrate={s.inputBitrate}
+                      inputBitrateMeasuring={s.inputBitrateMeasuring}
+                      lastMessage={lastMessage}
+                    />
                     <ConfidenceEmbed stream={s} />
                   </div>
                 )}
@@ -215,8 +231,17 @@ export default function StreamsPanel({ lastMessage }) {
 }
 
 function ConfidenceEmbed({ stream }) {
-  const [imgError, setImgError] = React.useState(false);
-  const thumbUrl = `${THUMB_BASE}/${stream.id}.jpg?t=${Date.now()}`;
+  const [imgError, setImgError] = useState(false);
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => setTick((v) => v + 1), EMBED_REFRESH_MS);
+    return () => clearInterval(timer);
+  }, []);
+  useEffect(() => {
+    // Retry thumbnail load each refresh tick.
+    setImgError(false);
+  }, [tick, stream.id]);
+  const thumbUrl = `${THUMB_BASE}/${stream.id}.jpg?t=${tick}`;
   const outputMbps = stream?.lastStats?.bitrate ? (stream.lastStats.bitrate / 1000).toFixed(2) : null;
   const inputMbps = stream?.inputBitrate ? (stream.inputBitrate / 1000).toFixed(2) : null;
 

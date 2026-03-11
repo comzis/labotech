@@ -7,7 +7,6 @@ import TranscodePanel from './components/TranscodePanel';
 import MulticastPanel from './components/MulticastPanel';
 import TSAnalyser from './components/TSAnalyser';
 import DecoderPanel from './components/DecoderPanel';
-import ConfidenceMonitor from './components/ConfidenceMonitor';
 import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
 import StreamViewPanel from './components/StreamViewPanel';
 import APIPanel from './components/APIPanel';
@@ -23,7 +22,6 @@ const TABS = [
   { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
   { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
   { id: 'streamView', label: 'Live View',   icon: LineChart,   led: '#66ccff' },
-  { id: 'confidence', label: 'Confidence',  icon: ShieldCheck, led: '#ff2233' },
   { id: 'api',        label: 'API',         icon: Terminal,    led: '#aaaaaa' },
 ];
 
@@ -291,7 +289,6 @@ export default function App() {
           {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
           {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
           {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} />}
-          {tab === 'confidence' && <ConfidenceMonitor lastMessage={lastMessage} />}
           {tab === 'api'        && <APIPanel />}
         </motion.div>
       </main>
