@@ -215,7 +215,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
           <div className="flex items-center justify-between text-[10px] mb-1">
             <span className="engraved uppercase tracking-widest">Audio</span>
             <span className="font-mono" style={{ color: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55' }}>
-              {displayMeanDb != null ? `${displayMeanDb.toFixed(1)} dB` : 'n/a'}
+              {displayMeanDb != null ? `${displayMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
           <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
