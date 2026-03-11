@@ -72,6 +72,7 @@ function toEvent(msg) {
         siIntervalsSec: si.intervalsSec || null,
         siCompliance: compliance || null,
         arrival: dvb.arrival || null,
+        probeDiagnostics: dvb.probeDiagnostics || null,
       },
     };
   }
@@ -83,6 +84,14 @@ function colorForSeverity(severity) {
   if (severity === 'warning') return '#ffaa00';
   if (severity === 'ok') return '#00dd55';
   return '#00ddff';
+}
+
+function laneColorForEvent(event) {
+  if (!event) return '#ffffff26';
+  if (event.severity === 'critical') return '#ff2233aa';
+  if (event.severity === 'warning') return '#ffaa00aa';
+  if (event.severity === 'ok') return '#00dd5566';
+  return '#66ccff66';
 }
 
 function num(v, digits = 3) {
@@ -102,6 +111,16 @@ export default function StreamViewPanel({ lastMessage }) {
     const event = toEvent(lastMessage);
     if (!event) return;
     setEvents((prev) => {
+      const lastSimilar = [...prev].reverse().find((e) => e.id === event.id && e.category === event.category);
+      if (lastSimilar) {
+        const sameSeverity = lastSimilar.severity === event.severity;
+        const sameTitle = lastSimilar.title === event.title;
+        const dt = Math.abs(event.ts - lastSimilar.ts);
+        // De-noise repetitive status/analyser points so timeline is not a dotted mock line.
+        if (sameSeverity && sameTitle && dt < 8000 && event.category !== 'etr290_alarm') {
+          return prev;
+        }
+      }
       const next = [...prev, event];
       return next.slice(-500);
     });
@@ -175,6 +194,21 @@ export default function StreamViewPanel({ lastMessage }) {
       return { id, event: best };
     });
   }, [mouseX, laneIds, laneMap]);
+
+  const selectedLaneId = hovered?.id || lanePointerStatus.find((row) => row.event)?.id || null;
+  const selectedLaneEvent = selectedLaneId
+    ? lanePointerStatus.find((row) => row.id === selectedLaneId)?.event || null
+    : null;
+
+  const lanePointerErrors = useMemo(() => {
+    if (!selectedLaneId || pointerUtc == null) return [];
+    const halfWindowMs = 30 * 1000; // show nearby context around pointer
+    return (laneMap[selectedLaneId] || [])
+      .filter((e) => e.category === 'etr290_alarm')
+      .filter((e) => Math.abs(e.ts - pointerUtc) <= halfWindowMs)
+      .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
+      .slice(0, 5);
+  }, [selectedLaneId, pointerUtc, laneMap]);
 
   const forensicByLane = useMemo(() => {
     const byLane = {};
@@ -264,6 +298,20 @@ export default function StreamViewPanel({ lastMessage }) {
             </button>
           </div>
         </div>
+        <div className="mb-2 flex items-center gap-3 text-[10px] text-gray-500 font-mono">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+            alarm
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block w-2 h-3 rounded-[1px] bg-neon-cyan" />
+            status sample
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block w-2 h-2 rounded-sm bg-green-500" />
+            analyse sample
+          </span>
+        </div>
 
         <div
           className="relative rounded-xl border border-white/10 bg-black/30 overflow-hidden"
@@ -302,21 +350,25 @@ export default function StreamViewPanel({ lastMessage }) {
           ) : (
             laneIds.map((id, laneIdx) => {
               const y = 52 + laneIdx * 34;
+              const laneEventAtPointer = lanePointerStatus.find((row) => row.id === id)?.event || null;
+              const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
               return (
                 <div key={id}>
-                  <div className="absolute left-0 right-0 h-px bg-white/15" style={{ top: `${y}px` }} />
+                  <div className="absolute left-0 right-0 h-px" style={{ top: `${y}px`, background: lineColor }} />
                   <div className="absolute left-2 -translate-y-1/2 text-[10px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
                     {id}
                   </div>
                   {(laneMap[id] || []).map((e) => (
                     <div
                       key={e.key}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border"
+                      className={`absolute -translate-x-1/2 -translate-y-1/2 border ${
+                        e.category === 'etr290_status' ? 'rounded-[1px]' : e.category === 'analyse_result' ? 'rounded-sm' : 'rounded-full'
+                      }`}
                       style={{
                         left: `${e.xPct}%`,
                         top: `${y}px`,
-                        width: e.category === 'etr290_alarm' ? '10px' : '8px',
-                        height: e.category === 'etr290_alarm' ? '10px' : '8px',
+                        width: e.category === 'etr290_alarm' ? '10px' : e.category === 'etr290_status' ? '2px' : '8px',
+                        height: e.category === 'etr290_alarm' ? '10px' : e.category === 'etr290_status' ? '12px' : '8px',
                         background: colorForSeverity(e.severity),
                         borderColor: `${colorForSeverity(e.severity)}77`,
                         boxShadow: `0 0 8px ${colorForSeverity(e.severity)}88`,
@@ -327,6 +379,42 @@ export default function StreamViewPanel({ lastMessage }) {
                 </div>
               );
             })
+          )}
+
+          {/* Pointer popup with lane-specific error context */}
+          {mouseX != null && selectedLaneId && (
+            <div
+              className="absolute z-20 w-[360px] max-w-[92%] rounded-lg border border-white/15 bg-black/90 backdrop-blur-md p-2.5 text-[11px]"
+              style={{
+                left: `clamp(8px, calc(${mouseX}% + 12px), calc(100% - 368px))`,
+                top: '28px',
+                boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
+              }}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="font-mono text-gray-200">{selectedLaneId}</div>
+                <div className="font-mono text-gray-500">{pointerUtc ? toUtc(pointerUtc) : '-'}</div>
+              </div>
+              <div className="mt-1 text-gray-400">
+                {selectedLaneEvent ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}` : 'No event at pointer'}
+              </div>
+              <div className="mt-2 border-t border-white/10 pt-2">
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Nearby Errors (±30s)</div>
+                {lanePointerErrors.length === 0 ? (
+                  <div className="text-gray-500">No ETR alarms near pointer time.</div>
+                ) : (
+                  <div className="space-y-1.5 max-h-36 overflow-auto">
+                    {lanePointerErrors.map((e) => (
+                      <div key={e.key} className="rounded border border-red-500/25 bg-red-900/15 px-2 py-1">
+                        <div className="text-red-300 font-mono">{e.title}</div>
+                        <div className="text-gray-400">{toUtc(e.ts)}</div>
+                        <div className="text-gray-500 truncate">{e.description || '-'}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
@@ -386,11 +474,25 @@ export default function StreamViewPanel({ lastMessage }) {
                 const lane = forensicByLane[id];
                 const latest = lane?.latest?.evidence?.arrival || null;
                 const latestIat = latest?.iatMs || {};
+                const latestDiag = lane?.latest?.evidence?.probeDiagnostics?.tsduck || null;
+                const hasForensicMetrics = Boolean(latest) || (lane?.iatMin?.length || lane?.iatAvg?.length || lane?.iatP95?.length || lane?.jitter?.length || lane?.loss?.length);
                 return (
                   <div key={`forensic-${id}`} className="rounded border border-white/10 bg-black/30 p-2">
                     <div className="font-mono text-gray-300 mb-2">{id}</div>
                     {!lane || lane.samples.length === 0 ? (
                       <div className="text-gray-500">No analyse samples yet for this lane.</div>
+                    ) : !hasForensicMetrics ? (
+                      <div className="text-gray-500">
+                        Analyse samples received, but arrival telemetry is unavailable.
+                        {latestDiag ? (
+                          <span className="block mt-1 text-[10px]">
+                            tsduck attempted: {String(latestDiag.attempted)} · available: {String(latestDiag.available)} · ok: {String(latestDiag.ok)}
+                            {latestDiag.error ? ` · error: ${latestDiag.error}` : ''}
+                          </span>
+                        ) : (
+                          <span className="block mt-1 text-[10px]">No probe diagnostics in sample payload.</span>
+                        )}
+                      </div>
                     ) : (
                       <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
