@@ -131,7 +131,8 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
     });
   }, [nowMs, audioSeenAt, displayMeanDb]);
 
-  const hasThumb = Boolean(displaySrc || candidateSrc) && !thumbFailed;
+  // Keep showing the last known-good image even if a newer refresh token fails.
+  const hasThumb = Boolean(displaySrc) || (Boolean(candidateSrc) && !thumbFailed);
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
   const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
   const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
@@ -180,7 +181,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             alt={`${id} thumbnail`}
             className="absolute inset-0 w-full h-full"
             style={{ objectFit: 'cover', objectPosition: 'center', display: 'block' }}
-            onError={() => setThumbFailed(true)}
+            onError={() => setThumbFailed(!displaySrc)}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
