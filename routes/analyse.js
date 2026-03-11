@@ -33,11 +33,11 @@ module.exports = function(analysers, wss) {
 
   // POST /analyse/start  (continuous)
   router.post('/start', (req, res) => {
-    const { id, url, interval } = req.body;
+    const { id, url, interval, nicName } = req.body;
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (analysers.has(id)) return res.status(409).json({ error: `Analyser ${id} already exists` });
 
-    const analyser = new TSAnalyser({ id, url, interval });
+    const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined });
 
     analyser.on('result', result => broadcast({ type: 'analyse_result', id, ...result }));
     analyser.on('error',  err    => broadcast({ type: 'error', id, message: err.message }));

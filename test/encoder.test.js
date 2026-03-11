@@ -419,4 +419,18 @@ describe('SRTEncoder', () => {
       expect(() => bad.buildFFmpegArgs()).toThrow(/Invalid stream id/);
     });
   });
+
+  describe('inputBitrateWatchAttempts', () => {
+    test('initialises to 0', () => {
+      const testEnc = new SRTEncoder({ id: 'test-attempts', input: 'udp://239.1.1.1:5000' });
+      expect(testEnc._inputBitrateWatchAttempts).toBe(0);
+    });
+
+    test('toJSON includes inputBitrateWatchAttempts', () => {
+      const testEnc = new SRTEncoder({ id: 'test-attempts-json', input: 'udp://239.1.1.1:5000' });
+      testEnc._inputBitrateWatchAttempts = 4;
+      const json = testEnc.toJSON();
+      expect(json.inputBitrateWatchAttempts).toBe(4);
+    });
+  });
 });

@@ -7,10 +7,10 @@ export default function useETR290() {
   const [activeIds, setActiveIds] = useState([]);
   const [error,    setError]    = useState(null);
 
-  const start = useCallback(async (id, url) => {
+  const start = useCallback(async (id, url, nicName) => {
     setError(null);
     try {
-      const s = await startETR290({ id, url });
+      const s = await startETR290({ id, url, ...(nicName ? { nicName } : {}) });
       setStatusById(prev => ({ ...prev, [id]: s }));
       setActiveIds(prev => (prev.includes(id) ? prev : [...prev, id]));
       setActiveId(id);

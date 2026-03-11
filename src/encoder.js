@@ -116,6 +116,7 @@ class SRTEncoder extends EventEmitter {
     this._stopInputBitrateWatcher = null;
     this._bitrateWatcherProc = null;
     this._inputBitrateMeasuring = false;
+    this._inputBitrateWatchAttempts = 0;
   }
 
   _setInputBitrateMeasuring(measuring) {
@@ -456,6 +457,7 @@ class SRTEncoder extends EventEmitter {
 
     const runOnce = () => {
       if (cancelled || !self.isRunning) return;
+      self._inputBitrateWatchAttempts += 1;
       const watchInputType = self.detectInputType(self.input);
       const inputFflags = (watchInputType === 'udp' || watchInputType === 'rtp')
         ? ['-fflags', '+discardcorrupt+genpts']
@@ -517,7 +519,14 @@ class SRTEncoder extends EventEmitter {
         ) {
           self.inputBitrate = kbps;
           self.inputBitrateSource = 'bitrate-watcher';
-          self.emit('stats', { inputBitrate: kbps });
+          self.emit('stats', { inputBitrate: kbps, inputBitrateWatchAttempts: self._inputBitrateWatchAttempts });
+        }
+        if (kbps && kbps > 0) {
+          self.emit('info', {
+            message: `Input bitrate resolved: ${kbps} kbps (attempts: ${self._inputBitrateWatchAttempts})`,
+            inputBitrate: kbps,
+            inputBitrateWatchAttempts: self._inputBitrateWatchAttempts,
+          });
         }
         self._setInputBitrateMeasuring(false);
         // Only reschedule if measurement was inconclusive (kbps still null).
@@ -696,6 +705,7 @@ class SRTEncoder extends EventEmitter {
       inputBitrate: this.inputBitrate || null,
       inputBitrateSource: this.inputBitrateSource || null,
       inputBitrateMeasuring: Boolean(this._inputBitrateMeasuring),
+      inputBitrateWatchAttempts: this._inputBitrateWatchAttempts || 0,
       inputStreams: this.inputStreams || null,
       srtStats: this.srtStats,
       encodeProfile: {

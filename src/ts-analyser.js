@@ -26,6 +26,7 @@ class TSAnalyser extends EventEmitter {
     this.isRunning = false;
     this.lastResult = null;
     this._continuousProbeCount = 0;
+    this.nicName = options.nicName || _getNicName();
     this._iatSniffer = null;
   }
 
@@ -960,7 +961,7 @@ class TSAnalyser extends EventEmitter {
     if (this.isRunning) return;
     this.isRunning = true;
     if (!this._iatSniffer) {
-      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: _getNicName() });
+      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: this.nicName });
       this._iatSniffer.start();
     }
 
@@ -1007,3 +1008,5 @@ class TSAnalyser extends EventEmitter {
 }
 
 module.exports = TSAnalyser;
+module.exports._getNicName = _getNicName;
+module.exports._resetNicNameCache = () => { _multicastConfig = null; };
