@@ -131,6 +131,53 @@ function AlarmTable({ alarms }) {
   );
 }
 
+function formatUtc(ts) {
+  if (!ts) return '-';
+  const d = new Date(ts);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toISOString().replace('T', ' ').replace('Z', ' UTC');
+}
+
+function AlarmTimeline({ alarms }) {
+  if (!alarms?.length) {
+    return <p className="text-gray-600 text-xs text-center py-4">No recent timeline events</p>;
+  }
+  const sorted = [...alarms]
+    .filter((a) => a?.time)
+    .sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime());
+  return (
+    <div className="max-h-64 overflow-auto rounded-xl border border-white/5 bg-black/20 p-3">
+      <div className="text-[10px] uppercase tracking-widest text-gray-500 mb-2">
+        Live Timeline (UTC)
+      </div>
+      <div className="space-y-2">
+        {sorted.map((alarm, idx) => {
+          const pri = (alarm.priority || '-').toUpperCase();
+          const priClass = pri === 'P1'
+            ? 'text-red-300 border-red-500/30 bg-red-900/20'
+            : pri === 'P2'
+              ? 'text-amber-300 border-amber-500/30 bg-amber-900/20'
+              : 'text-sky-300 border-sky-500/30 bg-sky-900/20';
+          return (
+            <div key={`${alarm.time}-${idx}`} className="relative pl-4">
+              <span className="absolute left-0 top-2 h-2 w-2 rounded-full bg-neon-cyan/70" />
+              <div className="absolute left-[3px] top-4 bottom-[-10px] w-px bg-white/10" />
+              <div className="rounded-lg border border-white/10 bg-black/30 p-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className={`text-[10px] px-1.5 py-0.5 rounded border font-mono ${priClass}`}>{pri}</span>
+                  <span className="text-[10px] text-gray-500 font-mono">{formatUtc(alarm.time)}</span>
+                </div>
+                <div className="mt-1 text-xs text-gray-300 font-mono">{alarm.label || '-'}</div>
+                <div className="text-[11px] text-gray-500">{alarm.message || '-'}</div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 const PROBE_MODES = [
   { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
@@ -248,7 +295,7 @@ export default function ETR290Panel({ lastMessage }) {
   const selectedRows = activeId ? collectPidRows(dvbByMonitorId[activeId]) : [];
   const videoBitrateMbps = selectedRows.filter(r => r.codecType === 'video').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
   const audioBitrateMbps = selectedRows.filter(r => r.codecType === 'audio').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
-  const displayedBitrateMbps = status?.runtime?.bitrateMbps
+  const displayedBitrateMbps = (selectedDvb?.measuredBitrateBps ? selectedDvb.measuredBitrateBps / 1e6 : null)
     ?? (selectedDvb?.formatBitrateBps ? selectedDvb.formatBitrateBps / 1e6 : null)
     ?? (selectedDvb?.bitrateBps ? selectedDvb.bitrateBps / 1e6 : null);
 
@@ -370,6 +417,11 @@ export default function ETR290Panel({ lastMessage }) {
               <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.patPid ?? 0)}</div>
             </div>
           </div>
+          {selectedDvb?.bitrateSource && (
+            <div className="mt-1 text-[10px] text-gray-500">
+              TS bitrate source: {selectedDvb.bitrateSource}
+            </div>
+          )}
           {(dvbByMonitorId[activeId].dvb.services || []).length > 0 && (
             <div className="mt-4 overflow-x-auto">
               <table className="w-full text-xs font-mono">
@@ -492,6 +544,9 @@ export default function ETR290Panel({ lastMessage }) {
             Alarm Log
           </h3>
           <AlarmTable alarms={status.recentAlarms} />
+          <div className="mt-3">
+            <AlarmTimeline alarms={status.recentAlarms} />
+          </div>
         </div>
       )}
     </div>

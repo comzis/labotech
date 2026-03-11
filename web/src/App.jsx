@@ -10,6 +10,7 @@ import DecoderPanel from './components/DecoderPanel';
 import ConfidenceMonitor from './components/ConfidenceMonitor';
 import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
 import APIPanel from './components/APIPanel';
+import StreamViewPanel from './components/StreamViewPanel';
 import useWebSocket from './hooks/useWebSocket';
 import { getHealth } from './api';
 
@@ -20,6 +21,7 @@ const TABS = [
   { id: 'multicast',  label: 'Forwarding',  icon: Network,     led: '#2299ff' },
   { id: 'decoder',    label: 'Decoder',     icon: Cpu,         led: '#00ddff' },
   { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
+  { id: 'streamView', label: 'Stream View', icon: Activity,    led: '#66ccff' },
   { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
   { id: 'confidence', label: 'Confidence',  icon: ShieldCheck, led: '#ff2233' },
   { id: 'api',        label: 'API',         icon: Terminal,    led: '#aaaaaa' },
@@ -287,6 +289,7 @@ export default function App() {
           {tab === 'multicast'  && <MulticastPanel lastMessage={lastMessage} />}
           {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} />}
           {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
+          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} />}
           {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
           {tab === 'confidence' && <ConfidenceMonitor lastMessage={lastMessage} />}
           {tab === 'api'        && <APIPanel />}

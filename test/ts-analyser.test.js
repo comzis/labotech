@@ -121,10 +121,59 @@ describe('TSAnalyser', () => {
       expect(r.dvb.pidCount).toBe(1);
     });
 
+    test('creates orphan PID rows when pid map has unseen indexes', () => {
+      const base = analyser.parseStructure({ programs: [], streams: [] });
+      const patched = analyser._applyPidMap(base, { 5: 0x0200, 6: 0x0201 });
+      const pids = (patched.orphanStreams || []).map((s) => s.pid).sort((a, b) => a - b);
+      expect(pids).toEqual([0x0200, 0x0201]);
+      expect(patched.dvb.pidCount).toBeGreaterThanOrEqual(2);
+    });
+
     test('returns probeTime', () => {
       const before = Date.now();
       const r = analyser.parseStructure(mockRaw);
       expect(r.probeTime).toBeGreaterThanOrEqual(before);
+    });
+
+    test('applies tsduck enrichment for bitrate/services/pids', () => {
+      const base = analyser.parseStructure(mockRaw);
+      const enriched = analyser._applyTSDuckData(base, {
+        bitrateBps: 21400000,
+        services: [{ serviceId: 1, serviceName: 'BBC One HD', serviceProvider: 'BBC' }],
+        pids: [
+          { pid: 0x0110, codecType: 'data', codecName: 'private_data', streamType: '0x06', bitrate: 64000 },
+        ],
+      });
+      expect(enriched.dvb.bitrateBps).toBe(21400000);
+      expect(enriched.dvb.bitrateSource).toBe('tsduck');
+      expect(enriched.dvb.services[0].serviceName).toBe('BBC One HD');
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0110)).toBe(true);
+    });
+  });
+
+  describe('tsduck helpers', () => {
+    test('extracts tsduck bitrate from mixed payload', () => {
+      const payload = {
+        stream: { bitrate: '900 kbits/s' },
+        transport: { bitrate: '21.4 Mbps' },
+      };
+      expect(analyser._extractTSDuckBitrateBps(payload)).toBe(21400000);
+    });
+
+    test('extracts SI intervals and compliance-ready structure', () => {
+      const payload = {
+        tables: {
+          nit: { repetition_interval: 9.5, unit: 's' },
+          sdt: { repetition_interval: 1.8, unit: 's' },
+          eit_pf: { repetition_interval_ms: 1800, unit: 'ms' },
+          tdt: { repetition_interval: 28, unit: 's' },
+        },
+      };
+      const si = analyser._extractTSDuckSIIntervalsSec(payload);
+      expect(si.nit).toBe(9.5);
+      expect(si.sdt).toBe(1.8);
+      expect(si.eitPf).toBe(1.8);
+      expect(si.tdt).toBe(28);
     });
   });
 
