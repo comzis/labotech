@@ -159,6 +159,7 @@ class IATSniffer extends EventEmitter {
     const proc = spawn(this.captureMethod, args);
     this._proc = proc;
     let buf = '';
+    let stderrBuf = '';
 
     proc.stdout.on('data', (d) => {
       buf += d.toString();
@@ -169,18 +170,25 @@ class IATSniffer extends EventEmitter {
         if (trimmed) parser(trimmed);
       }
     });
-    proc.stderr.on('data', () => {});
+    proc.stderr.on('data', (d) => {
+      stderrBuf += d.toString();
+      if (stderrBuf.length > 2000) stderrBuf = stderrBuf.slice(-2000);
+    });
     proc.on('error', (err) => {
       this.captureMethod = 'unavailable';
       this.lastError = err && err.message ? err.message : 'capture process error';
       this.emit('unavailable', { id: this.id, reason: this.lastError });
-      this.emit('error', err);
+      if (this.listenerCount('error') > 0) this.emit('error', err);
       this.stop();
     });
     proc.on('exit', (code) => {
       if (this.isRunning && code !== 0) {
-        this.lastError = `${this.captureMethod} exited ${code}`;
-        this.emit('error', new Error(this.lastError));
+        const reason = (stderrBuf || '').trim().split('\n').slice(-1)[0];
+        this.lastError = reason
+          ? `${this.captureMethod} exited ${code}: ${reason}`
+          : `${this.captureMethod} exited ${code}`;
+        this.emit('unavailable', { id: this.id, reason: this.lastError });
+        if (this.listenerCount('error') > 0) this.emit('error', new Error(this.lastError));
         this.stop();
       }
     });
