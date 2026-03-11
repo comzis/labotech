@@ -220,7 +220,7 @@ export default function StreamsPanel({ lastMessage }) {
                 )}
 
                 {s.isRunning && (
-                  <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_280px] gap-3 items-start">
                     <MetricsTile
                       id={s.id}
                       stats={s.lastStats}
@@ -253,7 +253,8 @@ function ConfidenceEmbed({ stream }) {
   }, [tick, stream.id]);
   const thumbUrl = `${THUMB_BASE}/${stream.id}.jpg?t=${tick}`;
   const outputMbps = stream?.lastStats?.bitrate ? (stream.lastStats.bitrate / 1000).toFixed(2) : null;
-  const inputMbps = stream?.inputBitrate ? (stream.inputBitrate / 1000).toFixed(2) : null;
+  const inputBr = Number(stream?.inputBitrate);
+  const inputMbps = Number.isFinite(inputBr) && inputBr > 0 ? (inputBr / 1000).toFixed(2) : null;
 
   return (
     <div className="bg-black/20 border border-white/5 rounded-2xl p-3 space-y-2">

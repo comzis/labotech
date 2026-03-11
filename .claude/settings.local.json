@@ -18,7 +18,10 @@
       "Bash(git push:*)",
       "Bash(ffmpeg:*)",
       "Bash(claude plugin:*)",
-      "Bash(find /Users/comzis/GitHub/LaboTech -name \"*.json\" -path \"*marketplace*\" 2>/dev/null | head -5; cat /Users/comzis/GitHub/LaboTech/.claude/settings.local.json)"
+      "Bash(find /Users/comzis/GitHub/LaboTech -name \"*.json\" -path \"*marketplace*\" 2>/dev/null | head -5; cat /Users/comzis/GitHub/LaboTech/.claude/settings.local.json)",
+      "Bash(gh issue:*)",
+      "Bash(gh label:*)",
+      "Bash(gh auth:*)"
     ]
   }
 }

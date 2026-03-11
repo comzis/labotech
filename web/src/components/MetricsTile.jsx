@@ -24,8 +24,9 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
     if ((lastMessage.type === 'stats' || lastMessage.type === 'transcode_stats') && lastMessage.id === id) {
       setCurrent(lastMessage);
       setHistory(h => [...h.slice(-(MAX_HISTORY - 1)), { t: h.length, v: lastMessage.bitrate || 0 }]);
-      if (lastMessage.inputBitrate) {
-        setInputBitrate(lastMessage.inputBitrate);
+      const msgInputBr = Number(lastMessage.inputBitrate);
+      if (Number.isFinite(msgInputBr) && msgInputBr > 0) {
+        setInputBitrate(msgInputBr);
         setInputBitrateMeasuring(false);
       }
       if (lastMessage.inputBitrateMeasuring != null) {
@@ -46,8 +47,9 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
   }, [lastMessage, id]);
 
   useEffect(() => {
-    if (initInputBr != null && Number.isFinite(initInputBr) && initInputBr > 0) {
-      setInputBitrate(initInputBr);
+    const normalizedInit = Number(initInputBr);
+    if (Number.isFinite(normalizedInit) && normalizedInit > 0) {
+      setInputBitrate(normalizedInit);
     }
   }, [initInputBr]);
   useEffect(() => {
@@ -56,7 +58,10 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
 
   // Broadcast standard: display TS bitrate in Mbps
   const mbps      = current?.bitrate ? (current.bitrate / 1000).toFixed(2) : null;
-  const inputMbps = inputBitrate ? (inputBitrate / 1000).toFixed(2) : null;
+  const normalizedInput = Number(inputBitrate);
+  const inputMbps = Number.isFinite(normalizedInput) && normalizedInput > 0
+    ? (normalizedInput / 1000).toFixed(2)
+    : null;
   const fps    = current?.fps     ? current.fps     : null;
   const speed  = current?.speed   ? current.speed   : null;
   const frame  = current?.frame   ? current.frame   : null;

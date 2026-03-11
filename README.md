@@ -270,7 +270,14 @@ SRT_PORT=9999
 SRT_LATENCY=2000
 SNMP_MANAGER_HOST=10.67.18.1
 SYSLOG_HOST=10.67.18.1
+THUMBNAIL_INTERVAL_SEC=5
+THUMBNAIL_QUALITY_PROFILE=high
 ```
+
+Thumbnail quality profile options:
+
+- `THUMBNAIL_QUALITY_PROFILE=high` (default): 640px capture, cleaner multiview image, higher CPU.
+- `THUMBNAIL_QUALITY_PROFILE=low`: 320px capture, lower CPU, lower visual quality.
 
 ---
 

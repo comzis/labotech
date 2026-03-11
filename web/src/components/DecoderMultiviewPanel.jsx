@@ -12,11 +12,13 @@ function countPids(result) {
 }
 
 function resolveDisplayBitrateMbps(result) {
-  // dvb.bitrateBps is the backend's best value: measured TS rate > format rate > ES sum.
-  // Never use formatBitrateBps directly — ffprobe's format-level estimate is unreliable
-  // for live RTP/UDP multicast (typically reports only decoded ES bitrate, not full TS rate).
+  // Prefer transport-level measurements for multiview consistency.
+  // format-only estimates on live RTP/UDP can be misleadingly low.
+  const measuredBps = result?.dvb?.measuredBitrateBps || result?.dvb?.tsduckBitrateBps;
+  if (measuredBps != null && measuredBps > 0) return measuredBps / 1e6;
   const bps = result?.dvb?.bitrateBps;
-  if (bps != null && bps > 0) return bps / 1e6;
+  const source = result?.dvb?.bitrateSource;
+  if (bps != null && bps > 0 && source && source !== 'format') return bps / 1e6;
   // Last-resort: sum individual ES bitrates (always an undercount)
   const total = (result?.programs || [])
     .flatMap(p => p.streams || [])
@@ -100,7 +102,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
         </button>
       </div>
 
-      {/* Thumbnail monitor — explicit 16:9 with visible frame */}
+      {/* Thumbnail monitor — keep full frame without artificial overlays */}
       <div
         className="relative w-full overflow-hidden shrink-0"
         style={{ aspectRatio: '16/9', background: '#080808', borderBottom: '1px solid #1a1a1a', outline: '2px solid #1a1a1a' }}
@@ -110,7 +112,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             src={thumbSrc}
             alt={`${id} thumbnail`}
             className="absolute inset-0 w-full h-full"
-            style={{ objectFit: 'cover', display: 'block' }}
+            style={{ objectFit: 'contain', display: 'block' }}
             onError={() => setThumbFailed(true)}
           />
         ) : (
@@ -119,11 +121,6 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             <span className="text-[9px] engraved uppercase tracking-widest">No Signal</span>
           </div>
         )}
-        {/* CRT scanline overlay */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px)' }}
-        />
       </div>
 
       {/* Info panel */}
