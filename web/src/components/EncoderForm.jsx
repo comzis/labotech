@@ -6,7 +6,7 @@ import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
 
 const DEFAULTS = {
-  id: '', input: '', inputLocalAddr: '',
+  id: '', inputMode: 'rtp', inputHost: '', inputPort: '6501', input: '', inputLocalAddr: '',
   // Output transport
   outputMode: 'srt',
   host: '', port: '9999', latency: '2000', passphrase: '', pbkeylen: '16', adapter: '', streamId: '',
@@ -20,6 +20,17 @@ const DEFAULTS = {
 };
 
 const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
+
+function buildInputUrl(inputMode, inputHost, inputPort, rawInput) {
+  if (inputMode === 'custom') return (rawInput || '').trim();
+  const host = (inputHost || '').trim();
+  const port = String(inputPort || '').trim();
+  if (!host || !port) return '';
+  if (inputMode === 'rtp') return `rtp://${host}:${port}`;
+  if (inputMode === 'udp') return `udp://${host}:${port}`;
+  if (inputMode === 'srt') return `srt://${host}:${port}`;
+  return '';
+}
 
 // Animations moved to BentoCard.jsx
 
@@ -52,6 +63,10 @@ export default function EncoderForm({ onStarted }) {
     setLoading(true);
     setError(null);
     try {
+      const builtInput = buildInputUrl(form.inputMode, form.inputHost, form.inputPort, form.input);
+      if (!builtInput) {
+        throw new Error('Input source is required (host + port, or custom URL)');
+      }
       const hostRequired = form.outputMode !== 'null';
       const cleanHost = (form.host || '').trim();
       if (hostRequired && !cleanHost) {
@@ -59,6 +74,7 @@ export default function EncoderForm({ onStarted }) {
       }
       await startStream({
         ...form,
+        input: builtInput,
         host: cleanHost,
         port: parseInt(form.port),
         latency: parseInt(form.latency),
@@ -128,7 +144,22 @@ export default function EncoderForm({ onStarted }) {
             <BentoCard icon={Server} title="Transport & Networking" className="md:col-span-2">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <Field label="Channel ID *" value={form.id} onChange={v => set('id', v)} required />
-                <Field label="Input Source *" value={form.input} onChange={v => set('input', v)} required placeholder="rtp://239.0.0.1:5000 or srt://source:9999" />
+                <SelectField label="Input Mode" value={form.inputMode} onChange={v => set('inputMode', v)} options={[
+                  { value: 'rtp', label: 'RTP' },
+                  { value: 'udp', label: 'UDP' },
+                  { value: 'srt', label: 'SRT' },
+                  { value: 'custom', label: 'Custom URL' },
+                ]} />
+                {form.inputMode !== 'custom' ? (
+                  <>
+                    <Field label="Input Host / IP *" value={form.inputHost} onChange={v => set('inputHost', v)} required placeholder="239.100.25.29" />
+                    <Field label="Input Port *" value={form.inputPort} onChange={v => set('inputPort', v)} type="number" required placeholder="6501" />
+                  </>
+                ) : (
+                  <div className="sm:col-span-2">
+                    <Field label="Input Source URL *" value={form.input} onChange={v => set('input', v)} required placeholder="rtp://239.100.25.29:6501" />
+                  </div>
+                )}
                 <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Leave blank for eno2 multicast" />
 
                 {/* Output mode selector — spans full width */}

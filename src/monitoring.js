@@ -7,6 +7,7 @@ const path = require('path');
 
 const THUMBNAIL_DIR      = path.join(__dirname, '..', 'logs', 'thumbnails');
 const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+const THUMBNAIL_QUALITY_PROFILE = String(process.env.THUMBNAIL_QUALITY_PROFILE || 'high').trim().toLowerCase();
 const SNMP_HOST          = process.env.SNMP_MANAGER_HOST || '10.67.18.1';
 const SYSLOG_HOST        = process.env.SYSLOG_HOST       || '10.67.18.1';
 const SYSLOG_PORT        = parseInt(process.env.SYSLOG_PORT) || 514;
@@ -24,6 +25,21 @@ function sanitizeStreamId(streamId) {
   return id;
 }
 
+function getThumbnailCaptureSettings() {
+  // high: better multiview detail, more CPU
+  // low: lower CPU footprint, more compression artifacts
+  if (THUMBNAIL_QUALITY_PROFILE === 'low') {
+    return {
+      width: 320,
+      qv: 6,
+    };
+  }
+  return {
+    width: 640,
+    qv: 3,
+  };
+}
+
 /**
  * Capture a JPEG confidence thumbnail from a stream URL.
  * @param {string} streamId
@@ -34,6 +50,7 @@ function captureThumbnail(streamId, inputUrl) {
   return new Promise((resolve, reject) => {
     const safeId = sanitizeStreamId(streamId);
     const outPath = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
+    const capture = getThumbnailCaptureSettings();
 
     // Build input URL with multicast-friendly options
     let src = inputUrl;
@@ -51,8 +68,8 @@ function captureThumbnail(streamId, inputUrl) {
       '-probesize', '5000000',
       '-i', src,
       '-frames:v', '1',
-      '-vf', 'thumbnail=60,scale=320:trunc(320/dar/2)*2',
-      '-q:v', '5',
+      '-vf', `thumbnail=60,scale=${capture.width}:trunc(${capture.width}/dar/2)*2`,
+      '-q:v', String(capture.qv),
       outPath,
     ];
 
