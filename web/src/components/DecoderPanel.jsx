@@ -100,6 +100,12 @@ function collectPidRows(result) {
   return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
 }
 
+function formatPidDisplay(pid, pidHex) {
+  if (pid == null && !pidHex) return '-';
+  if (pid == null) return pidHex || '-';
+  return pidHex ? `${pid} (${pidHex})` : String(pid);
+}
+
 function Stat({ label, value, alert = false }) {
   return (
     <div className={`rounded-lg px-3 py-2 border ${alert ? 'bg-red-900/20 border-red-500/20' : 'bg-black/20 border-white/10'}`}>
@@ -363,7 +369,7 @@ export default function DecoderPanel({ lastMessage }) {
                   {collectPidRows(selectedResult).map((row, idx) => (
                     <tr key={`${row.programId}-${row.pid}-${idx}`} className="border-b border-white/5">
                       <td className="py-1.5 px-2 text-gray-300">{row.programId === 'orphan' ? 'Orphan' : row.programId}</td>
-                      <td className="py-1.5 px-2 text-gray-300">{row.pidHex || (row.pid ?? '-')}</td>
+                      <td className="py-1.5 px-2 text-gray-300">{formatPidDisplay(row.pid, row.pidHex)}</td>
                       <td className="py-1.5 px-2 text-gray-300 uppercase">{row.codecType}</td>
                       <td className="py-1.5 px-2 text-gray-300">{row.codecName}</td>
                       <td className="py-1.5 px-2 text-gray-400">{row.language}</td>

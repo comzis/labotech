@@ -183,6 +183,12 @@ function collectPidRows(result) {
   return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
 }
 
+function formatPidDisplay(pid, pidHex) {
+  if (pid == null && !pidHex) return '-';
+  if (pid == null) return pidHex || '-';
+  return pidHex ? `${pid} (${pidHex})` : String(pid);
+}
+
 export default function ETR290Panel({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -412,7 +418,7 @@ export default function ETR290Panel({ lastMessage }) {
                   {collectPidRows(dvbByMonitorId[activeId]).map((row, i) => (
                     <tr key={`${row.programId}-${row.pid}-${i}`} className="border-b border-white/5">
                       <td className="py-2 px-2 text-gray-300">{row.programId === 'orphan' ? 'Orphan' : `${row.programId}`}</td>
-                      <td className="py-2 px-2 text-gray-300">{row.pidHex || (row.pid ?? '-')}</td>
+                      <td className="py-2 px-2 text-gray-300">{formatPidDisplay(row.pid, row.pidHex)}</td>
                       <td className="py-2 px-2 text-gray-300 uppercase">{row.codecType}</td>
                       <td className="py-2 px-2 text-gray-300">{row.codecName}</td>
                       <td className="py-2 px-2 text-gray-400">{row.streamType}</td>
