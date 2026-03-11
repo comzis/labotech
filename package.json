@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
-    "test": "jest --forceExit",
+    "test": "jest --runInBand",
     "test:watch": "jest --watch"
   },
   "dependencies": {
@@ -19,7 +19,8 @@
     "nodemon": "^3.0.2"
   },
   "overrides": {
-    "test-exclude": "^8.0.0"
+    "test-exclude": "^8.0.0",
+    "glob": "^13.0.6"
   },
   "jest": {
     "testEnvironment": "node",
