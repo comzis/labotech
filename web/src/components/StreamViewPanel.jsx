@@ -13,6 +13,30 @@ const WINDOW_OPTIONS = [
 const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
 const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
 const MAX_EVENTS = 1500;
+const EVENT_BLOCK_DURATION_MS = {
+  etr290_alarm: 14000,
+  etr290_incident: 18000,
+  etr290_incident_cleared: 6000,
+  runtime_error: 15000,
+  failover: 16000,
+  analyse_result: 7000,
+  etr290_status: 5000,
+};
+const EVENT_STYLE_BY_CATEGORY = {
+  etr290_alarm: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '88' },
+  etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
+  etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
+  runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
+  failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
+  analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
+  etr290_status: { alpha: '94', borderAlpha: '82', glowAlpha: '44' },
+};
+const LEGEND_TYPE_ITEMS = [
+  { key: 'etr_alarm', label: 'ETR alarm', category: 'etr290_alarm', severity: 'critical' },
+  { key: 'incident', label: 'incident', category: 'etr290_incident', severity: 'warning' },
+  { key: 'runtime', label: 'runtime', category: 'runtime_error', severity: 'critical' },
+  { key: 'analyse', label: 'analyse', category: 'analyse_result', severity: 'ok' },
+];
 
 function isExpectedNoSignalError(message) {
   const m = String(message || '').toLowerCase();
@@ -230,6 +254,47 @@ function buildLaneGradient(events, timeStart, windowMs) {
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 
+function buildEventBlocks(events, timeStart, windowMs) {
+  if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) return [];
+  const end = timeStart + windowMs;
+  return events
+    .filter((e) => e && e.ts != null)
+    .map((e, idx) => {
+      const startTs = Math.max(timeStart, e.ts);
+      const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
+      const severityFactor = e.severity === 'critical' ? 1.35 : e.severity === 'warning' ? 1.15 : 1.0;
+      const dur = Math.round(baseDur * severityFactor);
+      const endTs = Math.min(end, startTs + dur);
+      if (endTs <= timeStart || startTs >= end) return null;
+      const leftPct = ((startTs - timeStart) / windowMs) * 100;
+      const rightPct = ((endTs - timeStart) / windowMs) * 100;
+      const widthPct = Math.max(0.45, rightPct - leftPct);
+      const vis = getEventVisualStyle(e.category, e.severity);
+      return {
+        key: `${e.key}-blk-${idx}`,
+        leftPct: Math.max(0, Math.min(100, leftPct)),
+        widthPct: Math.max(0, Math.min(100, widthPct)),
+        color: vis.color,
+        bg: vis.bg,
+        border: vis.border,
+        glow: vis.glow,
+        title: `${toUtc(e.ts)} - ${e.title}`,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getEventVisualStyle(category, severity) {
+  const style = EVENT_STYLE_BY_CATEGORY[category] || { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' };
+  const color = colorForSeverity(severity);
+  return {
+    color,
+    bg: `${color}${style.alpha}`,
+    border: `${color}${style.borderAlpha}`,
+    glow: `${color}${style.glowAlpha}`,
+  };
+}
+
 function num(v, digits = 3) {
   return typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : null;
 }
@@ -242,6 +307,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [events, setEvents] = useState([]);
   const [nowMs, setNowMs] = useState(Date.now());
   const [mouseX, setMouseX] = useState(null);
+  const [mouseY, setMouseY] = useState(null);
   const [mouseLaneId, setMouseLaneId] = useState(null);
   const [freezeCursor, setFreezeCursor] = useState(false);
   const [scaleMode, setScaleMode] = useState('normalized');
@@ -419,6 +485,24 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return out;
   }, [laneIds, laneMap, timeStart, windowMs]);
 
+  const laneBlocksById = useMemo(() => {
+    const out = {};
+    for (const id of laneIds) {
+      out[id] = buildEventBlocks(laneMap[id] || [], timeStart, windowMs);
+    }
+    return out;
+  }, [laneIds, laneMap, timeStart, windowMs]);
+
+  const popupPos = useMemo(() => {
+    if (mouseX == null || mouseY == null) return null;
+    const rightBias = mouseX > 72;
+    const lowerBias = mouseY > 58;
+    return {
+      left: rightBias ? `calc(${mouseX}% - 372px)` : `calc(${mouseX}% + 12px)`,
+      top: lowerBias ? `calc(${mouseY}% - 190px)` : `calc(${mouseY}% + 12px)`,
+    };
+  }, [mouseX, mouseY]);
+
   return (
     <div className="space-y-6 font-sans">
       <BentoCard icon={Activity} title="Stream View">
@@ -469,6 +553,21 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-amber-500" /> major</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-red-500" /> critical</span>
         </div>
+        <div className="mb-2 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono flex-wrap">
+          <span className="text-gray-600 uppercase tracking-wider">type</span>
+          {LEGEND_TYPE_ITEMS.map((item) => {
+            const vis = getEventVisualStyle(item.category, item.severity);
+            return (
+              <span key={item.key} className="inline-flex items-center gap-1">
+                <span
+                  className="inline-block w-4 h-1 rounded-sm border"
+                  style={{ background: vis.bg, borderColor: vis.border, boxShadow: `0 0 4px ${vis.glow}` }}
+                />
+                {item.label}
+              </span>
+            );
+          })}
+        </div>
 
         <div
           className="relative rounded-xl border border-white/10 bg-black/30 overflow-hidden"
@@ -477,17 +576,21 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             if (freezeCursor) return;
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const yPct = ((e.clientY - rect.top) / rect.height) * 100;
             setMouseX(Math.min(100, Math.max(0, x)));
-            const y = e.clientY - rect.top;
-            const laneIdx = Math.round((y - LANE_TOP_PX) / LANE_STEP_PX);
+            setMouseY(Math.min(100, Math.max(0, yPct)));
+            const yPx = e.clientY - rect.top;
+            const laneIdx = Math.round((yPx - LANE_TOP_PX) / LANE_STEP_PX);
             setMouseLaneId(laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null);
           }}
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;
+            const yPct = ((e.clientY - rect.top) / rect.height) * 100;
             setMouseX(Math.min(100, Math.max(0, x)));
-            const y = e.clientY - rect.top;
-            const laneIdx = Math.round((y - LANE_TOP_PX) / LANE_STEP_PX);
+            setMouseY(Math.min(100, Math.max(0, yPct)));
+            const yPx = e.clientY - rect.top;
+            const laneIdx = Math.round((yPx - LANE_TOP_PX) / LANE_STEP_PX);
             const laneId = laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null;
             setMouseLaneId(laneId);
             setFreezeCursor(true);
@@ -498,6 +601,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           onMouseLeave={() => {
             if (!freezeCursor) {
               setMouseX(null);
+              setMouseY(null);
               setMouseLaneId(null);
             }
           }}
@@ -540,22 +644,30 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                   >
                     {id}
                   </div>
-                  {laneAlerts.map((e) => (
+                  {laneAlerts.length > 0 && (
                     <div
-                      key={e.key}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 border rounded-full"
+                      className="absolute left-0 right-0 overflow-hidden"
                       style={{
-                        left: `${e.xPct}%`,
-                        top: `${y}px`,
-                        width: e.category === 'runtime_error' ? '8px' : '10px',
-                        height: e.category === 'runtime_error' ? '8px' : '10px',
-                        background: colorForSeverity(e.severity),
-                        borderColor: `${colorForSeverity(e.severity)}77`,
-                        boxShadow: `0 0 8px ${colorForSeverity(e.severity)}88`,
+                        top: `${y - 3}px`,
+                        height: '6px',
                       }}
-                      title={`${toUtc(e.ts)} - ${e.title}`}
-                    />
-                  ))}
+                    >
+                      {(laneBlocksById[id] || []).map((blk) => (
+                        <div
+                          key={blk.key}
+                          className="absolute h-full rounded-sm border"
+                          style={{
+                            left: `${blk.leftPct}%`,
+                            width: `${blk.widthPct}%`,
+                            background: blk.bg,
+                            borderColor: blk.border,
+                            boxShadow: `0 0 5px ${blk.glow}`,
+                          }}
+                          title={blk.title}
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })
@@ -566,8 +678,8 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             <div
               className="absolute z-20 w-[360px] max-w-[92%] rounded-lg border border-white/15 bg-black/90 backdrop-blur-md p-2.5 text-[11px]"
               style={{
-                left: `clamp(8px, calc(${mouseX}% + 12px), calc(100% - 368px))`,
-                top: '28px',
+                left: popupPos ? popupPos.left : `clamp(8px, calc(${mouseX}% + 12px), calc(100% - 368px))`,
+                top: popupPos ? popupPos.top : '28px',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.55)',
               }}
             >
