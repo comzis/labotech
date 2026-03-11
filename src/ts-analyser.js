@@ -962,6 +962,11 @@ class TSAnalyser extends EventEmitter {
     this.isRunning = true;
     if (!this._iatSniffer) {
       this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: this.nicName });
+      // Safety net: absorb any 'error' events so Node.js doesn't throw them as
+      // uncaught exceptions. IATSniffer failures are non-fatal; probe() reads lastError.
+      this._iatSniffer.on('error', (err) => {
+        this.emit('info', { message: `IAT sniffer unavailable: ${err.message}` });
+      });
       this._iatSniffer.start();
     }
 
