@@ -14,6 +14,7 @@ const DEFAULTS = {
   sourcePort: '5000',
   destIp: '',
   destPort: '1234',
+  engineerApproved: false,
 };
 
 function buildSourceUrl({ sourceMode, sourceHost, sourcePort }) {
@@ -35,6 +36,11 @@ export default function MulticastPanel({ lastMessage }) {
     const [cfg, fwds] = await Promise.all([getMulticastConfig(), getForwarders()]);
     setConfig(cfg);
     setForwarders(fwds);
+    setForm((prev) => ({
+      ...prev,
+      destIp: prev.destIp || cfg.address || '',
+      engineerApproved: false,
+    }));
   };
 
   useEffect(() => { load(); }, []);
@@ -57,6 +63,7 @@ export default function MulticastPanel({ lastMessage }) {
         sourceUrl,
         destIp: form.destIp,
         destPort: parseInt(form.destPort),
+        engineerApproved: form.engineerApproved === true,
       });
       setForm(DEFAULTS);
       setOpen(false);
@@ -154,8 +161,20 @@ export default function MulticastPanel({ lastMessage }) {
 
               <BentoCard icon={Share2} title="Destination Configuration" accentColor="green">
                 <div className="space-y-4">
-                  <Field label="Dest IP *" value={form.destIp} onChange={v => set('destIp', v)} required color="green" placeholder="239.100.25.x" />
+                  <Field label="Dest IP *" value={form.destIp} onChange={v => set('destIp', v)} required color="green" placeholder="239.100.25.29" />
                   <Field label="Dest Port" value={form.destPort} onChange={v => set('destPort', v)} type="number" color="green" />
+                  <div className="text-[10px] text-gray-500">
+                    Allowed destination is restricted to <span className="font-mono text-neon-green">{config?.address || '239.100.25.29'}</span>.
+                  </div>
+                  <label className="flex items-center gap-2 text-xs text-amber-300">
+                    <input
+                      type="checkbox"
+                      checked={form.engineerApproved}
+                      onChange={(e) => set('engineerApproved', e.target.checked)}
+                      className="accent-amber-400"
+                    />
+                    Engineer approval confirmed for forwarding start
+                  </label>
                 </div>
               </BentoCard>
 
@@ -164,7 +183,7 @@ export default function MulticastPanel({ lastMessage }) {
                   whileHover={{ scale: 1.05, boxShadow: '0 0 25px rgba(34,197,94,0.4)' }}
                   whileTap={{ scale: 0.95 }}
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || !form.engineerApproved}
                   className="bg-gradient-to-r from-neon-green to-green-600 text-white font-bold px-10 py-3 rounded-xl shadow-lg transition-all disabled:opacity-50"
                 >
                   {loading ? 'Initializing Forwarder...' : 'INITIATE FORWARDER'}
