@@ -1,6 +1,6 @@
-# Labotech — Broadcast Encoder & Stream Management
+# LABOTECH
 
-Professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu. Manages SRT/UDP/RTP streams, handles 1080p→1080i transcoding, routes multicast traffic, and analyses MPEG-TS structure.
+Professional broadcast stream processing and management for HPE DL360 on Ubuntu. Handles SRT/UDP/RTP workflows, 1080p↔1080i transcoding, multicast routing, TS analysis, ETR290 monitoring, and decoder multiview operations.
 
 ---
 
@@ -52,6 +52,19 @@ cp .env.example .env
 docker-compose up -d
 ```
 
+### 3b. Standardized upgrade (git/systemd flow)
+
+```bash
+git fetch --all --tags --prune
+bash scripts/upgrade-prod.sh <tag-or-ref>
+```
+
+Rollback:
+
+```bash
+bash scripts/rollback-last-tag.sh
+```
+
 ### 4. Development (live reload)
 
 ```bash
@@ -70,7 +83,7 @@ Web UI: `http://10.67.18.29:4000`
 ```bash
 # Backend
 npm install
-npm test                          # 193 tests across 4 suites
+npm test                          # 87 tests across 4 suites
 npm test -- test/encoder.test.js  # single suite
 npm start                         # API server
 
@@ -124,7 +137,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `EncoderForm` | Full encoder configuration: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
 | `TranscodePanel` | 1080p→1080i presets + broadcast preset slot selector |
 | `MulticastPanel` | `eno2` forwarder controls and subnet status |
-| `TSAnalyser` | PAT→PMT→PID tree, DVB professional summary, one-shot probing, and multi-decoder continuous monitoring with multiview |
+| `TSAnalyser` | One-shot TS probe, DVB service summary/table, embedded ETR290 view, and continuous decoder/monitor workflows |
 | `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
@@ -155,14 +168,15 @@ The encoder supports full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13
 
 ---
 
-## TS Analyser (Professional)
+## TS Analyser and ETR290
 
-The TS Analyser now includes professional-grade transport and DVB structure views:
+The TS Analyser now includes transport, DVB, and ETR290 operator views:
 
 - **PID/program structure matrix** (PAT/PMT/PCR and per-stream details)
 - **DVB summary panel** with service count, PID count, stream breakdown, aggregate bitrate
 - **Service table** showing SID, service name/provider, PMT PID, PCR PID
-- **Decoder multiview** for all active continuous analysers with per-decoder stop control
+- **ETR290 monitor panel** (P1/P2/P3, alarms) embedded in analyser workflow
+- **TS PID inventory** table for video/audio/data/other streams, including codec and bitrate
 
 ---
 
@@ -238,7 +252,7 @@ SYSLOG_HOST=10.67.18.1
 
 ```bash
 npm test
-# 193 tests across 4 suites — encoder, transcoder, multicast, ts-analyser
+# 87 tests across 4 suites — encoder, transcoder, multicast, ts-analyser
 ```
 
 | Suite | Tests | Coverage |
