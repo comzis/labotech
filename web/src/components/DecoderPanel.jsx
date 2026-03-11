@@ -70,6 +70,36 @@ function qualityMetrics(status) {
   return { packetLoss, jitter, pcrErrors, ccErrors };
 }
 
+function collectPidRows(result) {
+  if (!result) return [];
+  const rows = [];
+  (result.programs || []).forEach((program) => {
+    (program.streams || []).forEach((stream) => {
+      rows.push({
+        programId: program.programId,
+        pid: stream.pid,
+        pidHex: stream.pidHex,
+        codecType: stream.codecType || 'unknown',
+        codecName: stream.codecName || '-',
+        language: stream.language || '-',
+        bitrate: stream.bitrate || 0,
+      });
+    });
+  });
+  (result.orphanStreams || []).forEach((stream) => {
+    rows.push({
+      programId: 'orphan',
+      pid: stream.pid,
+      pidHex: stream.pidHex,
+      codecType: stream.codecType || 'unknown',
+      codecName: stream.codecName || '-',
+      language: stream.language || '-',
+      bitrate: stream.bitrate || 0,
+    });
+  });
+  return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+}
+
 function Stat({ label, value, alert = false }) {
   return (
     <div className={`rounded-lg px-3 py-2 border ${alert ? 'bg-red-900/20 border-red-500/20' : 'bg-black/20 border-white/10'}`}>
@@ -311,6 +341,38 @@ export default function DecoderPanel({ lastMessage }) {
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {selectedResult && (
+          <div className="mt-4">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">TS PID Inventory</div>
+            <div className="max-h-56 overflow-auto rounded-lg border border-white/10 bg-black/20">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="text-gray-500 border-b border-white/10">
+                    <th className="text-left py-2 px-2">Program</th>
+                    <th className="text-left py-2 px-2">PID</th>
+                    <th className="text-left py-2 px-2">Type</th>
+                    <th className="text-left py-2 px-2">Codec</th>
+                    <th className="text-left py-2 px-2">Lang</th>
+                    <th className="text-left py-2 px-2">Bitrate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectPidRows(selectedResult).map((row, idx) => (
+                    <tr key={`${row.programId}-${row.pid}-${idx}`} className="border-b border-white/5">
+                      <td className="py-1.5 px-2 text-gray-300">{row.programId === 'orphan' ? 'Orphan' : row.programId}</td>
+                      <td className="py-1.5 px-2 text-gray-300">{row.pidHex || (row.pid ?? '-')}</td>
+                      <td className="py-1.5 px-2 text-gray-300 uppercase">{row.codecType}</td>
+                      <td className="py-1.5 px-2 text-gray-300">{row.codecName}</td>
+                      <td className="py-1.5 px-2 text-gray-400">{row.language}</td>
+                      <td className="py-1.5 px-2 text-gray-400">{row.bitrate > 0 ? `${(row.bitrate / 1e6).toFixed(2)} Mbps` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
