@@ -129,9 +129,9 @@ function num(v, digits = 3) {
 }
 
 export default function StreamViewPanel({ lastMessage }) {
-  const LANE_TOP_PX = 44;
-  const LANE_STEP_PX = 28;
-  const LANE_LINE_THICKNESS_PX = 2;
+  const LANE_TOP_PX = 48;
+  const LANE_STEP_PX = 34;
+  const LANE_LINE_THICKNESS_PX = 8;
   const [windowMs, setWindowMs] = useState(WINDOW_OPTIONS[1].value);
   const [events, setEvents] = useState([]);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -340,7 +340,7 @@ export default function StreamViewPanel({ lastMessage }) {
 
         <div
           className="relative rounded-xl border border-white/10 bg-black/30 overflow-hidden"
-          style={{ height: `${Math.max(160, 76 + laneIds.length * 28)}px` }}
+          style={{ height: `${Math.max(180, 92 + laneIds.length * LANE_STEP_PX)}px` }}
           onMouseMove={(e) => {
             if (freezeCursor) return;
             const rect = e.currentTarget.getBoundingClientRect();
@@ -396,7 +396,11 @@ export default function StreamViewPanel({ lastMessage }) {
                       background: laneLineById[id] || lineColor,
                     }}
                   />
-                  <div className="absolute left-2 -translate-y-1/2 text-[9px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
+                  <div
+                    className="absolute left-2 -translate-y-1/2 text-[11px] text-gray-300 font-mono max-w-[260px] truncate px-1 rounded"
+                    style={{ top: `${y}px`, background: 'rgba(0,0,0,0.32)' }}
+                    title={id}
+                  >
                     {id}
                   </div>
                   {(laneMap[id] || []).filter((e) => e.category === 'etr290_alarm').map((e) => (
