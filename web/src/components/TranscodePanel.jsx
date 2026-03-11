@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Zap, Activity, Settings2, Tv2, Share2 } from 'lucide-react';
+import { Activity, Settings2, Tv2, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
@@ -261,12 +261,12 @@ export default function TranscodePanel({ lastMessage }) {
         </div>
         <button
           onClick={() => setOpen(o => !o)}
-          className={`flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold transition-all ${open
+          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all ${open
             ? 'bg-gray-800 text-gray-400 hover:text-white border border-white/10'
-            : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 hover:shadow-neon-purple/40'
+            : 'bg-gradient-to-r from-neon-purple/25 to-purple-600/25 border border-neon-purple/35 text-purple-100 shadow-lg shadow-neon-purple/15 hover:shadow-neon-purple/30'
             }`}
         >
-          {open ? '✕ Cancel' : <><Zap className="w-4 h-4 fill-current" /> Create Broadcast Profile</>}
+          {open ? 'Cancel' : <><Tv2 className="w-4 h-4" /> Create Broadcast Profile</>}
         </button>
       </div>
 
