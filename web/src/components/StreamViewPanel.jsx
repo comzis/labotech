@@ -120,7 +120,16 @@ function toEvent(msg) {
     const si = dvb.si || {};
     const compliance = si.compliance || {};
     const hasSiViolation = ['nit', 'sdt', 'eitPf', 'tdt'].some((k) => compliance[k] === false);
-    const severity = hasSiViolation ? 'warning' : 'ok';
+    const healthSeverity = dvb?.health?.severity;
+    const severity = healthSeverity === 'critical' || healthSeverity === 'warning'
+      ? healthSeverity
+      : (hasSiViolation ? 'warning' : 'ok');
+    const healthScore = Number.isFinite(dvb?.health?.score) ? dvb.health.score : null;
+    const title = severity === 'critical'
+      ? 'TS Analysis (critical)'
+      : severity === 'warning'
+        ? 'TS Analysis (warning)'
+        : 'TS Analysis (OK)';
     return {
       key: `${ts}-${msg.id || 'analyse'}-analyse`,
       ts,
@@ -128,8 +137,8 @@ function toEvent(msg) {
       rawId: msg.id || 'analyse',
       category: 'analyse_result',
       severity,
-      title: hasSiViolation ? 'TS Analysis (SI warning)' : 'TS Analysis (OK)',
-      description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${(dvb.bitrateBps ? (dvb.bitrateBps / 1e6).toFixed(2) : '0.00')} Mbps`,
+      title,
+      description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${(dvb.bitrateBps ? (dvb.bitrateBps / 1e6).toFixed(2) : '0.00')} Mbps${healthScore != null ? ` · health ${healthScore}/100` : ''}`,
       evidence: {
         bitrateSource: dvb.bitrateSource || null,
         bitrateMbps: dvb.bitrateBps ? Number((dvb.bitrateBps / 1e6).toFixed(3)) : null,
@@ -138,7 +147,11 @@ function toEvent(msg) {
         siIntervalsSec: si.intervalsSec || null,
         siCompliance: compliance || null,
         arrival: dvb.arrival || null,
+        timestampDiscontinuity: dvb.timestampDiscontinuity || null,
+        continuityCounterErrors: dvb.continuityCounterErrors || null,
+        dolbyE: dvb.dolbyE || null,
         probeDiagnostics: dvb.probeDiagnostics || null,
+        health: dvb.health || null,
       },
     };
   }
@@ -608,6 +621,26 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             {selectedEvent?.evidence?.arrival && (
               <div className="text-gray-500 mt-0.5">
                 Arrival: jitter {selectedEvent.evidence.arrival.jitterMs ?? '-'} ms · loss {selectedEvent.evidence.arrival.packetLossPct ?? '-'}%
+              </div>
+            )}
+            {selectedEvent?.evidence?.health && (
+              <div className="text-gray-500 mt-0.5">
+                Health: {selectedEvent.evidence.health.score ?? '-'} / 100 · {selectedEvent.evidence.health.severity || '-'}
+              </div>
+            )}
+            {selectedEvent?.evidence?.timestampDiscontinuity && (
+              <div className="text-gray-500 mt-0.5">
+                Timestamp discontinuities: {selectedEvent.evidence.timestampDiscontinuity.count ?? 0}
+              </div>
+            )}
+            {selectedEvent?.evidence?.continuityCounterErrors && (
+              <div className="text-gray-500 mt-0.5">
+                CC errors: {selectedEvent.evidence.continuityCounterErrors.count ?? 0}
+              </div>
+            )}
+            {selectedEvent?.evidence?.dolbyE && (
+              <div className="text-gray-500 mt-0.5">
+                Dolby E: detected {String(Boolean(selectedEvent.evidence.dolbyE.detected))} · decoded {String(Boolean(selectedEvent.evidence.dolbyE.decoded))}
               </div>
             )}
           </div>

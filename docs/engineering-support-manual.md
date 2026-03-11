@@ -7,6 +7,7 @@ This manual is the operator and engineering runbook for LABOTECH support workflo
 - Safe deployment and rollback
 - Decoder and multiview refresh behavior
 - TS analysis accuracy path (NIC-capture preferred for arrival telemetry, `tsduck` and metadata fallback supported)
+- Optional Dolby E external decoder adapter deployment and verification
 - Stream View timeline usage
 - Common production troubleshooting patterns
 
@@ -149,6 +150,88 @@ tsanalyze --version
 ```
 
 Note: LABOTECH remains operational without `tsduck`; it will use fallback probes.
+
+---
+
+### 3.1) Optional Dolby E External Decoder Adapter
+
+LABOTECH supports Dolby E via an optional external decoder adapter. This path is intentionally non-fatal:
+
+- If disabled/unconfigured, core TS analysis remains operational.
+- If enabled and decoder is unavailable, Dolby E diagnostics report degraded state in analyser telemetry.
+
+#### Requirements
+
+1. Use a Linux executable/script as decoder command target.
+2. Decoder must be callable by the LABOTECH runtime user (`boro` in systemd installs).
+3. Prefer JSON output from decoder for deterministic parsing.
+
+> Important: Windows DLLs (for example `avcodec.dll`, `swresample.dll`) are not Linux executables and cannot be loaded directly by the Node.js service on Ubuntu.
+
+#### Environment configuration
+
+Add to `.env`:
+
+```bash
+DOLBYE_ENABLED=true
+DOLBYE_DECODER_PATH=/usr/local/bin/dolbye-decoder
+# Preferred (exact tokenization):
+DOLBYE_DECODER_ARGS_JSON=["--input","{url}","--json"]
+# Fallback template if *_JSON is empty:
+# DOLBYE_DECODER_ARGS=--input {url} --json
+DOLBYE_DECODER_TIMEOUT_MS=4000
+
+# Optional strict policy:
+DOLBYE_REQUIRED_WHEN_DETECTED=true
+```
+
+Decoder output (recommended JSON shape):
+
+```json
+{
+  "detected": true,
+  "decoded": true,
+  "frameCount": 128,
+  "programConfig": "5.1+2",
+  "ok": true
+}
+```
+
+#### Install/permission checks
+
+```bash
+sudo install -m 0755 /path/to/vendor-decoder /usr/local/bin/dolbye-decoder
+sudo -u boro /usr/local/bin/dolbye-decoder --version
+```
+
+If the command requires shared libs, verify with:
+
+```bash
+ldd /usr/local/bin/dolbye-decoder
+```
+
+#### Runtime verification
+
+1. Restart service:
+
+```bash
+sudo systemctl restart labotech
+```
+
+2. Run an analyser session on known Dolby E content.
+3. In TS Analyser / Stream View evidence, validate:
+   - `dvb.dolbyE.detected`
+   - `dvb.dolbyE.decoded`
+   - `dvb.dolbyE.frameCount`
+   - `dvb.probeDiagnostics.dolbyE` (`enabled`, `configured`, `ok`, `error`)
+4. Confirm health impact appears when Dolby E is detected but not decoded:
+   - `dvb.health.reasons` should include Dolby E decode/missing-decoder reason.
+
+#### Failure semantics
+
+- Adapter disabled/unset path: no crash; Dolby E state marked unavailable.
+- Decoder command timeout/non-zero exit: no crash; error captured under `dvb.dolbyE.error`.
+- Strict mode (`DOLBYE_REQUIRED_WHEN_DETECTED=true`): health score penalized when Dolby E is present but external decode path is not available.
 
 ---
 
@@ -302,6 +385,29 @@ Check:
 - WebSocket connected status is online
 - at least one analyser/ETR monitor is running
 - selected window (`5m`/`15m`/`1h`) contains events
+
+### Dolby E adapter shows unavailable
+
+Check:
+
+- `DOLBYE_ENABLED=true` is present in runtime environment
+- `DOLBYE_DECODER_PATH` points to a Linux executable (not `.dll`)
+- service user can execute decoder:
+
+```bash
+sudo -u boro "$DOLBYE_DECODER_PATH" --version
+```
+
+- `dvb.probeDiagnostics.dolbyE.error` for exact adapter failure
+
+### Dolby E detected but decoded=false
+
+Check:
+
+- input stream is confirmed Dolby E (independent probe/tool)
+- decoder args template uses `{url}` placeholder correctly
+- decoder timeout is sufficient for probe duration (`DOLBYE_DECODER_TIMEOUT_MS`)
+- vendor decoder dependencies are present (`ldd` clean output)
 
 ---
 

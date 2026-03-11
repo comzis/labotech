@@ -194,6 +194,49 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 
 ---
 
+## Optional Dolby E Adapter (Linux)
+
+LABOTECH supports Dolby E via an optional external decoder adapter in the TS analyser path.
+
+- Adapter is non-fatal: if disabled/unavailable, standard TS analysis continues.
+- Use a Linux executable/script for decoder integration.
+- Windows DLL files are not directly runnable by the Ubuntu Node.js service.
+
+Environment variables (`.env`):
+
+```bash
+DOLBYE_ENABLED=true
+DOLBYE_DECODER_PATH=/usr/local/bin/dolbye-decoder
+DOLBYE_DECODER_ARGS_JSON=["--input","{url}","--json"]
+# Fallback template if *_JSON is empty:
+# DOLBYE_DECODER_ARGS=--input {url} --json
+DOLBYE_DECODER_TIMEOUT_MS=4000
+DOLBYE_REQUIRED_WHEN_DETECTED=false
+```
+
+Expected decoder output (JSON):
+
+```json
+{
+  "detected": true,
+  "decoded": true,
+  "frameCount": 128,
+  "programConfig": "5.1+2",
+  "ok": true
+}
+```
+
+Operator visibility fields:
+
+- `dvb.dolbyE.detected`
+- `dvb.dolbyE.decoded`
+- `dvb.dolbyE.frameCount`
+- `dvb.probeDiagnostics.dolbyE`
+
+For deployment checks and troubleshooting runbook, see `docs/engineering-support-manual.md`.
+
+---
+
 ## Live View Timeline
 
 `Live View` provides a UTC timeline that correlates analyser and ETR events in one place:
