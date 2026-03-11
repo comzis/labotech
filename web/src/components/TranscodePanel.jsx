@@ -40,10 +40,10 @@ const OUTPUT_MODES = [
 ];
 
 const STANDARD_PROFILES = [
-  { value: 'dvb-hd', label: 'DVB HD (EBU Distribution)', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '192k' },
+  { value: 'dvb-hd', label: 'DVB HD (Distribution)', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '192k' },
   { value: 'dvb-contribution', label: 'DVB Contribution 4:2:2', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '30M', audioBitrate: '384k' },
   { value: 'dvb-hevc', label: 'DVB HEVC UHD', videoCodec: 'libx265', audioCodec: 'aac', videoBitrate: '20M', audioBitrate: '384k' },
-  { value: 'ebu-loudness-safe', label: 'EBU R128 Ready', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '256k' },
+  { value: 'ebu-loudness-safe', label: 'R128 Ready', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '256k' },
   { value: 'passthrough', label: 'Pass-through / Remux', videoCodec: 'copy', audioCodec: 'copy', videoBitrate: '', audioBitrate: '' },
 ];
 
@@ -255,9 +255,9 @@ export default function TranscodePanel({ lastMessage }) {
         <div>
           <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
             <Activity className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-            Professional Transcoding
+            Transcoder
           </h1>
-          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">DVB / EBU Service Conditioning and Delivery</p>
+          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Service Conditioning and Delivery</p>
         </div>
         <button
           onClick={() => setOpen(o => !o)}
@@ -302,7 +302,7 @@ export default function TranscodePanel({ lastMessage }) {
             </BentoCard>
 
             {/* Step 2: Format Matrix */}
-            <BentoCard icon={Tv2} title="2. DVB / EBU Profile Matrix" className="border-neon-purple/20 bg-neon-purple/5">
+            <BentoCard icon={Tv2} title="2. Profile Matrix" className="border-neon-purple/20 bg-neon-purple/5">
               <div className="space-y-4">
                 <div>
                   <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Broadcast Standard Profile</label>
@@ -385,7 +385,7 @@ export default function TranscodePanel({ lastMessage }) {
                   <div className="space-y-3">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                       <div className="flex flex-col gap-1.5">
-                        <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">EBU Template (optional)</label>
+                        <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Audio Template (optional)</label>
                         <select
                           value={form.audioPairTemplate}
                           onChange={(e) => applyAudioPairTemplate(e.target.value)}

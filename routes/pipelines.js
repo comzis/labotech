@@ -5,6 +5,7 @@ const WebSocket  = require('ws');
 const SRTEncoder = require('../src/encoder');
 const Transcoder = require('../src/transcoder');
 const { MulticastForwarder } = require('../src/multicast-forward');
+const DEFAULT_IP = process.env.FORWARD_MULTICAST_IP || '239.100.25.29';
 
 module.exports = function(streams, transcoders, forwarders, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
@@ -55,7 +56,7 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
     const {
       id, input, srtHost, srtPort, transcodePreset,
       multicastDestIp, multicastPort, videoBitrate,
-      audioBitrate, passphrase, enableForward,
+      audioBitrate, passphrase, enableForward, engineerApproved,
     } = req.body;
 
     if (!id || !input || !srtHost || !srtPort) {
@@ -124,13 +125,19 @@ module.exports = function(streams, transcoders, forwarders, wss, saveState = () 
 
     // Stage 3: Multicast forward (explicit opt-in only)
     if (multicastDestIp && enableForward === true) {
+      if (engineerApproved !== true) {
+        return rollback(new Error('Engineer approval required to enable forwarding in pipeline mode'));
+      }
+      if (multicastDestIp !== DEFAULT_IP) {
+        return rollback(new Error(`Forwarding allowed only to ${DEFAULT_IP}`));
+      }
       const fwdId = `${id}-fwd`;
       if (!forwarders.has(fwdId)) {
         const sourcePort = transcodePreset ? srtPortNum + 1 : srtPortNum;
         const sourceUrl = `srt://${srtHost}:${sourcePort}?mode=listener&latency=2000`;
         try {
           const fwd = new MulticastForwarder({
-            id: fwdId, sourceUrl, destIp: multicastDestIp, destPort: multicastPort,
+            id: fwdId, sourceUrl, destIp: multicastDestIp, destPort: multicastPort, allowedIp: DEFAULT_IP,
           });
           fwd.on('stats', s => broadcast({ type: 'multicast_stats', id: fwdId, ...s }));
           fwd.on('error', e => broadcast({ type: 'error', id: fwdId, message: e.message }));

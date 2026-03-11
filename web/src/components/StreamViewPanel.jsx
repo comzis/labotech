@@ -12,6 +12,14 @@ const WINDOW_OPTIONS = [
 const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
 const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
 
+function normalizeLaneId(rawId) {
+  const id = String(rawId || '').trim();
+  if (!id) return 'unknown';
+  // ETR monitor IDs are typically prefixed (etr-<decoder-id>) while analyser
+  // events use plain decoder IDs. Normalize both into one visual lane.
+  return id.replace(/^etr[-_:]/i, '') || id;
+}
+
 function toUtc(ts) {
   const d = new Date(ts);
   if (Number.isNaN(d.getTime())) return '-';
@@ -23,10 +31,12 @@ function toEvent(msg) {
   const ts = msg.time ? new Date(msg.time).getTime() : Date.now();
   if (!Number.isFinite(ts)) return null;
   if (msg.type === 'etr290_alarm') {
+    const laneId = normalizeLaneId(msg.id || 'etr');
     return {
       key: `${ts}-${msg.id || 'unknown'}-${msg.label || 'alarm'}`,
       ts,
-      id: msg.id || 'etr',
+      id: laneId,
+      rawId: msg.id || 'etr',
       category: 'etr290_alarm',
       severity: msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info',
       title: `${(msg.priority || 'p3').toUpperCase()} ${msg.label || 'Alarm'}`,
@@ -34,13 +44,15 @@ function toEvent(msg) {
     };
   }
   if (msg.type === 'etr290_status') {
+    const laneId = normalizeLaneId(msg.id || 'etr');
     const status = msg.status || {};
     const hasP1 = P1_KEYS.some((k) => status[k] === 'error');
     const hasP2 = P2_KEYS.some((k) => status[k] === 'error');
     return {
       key: `${ts}-${msg.id || 'unknown'}-status`,
       ts,
-      id: msg.id || 'etr',
+      id: laneId,
+      rawId: msg.id || 'etr',
       category: 'etr290_status',
       severity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
       title: hasP1 ? 'ETR Status (P1)' : hasP2 ? 'ETR Status (P2)' : 'ETR Status (OK)',
@@ -51,6 +63,7 @@ function toEvent(msg) {
     };
   }
   if (msg.type === 'analyse_result') {
+    const laneId = normalizeLaneId(msg.id || 'analyse');
     const dvb = msg.dvb || {};
     const si = dvb.si || {};
     const compliance = si.compliance || {};
@@ -59,7 +72,8 @@ function toEvent(msg) {
     return {
       key: `${ts}-${msg.id || 'analyse'}-analyse`,
       ts,
-      id: msg.id || 'analyse',
+      id: laneId,
+      rawId: msg.id || 'analyse',
       category: 'analyse_result',
       severity,
       title: hasSiViolation ? 'TS Analysis (SI warning)' : 'TS Analysis (OK)',

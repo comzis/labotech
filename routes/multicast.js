@@ -27,6 +27,10 @@ module.exports = function(forwarders, wss, saveState = () => {}, broadcastFn = n
       instance.once('stopped', onStopped);
       try { instance.stop(); } catch (_) { done(); }
     });
+    // Safety check: do not report stop success while process is still running.
+    if (instance && instance.isRunning) {
+      throw new Error('Forwarder stop verification failed: process still running');
+    }
   }
 
   function broadcast(msg) {
@@ -54,10 +58,16 @@ module.exports = function(forwarders, wss, saveState = () => {}, broadcastFn = n
 
   // POST /multicast/forward
   router.post('/forward', async (req, res) => {
-    const { id, sourceUrl, destIp, destPort, nic, ttl } = req.body;
+    const { id, sourceUrl, destIp, destPort, nic, ttl, engineerApproved } = req.body;
 
     if (!id || !sourceUrl || !destIp) {
       return res.status(400).json({ error: 'id, sourceUrl and destIp are required' });
+    }
+    if (engineerApproved !== true) {
+      return res.status(403).json({ error: 'Engineer approval required to start forwarding (engineerApproved=true)' });
+    }
+    if (destIp !== DEFAULT_IP) {
+      return res.status(403).json({ error: `Forwarding allowed only to ${DEFAULT_IP}` });
     }
     if (forwarders.has(id)) {
       return res.status(409).json({ error: `Forwarder ${id} already exists` });
@@ -76,7 +86,7 @@ module.exports = function(forwarders, wss, saveState = () => {}, broadcastFn = n
     }
 
     try {
-      const fwd = new MulticastForwarder({ id, sourceUrl, destIp, destPort, nic, ttl });
+      const fwd = new MulticastForwarder({ id, sourceUrl, destIp, destPort, nic, ttl, allowedIp: DEFAULT_IP });
       fwd.on('stats',   stats => broadcast({ type: 'multicast_stats', id, ...stats }));
       fwd.on('info',    msg   => broadcast({ type: 'info', id, message: msg.message, inputBitrate: msg.inputBitrate, inputBitrateWatchAttempts: msg.inputBitrateWatchAttempts }));
       fwd.on('error',   err   => broadcast({ type: 'error', id, message: err.message }));
