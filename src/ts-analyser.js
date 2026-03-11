@@ -2,7 +2,9 @@
 
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
-const { captureThumbnail } = require('./monitoring');
+const fs = require('fs');
+const path = require('path');
+const { captureThumbnail, THUMBNAIL_DIR } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
 let _multicastConfig = null;
 function _getNicName() {
@@ -119,6 +121,9 @@ class TSAnalyser extends EventEmitter {
               // Keep last good frame if a single capture cycle fails.
               if (this.lastResult?.thumbnailUrl) {
                 result.thumbnailUrl = this.lastResult.thumbnailUrl;
+              } else {
+                const cachedUrl = this._resolveCachedThumbnailUrl();
+                if (cachedUrl) result.thumbnailUrl = cachedUrl;
               }
               result.dvb.probeDiagnostics = {
                 ...(result.dvb.probeDiagnostics || {}),
@@ -132,6 +137,9 @@ class TSAnalyser extends EventEmitter {
           } else if (this.lastResult?.thumbnailUrl) {
             // Keep the previous thumbnail between capture cycles to avoid flicker.
             result.thumbnailUrl = this.lastResult.thumbnailUrl;
+          } else {
+            const cachedUrl = this._resolveCachedThumbnailUrl();
+            if (cachedUrl) result.thumbnailUrl = cachedUrl;
           }
           this.lastResult = result;
           this.emit('result', result);
@@ -970,6 +978,16 @@ class TSAnalyser extends EventEmitter {
       const m = String(url).match(/^rtp:\/\/([^/:?#]+):(\d+)/i);
       if (!m) return null;
       return `udp://${m[1]}:${m[2]}`;
+    }
+  }
+
+  _resolveCachedThumbnailUrl() {
+    try {
+      const p = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
+      if (!fs.existsSync(p)) return null;
+      return `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
+    } catch (_) {
+      return null;
     }
   }
 

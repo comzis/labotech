@@ -1,5 +1,6 @@
 'use strict';
 
+const fs = require('fs');
 const TSAnalyser = require('../src/ts-analyser');
 
 describe('TSAnalyser', () => {
@@ -282,6 +283,15 @@ describe('TSAnalyser', () => {
       expect(enriched.programs[0].streams[0].pid).toBe(256);
       expect(enriched.programs[0].streams[1].pid).toBe(257);
       expect(enriched.dvb.pidCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('thumbnail cache fallback', () => {
+    test('returns cached thumbnail URL when a file exists', () => {
+      const existsSpy = jest.spyOn(fs, 'existsSync').mockReturnValue(true);
+      const url = analyser._resolveCachedThumbnailUrl();
+      expect(url).toMatch(/^\/logs\/thumbnails\/test-analyser\.jpg\?t=\d+$/);
+      existsSpy.mockRestore();
     });
   });
 
