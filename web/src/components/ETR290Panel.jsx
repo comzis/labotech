@@ -1,10 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import useETR290 from '../hooks/useETR290';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { ShieldAlert, Activity } from 'lucide-react';
-import { useState } from 'react';
 import { probeUrl } from '../api';
 
 const PRIORITY_META = {
@@ -138,6 +137,11 @@ function formatUtc(ts) {
   return d.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
+function toTs(v) {
+  const t = new Date(v || '').getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 function AlarmTimeline({ alarms }) {
   if (!alarms?.length) {
     return <p className="text-gray-600 text-xs text-center py-4">No recent timeline events</p>;
@@ -264,6 +268,8 @@ export default function ETR290Panel({ lastMessage }) {
   const [passphrase, setPassphrase] = useState('');
   const [dvbByMonitorId, setDvbByMonitorId] = useState({});
   const [captureNic, setCaptureNic] = useState('');
+  const [counterHistoryByMonitorId, setCounterHistoryByMonitorId] = useState({});
+  const [copyState, setCopyState] = useState('idle');
   const { status, statusById, activeId, activeIds, error, start, stop, setActiveId, refreshActives, onWsMessage } = useETR290();
 
   useEffect(() => {
@@ -330,8 +336,77 @@ export default function ETR290Panel({ lastMessage }) {
   };
 
   const totalAlarms = status?.recentAlarms?.length || 0;
+  const p1AlarmCount = (status?.recentAlarms || []).filter((a) => a?.priority === 'p1').length;
+  const p2AlarmCount = (status?.recentAlarms || []).filter((a) => a?.priority === 'p2').length;
+  const p3AlarmCount = (status?.recentAlarms || []).filter((a) => a?.priority === 'p3').length;
+  const ccErrorCount = status?.counts?.cc_error || 0;
+  const pcrErrorCount = (status?.counts?.pcr_acc || 0) + (status?.counts?.pcr_rep || 0) + (status?.counts?.pcr_disc || 0);
   const p1Error = ETR_CHECKS.p1.some(c => status?.status?.[c.id] === 'error');
   const p2Error = ETR_CHECKS.p2.some(c => status?.status?.[c.id] === 'error');
+
+  useEffect(() => {
+    if (!activeId || !status?.counts) return;
+    const now = Date.now();
+    setCounterHistoryByMonitorId((prev) => {
+      const history = prev[activeId] || [];
+      const next = [...history, { ts: now, counts: status.counts }].filter((s) => now - s.ts <= 10 * 60 * 1000);
+      return { ...prev, [activeId]: next };
+    });
+  }, [activeId, status?.counts]);
+
+  const troubleshooting = useMemo(() => {
+    const alarms = status?.recentAlarms || [];
+    const now = Date.now();
+    const alarmsLast1m = alarms.filter((a) => {
+      const ts = toTs(a?.time);
+      return ts != null && now - ts <= 60 * 1000;
+    }).length;
+    const alarmsLast5m = alarms.filter((a) => {
+      const ts = toTs(a?.time);
+      return ts != null && now - ts <= 5 * 60 * 1000;
+    }).length;
+    const lastAlarmTs = alarms.reduce((acc, a) => {
+      const ts = toTs(a?.time);
+      if (ts == null) return acc;
+      return acc == null ? ts : Math.max(acc, ts);
+    }, null);
+
+    const activeP1Checks = ETR_CHECKS.p1.filter((c) => status?.status?.[c.id] === 'error').length;
+    const activeP2Checks = ETR_CHECKS.p2.filter((c) => status?.status?.[c.id] === 'error').length;
+    const activeP3Checks = ETR_CHECKS.p3.filter((c) => status?.status?.[c.id] === 'error').length;
+
+    const counts = status?.counts || {};
+    const topChecks = Object.entries(counts)
+      .filter(([, count]) => Number(count) > 0)
+      .sort((a, b) => Number(b[1]) - Number(a[1]))
+      .slice(0, 5)
+      .map(([check, count]) => ({ check, count: Number(count) }));
+
+    const history = activeId ? (counterHistoryByMonitorId[activeId] || []) : [];
+    const latest = history.length > 0 ? history[history.length - 1] : null;
+    const baseline = history.find((s) => latest && latest.ts - s.ts >= 60 * 1000) || history[0] || null;
+    const dtMin = latest && baseline ? Math.max((latest.ts - baseline.ts) / 60000, 0.001) : 0;
+    const ccRatePerMin = latest && baseline
+      ? Math.max(0, ((latest.counts?.cc_error || 0) - (baseline.counts?.cc_error || 0)) / dtMin)
+      : 0;
+    const pcrLatest = latest ? ((latest.counts?.pcr_acc || 0) + (latest.counts?.pcr_rep || 0) + (latest.counts?.pcr_disc || 0)) : 0;
+    const pcrBaseline = baseline ? ((baseline.counts?.pcr_acc || 0) + (baseline.counts?.pcr_rep || 0) + (baseline.counts?.pcr_disc || 0)) : 0;
+    const pcrRatePerMin = latest && baseline ? Math.max(0, (pcrLatest - pcrBaseline) / dtMin) : 0;
+
+    return {
+      alarmsLast1m,
+      alarmsLast5m,
+      lastAlarmTs,
+      activeP1Checks,
+      activeP2Checks,
+      activeP3Checks,
+      topChecks,
+      ccRatePerMin,
+      pcrRatePerMin,
+      rateWindowSec: latest && baseline ? Math.round((latest.ts - baseline.ts) / 1000) : 0,
+    };
+  }, [status, activeId, counterHistoryByMonitorId]);
+
   const selectedDvb = activeId ? dvbByMonitorId[activeId]?.dvb : null;
   const selectedRows = activeId ? collectPidRows(dvbByMonitorId[activeId]) : [];
   const resolvedPidCount = selectedRows.filter(r => r.pid != null).length;
@@ -342,6 +417,61 @@ export default function ETR290Panel({ lastMessage }) {
   const displayedBitrateMbps = (selectedDvb?.measuredBitrateBps ? selectedDvb.measuredBitrateBps / 1e6 : null)
     ?? (selectedDvb?.formatBitrateBps ? selectedDvb.formatBitrateBps / 1e6 : null)
     ?? (selectedDvb?.bitrateBps ? selectedDvb.bitrateBps / 1e6 : null);
+
+  const handleCopySnapshot = async () => {
+    if (!status) return;
+    const payload = {
+      capturedAtUtc: formatUtc(Date.now()),
+      monitorId: activeId || null,
+      monitorUrl: status?.url || statusById?.[activeId]?.url || null,
+      health: {
+        p1Error,
+        p2Error,
+        totalAlarms,
+      },
+      counters: {
+        totalAlarms,
+        p1AlarmCount,
+        p2AlarmCount,
+        p3AlarmCount,
+        ccErrorCount,
+        pcrErrorCount,
+      },
+      troubleshooting: {
+        alarmsLast1m: troubleshooting.alarmsLast1m,
+        alarmsLast5m: troubleshooting.alarmsLast5m,
+        activeP1Checks: troubleshooting.activeP1Checks,
+        activeP2Checks: troubleshooting.activeP2Checks,
+        activeP3Checks: troubleshooting.activeP3Checks,
+        ccRatePerMin: Number(troubleshooting.ccRatePerMin.toFixed(3)),
+        pcrRatePerMin: Number(troubleshooting.pcrRatePerMin.toFixed(3)),
+        lastAlarmUtc: troubleshooting.lastAlarmTs ? formatUtc(troubleshooting.lastAlarmTs) : null,
+        rateWindowSec: troubleshooting.rateWindowSec,
+        topFailingChecks: troubleshooting.topChecks,
+      },
+      runtime: status?.runtime || null,
+      diagnostics: status?.diagnostics || null,
+      dvb: selectedDvb
+        ? {
+            pidCount: selectedDvb.pidCount ?? null,
+            serviceCount: selectedDvb.serviceCount ?? null,
+            bitrateSource: selectedDvb.bitrateSource || null,
+            bitrateMbps: displayedBitrateMbps != null ? Number(displayedBitrateMbps.toFixed(3)) : null,
+            resolvedPidCount,
+            unresolvedPidGap,
+          }
+        : null,
+    };
+
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setCopyState('copied');
+      setTimeout(() => setCopyState('idle'), 1800);
+    } catch (_) {
+      setCopyState('error');
+      setTimeout(() => setCopyState('idle'), 2200);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -608,6 +738,108 @@ export default function ETR290Panel({ lastMessage }) {
           <Activity className="w-4 h-4" />
           {p1Error ? 'CRITICAL — Priority 1 errors detected' : p2Error ? 'WARNING — Priority 2 errors' : 'NOMINAL — All checks passing'}
           {totalAlarms > 0 && <span className="ml-auto text-xs font-mono opacity-70">{totalAlarms} alarm{totalAlarms !== 1 ? 's' : ''}</span>}
+        </div>
+      )}
+
+      {status && (
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500">Total Alarms</div>
+            <div className="text-gray-200 font-mono mt-1">{totalAlarms}</div>
+          </div>
+          <div className="rounded-lg border border-red-500/20 bg-red-900/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-red-300">P1</div>
+            <div className="text-red-200 font-mono mt-1">{p1AlarmCount}</div>
+          </div>
+          <div className="rounded-lg border border-amber-500/20 bg-amber-900/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-amber-300">P2</div>
+            <div className="text-amber-200 font-mono mt-1">{p2AlarmCount}</div>
+          </div>
+          <div className="rounded-lg border border-sky-500/20 bg-sky-900/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-sky-300">P3</div>
+            <div className="text-sky-200 font-mono mt-1">{p3AlarmCount}</div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500">CC Errors</div>
+            <div className="text-gray-200 font-mono mt-1">{ccErrorCount}</div>
+          </div>
+          <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500">PCR Errors</div>
+            <div className="text-gray-200 font-mono mt-1">{pcrErrorCount}</div>
+          </div>
+        </div>
+      )}
+
+      {status && (
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500">Troubleshooting Counters</div>
+            <button
+              type="button"
+              onClick={handleCopySnapshot}
+              className={`text-[10px] px-2 py-1 rounded border font-mono ${
+                copyState === 'copied'
+                  ? 'border-green-500/40 text-green-300 bg-green-900/20'
+                  : copyState === 'error'
+                    ? 'border-red-500/40 text-red-300 bg-red-900/20'
+                    : 'border-white/15 text-gray-300 bg-black/30 hover:bg-black/40'
+              }`}
+            >
+              {copyState === 'copied' ? 'Copied' : copyState === 'error' ? 'Copy Failed' : 'Copy Diagnostics Snapshot'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-2 text-xs">
+            <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+              <div className="text-[10px] text-gray-500 uppercase">Alarms 1m</div>
+              <div className="font-mono text-gray-200">{troubleshooting.alarmsLast1m}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+              <div className="text-[10px] text-gray-500 uppercase">Alarms 5m</div>
+              <div className="font-mono text-gray-200">{troubleshooting.alarmsLast5m}</div>
+            </div>
+            <div className="rounded border border-red-500/20 bg-red-900/10 px-2 py-1.5">
+              <div className="text-[10px] text-red-300 uppercase">Active P1 checks</div>
+              <div className="font-mono text-red-200">{troubleshooting.activeP1Checks}</div>
+            </div>
+            <div className="rounded border border-amber-500/20 bg-amber-900/10 px-2 py-1.5">
+              <div className="text-[10px] text-amber-300 uppercase">Active P2 checks</div>
+              <div className="font-mono text-amber-200">{troubleshooting.activeP2Checks}</div>
+            </div>
+            <div className="rounded border border-sky-500/20 bg-sky-900/10 px-2 py-1.5">
+              <div className="text-[10px] text-sky-300 uppercase">Active P3 checks</div>
+              <div className="font-mono text-sky-200">{troubleshooting.activeP3Checks}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+              <div className="text-[10px] text-gray-500 uppercase">CC rate/min</div>
+              <div className="font-mono text-gray-200">{troubleshooting.ccRatePerMin.toFixed(2)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+              <div className="text-[10px] text-gray-500 uppercase">PCR rate/min</div>
+              <div className="font-mono text-gray-200">{troubleshooting.pcrRatePerMin.toFixed(2)}</div>
+            </div>
+            <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+              <div className="text-[10px] text-gray-500 uppercase">Last alarm</div>
+              <div className="font-mono text-gray-200">{troubleshooting.lastAlarmTs ? formatUtc(troubleshooting.lastAlarmTs) : '-'}</div>
+            </div>
+          </div>
+          <div className="mt-2 text-[10px] text-gray-500 font-mono">
+            Rate window: {troubleshooting.rateWindowSec || 0}s
+          </div>
+          <div className="mt-2 rounded border border-white/10 bg-black/30 p-2">
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Top Failing Checks</div>
+            {troubleshooting.topChecks.length === 0 ? (
+              <div className="text-[11px] text-gray-500">No accumulated check failures.</div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-1.5">
+                {troubleshooting.topChecks.map((row) => (
+                  <div key={row.check} className="flex items-center justify-between text-[11px] rounded border border-white/10 bg-black/30 px-2 py-1">
+                    <span className="text-gray-300 font-mono">{row.check}</span>
+                    <span className="text-red-300 font-mono">{row.count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

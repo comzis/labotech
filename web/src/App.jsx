@@ -122,6 +122,7 @@ function LcdValue({ label, value, color }) {
 
 export default function App() {
   const [tab, setTab] = useState('streams');
+  const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
   const [eventLog, setEventLog] = useState([]);
@@ -204,6 +205,13 @@ export default function App() {
     const timer = setInterval(load, 5000);
     return () => { mounted = false; clearInterval(timer); };
   }, []);
+
+  const handleSelectDecoderFromTimeline = (decoderId) => {
+    const id = String(decoderId || '').trim();
+    if (!id) return;
+    setDecoderSelectionRequest({ id, at: Date.now() });
+    setTab('decoder');
+  };
 
   return (
     <div className="min-h-screen flex flex-col font-mono" style={{ background: 'transparent' }}>
@@ -406,10 +414,10 @@ export default function App() {
           {tab === 'streams'    && <StreamsPanel lastMessage={lastMessage} />}
           {tab === 'transcode'  && <TranscodePanel lastMessage={lastMessage} />}
           {tab === 'multicast'  && <MulticastPanel lastMessage={lastMessage} />}
-          {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} />}
+          {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} />}
           {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
           {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
-          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} />}
+          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} />}
           {tab === 'alarms'     && (
             <EventLogPanel
               events={eventLog}

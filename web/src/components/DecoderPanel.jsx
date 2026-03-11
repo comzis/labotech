@@ -213,7 +213,7 @@ function AlarmTimeline({ alarms }) {
   );
 }
 
-export default function DecoderPanel({ lastMessage }) {
+export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [mode, setMode] = useState('rtp');
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
   const [latency, setLatency] = useState('2000');
@@ -299,6 +299,12 @@ export default function DecoderPanel({ lastMessage }) {
     if (selectedId) return;
     if (activeIds.length > 0) setSelectedId(activeIds[0]);
   }, [activeIds, selectedId]);
+
+  useEffect(() => {
+    const requested = selectedDecoderRequest?.id;
+    if (!requested) return;
+    setSelectedId(requested);
+  }, [selectedDecoderRequest]);
 
   const updateRow = (rowKey, patch) => {
     setDecoderRows((rows) => rows.map((r) => (r.key === rowKey ? { ...r, ...patch } : r)));
