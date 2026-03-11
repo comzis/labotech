@@ -843,6 +843,38 @@ export default function ETR290Panel({ lastMessage }) {
         </div>
       )}
 
+      {status && (
+        <div className="rounded-xl border border-white/10 bg-black/20 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">Active Incidents</div>
+          {(status.activeIncidents || []).length === 0 ? (
+            <div className="text-[11px] text-gray-500">No active incidents.</div>
+          ) : (
+            <div className="space-y-1.5 max-h-48 overflow-auto">
+              {(status.activeIncidents || [])
+                .slice()
+                .sort((a, b) => (b.lastSeen || 0) - (a.lastSeen || 0))
+                .map((inc) => (
+                  <div key={inc.incidentId} className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-mono text-gray-200">{inc.label || inc.checkId}</div>
+                      <div className="text-[10px] font-mono text-gray-500">{String(inc.priority || '').toUpperCase()}</div>
+                    </div>
+                    <div className="text-[10px] text-gray-500 font-mono">
+                      id: {inc.incidentId} · hits: {inc.hitCount || 0}
+                      {inc.pid != null ? ` · pid: ${inc.pid}` : ''}
+                      {inc.pidHex ? ` (${inc.pidHex})` : ''}
+                    </div>
+                    <div className="text-[10px] text-gray-500 font-mono">
+                      first: {formatUtc(inc.firstSeen)} · last: {formatUtc(inc.lastSeen)}
+                    </div>
+                    <div className="text-[11px] text-gray-400 truncate">{inc.lastMessage || '-'}</div>
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ETR 290 Priority Grid */}
       {status && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">

@@ -148,7 +148,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             ? { background: 'rgba(0,120,50,0.25)', borderColor: 'rgba(0,221,85,0.35)', color: '#86efac' }
             : { background: 'rgba(120,80,0,0.25)', borderColor: 'rgba(255,170,0,0.35)', color: '#facc15' }}
         >
-          {signalOk ? 'Live' : 'No Signal'}
+          {signalOk ? 'Live' : 'Monitoring'}
         </span>
         <button
           onClick={onStop}
@@ -185,7 +185,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
             <div className="w-3 h-3 rounded-full" style={{ background: '#1a1a1a', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)' }} />
-            <span className="text-[9px] engraved uppercase tracking-widest">No Signal</span>
+            <span className="text-[9px] engraved uppercase tracking-widest">Awaiting Frame</span>
           </div>
         )}
       </div>

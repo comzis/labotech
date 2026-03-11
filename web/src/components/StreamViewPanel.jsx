@@ -75,6 +75,45 @@ function toEvent(msg) {
       },
     };
   }
+  if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
+    const laneId = normalizeLaneId(msg.id || 'etr');
+    const sev = msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info';
+    return {
+      key: `${ts}-${laneId}-${msg.incidentId || msg.checkId}-${msg.type}`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'etr',
+      category: 'etr290_incident',
+      severity: sev,
+      title: `Incident ${msg.type.endsWith('started') ? 'started' : 'updated'}: ${msg.label || msg.checkId || 'ETR check'}`,
+      description: msg.lastMessage || msg.message || '',
+      evidence: {
+        incidentId: msg.incidentId || null,
+        checkId: msg.checkId || null,
+        hitCount: msg.hitCount || 0,
+        pid: msg.pid ?? null,
+        pidHex: msg.pidHex || null,
+      },
+    };
+  }
+  if (msg.type === 'etr290_incident_cleared') {
+    const laneId = normalizeLaneId(msg.id || 'etr');
+    return {
+      key: `${ts}-${laneId}-${msg.incidentId || msg.checkId}-cleared`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'etr',
+      category: 'etr290_incident_cleared',
+      severity: 'ok',
+      title: `Incident cleared: ${msg.label || msg.checkId || 'ETR check'}`,
+      description: msg.lastMessage || '',
+      evidence: {
+        incidentId: msg.incidentId || null,
+        checkId: msg.checkId || null,
+        durationMs: msg.durationMs || null,
+      },
+    };
+  }
   if (msg.type === 'analyse_result') {
     const laneId = normalizeLaneId(msg.id || 'analyse');
     const dvb = msg.dvb || {};
