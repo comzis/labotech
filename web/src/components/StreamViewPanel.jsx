@@ -142,7 +142,7 @@ function num(v, digits = 3) {
   return typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : null;
 }
 
-export default function StreamViewPanel({ lastMessage }) {
+export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const LANE_TOP_PX = 48;
   const LANE_STEP_PX = 34;
   const LANE_LINE_THICKNESS_PX = 8;
@@ -370,8 +370,12 @@ export default function StreamViewPanel({ lastMessage }) {
             setMouseX(Math.min(100, Math.max(0, x)));
             const y = e.clientY - rect.top;
             const laneIdx = Math.round((y - LANE_TOP_PX) / LANE_STEP_PX);
-            setMouseLaneId(laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null);
+            const laneId = laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null;
+            setMouseLaneId(laneId);
             setFreezeCursor(true);
+            if (laneId && typeof onSelectDecoder === 'function') {
+              onSelectDecoder(laneId);
+            }
           }}
           onMouseLeave={() => {
             if (!freezeCursor) {
@@ -548,7 +552,7 @@ export default function StreamViewPanel({ lastMessage }) {
                               : 'text-amber-400 border-amber-500/30 bg-amber-900/20'
                           }`}
                           title={isNic
-                            ? `Packet capture via ${cm} - NIC-level IAT (BORO-grade)`
+                            ? `Packet capture via ${cm} - NIC-level IAT`
                             : 'IAT derived from stream analyser - install tshark or tcpdump for NIC-capture'}
                         >
                           {isNic ? `NIC-capture (${cm})` : 'analyser-derived'}
