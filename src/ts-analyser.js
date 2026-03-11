@@ -115,8 +115,19 @@ class TSAnalyser extends EventEmitter {
             try {
               await captureThumbnail(this.id, this.url);
               result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
-            } catch (_) {
-              // Thumbnail generation is best-effort for multiview cards.
+            } catch (err) {
+              // Keep last good frame if a single capture cycle fails.
+              if (this.lastResult?.thumbnailUrl) {
+                result.thumbnailUrl = this.lastResult.thumbnailUrl;
+              }
+              result.dvb.probeDiagnostics = {
+                ...(result.dvb.probeDiagnostics || {}),
+                thumbnail: {
+                  attempted: true,
+                  ok: false,
+                  error: err && err.message ? err.message : 'thumbnail capture failed',
+                },
+              };
             }
           } else if (this.lastResult?.thumbnailUrl) {
             // Keep the previous thumbnail between capture cycles to avoid flicker.
