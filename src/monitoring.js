@@ -43,7 +43,8 @@ function _doCaptureThumbnail(streamId, inputUrl) {
   return new Promise((resolve, reject) => {
     const safeId = sanitizeStreamId(streamId);
     const outPath = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
-    const tmpPath = `${outPath}.tmp`;
+    // Keep a .jpg suffix on temp output so ffmpeg selects the jpeg muxer.
+    const tmpPath = `${outPath}.tmp.jpg`;
     const capture = getThumbnailCaptureSettings();
 
     // Build input URL with multicast-friendly options
@@ -68,6 +69,7 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       // Much faster than the previous thumbnail=24 at fps=8 (3s buffer).
       // bilinear is sufficient for a confidence monitor thumbnail.
       '-vf', `fps=4,thumbnail=4,scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=bilinear`,
+      '-f', 'image2',
       '-q:v', String(capture.qv),
       tmpPath,  // write to .tmp first — atomic rename prevents corrupt browser reads
     ];
