@@ -41,7 +41,7 @@ class TSAnalyser extends EventEmitter {
     const runHeavyProbe = !isContinuous || (this._continuousProbeCount % 3 === 1);
     // Thumbnail refresh must remain deterministic for operator confidence.
     // Use time-based cadence (default 5s), independent of heavy probe cycles.
-    const thumbIntervalSec = parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5;
+    const thumbIntervalSec = parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 3;
     const thumbIntervalMs = Math.max(1000, thumbIntervalSec * 1000);
     const nowMs = Date.now();
     const runThumbnailCapture = !isContinuous || (nowMs - this._lastThumbnailAt >= thumbIntervalMs);
