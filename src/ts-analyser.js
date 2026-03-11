@@ -40,7 +40,13 @@ class TSAnalyser extends EventEmitter {
         }
         try {
           const raw = JSON.parse(stdout);
-          const result = this.parseStructure(raw);
+          let result = this.parseStructure(raw);
+          if ((result?.dvb?.pidCount || 0) === 0) {
+            // Some RTP/TS sources omit stream ids in ffprobe JSON. Fallback to
+            // ffmpeg banner parsing where stream lines usually contain [0xPID].
+            const pidMap = await this._probeStreamPidsFromFfmpeg();
+            result = this._applyPidMap(result, pidMap);
+          }
           result.audioLevels = await this._probeAudioLevels();
           try {
             await captureThumbnail(this.id, this.url);
@@ -227,6 +233,78 @@ class TSAnalyser extends EventEmitter {
     merged.bit_rate = pBitrate != null ? p.bit_rate : (gBitrate != null ? g.bit_rate : (p.bit_rate ?? g.bit_rate ?? null));
 
     return merged;
+  }
+
+  _probeStreamPidsFromFfmpeg() {
+    return new Promise((resolve) => {
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'info',
+        '-t', '1.0',
+        '-i', this.url,
+        '-map', '0',
+        '-f', 'null',
+        '-',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 3500);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => {
+        clearTimeout(timeout);
+        resolve({});
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const pidByIndex = {};
+        const lines = stderr.split('\n');
+        for (const line of lines) {
+          // Example:
+          // Stream #0:0[0x200]: Video: h264 ...
+          const m = line.match(/Stream #\d+:(\d+)\[0x([0-9a-f]+)\]/i);
+          if (!m) continue;
+          const idx = parseInt(m[1], 10);
+          const pid = parseInt(m[2], 16);
+          if (Number.isFinite(idx) && Number.isFinite(pid)) {
+            pidByIndex[idx] = pid;
+          }
+        }
+        resolve(pidByIndex);
+      });
+    });
+  }
+
+  _applyPidMap(result, pidMap) {
+    if (!result || !pidMap || Object.keys(pidMap).length === 0) return result;
+    const patchStream = (s) => {
+      if (!s) return s;
+      if (s.pid != null) return s;
+      const pid = pidMap[s.index];
+      if (pid == null) return s;
+      return {
+        ...s,
+        pid,
+        pidHex: `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`,
+      };
+    };
+    const programs = (result.programs || []).map((p) => ({
+      ...p,
+      streams: (p.streams || []).map(patchStream),
+    }));
+    const orphanStreams = (result.orphanStreams || []).map(patchStream);
+    const allStreams = programs.flatMap(p => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter(s => s.pid != null).length;
+    return {
+      ...result,
+      programs,
+      orphanStreams,
+      dvb: {
+        ...(result.dvb || {}),
+        pidCount,
+      },
+    };
   }
 
   startContinuous() {
