@@ -9,11 +9,12 @@ const MAX_HISTORY = 60;
 const rttColor  = ms  => !ms  ? 'text-gray-500' : ms  < 30  ? 'text-green-400' : ms  < 80  ? 'text-yellow-400' : 'text-red-400';
 const lossColor = pct => !pct && pct !== 0 ? 'text-gray-500' : pct === 0 ? 'text-green-400' : pct < 1 ? 'text-yellow-400' : 'text-red-400';
 
-export default function MetricsTile({ id, stats, inputBitrate: initInputBr, lastMessage }) {
+export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inputBitrateMeasuring: initInputBitrateMeasuring = false, lastMessage }) {
   const [history,      setHistory]      = useState([]);
   const [current,      setCurrent]      = useState(stats || null);
   const [srtStats,     setSrtStats]     = useState(null);
   const [inputBitrate, setInputBitrate] = useState(initInputBr || null);
+  const [inputBitrateMeasuring, setInputBitrateMeasuring] = useState(Boolean(initInputBitrateMeasuring));
   const [inputStreams, setInputStreams] = useState(null);
   const [ffmpegError,  setFfmpegError]  = useState(null);
 
@@ -22,7 +23,13 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
     if ((lastMessage.type === 'stats' || lastMessage.type === 'transcode_stats') && lastMessage.id === id) {
       setCurrent(lastMessage);
       setHistory(h => [...h.slice(-(MAX_HISTORY - 1)), { t: h.length, v: lastMessage.bitrate || 0 }]);
-      if (lastMessage.inputBitrate) setInputBitrate(lastMessage.inputBitrate);
+      if (lastMessage.inputBitrate) {
+        setInputBitrate(lastMessage.inputBitrate);
+        setInputBitrateMeasuring(false);
+      }
+      if (lastMessage.inputBitrateMeasuring != null) {
+        setInputBitrateMeasuring(Boolean(lastMessage.inputBitrateMeasuring));
+      }
       if (lastMessage.inputStreams) setInputStreams(lastMessage.inputStreams);
     }
     if (lastMessage.type === 'srtStats' && lastMessage.id === id) {
@@ -32,6 +39,15 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
       setFfmpegError(lastMessage.message);
     }
   }, [lastMessage, id]);
+
+  useEffect(() => {
+    if (initInputBr != null && Number.isFinite(initInputBr) && initInputBr > 0) {
+      setInputBitrate(initInputBr);
+    }
+  }, [initInputBr]);
+  useEffect(() => {
+    setInputBitrateMeasuring(Boolean(initInputBitrateMeasuring));
+  }, [initInputBitrateMeasuring]);
 
   // Broadcast standard: display TS bitrate in Mbps
   const mbps      = current?.bitrate ? (current.bitrate / 1000).toFixed(2) : null;
@@ -63,8 +79,12 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, last
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Input</span>
-          <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : 'text-gray-600'}`}>
-            {inputMbps ? `${inputMbps} Mbps` : '—'}
+          <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : inputBitrateMeasuring ? 'text-gray-400' : 'text-gray-600'}`}>
+            {inputMbps
+              ? `${inputMbps} Mbps`
+              : inputBitrateMeasuring
+                ? 'measuring...'
+                : '-'}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
@@ -175,15 +195,17 @@ function Metric({ label, value, color }) {
 
 function StatusPill({ label, locked, activeLabel, idleLabel }) {
   return (
-    <div className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-[10px] font-bold uppercase tracking-widest
+    <div className={`flex items-center justify-between gap-1.5 px-2 py-1.5 rounded-lg border text-[9px] font-semibold uppercase tracking-wide min-w-0
       ${locked
         ? 'bg-green-950/60 border-green-700/40 text-green-400'
         : 'bg-gray-900/60  border-gray-700/40  text-gray-500'
       }`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${locked ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
-      <span className="text-gray-500 mr-0.5">{label}</span>
-      <span>{locked ? activeLabel : idleLabel}</span>
+      <span className="flex items-center gap-1 shrink-0 min-w-0">
+        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${locked ? 'bg-green-400 animate-pulse' : 'bg-gray-600'}`} />
+        <span className="text-gray-500">{label}</span>
+      </span>
+      <span className="truncate">{locked ? activeLabel : idleLabel}</span>
     </div>
   );
 }

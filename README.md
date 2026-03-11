@@ -117,6 +117,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `transcoder.js` | `Transcoder` | Extends `SRTEncoder`. Four broadcast interlace presets: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT). |
 | `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `eno2`. Validates all addresses against `239.100.25.0/26`. Manages routes via `ensureMulticastRoute()`. |
 | `ts-analyser.js` | `TSAnalyser` | ffprobe wrapper. Parses PAT/PMT/PID tree via `parseStructure()`. One-shot and continuous probing modes. |
+| `iat-sniffer.js` | `IATSniffer` | Optional NIC-level packet timestamp sniffer for continuous analyser workflows. Uses `tshark` or `tcpdump` to derive IAT/jitter/loss metrics and capture provenance. |
 | `failover.js` | `FailoverEncoder` | Primary/backup input watchdog. 3-second switchover threshold. Emits `switched` event. |
 | `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder for ad marker injection. |
 | `monitoring.js` | — | Confidence thumbnail capture (ffmpeg), SNMP traps, syslog events. |
@@ -145,6 +146,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `MulticastPanel` | `eno2` forwarder controls and subnet status |
 | `TSAnalyser` | One-shot TS probe, DVB service summary/table, embedded ETR290 view, and continuous decoder/monitor workflows |
 | `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
+| `StreamViewPanel` | Live UTC timeline across analyser/ETR lanes with pointer popup, lane error context, and IAT/jitter forensics |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
 ---
@@ -183,6 +185,35 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **Service table** showing SID, service name/provider, PMT PID, PCR PID
 - **ETR290 monitor panel** (P1/P2/P3, alarms) embedded in analyser workflow
 - **TS PID inventory** table for video/audio/data/other streams, including codec and bitrate
+- **PID bitrate provenance label** for unresolved video remainder allocations (`(est.)`) so computed values are not mistaken for measured per-PID bitrate
+- **ETR input bind IP** for RTP/UDP monitor URLs, so operators can pin monitoring to the intended interface path
+- **ETR parser diagnostics** (matched lines and last match time) to verify monitor activity against live faults
+- **IAT sniffer diagnostics** (attempted, capture method, sample count, error) for NIC-capture visibility
+
+---
+
+## Live View Timeline
+
+`Live View` provides a UTC timeline that correlates analyser and ETR events in one place:
+
+- **Lane markers by type**: alarm (red dot), status sample (cyan tick), analyse sample (green square)
+- **Lane line severity at pointer**: lane baseline color reflects current severity near pointer (critical/warning/ok)
+- **Pointer popup**: selected lane + pointer UTC + nearest event + nearby ETR alarms (`±30s`)
+- **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
+- **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
+
+---
+
+## Input Bitrate Provenance
+
+`SRTEncoder` input bitrate reporting is intentionally source-aware for live feeds where startup metadata may be missing:
+
+- **`srt-stats`** — live SRT rate from periodic transport stats
+- **`bitrate-watcher`** — periodic ffmpeg remux watcher for UDP/RTP inputs
+- **`proxy-output`** — passthrough (`videoCodec=copy`) output-rate proxy when direct input-rate telemetry is absent
+- **`stream-descriptor` / startup metadata** — one-shot source metadata when available
+
+The API surface includes `inputBitrate` and provenance (`inputBitrateSource`) to support deterministic operator visibility.
 
 ---
 

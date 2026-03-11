@@ -302,6 +302,11 @@ Running channels appear as cards showing:
 - Input source and destination
 - DVB service identity and PID map
 - Real-time bitrate / packet loss metrics
+- Input bitrate provenance (`inputBitrateSource`) for live feeds:
+  - `srt-stats` (live SRT rate)
+  - `bitrate-watcher` (UDP/RTP periodic remux measurement)
+  - `proxy-output` (passthrough fallback)
+  - startup metadata paths when available
 
 Click **Stop** to terminate a channel.
 
@@ -377,8 +382,14 @@ Probes any MPEG-TS stream and displays the full PAT/PMT/PID tree.
    - Programme Association Table (PAT)
    - Programme Map Tables (PMT) per service
    - All PIDs with type, codec, bitrate, and language
+   - Arrival telemetry provenance (`dvb.arrival.captureMethod`) for IAT/jitter/loss:
+     - `tshark` / `tcpdump` = NIC-capture
+     - `tsduck` = analyser-derived
+     - `unavailable` = capture tool missing
 
 Useful for verifying DVB compliance and diagnosing multiplexer issues.
+
+When a PID bitrate cell shows `(est.)`, it indicates TS remainder allocation to an unresolved video PID, not a direct per-PID measured bitrate.
 
 ---
 
@@ -410,6 +421,7 @@ For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Strea
 | Blank page | Vite dev server not running | Run `cd web && npm run dev` |
 | Multicast route error | `eno2` route not configured | Run `sudo bash scripts/setup-host.sh` |
 | Stream fails to start | FFmpeg not installed | Run `sudo apt install ffmpeg` on server |
+| IAT lane shows analyser-derived/unavailable | NIC capture tool missing | Install `tshark` or `tcpdump` and verify with `which tshark \|\| which tcpdump` |
 | EPERM on node_modules | Stale Docker-owned files | Run `sudo rm -rf node_modules && npm install` |
 
 ---

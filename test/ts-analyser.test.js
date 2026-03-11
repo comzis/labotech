@@ -222,6 +222,26 @@ describe('TSAnalyser', () => {
       expect(enriched.orphanStreams[0].pid).toBe(0x0101);
       expect(enriched.dvb.pidCount).toBe(base.dvb.pidCount);
     });
+
+    test('prefers injected sniffer arrival metrics with capture method', () => {
+      const base = analyser.parseStructure({
+        programs: [],
+        streams: [{ index: 0, codec_type: 'audio', codec_name: 'mp2', id: '0x0101' }],
+      });
+      const enriched = analyser._applyTSDuckData(
+        base,
+        { arrivalMetrics: null },
+        {
+          iatMs: { min: 1.2, max: 5.7, avg: 2.8, p95: 4.9 },
+          jitterMs: 0.4,
+          packetLossPct: 0,
+          sampleCount: 42,
+          captureMethod: 'tshark',
+        }
+      );
+      expect(enriched.dvb.arrival.captureMethod).toBe('tshark');
+      expect(enriched.dvb.arrival.sampleCount).toBe(42);
+    });
   });
 
   describe('rtp fallback probing', () => {

@@ -3,6 +3,7 @@
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const { captureThumbnail } = require('./monitoring');
+const IATSniffer = require('./iat-sniffer');
 
 class TSAnalyser extends EventEmitter {
   constructor(options = {}) {
@@ -15,6 +16,7 @@ class TSAnalyser extends EventEmitter {
     this.isRunning = false;
     this.lastResult = null;
     this._continuousProbeCount = 0;
+    this._iatSniffer = null;
   }
 
   probe(options = {}) {
@@ -64,7 +66,10 @@ class TSAnalyser extends EventEmitter {
             runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
             this._probeAudioLevels(),
           ]);
-          result = this._applyTSDuckData(result, tsduckProbe?.data || null);
+          const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
+            ? this._iatSniffer.getMetrics()
+            : null;
+          result = this._applyTSDuckData(result, tsduckProbe?.data || null, nicMetrics);
           result.dvb.probeDiagnostics = {
             ...(result.dvb.probeDiagnostics || {}),
             tsduck: {
@@ -73,6 +78,12 @@ class TSAnalyser extends EventEmitter {
               ok: tsduckProbe?.ok === true,
               used: result?.dvb?.bitrateSource === 'tsduck',
               error: tsduckProbe?.error || null,
+            },
+            iatSniffer: {
+              attempted: Boolean(this._iatSniffer),
+              captureMethod: this._iatSniffer?.captureMethod || 'unavailable',
+              sampleCount: this._iatSniffer?.getMetrics?.()?.sampleCount ?? 0,
+              error: this._iatSniffer?.lastError || null,
             },
           };
           if (measuredBitrateBps && measuredBitrateBps > 0) {
@@ -408,8 +419,8 @@ class TSAnalyser extends EventEmitter {
     return merged;
   }
 
-  _applyTSDuckData(result, tsduckData) {
-    if (!result || !tsduckData) return result;
+  _applyTSDuckData(result, tsduckData, nicMetrics = null) {
+    if (!result) return result;
     const next = {
       ...result,
       programs: [...(result.programs || [])],
@@ -417,13 +428,13 @@ class TSAnalyser extends EventEmitter {
       dvb: { ...(result.dvb || {}) },
     };
 
-    if (tsduckData.bitrateBps && tsduckData.bitrateBps > 0) {
+    if (tsduckData && tsduckData.bitrateBps && tsduckData.bitrateBps > 0) {
       next.dvb.tsduckBitrateBps = tsduckData.bitrateBps;
       next.dvb.bitrateBps = tsduckData.bitrateBps;
       next.dvb.bitrateSource = 'tsduck';
     }
 
-    if (Array.isArray(tsduckData.services) && tsduckData.services.length > 0) {
+    if (tsduckData && Array.isArray(tsduckData.services) && tsduckData.services.length > 0) {
       const byId = new Map((next.dvb.services || []).map((s) => [s.serviceId, s]));
       for (const svc of tsduckData.services) {
         const prev = byId.get(svc.serviceId) || {};
@@ -440,7 +451,7 @@ class TSAnalyser extends EventEmitter {
       next.dvb.serviceCount = mergedServices.length;
     }
 
-    if (Array.isArray(tsduckData.pids) && tsduckData.pids.length > 0) {
+    if (tsduckData && Array.isArray(tsduckData.pids) && tsduckData.pids.length > 0) {
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
       const available = tsduckData.pids.filter((r) => r && r.pid != null && !existingPidSet.has(r.pid));
@@ -501,7 +512,7 @@ class TSAnalyser extends EventEmitter {
       audio: allStreams.filter((s) => s.codecType === 'audio').length,
       data: allStreams.filter((s) => s.codecType === 'data').length,
     };
-    if (tsduckData.siIntervalsSec) {
+    if (tsduckData && tsduckData.siIntervalsSec) {
       const si = tsduckData.siIntervalsSec;
       const compliance = {
         nit: si.nit != null ? si.nit <= 10 : null,
@@ -511,8 +522,19 @@ class TSAnalyser extends EventEmitter {
       };
       next.dvb.si = { intervalsSec: si, compliance };
     }
-    if (tsduckData.arrivalMetrics) {
-      next.dvb.arrival = tsduckData.arrivalMetrics;
+    if (nicMetrics && nicMetrics.sampleCount > 0) {
+      next.dvb.arrival = {
+        iatMs: nicMetrics.iatMs,
+        jitterMs: nicMetrics.jitterMs,
+        packetLossPct: nicMetrics.packetLossPct,
+        captureMethod: nicMetrics.captureMethod,
+        sampleCount: nicMetrics.sampleCount,
+      };
+    } else if (tsduckData && tsduckData.arrivalMetrics) {
+      next.dvb.arrival = {
+        ...tsduckData.arrivalMetrics,
+        captureMethod: 'tsduck',
+      };
     }
     return next;
   }
@@ -927,6 +949,10 @@ class TSAnalyser extends EventEmitter {
   startContinuous() {
     if (this.isRunning) return;
     this.isRunning = true;
+    if (!this._iatSniffer) {
+      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url });
+      this._iatSniffer.start();
+    }
 
     const run = async () => {
       const startedAt = Date.now();
@@ -952,6 +978,10 @@ class TSAnalyser extends EventEmitter {
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = null;
+    }
+    if (this._iatSniffer) {
+      this._iatSniffer.stop();
+      this._iatSniffer = null;
     }
     this.emit('stopped', { id: this.id });
   }

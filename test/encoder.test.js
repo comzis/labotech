@@ -141,6 +141,14 @@ describe('SRTEncoder', () => {
       expect(audioTracks).toHaveLength(2);
       expect(audioTracks.map(s => s.sourceIndex).sort()).toEqual([1, 2]);
     });
+
+    test('uses output bitrate as proxy in copy mode when input bitrate missing', () => {
+      enc.videoCodec = 'copy';
+      enc.inputBitrate = null;
+      enc.parseStats('frame=1 fps=25 bitrate=8500.0kbits/s speed=1.00x');
+      expect(enc.inputBitrate).toBe(8500);
+      expect(enc.inputBitrateSource).toBe('proxy-output');
+    });
   });
 
   describe('audioPairs', () => {
