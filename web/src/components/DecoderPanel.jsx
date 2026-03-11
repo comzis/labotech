@@ -61,6 +61,15 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   return url;
 }
 
+function newDecoderRow(seed = Date.now()) {
+  return {
+    key: `${seed}-${Math.random().toString(36).slice(2, 8)}`,
+    host: '',
+    port: '6501',
+    decoderId: '',
+  };
+}
+
 function qualityMetrics(status) {
   const counts = status?.counts || {};
   const packetLoss = (counts.ts_sync || 0) + (counts.transport_error || 0);
@@ -206,15 +215,14 @@ function AlarmTimeline({ alarms }) {
 
 export default function DecoderPanel({ lastMessage }) {
   const [mode, setMode] = useState('rtp');
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('6501');
+  const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
-  const [decoderId, setDecoderId] = useState('');
   const [interval, setInterval] = useState(5000);
   const [addToMultiview, setAddToMultiview] = useState(true);
   const [captureNic, setCaptureNic] = useState('');
   const [selectedId, setSelectedId] = useState('');
+  const [provisionSummary, setProvisionSummary] = useState(null);
 
   const {
     result,
@@ -243,7 +251,20 @@ export default function DecoderPanel({ lastMessage }) {
     }
   }, [lastMessage, onWsResult, etr]);
 
-  const builtUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
+  const rowPlans = useMemo(() => {
+    return decoderRows.map((row, idx) => {
+      const url = buildProbeUrl({
+        mode,
+        host: row.host,
+        port: row.port,
+        latency,
+        passphrase,
+      });
+      return { ...row, rowIndex: idx + 1, url };
+    });
+  }, [decoderRows, mode, latency, passphrase]);
+  const validRowPlans = rowPlans.filter((row) => row.url);
+  const firstPreviewUrl = validRowPlans[0]?.url || '';
   const selectedMonitorId = selectedId ? `etr-${selectedId}` : etr.activeId;
   const selectedEtrStatus = selectedMonitorId ? (etr.statusById?.[selectedMonitorId] || null) : etr.status;
   const metrics = qualityMetrics(selectedEtrStatus);
@@ -279,21 +300,48 @@ export default function DecoderPanel({ lastMessage }) {
     if (activeIds.length > 0) setSelectedId(activeIds[0]);
   }, [activeIds, selectedId]);
 
+  const updateRow = (rowKey, patch) => {
+    setDecoderRows((rows) => rows.map((r) => (r.key === rowKey ? { ...r, ...patch } : r)));
+  };
+
+  const addDecoderRow = () => {
+    setDecoderRows((rows) => [...rows, newDecoderRow()]);
+  };
+
+  const removeDecoderRow = (rowKey) => {
+    setDecoderRows((rows) => {
+      if (rows.length <= 1) return rows;
+      return rows.filter((r) => r.key !== rowKey);
+    });
+  };
+
   const startDecoder = async () => {
-    if (!builtUrl) return;
-    const id = decoderId || `decoder-${Date.now()}`;
-    setSelectedId(id);
-    try {
-      if (addToMultiview) {
-        await startContinuous(id, builtUrl, parseInt(interval, 10) || 5000, captureNic || undefined);
-      } else {
-        await probe(builtUrl);
+    if (validRowPlans.length === 0) return;
+    const runStamp = Date.now();
+    const started = [];
+    const failed = [];
+
+    for (let i = 0; i < validRowPlans.length; i += 1) {
+      const row = validRowPlans[i];
+      const id = row.decoderId?.trim() || `decoder-${runStamp}-${i + 1}`;
+      try {
+        if (addToMultiview) {
+          await startContinuous(id, row.url, parseInt(interval, 10) || 5000, captureNic || undefined);
+        } else {
+          await probe(row.url);
+        }
+        await etr.start(`etr-${id}`, row.url, captureNic || undefined);
+        started.push(id);
+      } catch (err) {
+        failed.push({ id, message: err?.message || 'Provision failed' });
       }
-      await etr.start(`etr-${id}`, builtUrl, captureNic || undefined);
-      setDecoderId('');
-    } catch (_) {
-      // Errors are surfaced by hooks; keep form state so operator can retry.
     }
+
+    if (started.length > 0) {
+      setSelectedId(started[started.length - 1]);
+      setDecoderRows((rows) => rows.map((r) => ({ ...r, decoderId: '' })));
+    }
+    setProvisionSummary({ started, failed, at: Date.now() });
   };
 
   const stopDecoder = async () => {
@@ -321,10 +369,47 @@ export default function DecoderPanel({ lastMessage }) {
           ))}
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3 mt-3">
-          <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.100.25.29" />
-          <Field label="Port" value={port} onChange={setPort} type="number" placeholder="6501" />
-          <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
+        <div className="mt-3 space-y-2">
+          {decoderRows.map((row) => (
+            <div key={row.key} className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-[1fr_140px_1fr_auto] gap-3 items-end">
+              <Field
+                label="Host / IP"
+                value={row.host}
+                onChange={(v) => updateRow(row.key, { host: v })}
+                placeholder="239.100.25.29"
+              />
+              <Field
+                label="Port"
+                value={row.port}
+                onChange={(v) => updateRow(row.key, { port: v })}
+                type="number"
+                placeholder="6501"
+              />
+              <Field
+                label="Decoder ID (optional)"
+                value={row.decoderId}
+                onChange={(v) => updateRow(row.key, { decoderId: v })}
+                placeholder="decoder-a"
+              />
+              <button
+                onClick={() => removeDecoderRow(row.key)}
+                disabled={decoderRows.length <= 1}
+                className="h-[42px] px-3 rounded-xl border border-red-500/30 bg-red-900/20 text-red-300 text-xs font-bold disabled:opacity-40"
+              >
+                Remove
+              </button>
+            </div>
+          ))}
+          <button
+            onClick={addDecoderRow}
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan text-xs font-semibold"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            Add decoder row
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
           <Field
             label="Capture NIC (optional)"
             value={captureNic}
@@ -362,17 +447,19 @@ export default function DecoderPanel({ lastMessage }) {
             />
             Add to Multiview
           </label>
-          <div className="text-[11px] text-gray-500 font-mono truncate max-w-[60%]">{builtUrl || 'Fill host/port to build decoder URL'}</div>
+          <div className="text-[11px] text-gray-500 font-mono truncate max-w-[60%]">
+            {firstPreviewUrl ? `${validRowPlans.length} row(s) ready - ${firstPreviewUrl}` : 'Fill host/port rows to build decoder URLs'}
+          </div>
         </div>
 
         <div className="mt-3 flex gap-3">
           <button
             onClick={startDecoder}
-            disabled={!builtUrl}
+            disabled={validRowPlans.length === 0}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-neon-purple to-purple-600 text-white text-sm font-bold disabled:opacity-50"
           >
             <Plus className="w-4 h-4" />
-            Provision Decoder
+            Provision {validRowPlans.length > 1 ? `${validRowPlans.length} Decoders` : 'Decoder'}
           </button>
           <button
             onClick={stopDecoder}
@@ -394,6 +481,19 @@ export default function DecoderPanel({ lastMessage }) {
                 {id}
               </button>
             ))}
+          </div>
+        )}
+        {provisionSummary && (
+          <div className="mt-3 text-xs rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+            <div className="text-gray-300">
+              Started: <span className="font-mono text-neon-cyan">{provisionSummary.started.length}</span>
+              {' '}· Failed: <span className="font-mono text-red-300">{provisionSummary.failed.length}</span>
+            </div>
+            {provisionSummary.failed.length > 0 && (
+              <div className="mt-1 text-red-300 font-mono">
+                {provisionSummary.failed.map((f) => `${f.id}: ${f.message}`).join(' | ')}
+              </div>
+            )}
           </div>
         )}
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
