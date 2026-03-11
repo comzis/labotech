@@ -166,8 +166,6 @@ LABOTECH supports Dolby E via an optional external decoder adapter. This path is
 2. Decoder must be callable by the LABOTECH runtime user (`boro` in systemd installs).
 3. Prefer JSON output from decoder for deterministic parsing.
 
-> Important: Windows DLLs (for example `avcodec.dll`, `swresample.dll`) are not Linux executables and cannot be loaded directly by the Node.js service on Ubuntu.
-
 #### Environment configuration
 
 Add to `.env`:
@@ -245,11 +243,11 @@ sudo systemctl restart labotech
 - Mouse crosshair and pointer UTC
 - Lane status at pointer
 - Event evidence panel (bitrate source, SI compliance, arrival metrics)
-- Pointer popup with lane-specific nearby ETR errors (`±30s`)
-- Marker legend:
-  - alarm = red dot
-  - ETR status = cyan tick
-  - analyser sample = green square
+- Dynamic pointer popup that repositions near cursor to reduce lane occlusion
+- Duration-block rendering per lane:
+  - compact line blocks represent event persistence windows
+  - block color follows severity/category style
+- Type legend (ETR alarm / incident / runtime / analyse) uses same shared style source as lane blocks
 - Lane baseline color at pointer reflects local severity (critical/warning/ok)
 
 ### Controls
@@ -335,6 +333,29 @@ If PID count or bitrate appears inconsistent:
 
 PID inventory tables can show `(est.)` on bitrate cells. This marks TS remainder allocation to unresolved video PID rows (computed value, not direct per-PID measurement).
 
+### Health scoring and transport integrity counters
+
+TS analyser publishes a composite health object under `dvb.health`:
+
+- `score` (0–100), `severity` (`ok`/`warning`/`critical`), `reasons[]`
+- `sourceConfidence` and effective threshold values
+
+Transport integrity signals included in scoring:
+
+- `dvb.timestampDiscontinuity`:
+  - total discontinuities
+  - PCR/PTS/DTS/non-monotonous DTS breakdown
+- `dvb.continuityCounterErrors`:
+  - total CC error count
+  - PID-scoped vs generic CC errors
+
+Optional Dolby E adapter signals included when enabled:
+
+- `dvb.dolbyE.detected`
+- `dvb.dolbyE.decoded`
+- `dvb.dolbyE.frameCount`
+- `dvb.probeDiagnostics.dolbyE`
+
 ### Encoder input bitrate provenance
 
 For live feeds where startup descriptors are missing, use `inputBitrateSource` to understand origin:
@@ -391,7 +412,7 @@ Check:
 Check:
 
 - `DOLBYE_ENABLED=true` is present in runtime environment
-- `DOLBYE_DECODER_PATH` points to a Linux executable (not `.dll`)
+- `DOLBYE_DECODER_PATH` points to a Linux executable
 - service user can execute decoder:
 
 ```bash
