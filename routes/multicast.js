@@ -9,7 +9,7 @@ const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET  || '239.100.25.0/26
 const DEFAULT_IP     = process.env.FORWARD_MULTICAST_IP      || '239.100.25.29';
 const MAX_FORWARDERS = parseInt(process.env.MAX_ACTIVE_FORWARDERS || '1');
 
-module.exports = function(forwarders, wss, saveState = () => {}) {
+module.exports = function(forwarders, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
 
   async function stopAndWait(instance, timeoutMs = 5000) {
@@ -30,6 +30,7 @@ module.exports = function(forwarders, wss, saveState = () => {}) {
   }
 
   function broadcast(msg) {
+    if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);

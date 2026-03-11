@@ -66,6 +66,14 @@ function updateAgeInfo(probeTime, nowMs, engineerMode = true) {
   return { ageSec, label: engineerMode ? 'radio silence' : 'stale', color: '#ff2233' };
 }
 
+function extractThumbTimestamp(thumbnailUrl) {
+  if (!thumbnailUrl) return null;
+  const m = String(thumbnailUrl).match(/[?&]t=(\d{10,})/);
+  if (!m) return null;
+  const ts = Number(m[1]);
+  return Number.isFinite(ts) ? ts : null;
+}
+
 function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
@@ -80,6 +88,12 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
 
   const hasThumb = thumbSrc && !thumbFailed;
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
+  const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
+  const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
+  const thumbFresh = thumbAgeSec != null ? thumbAgeSec <= 8 : false;
+  const hasTelemetry = Boolean(result?.probeTime);
+  const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
+  const signalOk = hasTelemetry && staleMs <= 15000;
 
   return (
     <div
@@ -91,8 +105,16 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
         className="flex items-center gap-2 px-2.5 py-1.5 shrink-0"
         style={{ background: 'linear-gradient(180deg, #242424 0%, #1a1a1a 100%)', borderBottom: '1px solid #0a0a0a', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}
       >
-        <StatusDot status="live" pulse />
+        <StatusDot status={signalOk ? 'live' : 'warning'} pulse={signalOk} />
         <span className="font-mono text-[10px] text-gray-400 truncate flex-1">{id}</span>
+        <span
+          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0"
+          style={signalOk
+            ? { background: 'rgba(0,120,50,0.25)', borderColor: 'rgba(0,221,85,0.35)', color: '#86efac' }
+            : { background: 'rgba(120,80,0,0.25)', borderColor: 'rgba(255,170,0,0.35)', color: '#facc15' }}
+        >
+          {signalOk ? 'Live' : 'No Signal'}
+        </span>
         <button
           onClick={onStop}
           className="text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
@@ -131,6 +153,12 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
           style={{ color: freshness.color }}
         >
           update age: {freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - {freshness.label}
+        </div>
+        <div
+          className="text-[10px] font-mono uppercase tracking-wider"
+          style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
+        >
+          thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
         </div>
         <div className="text-[11px] text-gray-300 font-mono truncate">
           <span className="engraved">SVC </span>{primaryService}

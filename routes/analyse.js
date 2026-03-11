@@ -4,10 +4,11 @@ const express    = require('express');
 const WebSocket  = require('ws');
 const TSAnalyser = require('../src/ts-analyser');
 
-module.exports = function(analysers, wss) {
+module.exports = function(analysers, wss, broadcastFn = null) {
   const router = express.Router();
 
   function broadcast(msg) {
+    if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);

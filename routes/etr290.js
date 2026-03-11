@@ -4,10 +4,11 @@ const express = require('express');
 const WebSocket = require('ws');
 const ETR290Analyser = require('../src/etr290-analyser');
 
-module.exports = function (etr290monitors, wss) {
+module.exports = function (etr290monitors, wss, broadcastFn = null) {
   const router = express.Router();
 
   function broadcast(msg) {
+    if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);
