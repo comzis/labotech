@@ -357,9 +357,9 @@ export default function TranscodePanel({ lastMessage }) {
                     >
                       <option value="" className="bg-midnight-surface">Auto (from profile/slot)</option>
                       <option value="aac" className="bg-midnight-surface">AAC-LC</option>
-                      <option value="mp2" className="bg-midnight-surface">MPEG-1 Layer II</option>
-                      <option value="ac3" className="bg-midnight-surface">AC-3</option>
-                      <option value="eac3" className="bg-midnight-surface">E-AC-3</option>
+                      <option value="mp2" className="bg-midnight-surface">MPEG-1 Layer II (MP2)</option>
+                      <option value="ac3" className="bg-midnight-surface">AC-3 (Dolby Digital)</option>
+                      <option value="eac3" className="bg-midnight-surface">E-AC-3 (Dolby Digital Plus)</option>
                       <option value="copy" className="bg-midnight-surface">Pass-through (copy)</option>
                     </select>
                   </div>
@@ -438,7 +438,7 @@ export default function TranscodePanel({ lastMessage }) {
                             <Field label="Channels" value={pair.channels} onChange={v => updateAudioPair(idx, 'channels', v)} type="number" color="purple" />
                           </div>
                           <div className="grid grid-cols-2 gap-2">
-                            <Field label="Codec" value={pair.codec} onChange={v => updateAudioPair(idx, 'codec', v)} placeholder="aac|copy|ac3|eac3|mp2" color="purple" />
+                            <Field label="Codec" value={pair.codec} onChange={v => updateAudioPair(idx, 'codec', v)} placeholder="aac|copy|ac3(dolby digital)|eac3(dd+)|mp2" color="purple" />
                             <Field label="Bitrate" value={pair.bitrate} onChange={v => updateAudioPair(idx, 'bitrate', v)} placeholder="192k" color="purple" />
                           </div>
                           <Field label="Language" value={pair.language} onChange={v => updateAudioPair(idx, 'language', v)} placeholder="eng / nat / qad" color="purple" />
