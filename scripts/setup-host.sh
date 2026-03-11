@@ -11,10 +11,18 @@ echo "==> Labotech host setup"
 echo "    Multicast NIC:    $MULTICAST_NIC"
 echo "    Multicast subnet: $MULTICAST_SUBNET"
 
-# ── 1. Install smcroute ─────────────────────────────────────────────────────
-echo "==> Installing smcroute..."
+# ── 1. Install host dependencies ────────────────────────────────────────────
+echo "==> Installing host dependencies (smcroute, tcpdump, libcap2-bin)..."
 apt-get update -qq
-apt-get install -y --no-install-recommends smcroute
+apt-get install -y --no-install-recommends smcroute tcpdump libcap2-bin
+
+# Packet capture capability for IAT sniffer (non-root service runtime)
+TCPDUMP_BIN="$(command -v tcpdump || true)"
+if [[ -n "$TCPDUMP_BIN" ]]; then
+  echo "==> Setting packet capture capabilities on $TCPDUMP_BIN..."
+  setcap cap_net_raw,cap_net_admin=eip "$TCPDUMP_BIN" || true
+  getcap "$TCPDUMP_BIN" || true
+fi
 
 # ── 2. UDP buffer tuning ────────────────────────────────────────────────────
 echo "==> Tuning UDP buffers to 25MB..."
