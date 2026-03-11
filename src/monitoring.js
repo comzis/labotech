@@ -71,13 +71,13 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       src = `${inputUrl}${sep}fifo_size=20000000&overrun_nonfatal=1&timeout=7000000&reorder_queue_size=1024`;
     }
 
-    const runAttempt = ({ iFrameOnly, timeoutMs }) => new Promise((attemptResolve, attemptReject) => {
+    const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
       const vf = [
         iFrameOnly ? 'select=eq(pict_type\\,I)' : null,
         `thumbnail=${capture.pick}`,
-        capture.deblock ? 'pp=de/de' : null,
+        deblock ? 'pp=de/de' : null,
         `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
-        capture.denoise || null,
+        denoise || null,
       ].filter(Boolean).join(',');
       const args = [
         '-y',
@@ -99,15 +99,18 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         tmpPath,
       ];
       const proc = spawn('ffmpeg', args);
+      let stderr = '';
       const timer = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
         attemptReject(new Error(iFrameOnly ? 'Thumbnail timeout (I-frame)' : 'Thumbnail timeout (fallback)'));
       }, timeoutMs);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('exit', (code) => {
         clearTimeout(timer);
         if (code === 0) return attemptResolve();
         try { fs.unlinkSync(tmpPath); } catch (_) {}
-        attemptReject(new Error(`Thumbnail capture failed with code ${code}`));
+        const detail = (stderr || '').trim();
+        attemptReject(new Error(detail ? `Thumbnail capture failed with code ${code}: ${detail}` : `Thumbnail capture failed with code ${code}`));
       });
       proc.on('error', (err) => {
         clearTimeout(timer);
@@ -116,8 +119,35 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       });
     });
 
-    runAttempt({ iFrameOnly: true, timeoutMs: 12000 })
-      .catch(() => runAttempt({ iFrameOnly: false, timeoutMs: 10000 }))
+    // Progressive fallback ladder:
+    // 1) strict I-frame + quality filters
+    // 2) strict I-frame without deblock (for ffmpeg builds missing "pp")
+    // 3) relaxed frame selection without deblock (maximize continuity)
+    // 4) minimal relaxed chain (no denoise) for very limited ffmpeg builds
+    runAttempt({
+      iFrameOnly: true,
+      timeoutMs: 12000,
+      deblock: capture.deblock,
+      denoise: capture.denoise,
+    })
+      .catch(() => runAttempt({
+        iFrameOnly: true,
+        timeoutMs: 10000,
+        deblock: false,
+        denoise: capture.denoise,
+      }))
+      .catch(() => runAttempt({
+        iFrameOnly: false,
+        timeoutMs: 10000,
+        deblock: false,
+        denoise: capture.denoise,
+      }))
+      .catch(() => runAttempt({
+        iFrameOnly: false,
+        timeoutMs: 8000,
+        deblock: false,
+        denoise: null,
+      }))
       .then(() => {
         fs.rename(tmpPath, outPath, (err) => {
           if (err) reject(err);
