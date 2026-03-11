@@ -312,3 +312,192 @@ For production support:
 - Prefer `upgrade-prod.sh` for deterministic upgrades.
 - Verify health endpoint after every deployment.
 - Keep this manual updated whenever probe cadence, timelines, or TS analysis paths change.
+
+---
+
+## 9) Production Incident Register
+
+### INC-001 — `Uncaught exception: Error: tcpdump exited 1` (2026-03-11)
+
+**Server:** `gva-boro-probe` · **Service:** `labotech[853167]`
+
+**Symptom**
+
+```
+Mar 11 11:22:01 gva-boro-probe labotech[853167]: Uncaught exception: Error: tcpdump exited 1
+Mar 11 11:22:23 gva-boro-probe labotech[853167]: Uncaught exception: Error: tcpdump exited 1
+```
+
+Repeated every ~22 seconds. Service continued running (global `uncaughtException` handler in `src/index.js` logs and swallows), but IAT forensics were non-functional.
+
+**Root cause**
+
+`boro` user lacked `CAP_NET_RAW` capability. `tcpdump` was found via `which` (binary exists), spawned successfully, attempted to open a raw socket on `eno2`, received `Operation not permitted`, and exited with code 1.
+
+Two code bugs amplified this into an uncaught exception:
+
+1. `IATSniffer._spawnCapture()` used `proc.on('exit')` instead of `proc.on('close')`, meaning `stderrBuf` was not fully flushed when the handler fired. The stderr reason was lost, leaving only `"tcpdump exited 1"`.
+2. The `emit('error')` path in the exit handler could reach the global Node.js uncaught exception handler under certain Node version / listener timing conditions.
+
+**Fix applied** — commits `1f59ccc`
+
+- `proc.on('exit')` → `proc.on('close')` in `IATSniffer._spawnCapture()` (guarantees stderr flushed before reading).
+- Removed `emit('error')` from both the spawn-error and close handlers in `IATSniffer`. A non-zero exit is a permissions/config fault, not a runtime error. `emit('unavailable')` and `lastError` are the correct signal paths.
+- Added safety-net `on('error', ...)` listener to `IATSniffer` instance in `TSAnalyser.startContinuous()`. Any residual error is forwarded as an `info` event on `TSAnalyser` (surfaced in UI, not fatal).
+
+**Server-side permanent fix (run once as root)**
+
+```bash
+# Grant raw-socket capability to the binary (survives user/group changes)
+sudo setcap cap_net_raw+eip /usr/bin/tcpdump
+
+# Verify
+getcap /usr/bin/tcpdump
+# → /usr/bin/tcpdump cap_net_raw=eip
+
+sudo -u boro tcpdump -i eno2 -c 3 udp -q 2>&1 | head -5
+```
+
+Add to `scripts/setup-host.sh` so the capability survives `apt upgrade`:
+
+```bash
+setcap cap_net_raw+eip /usr/bin/tcpdump
+```
+
+**Verify fix**
+
+```bash
+sudo journalctl -u labotech --since "5 min ago" --no-pager | grep -E "Uncaught|tcpdump"
+# should return no lines
+```
+
+---
+
+### INC-002 — Multiview thumbnail corruption and macroblocking (2026-03-11)
+
+**Symptom**
+
+Multiview tiles showing:
+- Corrupted JPEG with colour block artefacts (classic B-frame reference error pattern)
+- Tiles blanking to "No Signal" between probe cycles
+- Slow refresh (4+ seconds per tile visible lag) under 4+ concurrent decoders
+
+**Root causes**
+
+| # | Cause | Scope |
+|---|---|---|
+| 1 | `thumbnail=24` at `fps=8` buffered 3 seconds of frames per capture. With 4+ concurrent decoders, 4+ FFmpeg processes competed for CPU and I/O simultaneously | Backend `monitoring.js` |
+| 2 | FFmpeg wrote directly to `<id>.jpg`. Browser loaded the file during a concurrent write from the next cycle → partial JPEG read → corruption artefacts | Backend `monitoring.js` |
+| 3 | `setThumbFailed(false)` was triggered by `result?.probeTime` (every probe cycle), blanking the tile while the next JPEG was being written | Frontend `DecoderMultiviewPanel.jsx` |
+| 4 | FFmpeg attached mid-GOP without skipping B-frames. P/B frames decoded before their I-frame reference produced the coloured block macroblocking pattern | Backend `monitoring.js` |
+
+**Fixes applied** — commits `169af60`, `f2e3f8b`
+
+**Backend `src/monitoring.js`:**
+
+- Concurrency queue: at most 2 simultaneous thumbnail FFmpeg processes (`THUMBNAIL_MAX_CONCURRENT` env, default 2).
+- Atomic write: FFmpeg outputs to `<id>.jpg.tmp.jpg` then `fs.rename()` to `<id>.jpg`. Browser never reads a half-written file.
+- `-skip_frame noref`: instructs decoder to skip non-reference (B) frames. Eliminates the primary cause of macroblocking — P/B frames decoded before their I-frame is available.
+- `select=eq(pict_type\,I)`: filter passes only I-frames to thumbnail selector. I-frames are fully self-contained; no reference dependency, no artefact from broken reference chains.
+- `pp=de/de`: H.264 loop deblocking post-processing applied to selected frame before JPEG encode. Smooths DCT block boundaries.
+- `hqdn3d=2:2:6:6`: stronger temporal + spatial denoise (was `1.2:1.2:4:4`).
+- JPEG quality `qv 3→2` (lower = higher quality in FFmpeg scale).
+- `analyzeduration 3s→4s` to cover streams with longer I-frame intervals.
+
+**Frontend `web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- `displaySrc` state tracks the last successfully loaded thumbnail independently. Tile shows last good frame while the next JPEG is being written.
+- Probing the new candidate URL with a hidden `Image()` object before committing it to `displaySrc` — avoids flicker from a failed load.
+- `thumbFailed` reset only when the thumbnail URL path changes, not on every `probeTime`.
+- Audio level meter uses exponential smoothing (`0.75/0.25 blend`) and a 3dB/sample rate limiter to prevent meter jumping.
+
+**Tuning env vars (set in `.env` or `docker-compose`)**
+
+```bash
+THUMBNAIL_MAX_CONCURRENT=2     # raise to 3 if CPU headroom allows with 8+ decoders
+THUMBNAIL_INTERVAL_SEC=5       # default; increase to 10 on constrained hardware
+THUMBNAIL_QUALITY_PROFILE=low  # 320px, qv=5 — use when decoder count >= 8
+```
+
+**Known trade-off**
+
+`select=eq(pict_type\,I)` requires `pick=4` I-frames in the analysis window. At a standard 1s GOP this needs ~4s buffering, covered by `analyzeduration=4s`. Streams with longer GOPs (some VBR encoders use 2–3s GOPs) may timeout on first attempt and succeed on retry. If `Thumbnail timeout` appears frequently in logs:
+
+```bash
+# Increase in monitoring.js _doCaptureThumbnail:
+# -analyzeduration 6000000  (6s)
+# timer setTimeout 14000    (14s)
+```
+
+---
+
+### INC-003 — Cursor AI debugger telemetry injected into production files (2026-03-11)
+
+**Symptom**
+
+Production files `src/monitoring.js` and `web/src/components/DecoderMultiviewPanel.jsx` contained `// #region agent log` blocks auto-injected by the Cursor IDE AI debugger feature:
+
+```js
+fetch('http://127.0.0.1:7265/ingest/0cd02315-6fd1-4a1e-9c1a-d013ef8dc69e', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '320b2a' },
+  body: JSON.stringify({ streamId: safeId, elapsedMs: ..., thumbnailUrl: ..., probeTime: ... })
+}).catch(() => {});
+```
+
+**Impact**
+
+- These calls target `localhost:7265` (Cursor's local ingest port) so they fail silently in production (`.catch(() => {})`).
+- However: stream IDs, timing data, and thumbnail URLs are serialised and sent to the ingest endpoint when running in a Cursor IDE session.
+- This code was committed to git before review.
+
+**Resolution**
+
+Both injected blocks removed in commit `169af60`. All production data remains server-side.
+
+**Prevention**
+
+- Review `git diff` before committing. Look for `#region agent log`, `127.0.0.1:7265`, `X-Debug-Session-Id`.
+- Add pre-commit grep hook:
+
+```bash
+# .git/hooks/pre-commit (chmod +x)
+#!/bin/sh
+if git diff --cached | grep -q '127.0.0.1:7265'; then
+  echo "ERROR: Cursor agent telemetry detected in staged changes. Remove before committing."
+  exit 1
+fi
+```
+
+---
+
+## 10) UI Improvements Log (2026-03-11)
+
+### Alarm & Event Log panel
+
+New `Alarm Log` tab (`web/src/components/EventLogPanel.jsx`) aggregates all WebSocket events into a structured log:
+
+- UTC timestamp, instance ID, severity (critical / warning / info), status, event title, details
+- Severity filter buttons + free-text search
+- 1000-event in-memory ring (newest at top)
+- Toast popup suppression: expected no-signal faults (`ffprobe exited 1`, `connection refused`, `immediate exit requested`) are routed to log only, not popup
+- 15s dedup window on identical error toasts
+
+**Severity mapping**
+
+| WS message type | Severity |
+|---|---|
+| `etr290_alarm` P1 | critical |
+| `etr290_alarm` P2 | warning |
+| `error` (unexpected) | critical |
+| `error` (no-signal pattern) | warning |
+| `switched` (failover) | warning |
+| `started` / `stopped` / `info` | info |
+
+### Visual improvements
+
+- Background: `#070b14` (deep navy) + `rgba(255,255,255,0.055)` dot grid — previous `#1c1c1c` grid was invisible on `#080808`
+- Live stream cards: `ring-1 ring-cyan-500/20` + `shadow-[0_0_32px_-6px_rgba(34,211,238,0.18)]` cyan glow; top accent strip (cyan for running, gray for stopped)
+- Bitrate readouts in MetricsTile: `text-xl tracking-tight` — MCR-readable from 1.5m
+- Panel surface: `bg-[#0d1117]` + inset top-edge highlight simulates instrument panel depth
+- Header height reduced; tab buttons tighter for 9-tab layout without overflow
