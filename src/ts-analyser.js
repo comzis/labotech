@@ -23,6 +23,9 @@ class TSAnalyser extends EventEmitter {
     // Heavy transport/tsduck probing is expensive on live multicast.
     // In continuous mode, run it every 3rd cycle to keep UI responsive.
     const runHeavyProbe = !isContinuous || (this._continuousProbeCount % 3 === 1);
+    // Thumbnail generation also spawns ffmpeg; align with heavy cycles to prevent
+    // thumbnail starvation when many decoders run concurrently.
+    const runThumbnailCapture = runHeavyProbe;
 
     return new Promise((resolve, reject) => {
       const inputUrl = this._withLiveInputHints(this.url);
@@ -81,11 +84,16 @@ class TSAnalyser extends EventEmitter {
             }
           }
           result.audioLevels = audioLevels;
-          try {
-            await captureThumbnail(this.id, this.url);
-            result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
-          } catch (_) {
-            // Thumbnail generation is best-effort for multiview cards.
+          if (runThumbnailCapture) {
+            try {
+              await captureThumbnail(this.id, this.url);
+              result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
+            } catch (_) {
+              // Thumbnail generation is best-effort for multiview cards.
+            }
+          } else if (this.lastResult?.thumbnailUrl) {
+            // Keep the previous thumbnail between capture cycles to avoid flicker.
+            result.thumbnailUrl = this.lastResult.thumbnailUrl;
           }
           this.lastResult = result;
           this.emit('result', result);
