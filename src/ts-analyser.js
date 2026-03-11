@@ -6,7 +6,32 @@ const fs = require('fs');
 const path = require('path');
 const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
+const DolbyEAdapter = require('./dolbye-adapter');
 let _multicastConfig = null;
+
+function _envNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+const HEALTH_THRESHOLDS = {
+  scoreWarning: _envNumber('TS_HEALTH_SCORE_WARNING', 65),
+  scoreOk: _envNumber('TS_HEALTH_SCORE_OK', 85),
+  lossWarnPct: _envNumber('TS_HEALTH_LOSS_WARN_PCT', 0.1),
+  lossCriticalPct: _envNumber('TS_HEALTH_LOSS_CRITICAL_PCT', 1.0),
+  jitterWarnMs: _envNumber('TS_HEALTH_JITTER_WARN_MS', 5),
+  jitterCriticalMs: _envNumber('TS_HEALTH_JITTER_CRITICAL_MS', 15),
+  iatP95WarnMs: _envNumber('TS_HEALTH_IAT_P95_WARN_MS', 50),
+  iatP95CriticalMs: _envNumber('TS_HEALTH_IAT_P95_CRITICAL_MS', 150),
+  tsDiscWarnCount: _envNumber('TS_HEALTH_TS_DISC_WARN_COUNT', 1),
+  tsDiscCriticalCount: _envNumber('TS_HEALTH_TS_DISC_CRITICAL_COUNT', 3),
+  ccWarnCount: _envNumber('TS_HEALTH_CC_WARN_COUNT', 1),
+  ccCriticalCount: _envNumber('TS_HEALTH_CC_CRITICAL_COUNT', 3),
+  dolbyEMissingPenalty: _envNumber('TS_HEALTH_DOLBYE_MISSING_PENALTY', 10),
+  dolbyEDecodeFailurePenalty: _envNumber('TS_HEALTH_DOLBYE_DECODE_FAIL_PENALTY', 18),
+};
 function _getNicName() {
   if (_multicastConfig) return _multicastConfig.nic || 'eno2';
   try {
@@ -78,10 +103,13 @@ class TSAnalyser extends EventEmitter {
           const pidProbe = await this._probeStreamPidsFromFfmpeg();
           result = this._applyPidMap(result, pidProbe.pidByIndex || {});
           result = this._applyFallbackPidRows(result, pidProbe.rows || []);
-          const [tsduckProbe, measuredBitrateBps, audioLevels] = await Promise.all([
+          const [tsduckProbe, measuredBitrateBps, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = await Promise.all([
             runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
             runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
             this._probeAudioLevels(),
+            runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
+            runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null),
+            runHeavyProbe ? this._probeDolbyE() : Promise.resolve(null),
           ]);
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
             ? this._iatSniffer.getMetrics()
@@ -102,6 +130,46 @@ class TSAnalyser extends EventEmitter {
               sampleCount: nicMetrics?.sampleCount ?? 0,
               error: this._iatSniffer?.lastError || null,
             },
+            timestampDiscontinuity: {
+              attempted: runHeavyProbe,
+              ok: tsDiscontinuityProbe ? tsDiscontinuityProbe.ok === true : null,
+              error: tsDiscontinuityProbe?.error || null,
+            },
+            continuityCounter: {
+              attempted: runHeavyProbe,
+              ok: ccProbe ? ccProbe.ok === true : null,
+              error: ccProbe?.error || null,
+            },
+            dolbyE: {
+              attempted: runHeavyProbe,
+              enabled: DolbyEAdapter.isEnabled(),
+              configured: DolbyEAdapter.isConfigured(),
+              ok: dolbyEProbe ? dolbyEProbe.ok === true : null,
+              error: dolbyEProbe?.error || null,
+            },
+          };
+          result.dvb.timestampDiscontinuity = tsDiscontinuityProbe?.data || {
+            count: 0,
+            pcrDiscontinuity: 0,
+            ptsDiscontinuity: 0,
+            dtsDiscontinuity: 0,
+            nonMonotonousDts: 0,
+            lastMessages: [],
+          };
+          result.dvb.continuityCounterErrors = ccProbe?.data || {
+            count: 0,
+            pidScopedCount: 0,
+            genericCount: 0,
+            lastMessages: [],
+          };
+          result.dvb.dolbyE = dolbyEProbe || {
+            available: false,
+            ok: false,
+            detected: false,
+            decoded: false,
+            frameCount: null,
+            programConfig: null,
+            error: null,
           };
           if (measuredBitrateBps && measuredBitrateBps > 0) {
             result.dvb.measuredBitrateBps = measuredBitrateBps;
@@ -141,6 +209,7 @@ class TSAnalyser extends EventEmitter {
             const cachedUrl = this._resolveCachedThumbnailUrl();
             if (cachedUrl) result.thumbnailUrl = cachedUrl;
           }
+          result = this._attachHealthAssessment(result);
           this.lastResult = result;
           this.emit('result', result);
           resolve(result);
@@ -316,6 +385,160 @@ class TSAnalyser extends EventEmitter {
         resolve(null);
       });
     });
+  }
+
+  _probeTimestampDiscontinuities() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this.url);
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-fflags', '+discardcorrupt+genpts',
+        '-err_detect', '+crccheck+careful',
+        '-analyzeduration', '2000000',
+        '-probesize', '3000000',
+        '-t', '2.5',
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'null',
+        '-',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 8000);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'timestamp discontinuity probe failed',
+        });
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const lines = String(stderr || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const patterns = {
+          pcrDiscontinuity: /pcr.*discontinu/i,
+          ptsDiscontinuity: /pts.*discontinu|timestamp.*discontinu/i,
+          dtsDiscontinuity: /dts.*discontinu/i,
+          nonMonotonousDts: /non.?monoton(?:ic|ous).*dts/i,
+        };
+        const counts = {
+          pcrDiscontinuity: 0,
+          ptsDiscontinuity: 0,
+          dtsDiscontinuity: 0,
+          nonMonotonousDts: 0,
+        };
+        const matches = [];
+        for (const line of lines) {
+          let matched = false;
+          for (const [key, rx] of Object.entries(patterns)) {
+            if (rx.test(line)) {
+              counts[key] += 1;
+              matched = true;
+            }
+          }
+          if (matched) matches.push(line.slice(0, 220));
+        }
+        const total = Object.values(counts).reduce((a, b) => a + b, 0);
+        resolve({
+          ok: true,
+          data: {
+            count: total,
+            ...counts,
+            lastMessages: matches.slice(-6),
+          },
+          error: null,
+        });
+      });
+    });
+  }
+
+  _probeContinuityCounterErrors() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this.url);
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-fflags', '+discardcorrupt+genpts',
+        '-err_detect', '+crccheck+careful',
+        '-analyzeduration', '2000000',
+        '-probesize', '3000000',
+        '-t', '2.5',
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'null',
+        '-',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 8000);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'continuity counter probe failed',
+        });
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const lines = String(stderr || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const pidScopedRx = /\bcontinuity(?:\s+counter)?.*(?:check failed|error|mismatch|discontinuity).*\bpid\b/i;
+        const genericRx = /\bcontinuity(?:\s+counter)?.*(?:check failed|error|mismatch|discontinuity)|\bcc\b.*error/i;
+        let pidScopedCount = 0;
+        let genericCount = 0;
+        const matches = [];
+        for (const line of lines) {
+          if (pidScopedRx.test(line)) {
+            pidScopedCount += 1;
+            matches.push(line.slice(0, 220));
+            continue;
+          }
+          if (genericRx.test(line)) {
+            genericCount += 1;
+            matches.push(line.slice(0, 220));
+          }
+        }
+        resolve({
+          ok: true,
+          data: {
+            count: pidScopedCount + genericCount,
+            pidScopedCount,
+            genericCount,
+            lastMessages: matches.slice(-6),
+          },
+          error: null,
+        });
+      });
+    });
+  }
+
+  _probeDolbyE() {
+    return DolbyEAdapter.probe(this.url)
+      .catch((err) => ({
+        available: DolbyEAdapter.isConfigured(),
+        ok: false,
+        detected: false,
+        decoded: false,
+        frameCount: null,
+        programConfig: null,
+        error: err && err.message ? err.message : 'Dolby E probe failed',
+      }));
   }
 
   _probeTSDuck() {
@@ -989,6 +1212,175 @@ class TSAnalyser extends EventEmitter {
     } catch (_) {
       return null;
     }
+  }
+
+  _attachHealthAssessment(result) {
+    if (!result || !result.dvb) return result;
+    const assessment = this._buildHealthAssessment(result);
+    return {
+      ...result,
+      dvb: {
+        ...result.dvb,
+        health: assessment,
+      },
+    };
+  }
+
+  _buildHealthAssessment(result) {
+    const dvb = result?.dvb || {};
+    const audio = result?.audioLevels || null;
+    const dolbyRequiredWhenDetected = String(process.env.DOLBYE_REQUIRED_WHEN_DETECTED || 'false').toLowerCase() === 'true';
+    const scoreParts = [];
+    const reasons = [];
+    const pushPenalty = (points, reason) => {
+      scoreParts.push({ type: 'penalty', points: Math.max(0, points), reason });
+      if (reason) reasons.push(reason);
+    };
+    const pushBonus = (points) => {
+      scoreParts.push({ type: 'bonus', points: Math.max(0, points), reason: null });
+    };
+
+    const source = String(dvb.bitrateSource || '').toLowerCase();
+    const sourceConfidenceMap = {
+      tsduck: 1.0,
+      measured: 0.85,
+      format: 0.65,
+      streams: 0.55,
+    };
+    const sourceConfidence = sourceConfidenceMap[source] || 0.4;
+    if (source === 'tsduck') pushBonus(2);
+    if (source === 'measured') pushBonus(1);
+    if (source === 'format') pushPenalty(8, 'Bitrate derived from container metadata only');
+    if (source === 'streams') pushPenalty(10, 'Bitrate estimated from elementary streams only');
+    if (!source) pushPenalty(12, 'Bitrate source unavailable');
+
+    const bitrateBps = Number(dvb.bitrateBps || 0);
+    if (!Number.isFinite(bitrateBps) || bitrateBps <= 0) {
+      pushPenalty(16, 'No reliable transport bitrate detected');
+    }
+
+    const serviceCount = Number(dvb.serviceCount || 0);
+    const pidCount = Number(dvb.pidCount || 0);
+    if (serviceCount <= 0) pushPenalty(14, 'No DVB services detected');
+    if (pidCount <= 0) pushPenalty(14, 'No PID inventory detected');
+    if (pidCount > 0 && serviceCount > 0 && pidCount < (serviceCount * 2)) {
+      pushPenalty(6, 'Low PID/service ratio suggests partial PSI/ES visibility');
+    }
+
+    const siCompliance = dvb?.si?.compliance || null;
+    if (siCompliance) {
+      if (siCompliance.nit === false) pushPenalty(8, 'NIT repetition out of DVB target');
+      if (siCompliance.sdt === false) pushPenalty(8, 'SDT repetition out of DVB target');
+      if (siCompliance.eitPf === false) pushPenalty(8, 'EIT p/f repetition out of DVB target');
+      if (siCompliance.tdt === false) pushPenalty(6, 'TDT repetition out of DVB target');
+    }
+
+    const arrival = dvb.arrival || null;
+    if (arrival) {
+      const lossPct = Number(arrival.packetLossPct);
+      if (Number.isFinite(lossPct)) {
+        if (lossPct >= HEALTH_THRESHOLDS.lossCriticalPct) pushPenalty(28, `Packet loss ${lossPct}% exceeds critical threshold`);
+        else if (lossPct > HEALTH_THRESHOLDS.lossWarnPct) pushPenalty(12, `Packet loss ${lossPct}% exceeds warning threshold`);
+      }
+      const jitterMs = Number(arrival.jitterMs);
+      if (Number.isFinite(jitterMs)) {
+        if (jitterMs >= HEALTH_THRESHOLDS.jitterCriticalMs) pushPenalty(20, `Jitter ${jitterMs} ms exceeds critical threshold`);
+        else if (jitterMs >= HEALTH_THRESHOLDS.jitterWarnMs) pushPenalty(8, `Jitter ${jitterMs} ms exceeds warning threshold`);
+      }
+      const iatP95 = Number(arrival?.iatMs?.p95);
+      if (Number.isFinite(iatP95)) {
+        if (iatP95 >= HEALTH_THRESHOLDS.iatP95CriticalMs) pushPenalty(18, `IAT p95 ${iatP95} ms exceeds critical threshold`);
+        else if (iatP95 >= HEALTH_THRESHOLDS.iatP95WarnMs) pushPenalty(8, `IAT p95 ${iatP95} ms exceeds warning threshold`);
+      }
+      const captureMethod = String(arrival.captureMethod || '').toLowerCase();
+      if (captureMethod !== 'tshark' && captureMethod !== 'tcpdump') {
+        pushPenalty(4, 'Arrival telemetry is analyser-derived, not NIC-captured');
+      }
+    } else {
+      pushPenalty(6, 'Arrival telemetry unavailable');
+    }
+
+    const meanDb = Number(audio?.meanDb);
+    if (Number.isFinite(meanDb)) {
+      if (meanDb > -6) pushPenalty(8, `Audio mean level ${meanDb.toFixed(1)} dBFS indicates clipping risk`);
+      if (meanDb < -50) pushPenalty(6, `Audio mean level ${meanDb.toFixed(1)} dBFS indicates near-silence`);
+    }
+
+    const tsDisc = dvb.timestampDiscontinuity || null;
+    const tsDiscCount = Number(tsDisc?.count || 0);
+    if (Number.isFinite(tsDiscCount) && tsDiscCount >= HEALTH_THRESHOLDS.tsDiscCriticalCount) {
+      pushPenalty(24, `Timestamp discontinuities ${tsDiscCount} exceed critical threshold`);
+    } else if (Number.isFinite(tsDiscCount) && tsDiscCount >= HEALTH_THRESHOLDS.tsDiscWarnCount) {
+      pushPenalty(10, `Timestamp discontinuities ${tsDiscCount} exceed warning threshold`);
+    }
+
+    const cc = dvb.continuityCounterErrors || null;
+    const ccCount = Number(cc?.count || 0);
+    if (Number.isFinite(ccCount) && ccCount >= HEALTH_THRESHOLDS.ccCriticalCount) {
+      pushPenalty(24, `CC errors ${ccCount} exceed critical threshold`);
+    } else if (Number.isFinite(ccCount) && ccCount >= HEALTH_THRESHOLDS.ccWarnCount) {
+      pushPenalty(10, `CC errors ${ccCount} exceed warning threshold`);
+    }
+
+    const dolbyE = dvb.dolbyE || null;
+    const dolbyEnabled = DolbyEAdapter.isEnabled();
+    const dolbyDetected = Boolean(dolbyE?.detected);
+    const dolbyDecoded = Boolean(dolbyE?.decoded);
+    const dolbyAvailable = Boolean(dolbyE?.available);
+    if (dolbyEnabled && dolbyDetected) {
+      if (dolbyRequiredWhenDetected && !dolbyAvailable) {
+        pushPenalty(HEALTH_THRESHOLDS.dolbyEMissingPenalty, 'Dolby E detected but external decoder is unavailable');
+      } else if (!dolbyDecoded) {
+        pushPenalty(HEALTH_THRESHOLDS.dolbyEDecodeFailurePenalty, 'Dolby E detected but decode failed');
+      } else {
+        pushBonus(2);
+      }
+    }
+
+    let score = 100;
+    for (const part of scoreParts) {
+      if (part.type === 'penalty') score -= part.points;
+      if (part.type === 'bonus') score += part.points;
+    }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const severity = score >= HEALTH_THRESHOLDS.scoreOk
+      ? 'ok'
+      : score >= HEALTH_THRESHOLDS.scoreWarning
+        ? 'warning'
+        : 'critical';
+
+    return {
+      score,
+      severity,
+      reasons: reasons.slice(0, 8),
+      sourceConfidence: Number(sourceConfidence.toFixed(2)),
+      bitrateSource: source || null,
+      timestampDiscontinuityCount: Number.isFinite(tsDiscCount) ? tsDiscCount : 0,
+      continuityCounterErrorCount: Number.isFinite(ccCount) ? ccCount : 0,
+      dolbyE: {
+        enabled: dolbyEnabled,
+        requiredWhenDetected: dolbyRequiredWhenDetected,
+        detected: dolbyDetected,
+        decoded: dolbyDecoded,
+      },
+      thresholds: {
+        scoreWarning: HEALTH_THRESHOLDS.scoreWarning,
+        scoreOk: HEALTH_THRESHOLDS.scoreOk,
+        lossWarnPct: HEALTH_THRESHOLDS.lossWarnPct,
+        lossCriticalPct: HEALTH_THRESHOLDS.lossCriticalPct,
+        jitterWarnMs: HEALTH_THRESHOLDS.jitterWarnMs,
+        jitterCriticalMs: HEALTH_THRESHOLDS.jitterCriticalMs,
+        iatP95WarnMs: HEALTH_THRESHOLDS.iatP95WarnMs,
+        iatP95CriticalMs: HEALTH_THRESHOLDS.iatP95CriticalMs,
+        tsDiscWarnCount: HEALTH_THRESHOLDS.tsDiscWarnCount,
+        tsDiscCriticalCount: HEALTH_THRESHOLDS.tsDiscCriticalCount,
+        ccWarnCount: HEALTH_THRESHOLDS.ccWarnCount,
+        ccCriticalCount: HEALTH_THRESHOLDS.ccCriticalCount,
+        dolbyEMissingPenalty: HEALTH_THRESHOLDS.dolbyEMissingPenalty,
+        dolbyEDecodeFailurePenalty: HEALTH_THRESHOLDS.dolbyEDecodeFailurePenalty,
+      },
+      assessedAt: Date.now(),
+    };
   }
 
   startContinuous() {

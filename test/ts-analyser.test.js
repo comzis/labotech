@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const TSAnalyser = require('../src/ts-analyser');
+const DolbyEAdapter = require('../src/dolbye-adapter');
 
 describe('TSAnalyser', () => {
   let analyser;
@@ -242,6 +243,125 @@ describe('TSAnalyser', () => {
       );
       expect(enriched.dvb.arrival.captureMethod).toBe('tshark');
       expect(enriched.dvb.arrival.sampleCount).toBe(42);
+    });
+  });
+
+  describe('health assessment', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+      delete process.env.DOLBYE_REQUIRED_WHEN_DETECTED;
+    });
+
+    test('classifies nominal stream as ok with high score', () => {
+      const base = analyser.parseStructure({
+        programs: [
+          {
+            program_id: 101,
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100', bit_rate: '8000000' },
+              { index: 1, codec_type: 'audio', codec_name: 'aac', id: '0x0101', bit_rate: '192000' },
+            ],
+          },
+        ],
+        streams: [
+          { index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100', bit_rate: '8000000' },
+          { index: 1, codec_type: 'audio', codec_name: 'aac', id: '0x0101', bit_rate: '192000' },
+        ],
+      });
+      const result = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 10000000,
+          bitrateSource: 'tsduck',
+          timestampDiscontinuity: { count: 0 },
+          continuityCounterErrors: { count: 0 },
+          arrival: {
+            iatMs: { min: 0.6, max: 2.1, avg: 1.2, p95: 2.0 },
+            jitterMs: 0.4,
+            packetLossPct: 0,
+            sampleCount: 120,
+            captureMethod: 'tshark',
+          },
+          si: { compliance: { nit: true, sdt: true, eitPf: true, tdt: true } },
+        },
+        audioLevels: { meanDb: -18, maxDb: -3 },
+      };
+      const health = analyser._buildHealthAssessment(result);
+      expect(health.severity).toBe('ok');
+      expect(health.score).toBeGreaterThanOrEqual(85);
+      expect(health.timestampDiscontinuityCount).toBe(0);
+      expect(health.continuityCounterErrorCount).toBe(0);
+    });
+
+    test('classifies degraded stream as critical with actionable reasons', () => {
+      const base = analyser.parseStructure({ programs: [], streams: [] });
+      const result = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 0,
+          bitrateSource: 'format',
+          serviceCount: 0,
+          pidCount: 0,
+          timestampDiscontinuity: { count: 6 },
+          continuityCounterErrors: { count: 5 },
+          arrival: {
+            iatMs: { min: 1, max: 250, avg: 80, p95: 180 },
+            jitterMs: 24,
+            packetLossPct: 2.4,
+            sampleCount: 18,
+            captureMethod: 'tsduck',
+          },
+          si: { compliance: { nit: false, sdt: false, eitPf: true, tdt: false } },
+        },
+        audioLevels: { meanDb: -55, maxDb: -12 },
+      };
+      const health = analyser._buildHealthAssessment(result);
+      expect(health.severity).toBe('critical');
+      expect(health.score).toBeLessThan(65);
+      expect(health.reasons.length).toBeGreaterThan(0);
+      expect(health.timestampDiscontinuityCount).toBe(6);
+      expect(health.continuityCounterErrorCount).toBe(5);
+    });
+
+    test('penalizes when Dolby E detected but not decoded', () => {
+      jest.spyOn(DolbyEAdapter, 'isEnabled').mockReturnValue(true);
+      process.env.DOLBYE_REQUIRED_WHEN_DETECTED = 'true';
+      const base = analyser.parseStructure({
+        programs: [{ program_id: 101, streams: [{ index: 0, codec_type: 'audio', codec_name: 'eac3', id: '0x0101' }] }],
+        streams: [{ index: 0, codec_type: 'audio', codec_name: 'eac3', id: '0x0101' }],
+      });
+      const withDolbyFail = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 7000000,
+          bitrateSource: 'measured',
+          timestampDiscontinuity: { count: 0 },
+          continuityCounterErrors: { count: 0 },
+          dolbyE: {
+            available: true,
+            ok: false,
+            detected: true,
+            decoded: false,
+            frameCount: null,
+            error: 'decode failed',
+          },
+          arrival: {
+            iatMs: { min: 1, max: 4, avg: 2, p95: 3 },
+            jitterMs: 0.4,
+            packetLossPct: 0,
+            sampleCount: 12,
+            captureMethod: 'tshark',
+          },
+        },
+        audioLevels: { meanDb: -20, maxDb: -4 },
+      };
+      const health = analyser._buildHealthAssessment(withDolbyFail);
+      expect(health.reasons.some((r) => /Dolby E detected but decode failed/i.test(r))).toBe(true);
+      expect(health.dolbyE.detected).toBe(true);
+      expect(health.dolbyE.decoded).toBe(false);
     });
   });
 
