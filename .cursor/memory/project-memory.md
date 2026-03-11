@@ -24,3 +24,9 @@
 - Process lifecycle and rollback behavior.
 - API/frontend contract consistency.
 - Security around shell/process invocation.
+
+## Deployment Memory
+
+- If production UI appears to lose tabs/features, first suspect deployed ref/build drift rather than component deletion.
+- Prefer deterministic recovery with `bash scripts/recover-prod-fast.sh <ref>` before deeper debugging.
+- Verify expected tab IDs in `web/src/App.jsx` (`analyse`, `decoders`, `api`, `streamView`) during recovery.

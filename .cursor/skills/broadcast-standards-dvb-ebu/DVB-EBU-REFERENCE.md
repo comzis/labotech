@@ -43,3 +43,9 @@ Use simple severity semantics:
 - Keep TS forwarding optional at provisioning time.
 - Keep active forwarder limits in effect.
 - Avoid automatic restore behaviors that could trigger multicast flooding unless explicitly enabled by environment configuration.
+
+## Operational Recovery Checklist
+
+- If expected monitoring tabs/features are missing after deployment, validate deployed ref before feature debugging.
+- Confirm operator UI includes core workflows: Decoder, TS Analyser, Multiview, API, Stream View.
+- Use deterministic recovery flow (`scripts/recover-prod-fast.sh`) to re-align source, build artifacts, and runtime containers.

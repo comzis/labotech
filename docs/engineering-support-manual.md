@@ -36,6 +36,23 @@ systemctl is-active labotech
 curl -fsS http://10.67.18.29:4000/health
 ```
 
+### Fast production recovery (UI/features missing after deploy)
+
+If tabs/features disappear after deployment (for example missing `TS Analyser`, `Multiview`, `API`, or `Stream View`), run:
+
+```bash
+cd ~/LaboTech/labotech
+bash scripts/recover-prod-fast.sh origin/main
+```
+
+This flow:
+
+- fetches and checks out the target ref
+- verifies key UI component files and tab IDs exist
+- rebuilds backend/frontend dependencies
+- recreates Docker stack with `docker compose`
+- validates `/health`
+
 If health fails:
 
 ```bash

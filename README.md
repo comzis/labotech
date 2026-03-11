@@ -65,6 +65,12 @@ Rollback:
 bash scripts/rollback-last-tag.sh
 ```
 
+Fast recover (if UI tabs/features are missing after deployment):
+
+```bash
+bash scripts/recover-prod-fast.sh origin/main
+```
+
 ### 4. Development (live reload)
 
 ```bash
