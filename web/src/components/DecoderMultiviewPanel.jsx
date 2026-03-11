@@ -26,9 +26,9 @@ function resolveDisplayBitrateMbps(result) {
   return total > 0 ? total / 1e6 : null;
 }
 
-function audioPercent(levels) {
-  if (!levels || levels.meanDb == null) return 0;
-  const v = Math.max(-60, Math.min(0, levels.meanDb));
+function audioPercent(meanDb) {
+  if (meanDb == null || !Number.isFinite(meanDb)) return 0;
+  const v = Math.max(-60, Math.min(0, meanDb));
   return Math.round(((v + 60) / 60) * 100);
 }
 
@@ -77,7 +77,9 @@ function extractThumbTimestamp(thumbnailUrl) {
 function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
-  const levelPct = audioPercent(result?.audioLevels);
+  const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
+  const [displayMeanDb, setDisplayMeanDb] = useState(null);
+  const levelPct = audioPercent(displayMeanDb);
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -87,18 +89,32 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
     ? `${result.thumbnailUrl}${result.thumbnailUrl.includes('?') ? '&' : '?'}r=${result?.probeTime || Date.now()}`
     : null;
 
-  // Only reset failure state when the thumbnail URL itself changes, not on every
-  // probe cycle — avoids flicker while the new JPEG is still being written.
-  const prevUrlPathRef = React.useRef(null);
+  // Retry load for every new thumbnail token and keep displaying the last known-good frame.
+  const prevCandidateRef = React.useRef(null);
   useEffect(() => {
-    const urlPath = result?.thumbnailUrl?.split('?')[0] || null;
-    if (urlPath && urlPath !== prevUrlPathRef.current) {
-      prevUrlPathRef.current = urlPath;
+    if (!candidateSrc || candidateSrc === prevCandidateRef.current) return;
+    prevCandidateRef.current = candidateSrc;
+    setThumbFailed(false);
+    const probeImg = new Image();
+    probeImg.onload = () => {
+      setDisplaySrc(candidateSrc);
       setThumbFailed(false);
-    }
-  }, [result?.thumbnailUrl]);
+    };
+    probeImg.onerror = () => {
+      setThumbFailed(true);
+    };
+    probeImg.src = candidateSrc;
+  }, [candidateSrc]);
 
-  const hasThumb = (displaySrc || candidateSrc) && !thumbFailed;
+  useEffect(() => {
+    if (currentMeanDb == null) return;
+    setDisplayMeanDb((prev) => {
+      if (prev == null || !Number.isFinite(prev)) return currentMeanDb;
+      return (prev * 0.65) + (currentMeanDb * 0.35);
+    });
+  }, [currentMeanDb]);
+
+  const hasThumb = Boolean(displaySrc || candidateSrc) && !thumbFailed;
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
   const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
   const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
@@ -143,11 +159,10 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
       >
         {hasThumb ? (
           <img
-            src={candidateSrc || displaySrc}
+            src={displaySrc || candidateSrc}
             alt={`${id} thumbnail`}
             className="absolute inset-0 w-full h-full"
             style={{ objectFit: 'cover', objectPosition: 'center', display: 'block' }}
-            onLoad={() => setDisplaySrc(candidateSrc)}
             onError={() => setThumbFailed(true)}
           />
         ) : (
@@ -183,7 +198,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
           <div className="flex items-center justify-between text-[10px] mb-1">
             <span className="engraved uppercase tracking-widest">Audio</span>
             <span className="font-mono" style={{ color: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55' }}>
-              {result?.audioLevels?.meanDb != null ? `${result.audioLevels.meanDb.toFixed(1)} dB` : 'n/a'}
+              {displayMeanDb != null ? `${displayMeanDb.toFixed(1)} dB` : 'n/a'}
             </span>
           </div>
           <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
