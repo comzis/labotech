@@ -129,10 +129,14 @@ function num(v, digits = 3) {
 }
 
 export default function StreamViewPanel({ lastMessage }) {
+  const LANE_TOP_PX = 44;
+  const LANE_STEP_PX = 28;
+  const LANE_LINE_THICKNESS_PX = 2;
   const [windowMs, setWindowMs] = useState(WINDOW_OPTIONS[1].value);
   const [events, setEvents] = useState([]);
   const [nowMs, setNowMs] = useState(Date.now());
   const [mouseX, setMouseX] = useState(null);
+  const [mouseLaneId, setMouseLaneId] = useState(null);
   const [freezeCursor, setFreezeCursor] = useState(false);
   const [scaleMode, setScaleMode] = useState('normalized');
 
@@ -191,20 +195,6 @@ export default function StreamViewPanel({ lastMessage }) {
     return m;
   }, [timelineEvents, laneIds]);
 
-  const hovered = useMemo(() => {
-    if (mouseX == null || timelineEvents.length === 0) return null;
-    let best = null;
-    let bestDist = Infinity;
-    for (const e of timelineEvents) {
-      const dist = Math.abs(e.xPct - mouseX);
-      if (dist < bestDist) {
-        best = e;
-        bestDist = dist;
-      }
-    }
-    return best;
-  }, [mouseX, timelineEvents]);
-
   const pointerUtc = mouseX == null ? null : (timeStart + (windowMs * mouseX) / 100);
 
   const lanePointerStatus = useMemo(() => {
@@ -225,10 +215,12 @@ export default function StreamViewPanel({ lastMessage }) {
     });
   }, [mouseX, laneIds, laneMap]);
 
-  const selectedLaneId = hovered?.id || lanePointerStatus.find((row) => row.event)?.id || null;
+  const selectedLaneId = mouseLaneId || lanePointerStatus.find((row) => row.event)?.id || null;
   const selectedLaneEvent = selectedLaneId
     ? lanePointerStatus.find((row) => row.id === selectedLaneId)?.event || null
     : null;
+
+  const selectedEvent = selectedLaneEvent;
 
   const lanePointerErrors = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
@@ -354,15 +346,24 @@ export default function StreamViewPanel({ lastMessage }) {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;
             setMouseX(Math.min(100, Math.max(0, x)));
+            const y = e.clientY - rect.top;
+            const laneIdx = Math.round((y - LANE_TOP_PX) / LANE_STEP_PX);
+            setMouseLaneId(laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null);
           }}
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
             const x = ((e.clientX - rect.left) / rect.width) * 100;
             setMouseX(Math.min(100, Math.max(0, x)));
+            const y = e.clientY - rect.top;
+            const laneIdx = Math.round((y - LANE_TOP_PX) / LANE_STEP_PX);
+            setMouseLaneId(laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null);
             setFreezeCursor(true);
           }}
           onMouseLeave={() => {
-            if (!freezeCursor) setMouseX(null);
+            if (!freezeCursor) {
+              setMouseX(null);
+              setMouseLaneId(null);
+            }
           }}
         >
           <div className="absolute left-2 top-1.5 text-[9px] text-gray-500 font-mono">{toUtc(timeStart)}</div>
@@ -382,14 +383,18 @@ export default function StreamViewPanel({ lastMessage }) {
             </div>
           ) : (
             laneIds.map((id, laneIdx) => {
-              const y = 44 + laneIdx * 28;
+              const y = LANE_TOP_PX + laneIdx * LANE_STEP_PX;
               const laneEventAtPointer = lanePointerStatus.find((row) => row.id === id)?.event || null;
               const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
               return (
                 <div key={id}>
                   <div
-                    className="absolute left-0 right-0 h-px"
-                    style={{ top: `${y}px`, background: laneLineById[id] || lineColor }}
+                    className="absolute left-0 right-0"
+                    style={{
+                      top: `${y - (LANE_LINE_THICKNESS_PX / 2)}px`,
+                      height: `${LANE_LINE_THICKNESS_PX}px`,
+                      background: laneLineById[id] || lineColor,
+                    }}
                   />
                   <div className="absolute left-2 -translate-y-1/2 text-[9px] text-gray-500 font-mono" style={{ top: `${y}px` }}>
                     {id}
@@ -461,20 +466,20 @@ export default function StreamViewPanel({ lastMessage }) {
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
             <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Selected Event</div>
-            <div className="font-mono text-gray-300">{hovered ? hovered.title : 'Move mouse over timeline'}</div>
-            <div className="text-gray-500 mt-0.5">{hovered ? hovered.description : '-'}</div>
-            <div className="text-gray-500 mt-0.5">{hovered ? toUtc(hovered.ts) : '-'}</div>
-            {hovered?.evidence?.bitrateSource && (
-              <div className="text-gray-500 mt-0.5">Bitrate source: {hovered.evidence.bitrateSource}</div>
+            <div className="font-mono text-gray-300">{selectedEvent ? selectedEvent.title : 'Move mouse over a lane'}</div>
+            <div className="text-gray-500 mt-0.5">{selectedEvent ? selectedEvent.description : '-'}</div>
+            <div className="text-gray-500 mt-0.5">{selectedEvent ? toUtc(selectedEvent.ts) : '-'}</div>
+            {selectedEvent?.evidence?.bitrateSource && (
+              <div className="text-gray-500 mt-0.5">Bitrate source: {selectedEvent.evidence.bitrateSource}</div>
             )}
-            {hovered?.evidence?.siCompliance && (
+            {selectedEvent?.evidence?.siCompliance && (
               <div className="text-gray-500 mt-0.5">
-                SI: NIT {String(hovered.evidence.siCompliance.nit)} · SDT {String(hovered.evidence.siCompliance.sdt)} · EITp/f {String(hovered.evidence.siCompliance.eitPf)} · TDT {String(hovered.evidence.siCompliance.tdt)}
+                SI: NIT {String(selectedEvent.evidence.siCompliance.nit)} · SDT {String(selectedEvent.evidence.siCompliance.sdt)} · EITp/f {String(selectedEvent.evidence.siCompliance.eitPf)} · TDT {String(selectedEvent.evidence.siCompliance.tdt)}
               </div>
             )}
-            {hovered?.evidence?.arrival && (
+            {selectedEvent?.evidence?.arrival && (
               <div className="text-gray-500 mt-0.5">
-                Arrival: jitter {hovered.evidence.arrival.jitterMs ?? '-'} ms · loss {hovered.evidence.arrival.packetLossPct ?? '-'}%
+                Arrival: jitter {selectedEvent.evidence.arrival.jitterMs ?? '-'} ms · loss {selectedEvent.evidence.arrival.packetLossPct ?? '-'}%
               </div>
             )}
           </div>
