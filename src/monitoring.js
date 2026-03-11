@@ -71,57 +71,63 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       src = `${inputUrl}${sep}fifo_size=20000000&overrun_nonfatal=1&timeout=7000000&reorder_queue_size=1024`;
     }
 
-    const args = [
-      '-y',
-      '-hide_banner',
-      '-loglevel', 'error',
-      '-fflags', '+discardcorrupt+genpts',
-      '-err_detect', 'ignore_err',
-      // Skip non-reference (B) frames at the decoder level — eliminates the most
-      // common cause of macroblocking: P/B frames decoded before their I-frame ref.
-      '-skip_frame', 'noref',
-      '-analyzeduration', '4000000',
-      '-probesize', '5000000',
-      '-rtbufsize', '128M',
-      '-i', src,
-      '-frames:v', '1',
-      '-vf', [
-        // Select only I-frames: guarantees a fully self-contained decode,
-        // no missing reference frames, zero B-frame artefacts.
-        `select=eq(pict_type\\,I)`,
+    const runAttempt = ({ iFrameOnly, timeoutMs }) => new Promise((attemptResolve, attemptReject) => {
+      const vf = [
+        iFrameOnly ? 'select=eq(pict_type\\,I)' : null,
         `thumbnail=${capture.pick}`,
-        // Deblock post-processing: smooths DCT block boundaries on the selected
-        // frame before JPEG encode. Reduces residual macroblock visibility from
-        // source compression even on clean I-frames.
         capture.deblock ? 'pp=de/de' : null,
         `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
         capture.denoise || null,
-      ].filter(Boolean).join(','),
-      '-f', 'image2',
-      '-q:v', String(capture.qv),
-      tmpPath,  // write to .tmp first — atomic rename prevents corrupt browser reads
-    ];
+      ].filter(Boolean).join(',');
+      const args = [
+        '-y',
+        '-hide_banner',
+        '-loglevel', 'error',
+        '-fflags', '+discardcorrupt+genpts',
+        '-err_detect', 'ignore_err',
+        // Strict pass avoids B-frame artefacts. Fallback pass allows any decodable
+        // frame to guarantee thumbnail continuity under long/irregular GOPs.
+        ...(iFrameOnly ? ['-skip_frame', 'noref'] : []),
+        '-analyzeduration', iFrameOnly ? '4000000' : '7000000',
+        '-probesize', iFrameOnly ? '5000000' : '7000000',
+        '-rtbufsize', '128M',
+        '-i', src,
+        '-frames:v', '1',
+        '-vf', vf,
+        '-f', 'image2',
+        '-q:v', String(capture.qv),
+        tmpPath,
+      ];
+      const proc = spawn('ffmpeg', args);
+      const timer = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+        attemptReject(new Error(iFrameOnly ? 'Thumbnail timeout (I-frame)' : 'Thumbnail timeout (fallback)'));
+      }, timeoutMs);
+      proc.on('exit', (code) => {
+        clearTimeout(timer);
+        if (code === 0) return attemptResolve();
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
+        attemptReject(new Error(`Thumbnail capture failed with code ${code}`));
+      });
+      proc.on('error', (err) => {
+        clearTimeout(timer);
+        try { fs.unlinkSync(tmpPath); } catch (_) {}
+        attemptReject(err);
+      });
+    });
 
-    const proc = spawn('ffmpeg', args);
-    const timer = setTimeout(() => { proc.kill('SIGTERM'); reject(new Error('Thumbnail timeout')); }, 12000);
-    proc.on('exit', (code) => {
-      clearTimeout(timer);
-      if (code === 0) {
-        // Atomic rename: browser never loads a half-written JPEG.
+    runAttempt({ iFrameOnly: true, timeoutMs: 12000 })
+      .catch(() => runAttempt({ iFrameOnly: false, timeoutMs: 10000 }))
+      .then(() => {
         fs.rename(tmpPath, outPath, (err) => {
           if (err) reject(err);
           else resolve(outPath);
         });
-      } else {
+      })
+      .catch((err) => {
         try { fs.unlinkSync(tmpPath); } catch (_) {}
-        reject(new Error(`Thumbnail capture failed with code ${code}`));
-      }
-    });
-    proc.on('error', (err) => {
-      clearTimeout(timer);
-      try { fs.unlinkSync(tmpPath); } catch (_) {}
-      reject(err);
-    });
+        reject(err);
+      });
   });
 }
 
