@@ -30,6 +30,9 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
 
     mon.on('etr290', status => broadcast({ type: 'etr290_status', id, ...status }));
     mon.on('alarm',  alarm  => broadcast({ type: 'etr290_alarm',  id, ...alarm  }));
+    mon.on('incident_started', incident => broadcast({ type: 'etr290_incident_started', id, ...incident }));
+    mon.on('incident_updated', incident => broadcast({ type: 'etr290_incident_updated', id, ...incident }));
+    mon.on('incident_cleared', incident => broadcast({ type: 'etr290_incident_cleared', id, ...incident }));
     mon.on('error',  err    => broadcast({ type: 'error', id, message: err.message }));
     mon.on('stopped', ()    => broadcast({ type: 'etr290_stopped', id }));
 

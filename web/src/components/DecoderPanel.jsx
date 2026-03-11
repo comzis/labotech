@@ -96,6 +96,28 @@ function toDecoderEvent(msg) {
       details: msg.message || '',
     };
   }
+  if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
+    const sev = msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info';
+    const state = msg.type.endsWith('started') ? 'started' : 'updated';
+    return {
+      key: `evt-${ts}-${decoderId}-${msg.incidentId || msg.checkId}-${msg.type}`,
+      decoderId,
+      ts,
+      severity: sev,
+      title: `ETR incident ${state}: ${msg.label || msg.checkId || '-'}`,
+      details: msg.lastMessage || msg.message || '',
+    };
+  }
+  if (msg.type === 'etr290_incident_cleared') {
+    return {
+      key: `evt-${ts}-${decoderId}-${msg.incidentId || msg.checkId}-cleared`,
+      decoderId,
+      ts,
+      severity: 'info',
+      title: `ETR incident cleared: ${msg.label || msg.checkId || '-'}`,
+      details: msg.durationMs != null ? `Duration ${(msg.durationMs / 1000).toFixed(1)}s` : (msg.lastMessage || ''),
+    };
+  }
   if (msg.type === 'error') {
     const warning = isExpectedNoSignalError(msg.message);
     return {
