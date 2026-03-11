@@ -129,6 +129,8 @@ export default function DecoderPanel({ lastMessage }) {
 
   useEffect(() => {
     refreshActives();
+    etr.refreshActives();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshActives]);
 
   useEffect(() => {
@@ -161,9 +163,7 @@ export default function DecoderPanel({ lastMessage }) {
       } else {
         await probe(builtUrl);
       }
-      if (!etr.activeId) {
-        await etr.start(`etr-${id}`, builtUrl);
-      }
+      await etr.start(`etr-${id}`, builtUrl);
       setDecoderId('');
     } catch (_) {
       // Errors are surfaced by hooks; keep form state so operator can retry.
@@ -171,8 +171,13 @@ export default function DecoderPanel({ lastMessage }) {
   };
 
   const stopDecoder = async () => {
-    if (selectedId) await stop(selectedId);
-    await etr.stop();
+    if (selectedId) {
+      await stop(selectedId);
+      await etr.stop(`etr-${selectedId}`);
+      setSelectedId('');
+      return;
+    }
+    if (etr.activeId) await etr.stop(etr.activeId);
   };
 
   return (

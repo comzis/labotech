@@ -5,6 +5,7 @@ import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { ShieldAlert, Activity } from 'lucide-react';
 import { useState } from 'react';
+import { probeUrl } from '../api';
 
 const PRIORITY_META = {
   p1: { label: 'Priority 1', desc: 'Service not receivable', color: 'red',    border: 'border-red-500/30',    bg: 'bg-red-900/20',    text: 'text-red-400',    dot: 'bg-red-400'    },
@@ -148,27 +149,90 @@ function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
   return url;
 }
 
+function collectPidRows(result) {
+  if (!result) return [];
+  const rows = [];
+  (result.programs || []).forEach((program) => {
+    (program.streams || []).forEach((stream) => {
+      rows.push({
+        programId: program.programId,
+        programName: program.name || '-',
+        pid: stream.pid,
+        pidHex: stream.pidHex,
+        codecType: stream.codecType || 'unknown',
+        codecName: stream.codecName || '-',
+        streamType: stream.streamType || '-',
+        language: stream.language || '-',
+        bitrate: stream.bitrate || 0,
+      });
+    });
+  });
+  (result.orphanStreams || []).forEach((stream) => {
+    rows.push({
+      programId: 'orphan',
+      programName: 'Orphan',
+      pid: stream.pid,
+      pidHex: stream.pidHex,
+      codecType: stream.codecType || 'unknown',
+      codecName: stream.codecName || '-',
+      streamType: stream.streamType || '-',
+      language: stream.language || '-',
+      bitrate: stream.bitrate || 0,
+    });
+  });
+  return rows.sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+}
+
 export default function ETR290Panel({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
-  const { status, activeId, error, start, stop, onWsMessage } = useETR290();
+  const [dvbByMonitorId, setDvbByMonitorId] = useState({});
+  const { status, statusById, activeId, activeIds, error, start, stop, setActiveId, refreshActives, onWsMessage } = useETR290();
 
   useEffect(() => {
     if (lastMessage) onWsMessage(lastMessage);
   }, [lastMessage, onWsMessage]);
 
+  useEffect(() => {
+    refreshActives();
+  }, [refreshActives]);
+
+  useEffect(() => {
+    if (!activeId || dvbByMonitorId[activeId]) return;
+    const url = statusById?.[activeId]?.url;
+    if (!url) return;
+    probeUrl(url)
+      .then((dvb) => setDvbByMonitorId(prev => ({ ...prev, [activeId]: dvb })))
+      .catch(() => {});
+  }, [activeId, dvbByMonitorId, statusById]);
+
   const builtUrl = buildMonitorUrl({ mode: probeMode, host, port, latency, passphrase });
 
-  const handleToggle = (e) => {
+  const handleToggle = async (e) => {
     e.preventDefault();
-    if (activeId) {
-      stop();
-    } else if (builtUrl) {
-      start(`etr290-${Date.now()}`, builtUrl);
+    if (builtUrl) {
+      const id = `etr290-${Date.now()}`;
+      try {
+        await start(id, builtUrl);
+        const dvb = await probeUrl(builtUrl);
+        setDvbByMonitorId(prev => ({ ...prev, [id]: dvb }));
+      } catch (_) {}
     }
+  };
+
+  const handleStopActive = async () => {
+    if (!activeId) return;
+    try {
+      await stop(activeId);
+      setDvbByMonitorId(prev => {
+        const next = { ...prev };
+        delete next[activeId];
+        return next;
+      });
+    } catch (_) {}
   };
 
   const totalAlarms = status?.recentAlarms?.length || 0;
@@ -234,25 +298,127 @@ export default function ETR290Panel({ lastMessage }) {
 
           <button
             type="submit"
-            disabled={!builtUrl && !activeId}
-            className={`px-6 py-2.5 rounded-xl font-bold text-sm transition-all ${
-              activeId
-                ? 'bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30'
-                : 'bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20'
-            } disabled:opacity-50`}
+            disabled={!builtUrl}
+            className="px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-gradient-to-r from-neon-purple to-purple-600 text-white shadow-lg shadow-neon-purple/20 disabled:opacity-50"
           >
-            {activeId ? 'Stop Monitor' : 'Start Monitor'}
+            Start Monitor
+          </button>
+          <button
+            type="button"
+            onClick={handleStopActive}
+            disabled={!activeId}
+            className="ml-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 disabled:opacity-50"
+          >
+            Stop Selected
           </button>
         </form>
+
+        {activeIds.length > 0 && (
+          <div className="flex flex-wrap gap-2 mt-3">
+            {activeIds.map((id) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setActiveId(id)}
+                className={`text-xs px-2 py-1 rounded border ${activeId === id ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10' : 'border-white/10 text-gray-400 bg-black/20'}`}
+              >
+                {id}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeId && (
           <div className="flex items-center gap-2 mt-3 text-xs text-neon-cyan font-mono animate-pulse">
             <StatusDot status="live" pulse />
-            Monitoring: {status?.url || builtUrl}
+            Monitoring: {status?.url || statusById?.[activeId]?.url || builtUrl}
           </div>
         )}
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </BentoCard>
+
+      {activeId && dvbByMonitorId[activeId]?.dvb && (
+        <BentoCard icon={Activity} title="DVB Service Table">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Service Count</div>
+              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.serviceCount || 0)}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">PID Count</div>
+              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.pidCount || 0)}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Bitrate</div>
+              <div className="text-gray-200 font-mono mt-1">{`${((dvbByMonitorId[activeId].dvb.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">PAT PID</div>
+              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.patPid ?? 0)}</div>
+            </div>
+          </div>
+          {(dvbByMonitorId[activeId].dvb.services || []).length > 0 && (
+            <div className="mt-4 overflow-x-auto">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="text-gray-500 border-b border-white/10">
+                    <th className="text-left py-2">SID</th>
+                    <th className="text-left py-2">Service</th>
+                    <th className="text-left py-2">Provider</th>
+                    <th className="text-left py-2">PMT PID</th>
+                    <th className="text-left py-2">PCR PID</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(dvbByMonitorId[activeId].dvb.services || []).map((s, i) => (
+                    <tr key={`${s.serviceId}-${i}`} className="border-b border-white/5">
+                      <td className="py-2 text-gray-300">{s.serviceId}</td>
+                      <td className="py-2 text-gray-300">{s.serviceName || '-'}</td>
+                      <td className="py-2 text-gray-400">{s.serviceProvider || '-'}</td>
+                      <td className="py-2 text-gray-300">{s.pmtPid ?? '-'}</td>
+                      <td className="py-2 text-gray-300">{s.pcrPid ?? '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          <div className="mt-4">
+            <h3 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold mb-2">
+              TS PID Inventory
+            </h3>
+            <div className="overflow-x-auto rounded-xl border border-white/5">
+              <table className="w-full text-xs font-mono">
+                <thead>
+                  <tr className="text-gray-500 border-b border-white/10">
+                    <th className="text-left py-2 px-2">Program</th>
+                    <th className="text-left py-2 px-2">PID</th>
+                    <th className="text-left py-2 px-2">Type</th>
+                    <th className="text-left py-2 px-2">Codec</th>
+                    <th className="text-left py-2 px-2">Stream Type</th>
+                    <th className="text-left py-2 px-2">Lang</th>
+                    <th className="text-left py-2 px-2">Bitrate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {collectPidRows(dvbByMonitorId[activeId]).map((row, i) => (
+                    <tr key={`${row.programId}-${row.pid}-${i}`} className="border-b border-white/5">
+                      <td className="py-2 px-2 text-gray-300">{row.programId === 'orphan' ? 'Orphan' : `${row.programId}`}</td>
+                      <td className="py-2 px-2 text-gray-300">{row.pidHex || (row.pid ?? '-')}</td>
+                      <td className="py-2 px-2 text-gray-300 uppercase">{row.codecType}</td>
+                      <td className="py-2 px-2 text-gray-300">{row.codecName}</td>
+                      <td className="py-2 px-2 text-gray-400">{row.streamType}</td>
+                      <td className="py-2 px-2 text-gray-400">{row.language}</td>
+                      <td className="py-2 px-2 text-gray-400">{row.bitrate > 0 ? `${(row.bitrate / 1e6).toFixed(2)} Mbps` : '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </BentoCard>
+      )}
 
       {/* Overall status banner */}
       {status && (
