@@ -237,6 +237,8 @@ export default function DecoderPanel({ lastMessage }) {
   }, [selectedId, resultsById, result]);
   const selectedPidRows = useMemo(() => collectPidRows(selectedResult), [selectedResult]);
   const resolvedPidCount = selectedPidRows.filter(r => r.pid != null).length;
+  const expectedPidCount = selectedResult?.dvb?.pidCount || 0;
+  const unresolvedPidGap = expectedPidCount > 0 && resolvedPidCount < expectedPidCount;
 
   useEffect(() => {
     if (!selectedId) return;
@@ -381,6 +383,11 @@ export default function DecoderPanel({ lastMessage }) {
         {selectedResult?.dvb?.bitrateSource && (
           <div className="mt-1 text-[10px] text-gray-500">
             TS bitrate source: {selectedResult.dvb.bitrateSource}
+          </div>
+        )}
+        {unresolvedPidGap && (
+          <div className="mt-1 text-[10px] text-amber-300">
+            PID sample is partial ({resolvedPidCount}/{expectedPidCount} resolved). Next probe should complete missing rows.
           </div>
         )}
 

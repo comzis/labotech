@@ -179,6 +179,15 @@ describe('TSAnalyser', () => {
   });
 
   describe('tsduck helpers', () => {
+    test('builds tsduck args with raw URL (no ffmpeg query hints)', () => {
+      const args = analyser._buildTSDuckArgs();
+      const input = args[args.length - 1];
+      expect(input).toBe('udp://239.1.1.1:5000');
+      expect(input.includes('fifo_size=')).toBe(false);
+      expect(input.includes('overrun_nonfatal=')).toBe(false);
+      expect(input.includes('timeout=')).toBe(false);
+    });
+
     test('extracts tsduck bitrate from mixed payload', () => {
       const payload = {
         stream: { bitrate: '900 kbits/s' },
@@ -201,6 +210,56 @@ describe('TSAnalyser', () => {
       expect(si.sdt).toBe(1.8);
       expect(si.eitPf).toBe(1.8);
       expect(si.tdt).toBe(28);
+    });
+
+    test('keeps previous structure when tsduck data is unavailable', () => {
+      const base = analyser.parseStructure({
+        programs: [],
+        streams: [{ index: 0, codec_type: 'audio', codec_name: 'mp2', id: '0x0101' }],
+      });
+      const enriched = analyser._applyTSDuckData(base, null);
+      expect(enriched.programs).toEqual(base.programs);
+      expect(enriched.orphanStreams[0].pid).toBe(0x0101);
+      expect(enriched.dvb.pidCount).toBe(base.dvb.pidCount);
+    });
+  });
+
+  describe('rtp fallback probing', () => {
+    test('builds udp fallback URL from rtp URL', () => {
+      expect(analyser._rtpToUdpUrl('rtp://239.100.29.49:6501')).toBe('udp://239.100.29.49:6501');
+    });
+
+    test('detects unresolved pid rows', () => {
+      const parsed = analyser.parseStructure({
+        programs: [{ program_id: 1, streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: null }] }],
+        streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: null }],
+      });
+      expect(analyser._hasUnresolvedPidRows(parsed)).toBe(true);
+    });
+
+    test('applies forced-mpegts fallback rows into unresolved streams', () => {
+      const parsed = analyser.parseStructure({
+        programs: [
+          {
+            program_id: 1,
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264', id: null },
+              { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+            ],
+          },
+        ],
+        streams: [
+          { index: 0, codec_type: 'video', codec_name: 'h264', id: null },
+          { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+        ],
+      });
+      const enriched = analyser._applyFallbackPidRows(parsed, [
+        { pid: 256, pidHex: '0x0100', codecType: 'video', codecName: 'h264' },
+        { pid: 257, pidHex: '0x0101', codecType: 'audio', codecName: 'mp2' },
+      ]);
+      expect(enriched.programs[0].streams[0].pid).toBe(256);
+      expect(enriched.programs[0].streams[1].pid).toBe(257);
+      expect(enriched.dvb.pidCount).toBeGreaterThanOrEqual(2);
     });
   });
 
