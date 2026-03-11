@@ -1,0 +1,8 @@
+{
+  "name": "labotech-broadcast",
+  "version": "1.0.0",
+  "description": "Professional broadcast engineering skill covering DVB (ETSI) and EBU standards for the Labotech encoder/stream management application",
+  "author": {
+    "name": "Labotech"
+  }
+}

@@ -183,6 +183,7 @@ const PROBE_MODES = [
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
   { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
 ];
+const DVB_REPROBE_MS = 8000;
 
 function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
@@ -254,13 +255,33 @@ export default function ETR290Panel({ lastMessage }) {
   }, [refreshActives]);
 
   useEffect(() => {
-    if (!activeId || dvbByMonitorId[activeId]) return;
+    if (!activeId) return undefined;
     const url = statusById?.[activeId]?.url;
-    if (!url) return;
-    probeUrl(url)
-      .then((dvb) => setDvbByMonitorId(prev => ({ ...prev, [activeId]: dvb })))
-      .catch(() => {});
-  }, [activeId, dvbByMonitorId, statusById]);
+    if (!url) return undefined;
+    let cancelled = false;
+
+    const refreshDvb = async () => {
+      try {
+        const dvb = await probeUrl(url);
+        if (cancelled) return;
+        setDvbByMonitorId(prev => {
+          const current = prev[activeId];
+          const currentResolved = collectPidRows(current).filter(r => r.pid != null).length;
+          const nextResolved = collectPidRows(dvb).filter(r => r.pid != null).length;
+          // Keep the stronger sample if it has more resolved PIDs.
+          if (current && currentResolved > nextResolved) return prev;
+          return { ...prev, [activeId]: dvb };
+        });
+      } catch (_) {}
+    };
+
+    refreshDvb();
+    const timer = setInterval(refreshDvb, DVB_REPROBE_MS);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [activeId, statusById]);
 
   const builtUrl = buildMonitorUrl({ mode: probeMode, host, port, latency, passphrase });
 
@@ -293,6 +314,9 @@ export default function ETR290Panel({ lastMessage }) {
   const p2Error = ETR_CHECKS.p2.some(c => status?.status?.[c.id] === 'error');
   const selectedDvb = activeId ? dvbByMonitorId[activeId]?.dvb : null;
   const selectedRows = activeId ? collectPidRows(dvbByMonitorId[activeId]) : [];
+  const resolvedPidCount = selectedRows.filter(r => r.pid != null).length;
+  const expectedPidCount = selectedDvb?.pidCount || 0;
+  const unresolvedPidGap = expectedPidCount > 0 && resolvedPidCount < expectedPidCount;
   const videoBitrateMbps = selectedRows.filter(r => r.codecType === 'video').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
   const audioBitrateMbps = selectedRows.filter(r => r.codecType === 'audio').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
   const displayedBitrateMbps = (selectedDvb?.measuredBitrateBps ? selectedDvb.measuredBitrateBps / 1e6 : null)
@@ -406,7 +430,7 @@ export default function ETR290Panel({ lastMessage }) {
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">PID Count</div>
-              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.pidCount || selectedRows.filter(r => r.pid != null).length || 0)}</div>
+              <div className="text-gray-200 font-mono mt-1">{String(resolvedPidCount || expectedPidCount || 0)}</div>
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">Actual TS Bitrate</div>
@@ -420,6 +444,11 @@ export default function ETR290Panel({ lastMessage }) {
           {selectedDvb?.bitrateSource && (
             <div className="mt-1 text-[10px] text-gray-500">
               TS bitrate source: {selectedDvb.bitrateSource}
+            </div>
+          )}
+          {unresolvedPidGap && (
+            <div className="mt-1 text-[10px] text-amber-300">
+              PID sample is partial ({resolvedPidCount}/{expectedPidCount} resolved). Background re-probe is running.
             </div>
           )}
           {(dvbByMonitorId[activeId].dvb.services || []).length > 0 && (

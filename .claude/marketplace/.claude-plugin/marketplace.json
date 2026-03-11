@@ -1,0 +1,19 @@
+{
+  "name": "labotech-local",
+  "description": "Local Labotech project plugins for broadcast engineering",
+  "owner": {
+    "name": "Labotech"
+  },
+  "plugins": [
+    {
+      "name": "labotech-broadcast",
+      "description": "Professional broadcast engineering skill covering DVB (ETSI ETR 290, EN 300 468) and EBU (R 128, R 68, Tech 3337) standards for the Labotech encoder/stream management application",
+      "version": "1.0.0",
+      "author": {
+        "name": "Labotech"
+      },
+      "source": "./plugins/labotech-broadcast",
+      "category": "development"
+    }
+  ]
+}

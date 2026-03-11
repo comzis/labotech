@@ -6,3 +6,11 @@ dist/
 web/dist/
 web/node_modules/
 .DS_Store
+
+# ── REFERENCE ONLY — never commit ─────────────────────────────────────────────
+# This folder contains third-party binaries, SDKs, and proprietary reference
+# material. It is LOCAL ONLY and must NEVER be pushed to any remote repository.
+REREFENCE ONLY/
+"REREFENCE ONLY"/
+REFERENCE ONLY/
+"REFERENCE ONLY"/

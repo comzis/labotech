@@ -55,12 +55,26 @@ class TSAnalyser extends EventEmitter {
           // Always attempt PID backfill from ffmpeg banner lines and patch any gaps.
           const pidMap = await this._probeStreamPidsFromFfmpeg();
           result = this._applyPidMap(result, pidMap);
-          const [tsduckData, measuredBitrateBps, audioLevels] = await Promise.all([
+          if (this._isRtpUrl(this.url) && this._hasUnresolvedPidRows(result)) {
+            const forcedRows = await this._probeRtpAsUdpForcedMpegtsRows();
+            result = this._applyFallbackPidRows(result, forcedRows);
+          }
+          const [tsduckProbe, measuredBitrateBps, audioLevels] = await Promise.all([
             runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
             runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
             this._probeAudioLevels(),
           ]);
-          result = this._applyTSDuckData(result, tsduckData);
+          result = this._applyTSDuckData(result, tsduckProbe?.data || null);
+          result.dvb.probeDiagnostics = {
+            ...(result.dvb.probeDiagnostics || {}),
+            tsduck: {
+              attempted: runHeavyProbe,
+              available: tsduckProbe?.available === true,
+              ok: tsduckProbe?.ok === true,
+              used: result?.dvb?.bitrateSource === 'tsduck',
+              error: tsduckProbe?.error || null,
+            },
+          };
           if (measuredBitrateBps && measuredBitrateBps > 0) {
             result.dvb.measuredBitrateBps = measuredBitrateBps;
             // tsduck is preferred when available, otherwise use measured remux bitrate.
@@ -158,7 +172,7 @@ class TSAnalyser extends EventEmitter {
         '-nostats',
         '-loglevel', 'info',
         '-t', '1.0',
-        '-i', this.url,
+        '-i', this._withLiveInputHints(this.url),
         '-vn',
         '-af', 'volumedetect',
         '-f', 'null',
@@ -255,24 +269,35 @@ class TSAnalyser extends EventEmitter {
 
   _probeTSDuck() {
     return new Promise((resolve) => {
-      const inputUrl = this._withLiveInputHints(this.url);
-      const args = ['--json', '--input-timeout', '3000', inputUrl];
+      const args = this._buildTSDuckArgs();
       const proc = spawn('tsanalyze', args);
       let stdout = '';
       let stderr = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 7000);
+      }, 9000);
 
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
-      proc.on('error', () => {
+      proc.on('error', (err) => {
         clearTimeout(timeout);
-        resolve(null);
+        resolve({
+          available: false,
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'tsanalyze unavailable',
+        });
       });
       proc.on('exit', (code) => {
         clearTimeout(timeout);
-        if (code !== 0 || !stdout.trim()) return resolve(null);
+        if (code !== 0 || !stdout.trim()) {
+          return resolve({
+            available: true,
+            ok: false,
+            data: null,
+            error: stderr.trim() || `tsanalyze exited ${code}`,
+          });
+        }
         try {
           const raw = JSON.parse(stdout);
           const bitrateBps = this._extractTSDuckBitrateBps(raw);
@@ -281,18 +306,32 @@ class TSAnalyser extends EventEmitter {
           const siIntervalsSec = this._extractTSDuckSIIntervalsSec(raw);
           const arrivalMetrics = this._extractTSDuckArrivalMetrics(raw);
           resolve({
-            bitrateBps,
-            services,
-            pids,
-            siIntervalsSec,
-            arrivalMetrics,
-            stderr: stderr.trim() || null,
+            available: true,
+            ok: true,
+            data: {
+              bitrateBps,
+              services,
+              pids,
+              siIntervalsSec,
+              arrivalMetrics,
+              stderr: stderr.trim() || null,
+            },
+            error: null,
           });
         } catch (_) {
-          resolve(null);
+          resolve({
+            available: true,
+            ok: false,
+            data: null,
+            error: 'tsanalyze returned invalid JSON',
+          });
         }
       });
     });
+  }
+
+  _buildTSDuckArgs() {
+    return ['--json', '--input-timeout', '5000', this.url];
   }
 
   _mapStream(s) {
@@ -698,48 +737,98 @@ class TSAnalyser extends EventEmitter {
   }
 
   _probeStreamPidsFromFfmpeg() {
-    return new Promise((resolve) => {
-      const inputUrl = this._withLiveInputHints(this.url);
+    // Use ffprobe -show_streams JSON to extract PIDs from AVStream.id.
+    // This is far more reliable than banner text parsing.
+    // For rtp:// inputs the RTP demuxer does NOT populate AVStream.id with
+    // MPEG-TS PIDs — it always returns 0 or omits the field. In that case we
+    // fall back to a second probe using udp:// with a forced mpegts demuxer,
+    // which resolves PIDs correctly (the 12-byte RTP header prefix is
+    // handled by mpegts resync + discardcorrupt).
+    const tryFfprobeStreams = (url, extraArgs = []) => new Promise((resolve) => {
       const args = [
-        '-hide_banner',
-        '-loglevel', 'info',
+        '-v', 'quiet',
+        '-analyzeduration', '5000000',
+        '-probesize', '5000000',
+        ...extraArgs,
+        '-print_format', 'json',
+        '-show_streams',
+        url,
+      ];
+      const proc = spawn('ffprobe', args);
+      let stdout = '';
+      const killTimer = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 9000);
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('error', () => { clearTimeout(killTimer); resolve({}); });
+      proc.on('exit', () => {
+        clearTimeout(killTimer);
+        const pidByIndex = {};
+        try {
+          const parsed = JSON.parse(stdout);
+          for (const s of (parsed.streams || [])) {
+            const pid = this._normalizePid(s.id);
+            if (typeof s.index === 'number' && pid != null && pid > 0) {
+              pidByIndex[s.index] = pid;
+            }
+          }
+        } catch (_) {}
+        resolve(pidByIndex);
+      });
+    });
+
+    const primaryUrl = this._withLiveInputHints(this.url);
+    return tryFfprobeStreams(primaryUrl).then((result) => {
+      if (Object.keys(result).length > 0) return result;
+      // UDP+mpegts fallback: for rtp:// the RTP wrapper hides PID info.
+      // The mpegts demuxer on udp:// receives the same multicast packets and
+      // directly exposes PID values through AVStream.id.
+      if (this.url && this.url.startsWith('rtp://')) {
+        const udpUrl = this._withLiveInputHints(
+          this.url.replace(/^rtp:\/\//, 'udp://')
+        );
+        return tryFfprobeStreams(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+      }
+      return result;
+    });
+  }
+
+  _probeRtpAsUdpForcedMpegtsRows() {
+    return new Promise((resolve) => {
+      const udpUrl = this._rtpToUdpUrl(this.url);
+      if (!udpUrl) return resolve([]);
+      const inputUrl = this._withLiveInputHints(udpUrl);
+      const args = [
+        '-v', 'quiet',
+        '-f', 'mpegts',
         '-analyzeduration', '7000000',
         '-probesize', '7000000',
-        '-t', '3.0',
-        '-i', inputUrl,
-        '-map', '0',
-        '-f', 'null',
-        '-',
+        '-print_format', 'json',
+        '-show_streams',
+        inputUrl,
       ];
-      const proc = spawn('ffmpeg', args);
-      let stderr = '';
+      const proc = spawn('ffprobe', args);
+      let stdout = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
       }, 9000);
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.on('error', () => {
         clearTimeout(timeout);
-        resolve({});
+        resolve([]);
       });
-      proc.on('exit', () => {
+      proc.on('exit', (code) => {
         clearTimeout(timeout);
-        const pidByIndex = {};
-        const lines = stderr.split('\n');
-        for (const line of lines) {
-          // Example:
-          // Stream #0:0[0x200]: Video: h264 ...
-          // Alternative:
-          // Stream #0:0(und): Video: ... [0x200]
-          const m = line.match(/Stream #\d+:(\d+)\[0x([0-9a-f]+)\]/i)
-            || line.match(/Stream #\d+:(\d+).*?\[0x([0-9a-f]+)\]/i);
-          if (!m) continue;
-          const idx = parseInt(m[1], 10);
-          const pid = parseInt(m[2], 16);
-          if (Number.isFinite(idx) && Number.isFinite(pid)) {
-            pidByIndex[idx] = pid;
-          }
+        if (code !== 0 || !stdout.trim()) return resolve([]);
+        try {
+          const raw = JSON.parse(stdout);
+          const rows = (raw.streams || [])
+            .map((s) => this._mapStream(s))
+            .filter((s) => s && s.pid != null);
+          resolve(rows);
+        } catch (_) {
+          resolve([]);
         }
-        resolve(pidByIndex);
       });
     });
   }
@@ -802,11 +891,75 @@ class TSAnalyser extends EventEmitter {
     };
   }
 
+  _applyFallbackPidRows(result, fallbackRows) {
+    if (!result || !Array.isArray(fallbackRows) || fallbackRows.length === 0) return result;
+    const programs = (result.programs || []).map((p) => ({ ...p, streams: [...(p.streams || [])] }));
+    const orphanStreams = [...(result.orphanStreams || [])];
+    const allExisting = programs.flatMap((p) => p.streams).concat(orphanStreams);
+    const used = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
+    const candidates = fallbackRows.filter((r) => r && r.pid != null && !used.has(r.pid));
+    const consume = (codecType) => {
+      let idx = -1;
+      if (codecType) idx = candidates.findIndex((r) => !used.has(r.pid) && r.codecType === codecType);
+      if (idx < 0) idx = candidates.findIndex((r) => !used.has(r.pid));
+      if (idx < 0) return null;
+      const row = candidates[idx];
+      used.add(row.pid);
+      return row;
+    };
+    for (const stream of allExisting) {
+      if (!stream || stream.pid != null) continue;
+      const row = consume(stream.codecType);
+      if (!row) continue;
+      stream.pid = row.pid;
+      stream.pidHex = row.pidHex || `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`;
+      if (!stream.streamType && row.streamType) stream.streamType = row.streamType;
+      if (!stream.codecName && row.codecName) stream.codecName = row.codecName;
+      if (!stream.language && row.language) stream.language = row.language;
+      if (!stream.bitrate && row.bitrate) stream.bitrate = row.bitrate;
+    }
+    const allStreams = programs.flatMap((p) => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter((s) => s.pid != null).length;
+    return {
+      ...result,
+      programs,
+      orphanStreams,
+      dvb: {
+        ...(result.dvb || {}),
+        pidCount,
+      },
+    };
+  }
+
   _withLiveInputHints(url) {
     if (!url) return url;
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
+  }
+
+  _isRtpUrl(url) {
+    return typeof url === 'string' && url.startsWith('rtp://');
+  }
+
+  _rtpToUdpUrl(url) {
+    if (!this._isRtpUrl(url)) return null;
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname;
+      const port = parsed.port;
+      if (!host || !port) return null;
+      return `udp://${host}:${port}`;
+    } catch (_) {
+      const m = String(url).match(/^rtp:\/\/([^/:?#]+):(\d+)/i);
+      if (!m) return null;
+      return `udp://${m[1]}:${m[2]}`;
+    }
+  }
+
+  _hasUnresolvedPidRows(result) {
+    const allStreams = (result?.programs || []).flatMap((p) => p.streams || []).concat(result?.orphanStreams || []);
+    return allStreams.some((s) => s && s.pid == null);
   }
 
   startContinuous() {
