@@ -23,11 +23,27 @@ if (!fs.existsSync(THUMBNAIL_DIR)) {
 }
 
 function sanitizeStreamId(streamId) {
-  const id = String(streamId || '');
-  if (!SAFE_STREAM_ID_RE.test(id)) {
-    throw new Error('Invalid stream id');
+  const raw = String(streamId || '').trim();
+  if (SAFE_STREAM_ID_RE.test(raw)) return raw;
+  let base = raw
+    .replace(/[^A-Za-z0-9_-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!base) base = 'stream';
+  const hash = Math.abs(_hashString(raw || 'stream')).toString(36).slice(0, 8);
+  // Keep deterministic IDs and avoid collisions for similarly-normalized names.
+  const truncated = base.slice(0, 54);
+  return `${truncated}_${hash}`.slice(0, 64);
+}
+
+function _hashString(input) {
+  let h = 0;
+  const s = String(input || '');
+  for (let i = 0; i < s.length; i += 1) {
+    h = ((h << 5) - h) + s.charCodeAt(i);
+    h |= 0;
   }
-  return id;
+  return h;
 }
 
 function getThumbnailCaptureSettings() {

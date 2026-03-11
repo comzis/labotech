@@ -4,7 +4,7 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { captureThumbnail, THUMBNAIL_DIR } = require('./monitoring');
+const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
 let _multicastConfig = null;
 function _getNicName() {
@@ -116,7 +116,7 @@ class TSAnalyser extends EventEmitter {
             this._lastThumbnailAt = Date.now();
             try {
               await captureThumbnail(this.id, this.url);
-              result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
+              result.thumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
             } catch (err) {
               // Keep last good frame if a single capture cycle fails.
               if (this.lastResult?.thumbnailUrl) {
@@ -983,9 +983,9 @@ class TSAnalyser extends EventEmitter {
 
   _resolveCachedThumbnailUrl() {
     try {
-      const p = path.join(THUMBNAIL_DIR, `${this.id}.jpg`);
+      const p = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
       if (!fs.existsSync(p)) return null;
-      return `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;
+      return `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
     } catch (_) {
       return null;
     }

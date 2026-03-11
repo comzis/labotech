@@ -57,4 +57,10 @@ describe('monitoring.captureThumbnail', () => {
     expect(thirdFilter).not.toContain('select=eq(pict_type\\,I)');
     expect(thirdArgs).not.toContain('-skip_frame');
   });
+
+  test('normalizes custom decoder IDs for thumbnail filenames', async () => {
+    spawn.mockImplementationOnce(() => makeProc(0));
+    const out = await monitoring.captureThumbnail('WE M4 FEED A Bu', 'rtp://239.100.17.7:6501');
+    expect(out).toMatch(/\/logs\/thumbnails\/WE_M4_FEED_A_Bu_[a-z0-9]+\.jpg$/i);
+  });
 });
