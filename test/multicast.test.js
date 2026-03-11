@@ -65,6 +65,14 @@ describe('MulticastForwarder', () => {
     expect(() => f.validateDestination()).not.toThrow();
   });
 
+  test('validateDestination enforces strict allowedIp when configured', () => {
+    const strict = new MulticastForwarder({ ...baseOpts, allowedIp: '239.100.25.29' });
+    expect(() => strict.validateDestination()).toThrow(/Only 239\.100\.25\.29 is allowed/);
+
+    const strictAllowed = new MulticastForwarder({ ...baseOpts, destIp: '239.100.25.29', allowedIp: '239.100.25.29' });
+    expect(() => strictAllowed.validateDestination()).not.toThrow();
+  });
+
   test('validateNic rejects unsafe interface names', () => {
     const f = new MulticastForwarder({ ...baseOpts, nic: 'eno2;rm -rf /' });
     expect(() => f.validateNic()).toThrow(/Invalid NIC name/);
