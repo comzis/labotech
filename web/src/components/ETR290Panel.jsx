@@ -353,7 +353,7 @@ export default function ETR290Panel({ lastMessage }) {
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">PID Count</div>
-              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.pidCount || 0)}</div>
+              <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.pidCount || selectedRows.filter(r => r.pid != null).length || 0)}</div>
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">Actual TS Bitrate</div>

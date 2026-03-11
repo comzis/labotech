@@ -100,6 +100,27 @@ describe('TSAnalyser', () => {
       expect(r.orphanStreams[0].codecType).toBe('data');
     });
 
+    test('uses global stream PID when program stream omits id', () => {
+      const rawMissingProgramPid = {
+        programs: [
+          {
+            program_id: 1,
+            pmt_pid: 256,
+            pcr_pid: 257,
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264', id: null },
+            ],
+          },
+        ],
+        streams: [
+          { index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100', bit_rate: '8000000' },
+        ],
+      };
+      const r = analyser.parseStructure(rawMissingProgramPid);
+      expect(r.programs[0].streams[0].pid).toBe(0x0100);
+      expect(r.dvb.pidCount).toBe(1);
+    });
+
     test('returns probeTime', () => {
       const before = Date.now();
       const r = analyser.parseStructure(mockRaw);
