@@ -9,6 +9,7 @@ const path = require('path');
 const os = require('os');
 
 const persistence = require('./state-persistence');
+const eventLog = require('./event-log');
 
 const API_HOST = process.env.API_HOST || '10.67.18.29';
 const API_PORT = parseInt(process.env.API_PORT, 10) || 4000;
@@ -113,7 +114,7 @@ function saveState() {
 }
 
 // ─── Restore persisted engines after boot ────────────────────────────────────
-async function restoreState(wss) {
+async function restoreState(broadcast) {
   const state = persistence.load();
   if (!state) return;
   const restoreStreams = process.env.RESTORE_STREAMS_ON_BOOT === 'true';
@@ -123,11 +124,6 @@ async function restoreState(wss) {
   const SRTEncoder          = require('./encoder');
   const Transcoder          = require('./transcoder');
   const { MulticastForwarder } = require('./multicast-forward');
-
-  function broadcast(msg) {
-    const data = JSON.stringify(msg);
-    wss.clients.forEach(c => { if (c.readyState === 1) c.send(data); });
-  }
 
   if (restoreStreams) {
     for (const cfg of (state.streams || [])) {
@@ -204,13 +200,23 @@ function start() {
   const { THUMBNAIL_DIR } = require('./monitoring');
   app.use('/logs/thumbnails', express.static(THUMBNAIL_DIR));
 
-  app.use('/streams',   require('../routes/streams')(streams, wss, saveState));
-  app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState));
-  app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState));
-  app.use('/analyse',   require('../routes/analyse')(analysers, wss));
-  app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss));
-  app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState));
+  function broadcast(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    eventLog.push(msg);
+    const data = JSON.stringify(msg);
+    wss.clients.forEach(c => {
+      if (c.readyState === WebSocket.OPEN) c.send(data);
+    });
+  }
+
+  app.use('/streams',   require('../routes/streams')(streams, wss, saveState, broadcast));
+  app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
+  app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
+  app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast));
+  app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast));
+  app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));
   app.use('/scte35',    require('../routes/scte35')());
+  app.use('/api/events', require('../routes/events')(eventLog));
 
   app.get('/health', (req, res) => {
     res.json(getHealthPayload());
@@ -233,7 +239,7 @@ function start() {
   server.listen(API_PORT, API_HOST, () => {
     console.log(`Labotech API listening on http://${API_HOST}:${API_PORT}`);
     // Restore engines after a short delay to let the event loop settle
-    setTimeout(() => restoreState(wss), 2000);
+    setTimeout(() => restoreState(broadcast), 2000);
   });
 
   return { server, wss, streams, transcoders, forwarders, analysers, etr290monitors };

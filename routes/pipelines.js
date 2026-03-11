@@ -6,10 +6,11 @@ const SRTEncoder = require('../src/encoder');
 const Transcoder = require('../src/transcoder');
 const { MulticastForwarder } = require('../src/multicast-forward');
 
-module.exports = function(streams, transcoders, forwarders, wss, saveState = () => {}) {
+module.exports = function(streams, transcoders, forwarders, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
 
   function broadcast(msg) {
+    if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);

@@ -26,6 +26,7 @@ class TSAnalyser extends EventEmitter {
     this.isRunning = false;
     this.lastResult = null;
     this._continuousProbeCount = 0;
+    this._lastThumbnailAt = 0;
     this.nicName = options.nicName || _getNicName();
     this._iatSniffer = null;
   }
@@ -36,9 +37,12 @@ class TSAnalyser extends EventEmitter {
     // Heavy transport/tsduck probing is expensive on live multicast.
     // In continuous mode, run it every 3rd cycle to keep UI responsive.
     const runHeavyProbe = !isContinuous || (this._continuousProbeCount % 3 === 1);
-    // Thumbnail generation also spawns ffmpeg; align with heavy cycles to prevent
-    // thumbnail starvation when many decoders run concurrently.
-    const runThumbnailCapture = runHeavyProbe;
+    // Thumbnail refresh must remain deterministic for operator confidence.
+    // Use time-based cadence (default 5s), independent of heavy probe cycles.
+    const thumbIntervalSec = parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5;
+    const thumbIntervalMs = Math.max(1000, thumbIntervalSec * 1000);
+    const nowMs = Date.now();
+    const runThumbnailCapture = !isContinuous || (nowMs - this._lastThumbnailAt >= thumbIntervalMs);
 
     return new Promise((resolve, reject) => {
       const inputUrl = this._withLiveInputHints(this.url);
@@ -107,6 +111,7 @@ class TSAnalyser extends EventEmitter {
           }
           result.audioLevels = audioLevels;
           if (runThumbnailCapture) {
+            this._lastThumbnailAt = Date.now();
             try {
               await captureThumbnail(this.id, this.url);
               result.thumbnailUrl = `/logs/thumbnails/${this.id}.jpg?t=${Date.now()}`;

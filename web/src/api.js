@@ -65,3 +65,7 @@ export const getHealth = () => request('GET', '/health');
 
 // Generic (for API Explorer / tools)
 export const apiRequestDetailed = (method, path, body) => requestDetailed(method, path, body);
+
+// Event Log
+export const getEvents = () => request('GET', '/api/events');
+export const clearEvents = () => request('DELETE', '/api/events');

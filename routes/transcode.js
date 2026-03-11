@@ -4,7 +4,7 @@ const express = require('express');
 const WebSocket = require('ws');
 const Transcoder = require('../src/transcoder');
 
-module.exports = function (transcoders, wss, saveState = () => {}) {
+module.exports = function (transcoders, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
 
   async function stopAndWait(instance, timeoutMs = 5000) {
@@ -25,6 +25,7 @@ module.exports = function (transcoders, wss, saveState = () => {}) {
   }
 
   function broadcast(msg) {
+    if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);

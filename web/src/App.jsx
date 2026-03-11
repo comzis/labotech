@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -10,8 +10,9 @@ import DecoderPanel from './components/DecoderPanel';
 import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
 import StreamViewPanel from './components/StreamViewPanel';
 import APIPanel from './components/APIPanel';
+import EventLogPanel from './components/EventLogPanel';
 import useWebSocket from './hooks/useWebSocket';
-import { getHealth } from './api';
+import { clearEvents, getEvents, getHealth } from './api';
 
 // Per-tab LED colours (Evertz-style coloured buttons)
 const TABS = [
@@ -22,6 +23,7 @@ const TABS = [
   { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
   { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
   { id: 'streamView', label: 'Live View',   icon: LineChart,   led: '#66ccff' },
+  { id: 'alarms',     label: 'Alarm Log',   icon: ShieldCheck, led: '#ff5577' },
   { id: 'api',        label: 'API',         icon: Terminal,    led: '#aaaaaa' },
 ];
 
@@ -33,6 +35,80 @@ function cpuColor(pct) {
 }
 
 const INACTIVE_TAB_COLOR = '#7a7a7a';
+
+function isExpectedNoSignalError(message) {
+  const m = String(message || '').toLowerCase();
+  return (
+    m.includes('ffprobe exited 1') ||
+    m.includes('connection refused') ||
+    m.includes('input/output error') ||
+    m.includes('server returned 404') ||
+    m.includes('immediate exit requested')
+  );
+}
+
+function classifySeverity(msg) {
+  if (!msg || !msg.type) return 'info';
+  if (msg.type === 'etr290_alarm') {
+    if (msg.priority === 'p1') return 'critical';
+    if (msg.priority === 'p2') return 'warning';
+    return 'info';
+  }
+  if (msg.type === 'error') {
+    return isExpectedNoSignalError(msg.message) ? 'warning' : 'critical';
+  }
+  if (msg.type === 'switched') return 'warning';
+  if (msg.type === 'info') return 'info';
+  return 'info';
+}
+
+function toLogEntry(msg) {
+  if (!msg || !msg.type) return null;
+  const parsedWhen = msg.time ? new Date(msg.time).getTime() : Date.now();
+  const when = Number.isFinite(parsedWhen) ? parsedWhen : Date.now();
+  const id = msg.id || 'system';
+  const severity = classifySeverity(msg);
+  let status = 'active';
+  let title = msg.type;
+  let details = msg.message || '';
+
+  if (msg.type === 'started') {
+    status = 'started';
+    title = 'Stream started';
+    details = `${id} is running`;
+  } else if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped') {
+    status = 'stopped';
+    title = 'Instance stopped';
+    details = `${id} stopped`;
+  } else if (msg.type === 'error') {
+    status = isExpectedNoSignalError(msg.message) ? 'no-signal' : 'error';
+    title = isExpectedNoSignalError(msg.message) ? 'Input signal missing' : 'Engine error';
+    details = msg.message || 'Unknown error';
+  } else if (msg.type === 'etr290_alarm') {
+    status = 'alarm';
+    title = `ETR ${(msg.priority || 'p3').toUpperCase()} - ${msg.label || 'Alarm'}`;
+    details = msg.message || '';
+  } else if (msg.type === 'switched') {
+    status = 'failover';
+    title = 'Failover switch';
+    details = msg.message || 'Primary input switched to backup';
+  } else if (msg.type === 'info') {
+    status = 'info';
+    title = 'Engine info';
+    details = msg.message || '';
+  }
+
+  return {
+    key: `${msg.type}-${id}-${when}-${msg.label || msg.message || ''}`,
+    when,
+    id,
+    type: msg.type,
+    severity,
+    status,
+    title,
+    details,
+  };
+}
 
 // Small LCD-style readout for telemetry
 function LcdValue({ label, value, color }) {
@@ -48,10 +124,20 @@ export default function App() {
   const [tab, setTab] = useState('streams');
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
+  const [eventLog, setEventLog] = useState([]);
+  const [alarmUnreadCritical, setAlarmUnreadCritical] = useState(0);
+  const errorToastSeenRef = useRef(new Map());
 
   // ── Broadcast event toasts ────────────────────────────────────────────────
   useEffect(() => {
     if (!lastMessage) return;
+    const entry = toLogEntry(lastMessage);
+    if (entry) {
+      setEventLog((prev) => [...prev, entry].slice(-1000));
+      if (entry.severity === 'critical' && tab !== 'alarms') {
+        setAlarmUnreadCritical((n) => n + 1);
+      }
+    }
     const { type, id, message } = lastMessage;
     switch (type) {
       case 'started':
@@ -63,7 +149,16 @@ export default function App() {
         toast.info(`${id} stopped`, { duration: 4000 });
         break;
       case 'error':
-        toast.error(`${id}: ${message}`, { duration: 8000 });
+        // Expected transient signal/input faults are logged but not promoted as popups.
+        if (isExpectedNoSignalError(message)) break;
+        {
+          const key = `${id || 'unknown'}:${message || ''}`;
+          const now = Date.now();
+          const prevTs = errorToastSeenRef.current.get(key) || 0;
+          if (now - prevTs < 15000) break; // de-duplicate repeated errors
+          errorToastSeenRef.current.set(key, now);
+          toast.error(`${id}: ${message}`, { duration: 8000 });
+        }
         break;
       case 'etr290_alarm':
         if (lastMessage.priority === 'p1') {
@@ -76,7 +171,26 @@ export default function App() {
       default:
         break;
     }
-  }, [lastMessage]);
+  }, [lastMessage, tab]);
+
+  useEffect(() => {
+    if (tab === 'alarms') setAlarmUnreadCritical(0);
+  }, [tab]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        const seed = await getEvents();
+        if (!mounted || !Array.isArray(seed)) return;
+        const normalized = seed.map(toLogEntry).filter(Boolean);
+        const dedup = new Map();
+        normalized.forEach((e) => dedup.set(e.key, e));
+        setEventLog(Array.from(dedup.values()).slice(-1000));
+      } catch (_) {}
+    })();
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -193,6 +307,11 @@ export default function App() {
                   >
                     {t.label}
                   </span>
+                  {t.id === 'alarms' && alarmUnreadCritical > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                      {alarmUnreadCritical > 9 ? '9+' : alarmUnreadCritical}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -291,6 +410,16 @@ export default function App() {
           {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
           {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
           {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} />}
+          {tab === 'alarms'     && (
+            <EventLogPanel
+              events={eventLog}
+              onClear={async () => {
+                try { await clearEvents(); } catch (_) {}
+                setEventLog([]);
+                setAlarmUnreadCritical(0);
+              }}
+            />
+          )}
           {tab === 'api'        && <APIPanel />}
         </motion.div>
       </main>
