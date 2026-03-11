@@ -78,15 +78,27 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   const levelPct = audioPercent(result?.audioLevels);
+  // Keep the last successfully loaded src so the tile doesn't blank during
+  // the write gap between probe cycles (atomic rename means the old file
+  // stays readable until the new one is ready).
+  const [displaySrc, setDisplaySrc] = useState(null);
   const [thumbFailed, setThumbFailed] = useState(false);
-  const thumbSrc = result?.thumbnailUrl
+  const candidateSrc = result?.thumbnailUrl
     ? `${result.thumbnailUrl}${result.thumbnailUrl.includes('?') ? '&' : '?'}r=${result?.probeTime || Date.now()}`
     : null;
-  useEffect(() => {
-    setThumbFailed(false);
-  }, [result?.thumbnailUrl, result?.probeTime]);
 
-  const hasThumb = thumbSrc && !thumbFailed;
+  // Only reset failure state when the thumbnail URL itself changes, not on every
+  // probe cycle — avoids flicker while the new JPEG is still being written.
+  const prevUrlPathRef = React.useRef(null);
+  useEffect(() => {
+    const urlPath = result?.thumbnailUrl?.split('?')[0] || null;
+    if (urlPath && urlPath !== prevUrlPathRef.current) {
+      prevUrlPathRef.current = urlPath;
+      setThumbFailed(false);
+    }
+  }, [result?.thumbnailUrl]);
+
+  const hasThumb = (displaySrc || candidateSrc) && !thumbFailed;
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
   const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
   const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
@@ -131,10 +143,11 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
       >
         {hasThumb ? (
           <img
-            src={thumbSrc}
+            src={candidateSrc || displaySrc}
             alt={`${id} thumbnail`}
             className="absolute inset-0 w-full h-full"
-            style={{ objectFit: 'contain', display: 'block' }}
+            style={{ objectFit: 'cover', objectPosition: 'center', display: 'block' }}
+            onLoad={() => setDisplaySrc(candidateSrc)}
             onError={() => setThumbFailed(true)}
           />
         ) : (
