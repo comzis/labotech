@@ -79,6 +79,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
   const [displayMeanDb, setDisplayMeanDb] = useState(null);
+  const [audioSeenAt, setAudioSeenAt] = useState(0);
   const levelPct = audioPercent(displayMeanDb);
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
@@ -110,9 +111,25 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
     if (currentMeanDb == null) return;
     setDisplayMeanDb((prev) => {
       if (prev == null || !Number.isFinite(prev)) return currentMeanDb;
-      return (prev * 0.65) + (currentMeanDb * 0.35);
+      // Smooth fast probe-to-probe jumps and cap per-update movement.
+      const blended = (prev * 0.75) + (currentMeanDb * 0.25);
+      const delta = blended - prev;
+      const maxStepDb = 3;
+      const limited = prev + Math.max(-maxStepDb, Math.min(maxStepDb, delta));
+      return Math.max(-60, Math.min(0, limited));
     });
+    setAudioSeenAt(Date.now());
   }, [currentMeanDb]);
+
+  useEffect(() => {
+    if (displayMeanDb == null || !audioSeenAt) return;
+    // If analyzer skips samples, decay slowly instead of hard-dropping to zero.
+    if ((nowMs - audioSeenAt) <= 10000) return;
+    setDisplayMeanDb((prev) => {
+      if (prev == null || !Number.isFinite(prev)) return prev;
+      return Math.max(-60, prev - 1.5);
+    });
+  }, [nowMs, audioSeenAt, displayMeanDb]);
 
   const hasThumb = Boolean(displaySrc || candidateSrc) && !thumbFailed;
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
