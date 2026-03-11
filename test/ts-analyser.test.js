@@ -229,12 +229,14 @@ describe('TSAnalyser', () => {
       expect(analyser._rtpToUdpUrl('rtp://239.100.29.49:6501')).toBe('udp://239.100.29.49:6501');
     });
 
-    test('detects unresolved pid rows', () => {
-      const parsed = analyser.parseStructure({
-        programs: [{ program_id: 1, streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: null }] }],
-        streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: null }],
-      });
-      expect(analyser._hasUnresolvedPidRows(parsed)).toBe(true);
+    test('builds consolidated pid probe result from rows', () => {
+      const res = analyser._buildPidProbeResult([
+        { index: 0, pid: 256, codecType: 'video' },
+        { index: 1, pid: 257, codecType: 'audio' },
+      ]);
+      expect(res.pidByIndex[0]).toBe(256);
+      expect(res.pidByIndex[1]).toBe(257);
+      expect(res.rows).toHaveLength(2);
     });
 
     test('applies forced-mpegts fallback rows into unresolved streams', () => {

@@ -53,12 +53,9 @@ class TSAnalyser extends EventEmitter {
           let result = this.parseStructure(raw);
           // Some RTP/TS sources omit ids for all or part of program streams.
           // Always attempt PID backfill from ffmpeg banner lines and patch any gaps.
-          const pidMap = await this._probeStreamPidsFromFfmpeg();
-          result = this._applyPidMap(result, pidMap);
-          if (this._isRtpUrl(this.url) && this._hasUnresolvedPidRows(result)) {
-            const forcedRows = await this._probeRtpAsUdpForcedMpegtsRows();
-            result = this._applyFallbackPidRows(result, forcedRows);
-          }
+          const pidProbe = await this._probeStreamPidsFromFfmpeg();
+          result = this._applyPidMap(result, pidProbe.pidByIndex || {});
+          result = this._applyFallbackPidRows(result, pidProbe.rows || []);
           const [tsduckProbe, measuredBitrateBps, audioLevels] = await Promise.all([
             runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
             runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
@@ -737,13 +734,10 @@ class TSAnalyser extends EventEmitter {
   }
 
   _probeStreamPidsFromFfmpeg() {
-    // Use ffprobe -show_streams JSON to extract PIDs from AVStream.id.
-    // This is far more reliable than banner text parsing.
-    // For rtp:// inputs the RTP demuxer does NOT populate AVStream.id with
-    // MPEG-TS PIDs — it always returns 0 or omits the field. In that case we
-    // fall back to a second probe using udp:// with a forced mpegts demuxer,
-    // which resolves PIDs correctly (the 12-byte RTP header prefix is
-    // handled by mpegts resync + discardcorrupt).
+    // Single consolidated PID probe path:
+    // 1) ffprobe on original URL
+    // 2) for RTP only, fallback ffprobe on equivalent UDP with forced mpegts demux
+    // Then return both pid-by-index map and parsed stream rows for row-level backfill.
     const tryFfprobeStreams = (url, extraArgs = []) => new Promise((resolve) => {
       const args = [
         '-v', 'quiet',
@@ -760,77 +754,42 @@ class TSAnalyser extends EventEmitter {
         try { proc.kill('SIGTERM'); } catch (_) {}
       }, 9000);
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.on('error', () => { clearTimeout(killTimer); resolve({}); });
+      proc.on('error', () => { clearTimeout(killTimer); resolve([]); });
       proc.on('exit', () => {
         clearTimeout(killTimer);
-        const pidByIndex = {};
         try {
           const parsed = JSON.parse(stdout);
-          for (const s of (parsed.streams || [])) {
-            const pid = this._normalizePid(s.id);
-            if (typeof s.index === 'number' && pid != null && pid > 0) {
-              pidByIndex[s.index] = pid;
-            }
-          }
-        } catch (_) {}
-        resolve(pidByIndex);
+          const rows = (parsed.streams || [])
+            .map((s) => this._mapStream(s))
+            .filter((s) => s && s.pid != null);
+          return resolve(rows);
+        } catch (_) {
+          return resolve([]);
+        }
       });
     });
 
     const primaryUrl = this._withLiveInputHints(this.url);
-    return tryFfprobeStreams(primaryUrl).then((result) => {
-      if (Object.keys(result).length > 0) return result;
-      // UDP+mpegts fallback: for rtp:// the RTP wrapper hides PID info.
-      // The mpegts demuxer on udp:// receives the same multicast packets and
-      // directly exposes PID values through AVStream.id.
-      if (this.url && this.url.startsWith('rtp://')) {
-        const udpUrl = this._withLiveInputHints(
-          this.url.replace(/^rtp:\/\//, 'udp://')
-        );
-        return tryFfprobeStreams(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+    return tryFfprobeStreams(primaryUrl).then((rows) => {
+      if (rows.length > 0) return this._buildPidProbeResult(rows);
+      if (this._isRtpUrl(this.url)) {
+        const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
+        if (udpUrl) {
+          return tryFfprobeStreams(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts'])
+            .then((udpRows) => this._buildPidProbeResult(udpRows));
+        }
       }
-      return result;
+      return this._buildPidProbeResult([]);
     });
   }
 
-  _probeRtpAsUdpForcedMpegtsRows() {
-    return new Promise((resolve) => {
-      const udpUrl = this._rtpToUdpUrl(this.url);
-      if (!udpUrl) return resolve([]);
-      const inputUrl = this._withLiveInputHints(udpUrl);
-      const args = [
-        '-v', 'quiet',
-        '-f', 'mpegts',
-        '-analyzeduration', '7000000',
-        '-probesize', '7000000',
-        '-print_format', 'json',
-        '-show_streams',
-        inputUrl,
-      ];
-      const proc = spawn('ffprobe', args);
-      let stdout = '';
-      const timeout = setTimeout(() => {
-        try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 9000);
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.on('error', () => {
-        clearTimeout(timeout);
-        resolve([]);
-      });
-      proc.on('exit', (code) => {
-        clearTimeout(timeout);
-        if (code !== 0 || !stdout.trim()) return resolve([]);
-        try {
-          const raw = JSON.parse(stdout);
-          const rows = (raw.streams || [])
-            .map((s) => this._mapStream(s))
-            .filter((s) => s && s.pid != null);
-          resolve(rows);
-        } catch (_) {
-          resolve([]);
-        }
-      });
+  _buildPidProbeResult(rows) {
+    const cleanRows = Array.isArray(rows) ? rows.filter((r) => r && r.pid != null) : [];
+    const pidByIndex = {};
+    cleanRows.forEach((r) => {
+      if (typeof r.index === 'number' && r.pid != null) pidByIndex[r.index] = r.pid;
     });
+    return { pidByIndex, rows: cleanRows };
   }
 
   _applyPidMap(result, pidMap) {
@@ -955,11 +914,6 @@ class TSAnalyser extends EventEmitter {
       if (!m) return null;
       return `udp://${m[1]}:${m[2]}`;
     }
-  }
-
-  _hasUnresolvedPidRows(result) {
-    const allStreams = (result?.programs || []).flatMap((p) => p.streams || []).concat(result?.orphanStreams || []);
-    return allStreams.some((s) => s && s.pid == null);
   }
 
   startContinuous() {
