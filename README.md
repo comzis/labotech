@@ -132,6 +132,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `transcode.js` | `GET/POST/DELETE /transcode`, `GET /transcode/presets` |
 | `multicast.js` | `GET/POST/DELETE /multicast/forward`, `GET /multicast/config` |
 | `analyse.js` | `GET /analyse`, `POST /analyse/start`, `GET/DELETE /analyse/:id` |
+| `events.js` | `GET /api/events`, `DELETE /api/events` |
 | `pipelines.js` | `POST /pipeline` — chained ingest → transcode → forward |
 | `scte35.js` | `POST /scte35/splice` |
 
@@ -147,6 +148,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `TSAnalyser` | One-shot TS probe, DVB service summary/table, embedded ETR290 view, and continuous decoder/monitor workflows |
 | `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
 | `StreamViewPanel` | Live UTC timeline across analyser/ETR lanes with pointer popup, lane error context, and IAT/jitter forensics |
+| `EventLogPanel` | Central alarm/event log with UTC timestamps, instance correlation, severity/status filters, and CSV/JSONL export |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
 ---
@@ -201,6 +203,18 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **Pointer popup**: selected lane + pointer UTC + nearest event + nearby ETR alarms (`±30s`)
 - **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
 - **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
+
+---
+
+## Alarm and Event Log
+
+`Alarm Log` is a persistent operator-focused incident view:
+
+- **Sources:** stream/transcode/multicast/analyser/ETR events and errors routed through centralized API broadcast
+- **Scope:** `critical`, `warning`, and `info` severities, with explicit status (`alarm`, `error`, `no-signal`, `failover`, `started`, `stopped`, `info`)
+- **UX controls:** unread critical badge on tab, severity filter, text search, clear log action
+- **Export:** one-click **CSV** and **JSONL** export for NOC handover and post-incident review
+- **Persistence:** in-memory ring + append-only `logs/events.jsonl`; seeded on page load from `GET /api/events`
 
 ---
 
@@ -272,6 +286,7 @@ SNMP_MANAGER_HOST=10.67.18.1
 SYSLOG_HOST=10.67.18.1
 THUMBNAIL_INTERVAL_SEC=5
 THUMBNAIL_QUALITY_PROFILE=high
+EVENT_LOG_RING_SIZE=500
 ```
 
 Thumbnail quality profile options:

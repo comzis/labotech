@@ -15,8 +15,9 @@
 7. [Multicast Panel](#7-multicast-panel)
 8. [TS Analyser](#8-ts-analyser)
 9. [Confidence Monitor](#9-confidence-monitor)
-10. [Engineering Support Manual](#10-engineering-support-manual)
-11. [Troubleshooting](#11-troubleshooting)
+10. [Alarm and Event Log](#10-alarm-and-event-log)
+11. [Engineering Support Manual](#11-engineering-support-manual)
+12. [Troubleshooting](#12-troubleshooting)
 
 ---
 
@@ -403,7 +404,34 @@ Provides a real-time health overview of all active streams and transcoders.
 
 ---
 
-## 10. Engineering Support Manual
+## 10. Alarm and Event Log
+
+`Alarm Log` is the operational event console for all engine functions (encoder, transcoder, multicast, decoder/analyser, ETR).
+
+### What it shows
+
+- UTC timestamp per event
+- Instance ID (exact stream/transcoder/decoder/forwarder/monitor)
+- Severity (`critical`, `warning`, `info`)
+- Status (`alarm`, `error`, `no-signal`, `failover`, `started`, `stopped`, `info`)
+- Explanatory event title and details
+
+### Operator controls
+
+- Severity filter
+- Text search (instance/message/status)
+- **Clear** log (resets active view and backend ring)
+- **Download JSONL** and **Download CSV** for incident handover/reporting
+
+### Persistence behavior
+
+- Events are persisted by backend to `logs/events.jsonl`
+- UI seeds from `GET /api/events` on load/reconnect
+- Expected no-signal probe faults are logged as status context and are not promoted as repeated popup alarms
+
+---
+
+## 11. Engineering Support Manual
 
 For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Stream View timeline operation, multiview refresh behavior, and production troubleshooting workflows, use:
 
@@ -411,7 +439,7 @@ For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Strea
 
 ---
 
-## 11. Troubleshooting
+## 12. Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
