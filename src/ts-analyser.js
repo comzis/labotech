@@ -69,8 +69,9 @@ class TSAnalyser extends EventEmitter {
       name: prog.tags && prog.tags['service_name'] || null,
       provider: prog.tags && prog.tags['service_provider'] || null,
       // ffprobe program-level stream objects can omit PID/id fields depending on input.
-      // Merge with global stream entry by index so PID inventory remains complete.
-      streams: (prog.streams || []).map((s) => this._mapStream({ ...(globalByIndex.get(s.index) || {}), ...s })),
+      // Merge carefully with global stream entry by index so empty program values do not
+      // clobber valid global PID metadata.
+      streams: (prog.streams || []).map((s) => this._mapStream(this._mergeStreamInfo(globalByIndex.get(s.index), s))),
     }));
 
     // Streams not in any program
@@ -176,7 +177,7 @@ class TSAnalyser extends EventEmitter {
       width: s.width || null,
       height: s.height || null,
       fps: s.avg_frame_rate || null,
-      bitrate: s.bit_rate ? parseInt(s.bit_rate) : null,
+      bitrate: this._parseBitrate(s.bit_rate),
       sampleRate: s.sample_rate || null,
       channels: s.channels || null,
       language: s.tags && s.tags['language'] || null,
@@ -197,7 +198,35 @@ class TSAnalyser extends EventEmitter {
     if (/^0x[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
     if (/^[0-9]+$/.test(str)) return parseInt(str, 10);
     if (/^[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    // Handles forms like "256[0x100]" or "pid=0x0100".
+    const decMatch = str.match(/(^|[^\d])(\d{2,5})(?!\d)/);
+    if (decMatch) return parseInt(decMatch[2], 10);
     return null;
+  }
+
+  _parseBitrate(raw) {
+    if (raw === undefined || raw === null) return null;
+    const str = String(raw).trim();
+    if (!str || str.toUpperCase() === 'N/A') return null;
+    if (/^\d+$/.test(str)) return parseInt(str, 10);
+    const n = parseInt(str.replace(/[^\d]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  _mergeStreamInfo(globalStream, programStream) {
+    const g = globalStream || {};
+    const p = programStream || {};
+    const merged = { ...g, ...p };
+
+    const pPid = this._normalizePid(p.id);
+    const gPid = this._normalizePid(g.id);
+    merged.id = pPid != null ? p.id : (gPid != null ? g.id : (p.id ?? g.id ?? null));
+
+    const pBitrate = this._parseBitrate(p.bit_rate);
+    const gBitrate = this._parseBitrate(g.bit_rate);
+    merged.bit_rate = pBitrate != null ? p.bit_rate : (gBitrate != null ? g.bit_rate : (p.bit_rate ?? g.bit_rate ?? null));
+
+    return merged;
   }
 
   startContinuous() {
