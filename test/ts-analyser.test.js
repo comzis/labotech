@@ -149,6 +149,33 @@ describe('TSAnalyser', () => {
       expect(enriched.dvb.services[0].serviceName).toBe('BBC One HD');
       expect(enriched.orphanStreams.some((s) => s.pid === 0x0110)).toBe(true);
     });
+
+    test('maps tsduck PIDs into program streams when IDs are missing', () => {
+      const base = analyser.parseStructure({
+        programs: [
+          {
+            program_id: 1,
+            streams: [
+              { index: 0, codec_type: 'video', codec_name: 'h264', id: null },
+              { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+            ],
+          },
+        ],
+        streams: [
+          { index: 0, codec_type: 'video', codec_name: 'h264', id: null },
+          { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+        ],
+      });
+      const enriched = analyser._applyTSDuckData(base, {
+        pids: [
+          { pid: 0x0100, codecType: 'video', codecName: 'h264' },
+          { pid: 0x0101, codecType: 'audio', codecName: 'mp2' },
+        ],
+      });
+      const rows = enriched.programs[0].streams;
+      expect(rows[0].pid).toBe(0x0100);
+      expect(rows[1].pid).toBe(0x0101);
+    });
   });
 
   describe('tsduck helpers', () => {

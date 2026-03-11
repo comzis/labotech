@@ -399,8 +399,35 @@ class TSAnalyser extends EventEmitter {
     if (Array.isArray(tsduckData.pids) && tsduckData.pids.length > 0) {
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
-      for (const row of tsduckData.pids) {
-        if (row.pid == null || existingPidSet.has(row.pid)) continue;
+      const available = tsduckData.pids.filter((r) => r && r.pid != null && !existingPidSet.has(r.pid));
+      const usedPidSet = new Set();
+
+      // First, patch missing PID fields on known program/orphan rows so operator tables
+      // show PID values in-place instead of only in appended orphan entries.
+      const missing = allExisting.filter((s) => s && s.pid == null);
+      for (const s of missing) {
+        let pickIdx = -1;
+        if (s.codecType) {
+          pickIdx = available.findIndex((r) => !usedPidSet.has(r.pid) && r.codecType && r.codecType === s.codecType);
+        }
+        if (pickIdx < 0) {
+          pickIdx = available.findIndex((r) => !usedPidSet.has(r.pid));
+        }
+        if (pickIdx < 0) continue;
+        const row = available[pickIdx];
+        s.pid = row.pid;
+        s.pidHex = `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`;
+        if (!s.streamType && row.streamType) s.streamType = row.streamType;
+        if (!s.codecName && row.codecName) s.codecName = row.codecName;
+        if (!s.language && row.language) s.language = row.language;
+        if (!s.bitrate && row.bitrate) s.bitrate = row.bitrate;
+        usedPidSet.add(row.pid);
+        existingPidSet.add(row.pid);
+      }
+
+      // Then append any still-unmapped tsduck PIDs as orphan rows.
+      for (const row of available) {
+        if (usedPidSet.has(row.pid) || existingPidSet.has(row.pid)) continue;
         existingPidSet.add(row.pid);
         next.orphanStreams.push({
           index: `tsduck-${row.pid}`,
