@@ -60,13 +60,16 @@ class TSAnalyser extends EventEmitter {
   }
 
   parseStructure(raw) {
+    const globalByIndex = new Map((raw.streams || []).map((s) => [s.index, s]));
     const programs = (raw.programs || []).map(prog => ({
       programId: prog.program_id,
       pmtPid: prog.pmt_pid,
       pcrPid: prog.pcr_pid,
       name: prog.tags && prog.tags['service_name'] || null,
       provider: prog.tags && prog.tags['service_provider'] || null,
-      streams: (prog.streams || []).map(s => this._mapStream(s)),
+      // ffprobe program-level stream objects can omit PID/id fields depending on input.
+      // Merge with global stream entry by index so PID inventory remains complete.
+      streams: (prog.streams || []).map((s) => this._mapStream({ ...(globalByIndex.get(s.index) || {}), ...s })),
     }));
 
     // Streams not in any program
@@ -148,7 +151,7 @@ class TSAnalyser extends EventEmitter {
   }
 
   _mapStream(s) {
-    const pid = s.id !== undefined ? s.id : null;
+    const pid = this._normalizePid(s.id);
     let streamType = null;
     if (s.codec_tag_string && /^0x[0-9a-f]+$/i.test(s.codec_tag_string)) {
       streamType = s.codec_tag_string;
@@ -172,6 +175,18 @@ class TSAnalyser extends EventEmitter {
       colorTrc: s.color_transfer || null,
       colorPrimaries: s.color_primaries || null,
     };
+  }
+
+  _normalizePid(rawId) {
+    if (rawId === undefined || rawId === null) return null;
+    if (typeof rawId === 'number' && Number.isFinite(rawId)) return rawId;
+    const str = String(rawId).trim();
+    if (!str) return null;
+    // ffprobe can return IDs like "0x100", "256", or occasionally hex without 0x.
+    if (/^0x[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    if (/^[0-9]+$/.test(str)) return parseInt(str, 10);
+    if (/^[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    return null;
   }
 
   startContinuous() {
