@@ -23,6 +23,7 @@ class TSAnalyser extends EventEmitter {
         '-print_format', 'json',
         '-show_programs',
         '-show_streams',
+        '-show_format',
         this.url,
       ];
 
@@ -86,7 +87,13 @@ class TSAnalyser extends EventEmitter {
     const videoCount = allStreams.filter(s => s.codecType === 'video').length;
     const audioCount = allStreams.filter(s => s.codecType === 'audio').length;
     const dataCount = allStreams.filter(s => s.codecType === 'data').length;
-    const bitrateBps = allStreams.reduce((acc, s) => acc + (s.bitrate || 0), 0);
+    const streamBitrateBps = allStreams.reduce((acc, s) => acc + (s.bitrate || 0), 0);
+    const formatBitrateBps = raw?.format?.bit_rate ? parseInt(raw.format.bit_rate, 10) : null;
+    // Prefer container/transport bitrate when available (closer to on-wire TS rate),
+    // then fall back to summed elementary stream bitrates.
+    const bitrateBps = formatBitrateBps && Number.isFinite(formatBitrateBps) && formatBitrateBps > 0
+      ? formatBitrateBps
+      : streamBitrateBps;
 
     return {
       url: this.url,
@@ -101,6 +108,8 @@ class TSAnalyser extends EventEmitter {
         pidCount,
         streamBreakdown: { video: videoCount, audio: audioCount, data: dataCount },
         bitrateBps,
+        streamBitrateBps,
+        formatBitrateBps,
         services: programs.map(p => ({
           serviceId: p.programId,
           serviceName: p.name,
@@ -183,6 +192,8 @@ class TSAnalyser extends EventEmitter {
     const str = String(rawId).trim();
     if (!str) return null;
     // ffprobe can return IDs like "0x100", "256", or occasionally hex without 0x.
+    const hexMatch = str.match(/0x([0-9a-f]+)/i);
+    if (hexMatch) return parseInt(hexMatch[1], 16);
     if (/^0x[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
     if (/^[0-9]+$/.test(str)) return parseInt(str, 10);
     if (/^[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
