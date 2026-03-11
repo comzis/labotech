@@ -43,6 +43,12 @@ class ETR290Analyser extends EventEmitter {
     this._alarms = [];   // { time, priority, checkId, label, message }
     this._counts = {};   // checkId → count
     this._status = {};   // checkId → 'ok' | 'error'
+    this._runtime = {
+      bitrateMbps: null,
+      fps: null,
+      speed: null,
+      dropFrames: 0,
+    };
 
     for (const checks of Object.values(CHECKS)) {
       for (const c of checks) {
@@ -58,7 +64,8 @@ class ETR290Analyser extends EventEmitter {
 
     const args = [
       '-hide_banner',
-      '-loglevel', 'warning',
+      '-loglevel', 'info',
+      '-stats',
       '-err_detect', '+crccheck+careful',
       // +discardcorrupt only — genpts regenerates timestamps from decoded frame
       // timing which introduces small irregularities that show up as PCR jitter
@@ -111,6 +118,21 @@ class ETR290Analyser extends EventEmitter {
   }
 
   _parseLine(line) {
+    // Parse FFmpeg live runtime stats for operator metrics.
+    const mBitrate = line.match(/bitrate=\s*([\d.]+)\s*([kmg])bits\/s/i);
+    const mFps = line.match(/fps=\s*([\d.]+)/i);
+    const mSpeed = line.match(/speed=\s*([\d.]+)x/i);
+    const mDrop = line.match(/drop=\s*(\d+)/i);
+    if (mBitrate) {
+      const val = parseFloat(mBitrate[1]);
+      const unit = mBitrate[2].toLowerCase();
+      const mbps = unit === 'g' ? val * 1000 : unit === 'm' ? val : val / 1000;
+      this._runtime.bitrateMbps = Number.isFinite(mbps) ? parseFloat(mbps.toFixed(3)) : this._runtime.bitrateMbps;
+    }
+    if (mFps) this._runtime.fps = parseFloat(mFps[1]);
+    if (mSpeed) this._runtime.speed = parseFloat(mSpeed[1]);
+    if (mDrop) this._runtime.dropFrames = parseInt(mDrop[1], 10);
+
     for (const [priority, checks] of Object.entries(CHECKS)) {
       for (const c of checks) {
         if (c.pattern.test(line)) {
@@ -141,6 +163,7 @@ class ETR290Analyser extends EventEmitter {
       counts: { ...this._counts },
       status: { ...this._status },
       recentAlarms: this._alarms.slice(0, 50),
+      runtime: { ...this._runtime },
     };
   }
 

@@ -238,6 +238,13 @@ export default function ETR290Panel({ lastMessage }) {
   const totalAlarms = status?.recentAlarms?.length || 0;
   const p1Error = ETR_CHECKS.p1.some(c => status?.status?.[c.id] === 'error');
   const p2Error = ETR_CHECKS.p2.some(c => status?.status?.[c.id] === 'error');
+  const selectedDvb = activeId ? dvbByMonitorId[activeId]?.dvb : null;
+  const selectedRows = activeId ? collectPidRows(dvbByMonitorId[activeId]) : [];
+  const videoBitrateMbps = selectedRows.filter(r => r.codecType === 'video').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
+  const audioBitrateMbps = selectedRows.filter(r => r.codecType === 'audio').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
+  const displayedBitrateMbps = status?.runtime?.bitrateMbps
+    ?? (selectedDvb?.formatBitrateBps ? selectedDvb.formatBitrateBps / 1e6 : null)
+    ?? (selectedDvb?.bitrateBps ? selectedDvb.bitrateBps / 1e6 : null);
 
   return (
     <div className="space-y-6">
@@ -349,8 +356,8 @@ export default function ETR290Panel({ lastMessage }) {
               <div className="text-gray-200 font-mono mt-1">{String(dvbByMonitorId[activeId].dvb.pidCount || 0)}</div>
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
-              <div className="text-[10px] uppercase tracking-wider text-gray-500">Bitrate</div>
-              <div className="text-gray-200 font-mono mt-1">{`${((dvbByMonitorId[activeId].dvb.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`}</div>
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Actual TS Bitrate</div>
+              <div className="text-gray-200 font-mono mt-1">{displayedBitrateMbps != null ? `${displayedBitrateMbps.toFixed(3)} Mbps` : '-'}</div>
             </div>
             <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
               <div className="text-[10px] uppercase tracking-wider text-gray-500">PAT PID</div>
@@ -415,6 +422,27 @@ export default function ETR290Panel({ lastMessage }) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Video Bitrate</div>
+              <div className="text-gray-200 font-mono mt-1">{`${videoBitrateMbps.toFixed(3)} Mbps`}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Audio Bitrate</div>
+              <div className="text-gray-200 font-mono mt-1">{`${audioBitrateMbps.toFixed(3)} Mbps`}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">FPS</div>
+              <div className="text-gray-200 font-mono mt-1">{status?.runtime?.fps != null ? String(status.runtime.fps) : '-'}</div>
+            </div>
+            <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500">Speed / Drops</div>
+              <div className="text-gray-200 font-mono mt-1">
+                {status?.runtime?.speed != null ? `${status.runtime.speed.toFixed(2)}x` : '-'} / {status?.runtime?.dropFrames ?? 0}
+              </div>
             </div>
           </div>
         </BentoCard>
