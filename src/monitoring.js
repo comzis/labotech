@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 // Limit concurrent thumbnail captures to avoid CPU pile-up when many decoders run.
-const THUMB_CONCURRENCY = parseInt(process.env.THUMBNAIL_MAX_CONCURRENT, 10) || 2;
+const THUMB_CONCURRENCY = parseInt(process.env.THUMBNAIL_MAX_CONCURRENT, 10) || 4;
 let _thumbRunning = 0;
 const _thumbQueue = [];
 

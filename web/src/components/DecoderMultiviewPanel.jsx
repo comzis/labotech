@@ -86,9 +86,9 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   // stays readable until the new one is ready).
   const [displaySrc, setDisplaySrc] = useState(null);
   const [thumbRetry, setThumbRetry] = useState(0);
-  const candidateBaseSrc = result?.thumbnailUrl
-    ? `${result.thumbnailUrl}${result.thumbnailUrl.includes('?') ? '&' : '?'}r=${result?.probeTime || Date.now()}`
-    : null;
+  // Keep browser cache-busting tied to backend thumbnail token only.
+  // result.thumbnailUrl already includes ?t=... when a new frame is written.
+  const candidateBaseSrc = result?.thumbnailUrl || null;
   const candidateSrc = candidateBaseSrc ? `${candidateBaseSrc}&retry=${thumbRetry}` : null;
 
   // Reset retry budget when backend publishes a new thumbnail token.
