@@ -16,7 +16,7 @@ const DEFAULTS = {
   pmtPid: '4096', videoPid: '256',
   serviceName: '', serviceProvider: '',
   // Video
-  videoCodec: 'libx264', videoBitrate: '8M', preset: 'medium', profile: 'high', gopSize: '50', rateMode: 'cbr',
+  videoCodec: 'libx264', videoBitrate: '10', preset: 'medium', profile: 'high', gopSize: '50', rateMode: 'cbr',
 };
 
 const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
@@ -52,8 +52,14 @@ export default function EncoderForm({ onStarted }) {
     setLoading(true);
     setError(null);
     try {
+      const hostRequired = form.outputMode !== 'null';
+      const cleanHost = (form.host || '').trim();
+      if (hostRequired && !cleanHost) {
+        throw new Error(`Target host is required for ${form.outputMode.toUpperCase()} output`);
+      }
       await startStream({
         ...form,
+        host: cleanHost,
         port: parseInt(form.port),
         latency: parseInt(form.latency),
         gopSize: parseInt(form.gopSize),
@@ -139,6 +145,7 @@ export default function EncoderForm({ onStarted }) {
                   label={form.outputMode === 'srt' ? 'SRT Target Host' : 'Destination IP'}
                   value={form.host} onChange={v => set('host', v)}
                   placeholder={form.outputMode === 'udp' || form.outputMode === 'rtp' ? '239.100.25.29' : 'srt://host or IP'}
+                  required
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Port" value={form.port} onChange={v => set('port', v)} type="number" />
@@ -258,9 +265,12 @@ export default function EncoderForm({ onStarted }) {
                 <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
                 <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
                 <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
-                <Field label="Bitrate (Mbps)" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} placeholder="e.g. 10" />
+                <Field label="Bitrate (Mbps)" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} placeholder="e.g. 10 or 12.5" />
                 <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />
                 <SelectField label="Rate Mode" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
+              </div>
+              <div className="mt-2 text-[10px] text-gray-500">
+                Enter Mbps as a number. No fixed app cap; practical range depends on codec, profile, and transport capacity.
               </div>
             </BentoCard>
 

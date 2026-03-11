@@ -253,5 +253,6 @@ npm test
 ## Release Safety
 
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
+- Standardized production upgrade: `bash scripts/upgrade-prod.sh [tag-or-ref]`
 - Deploy a fixed version tag/ref: `bash scripts/deploy-ref.sh <tag-or-ref>`
 - Roll back quickly to prior tag: `bash scripts/rollback-last-tag.sh`

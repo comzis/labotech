@@ -55,7 +55,7 @@ class SRTEncoder extends EventEmitter {
     this.pbkeylen = options.pbkeylen || 16;
     this.adapter = options.adapter || null;
     this.streamId = options.streamId || null;
-    this.videoBitrate = normBitrate(options.videoBitrate || '8M', 'M');
+    this.videoBitrate = normBitrate(options.videoBitrate || '10M', 'M');
     this.videoCodec = options.videoCodec || 'libx264';
     this.preset = options.preset || 'medium';
     this.profile = options.profile || 'high';
@@ -278,7 +278,7 @@ class SRTEncoder extends EventEmitter {
       args.push('-c:a', this.audioCodec, '-b:a', this.audioBitrate, '-ac', this.audioChannels.toString());
     }
 
-    // Prevent muxing queue overflow on high-bitrate streams (>= 8 Mbps)
+    // Prevent muxing queue overflow on high-bitrate streams (>= 10 Mbps)
     args.push('-max_muxing_queue_size', '4096');
 
     // ─── DVB-compliant output ────────────────────────────────────────────────

@@ -40,7 +40,7 @@ const OUTPUT_MODES = [
 ];
 
 const STANDARD_PROFILES = [
-  { value: 'dvb-hd', label: 'DVB HD (EBU Distribution)', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '8M', audioBitrate: '192k' },
+  { value: 'dvb-hd', label: 'DVB HD (EBU Distribution)', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '192k' },
   { value: 'dvb-contribution', label: 'DVB Contribution 4:2:2', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '30M', audioBitrate: '384k' },
   { value: 'dvb-hevc', label: 'DVB HEVC UHD', videoCodec: 'libx265', audioCodec: 'aac', videoBitrate: '20M', audioBitrate: '384k' },
   { value: 'ebu-loudness-safe', label: 'EBU R128 Ready', videoCodec: 'libx264', audioCodec: 'aac', videoBitrate: '10M', audioBitrate: '256k' },
