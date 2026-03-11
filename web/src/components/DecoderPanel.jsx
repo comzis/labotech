@@ -72,27 +72,41 @@ function qualityMetrics(status) {
 
 function collectPidRows(result) {
   if (!result) return [];
+  const normalizePid = (pid, pidHex) => {
+    if (pid != null && Number.isFinite(Number(pid))) return Number(pid);
+    if (typeof pidHex === 'string') {
+      if (/^0x[0-9a-f]+$/i.test(pidHex)) return parseInt(pidHex, 16);
+      if (/^\d+$/.test(pidHex)) return parseInt(pidHex, 10);
+    }
+    return null;
+  };
   const rows = [];
   (result.programs || []).forEach((program) => {
     (program.streams || []).forEach((stream) => {
+      const normalizedPid = normalizePid(stream.pid, stream.pidHex);
       rows.push({
         programId: program.programId,
-        pid: stream.pid,
-        pidHex: stream.pidHex,
+        pid: normalizedPid,
+        pidHex: stream.pidHex || (normalizedPid != null ? `0x${normalizedPid.toString(16).toUpperCase().padStart(4, '0')}` : null),
         codecType: stream.codecType || 'unknown',
         codecName: stream.codecName || '-',
+        streamType: stream.streamType || '-',
+        sourceIndex: stream.index,
         language: stream.language || '-',
         bitrate: stream.bitrate || 0,
       });
     });
   });
   (result.orphanStreams || []).forEach((stream) => {
+    const normalizedPid = normalizePid(stream.pid, stream.pidHex);
     rows.push({
       programId: 'orphan',
-      pid: stream.pid,
-      pidHex: stream.pidHex,
+      pid: normalizedPid,
+      pidHex: stream.pidHex || (normalizedPid != null ? `0x${normalizedPid.toString(16).toUpperCase().padStart(4, '0')}` : null),
       codecType: stream.codecType || 'unknown',
       codecName: stream.codecName || '-',
+      streamType: stream.streamType || '-',
+      sourceIndex: stream.index,
       language: stream.language || '-',
       bitrate: stream.bitrate || 0,
     });
@@ -380,6 +394,12 @@ export default function DecoderPanel({ lastMessage }) {
           <Stat label="PID Count" value={selectedResult ? String(resolvedPidCount || selectedResult?.dvb?.pidCount || 0) : '-'} />
           <Stat label="Bitrate" value={selectedResult ? `${(((selectedResult?.dvb?.bitrateBps || 0) / 1e6)).toFixed(2)} Mbps` : '-'} />
         </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          <Stat label="TS ID" value={selectedResult ? String(selectedResult?.dvb?.transportStreamId ?? '-') : '-'} />
+          <Stat label="ONID" value={selectedResult ? String(selectedResult?.dvb?.originalNetworkId ?? '-') : '-'} />
+          <Stat label="Bitrate Source" value={selectedResult ? (selectedResult?.dvb?.bitrateSource || '-') : '-'} />
+          <Stat label="Jitter" value={selectedResult?.dvb?.arrival?.jitterMs != null ? `${selectedResult.dvb.arrival.jitterMs} ms` : '-'} />
+        </div>
         {selectedResult?.dvb?.bitrateSource && (
           <div className="mt-1 text-[10px] text-gray-500">
             TS bitrate source: {selectedResult.dvb.bitrateSource}
@@ -437,6 +457,8 @@ export default function DecoderPanel({ lastMessage }) {
                     <th className="text-left py-2 px-2">PID</th>
                     <th className="text-left py-2 px-2">Type</th>
                     <th className="text-left py-2 px-2">Codec</th>
+                    <th className="text-left py-2 px-2">Stream Type</th>
+                    <th className="text-left py-2 px-2">Index</th>
                     <th className="text-left py-2 px-2">Lang</th>
                     <th className="text-left py-2 px-2">Bitrate</th>
                   </tr>
@@ -448,6 +470,8 @@ export default function DecoderPanel({ lastMessage }) {
                       <td className="py-1.5 px-2 text-gray-300">{formatPidDisplay(row.pid, row.pidHex)}</td>
                       <td className="py-1.5 px-2 text-gray-300 uppercase">{row.codecType}</td>
                       <td className="py-1.5 px-2 text-gray-300">{row.codecName}</td>
+                      <td className="py-1.5 px-2 text-gray-400">{row.streamType}</td>
+                      <td className="py-1.5 px-2 text-gray-400">{row.sourceIndex ?? '-'}</td>
                       <td className="py-1.5 px-2 text-gray-400">{row.language}</td>
                       <td className="py-1.5 px-2 text-gray-400">{row.bitrate > 0 ? `${(row.bitrate / 1e6).toFixed(2)} Mbps` : '-'}</td>
                     </tr>

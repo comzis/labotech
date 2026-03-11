@@ -185,10 +185,17 @@ const PROBE_MODES = [
 ];
 const DVB_REPROBE_MS = 8000;
 
-function buildMonitorUrl({ mode, host, port, latency, passphrase }) {
+function buildMonitorUrl({ mode, host, port, latency, passphrase, bindIp }) {
   if (!host || !port) return '';
-  if (mode === 'udp') return `udp://${host}:${port}`;
-  if (mode === 'rtp') return `rtp://${host}:${port}`;
+  const local = (bindIp || '').trim();
+  if (mode === 'udp') {
+    const q = local ? `?localaddr=${encodeURIComponent(local)}` : '';
+    return `udp://${host}:${port}${q}`;
+  }
+  if (mode === 'rtp') {
+    const q = local ? `?localaddr=${encodeURIComponent(local)}` : '';
+    return `rtp://${host}:${port}${q}`;
+  }
   let url = `srt://${host}:${port}`;
   const params = [];
   if (latency)    params.push(`latency=${latency}`);
@@ -241,6 +248,7 @@ export default function ETR290Panel({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
+  const [bindIp, setBindIp] = useState('');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [dvbByMonitorId, setDvbByMonitorId] = useState({});
@@ -283,7 +291,7 @@ export default function ETR290Panel({ lastMessage }) {
     };
   }, [activeId, statusById]);
 
-  const builtUrl = buildMonitorUrl({ mode: probeMode, host, port, latency, passphrase });
+  const builtUrl = buildMonitorUrl({ mode: probeMode, host, port, latency, passphrase, bindIp });
 
   const handleToggle = async (e) => {
     e.preventDefault();
@@ -371,6 +379,11 @@ export default function ETR290Panel({ lastMessage }) {
               <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="Optional" />
             </div>
           )}
+          {(probeMode === 'udp' || probeMode === 'rtp') && (
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="Input Bind IP (eno2 IP)" value={bindIp} onChange={setBindIp} placeholder="10.67.18.29 (optional)" />
+            </div>
+          )}
 
           {/* URL preview */}
           {builtUrl && (
@@ -418,6 +431,12 @@ export default function ETR290Panel({ lastMessage }) {
             Monitoring: {status?.url || statusById?.[activeId]?.url || builtUrl}
           </div>
         )}
+      {status?.diagnostics && (
+        <div className="mt-2 text-[11px] text-gray-500 font-mono">
+          Detector: {status.diagnostics.parser} · matched lines: {status.diagnostics.totalMatchedLines || 0}
+          {status.diagnostics.lastMatchAt ? ` · last match: ${formatUtc(status.diagnostics.lastMatchAt)}` : ' · last match: none yet'}
+        </div>
+      )}
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
       </BentoCard>
 

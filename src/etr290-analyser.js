@@ -6,21 +6,21 @@ const { spawn } = require('child_process');
 // ETR 290 (ETSI TR 101 290) check definitions by priority
 const CHECKS = {
   p1: [
-    { id: 'ts_sync',   label: 'TS Sync Loss',   pattern: /Lost sync|sync byte.*(0x47|not found)/i },
-    { id: 'sync_byte', label: 'Sync Byte Error', pattern: /Sync byte is not 0x47/i },
-    { id: 'pat_error', label: 'PAT Error',       pattern: /no PAT found|PAT.*error|PAT.*missing/i },
-    { id: 'cc_error',  label: 'CC Error',        pattern: /continuity.*(check failed|error)|CC error/i },
-    { id: 'pmt_error', label: 'PMT Error',       pattern: /no PMT found|PMT.*error|PMT.*missing/i },
-    { id: 'pid_error', label: 'PID Error',       pattern: /Unknown pid|PID.*not found|pid.*missing/i },
+    { id: 'ts_sync',   label: 'TS Sync Loss',   pattern: /Lost sync|sync byte.*(0x47|not found)|TS packet too short|invalid sync/i },
+    { id: 'sync_byte', label: 'Sync Byte Error', pattern: /Sync byte is not 0x47|sync byte/i },
+    { id: 'pat_error', label: 'PAT Error',       pattern: /no PAT found|PAT.*error|PAT.*missing|PAT.*invalid/i },
+    { id: 'cc_error',  label: 'CC Error',        pattern: /continuity.*(check failed|error|mismatch)|CC error/i },
+    { id: 'pmt_error', label: 'PMT Error',       pattern: /no PMT found|PMT.*error|PMT.*missing|PMT.*invalid/i },
+    { id: 'pid_error', label: 'PID Error',       pattern: /Unknown pid|PID.*not found|pid.*missing|invalid pid/i },
   ],
   p2: [
-    { id: 'transport_error', label: 'Transport Error',   pattern: /transport_error_indicator/i },
-    { id: 'crc_error',       label: 'CRC Error',         pattern: /CRC check failed|crc.*error/i },
-    { id: 'pcr_disc',        label: 'PCR Discontinuity', pattern: /PCR.*discontinu/i },
-    { id: 'pcr_acc',         label: 'PCR Accuracy',      pattern: /PCR.*inaccur|PCR.*jitter/i },
-    { id: 'pcr_rep',         label: 'PCR Repetition',    pattern: /PCR.*repeat/i },
-    { id: 'pts_error',       label: 'PTS Error',         pattern: /DTS .*, out of order|PTS.*error|pts.*wrong/i },
-    { id: 'cat_error',       label: 'CAT Error',         pattern: /CAT.*error/i },
+    { id: 'transport_error', label: 'Transport Error',   pattern: /transport_error_indicator|packet corrupt|corrupt input packet|RTP: missed \d+ packets|max delay reached/i },
+    { id: 'crc_error',       label: 'CRC Error',         pattern: /CRC check failed|crc.*error|invalid crc/i },
+    { id: 'pcr_disc',        label: 'PCR Discontinuity', pattern: /PCR.*discontinu|non.?monotonous dts|timestamp discontinuity/i },
+    { id: 'pcr_acc',         label: 'PCR Accuracy',      pattern: /PCR.*inaccur|PCR.*jitter|jitter too high|clock drift/i },
+    { id: 'pcr_rep',         label: 'PCR Repetition',    pattern: /PCR.*repeat|PCR.*too (late|sparse)|PCR repetition/i },
+    { id: 'pts_error',       label: 'PTS Error',         pattern: /DTS .*, out of order|PTS.*error|pts.*wrong|non.?monotonous|invalid timestamps/i },
+    { id: 'cat_error',       label: 'CAT Error',         pattern: /CAT.*error|CAT.*missing/i },
   ],
   p3: [
     { id: 'nit_error', label: 'NIT Error',    pattern: /NIT.*error/i },
@@ -49,6 +49,12 @@ class ETR290Analyser extends EventEmitter {
       speed: null,
       dropFrames: 0,
     };
+    this._diagnostics = {
+      parser: 'ffmpeg-log',
+      lastMatchAt: null,
+      lastLines: [],
+      totalMatchedLines: 0,
+    };
 
     for (const checks of Object.values(CHECKS)) {
       for (const c of checks) {
@@ -62,18 +68,7 @@ class ETR290Analyser extends EventEmitter {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    const args = [
-      '-hide_banner',
-      '-loglevel', 'info',
-      '-stats',
-      '-err_detect', '+crccheck+careful',
-      // +discardcorrupt only — genpts regenerates timestamps from decoded frame
-      // timing which introduces small irregularities that show up as PCR jitter
-      // alarms on the very stream we're trying to monitor cleanly.
-      '-fflags', '+discardcorrupt',
-      '-i', this.url,
-      '-f', 'null', '-',
-    ];
+    const args = this._buildFFmpegArgs();
 
     this._proc = spawn('ffmpeg', args);
 
@@ -107,10 +102,10 @@ class ETR290Analyser extends EventEmitter {
       this.emit('error', err);
     });
 
-    // Broadcast status every 5 seconds
+    // Broadcast status every second for near-real-time operator feedback.
     this._statusTimer = setInterval(() => {
       if (this.isRunning) this.emit('etr290', this._buildStatus());
-    }, 5000);
+    }, 1000);
 
     this.emit('started', { id: this.id });
     // Emit initial status immediately
@@ -118,6 +113,8 @@ class ETR290Analyser extends EventEmitter {
   }
 
   _parseLine(line) {
+    this._diagnostics.lastLines = [...this._diagnostics.lastLines.slice(-19), line.trim()];
+
     // Parse FFmpeg live runtime stats for operator metrics.
     const mBitrate = line.match(/bitrate=\s*([\d.]+)\s*([kmg])bits\/s/i);
     const mFps = line.match(/fps=\s*([\d.]+)/i);
@@ -138,6 +135,8 @@ class ETR290Analyser extends EventEmitter {
         if (c.pattern.test(line)) {
           this._counts[c.id]++;
           this._status[c.id] = 'error';
+          this._diagnostics.lastMatchAt = Date.now();
+          this._diagnostics.totalMatchedLines += 1;
           const alarm = {
             time: Date.now(),
             priority,
@@ -155,6 +154,39 @@ class ETR290Analyser extends EventEmitter {
     }
   }
 
+  _buildFFmpegArgs() {
+    const type = this._detectInputType(this.url);
+    const args = [
+      '-hide_banner',
+      '-loglevel', 'info',
+      '-stats',
+      '-err_detect', '+crccheck+careful',
+      '-analyzeduration', '7000000',
+      '-probesize', '7000000',
+      // Keep corrupt packet discard on so monitoring survives noisy links.
+      '-fflags', '+discardcorrupt',
+    ];
+
+    if (type === 'rtp' || type === 'udp') {
+      const sep = this.url.includes('?') ? '&' : '?';
+      const liveUrl = `${this.url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
+      // Force mpegts demux on live RTP/UDP to expose PAT/PMT/CC/PCR faults.
+      args.push('-f', 'mpegts', '-i', liveUrl);
+    } else {
+      args.push('-i', this.url);
+    }
+    args.push('-f', 'null', '-');
+    return args;
+  }
+
+  _detectInputType(url) {
+    if (!url) return 'file';
+    if (url.startsWith('rtp://')) return 'rtp';
+    if (url.startsWith('udp://')) return 'udp';
+    if (url.startsWith('srt://')) return 'srt';
+    return 'file';
+  }
+
   _buildStatus() {
     return {
       id: this.id,
@@ -164,6 +196,7 @@ class ETR290Analyser extends EventEmitter {
       status: { ...this._status },
       recentAlarms: this._alarms.slice(0, 50),
       runtime: { ...this._runtime },
+      diagnostics: { ...this._diagnostics },
     };
   }
 
