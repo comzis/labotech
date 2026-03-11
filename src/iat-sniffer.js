@@ -178,17 +178,20 @@ class IATSniffer extends EventEmitter {
       this.captureMethod = 'unavailable';
       this.lastError = err && err.message ? err.message : 'capture process error';
       this.emit('unavailable', { id: this.id, reason: this.lastError });
-      if (this.listenerCount('error') > 0) this.emit('error', err);
+      // Do not re-emit as 'error' — spawn failure is a config/permissions issue,
+      // not a runtime error. Callers read lastError or listen to 'unavailable'.
       this.stop();
     });
-    proc.on('exit', (code) => {
-      if (this.isRunning && code !== 0) {
+    // Use 'close' not 'exit': guarantees stderr has fully flushed before we read stderrBuf.
+    proc.on('close', (code) => {
+      if (this.isRunning && code !== 0 && code !== null) {
         const reason = (stderrBuf || '').trim().split('\n').slice(-1)[0];
         this.lastError = reason
           ? `${this.captureMethod} exited ${code}: ${reason}`
           : `${this.captureMethod} exited ${code}`;
         this.emit('unavailable', { id: this.id, reason: this.lastError });
-        if (this.listenerCount('error') > 0) this.emit('error', new Error(this.lastError));
+        // Do not emit 'error' — a non-zero exit is a permissions/config issue (e.g.
+        // CAP_NET_RAW not granted). Callers should listen to 'unavailable' or poll lastError.
         this.stop();
       }
     });
