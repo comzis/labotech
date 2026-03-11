@@ -4,9 +4,9 @@
 
 /* ── Rack room background ─────────────────────────────────────────────────── */
 body {
-  background-color: #080808;
+  background-color: #070b14;
   background-image:
-    radial-gradient(circle, #1c1c1c 1px, transparent 1px);
+    radial-gradient(circle, rgba(255,255,255,0.055) 1px, transparent 1px);
   background-size: 22px 22px;
   color: #d0d0d0;
   @apply font-sans;

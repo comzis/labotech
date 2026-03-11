@@ -86,8 +86,18 @@ export default function StreamsPanel({ lastMessage }) {
                 key={s.id}
                 initial={{ opacity: 0, scale: 0.95 }}
                 animate={{ opacity: 1, scale: 1 }}
-                className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
+                className={`bg-midnight-glass backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group transition-shadow duration-500
+                  ${s.isRunning
+                    ? 'border border-transparent ring-1 ring-cyan-500/20 shadow-[0_0_32px_-6px_rgba(34,211,238,0.18),inset_0_1px_0_rgba(255,255,255,0.06)]'
+                    : 'border border-white/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                  }`}
               >
+                {/* State accent strip — top edge colour coding */}
+                <div className={`absolute top-0 left-0 right-0 h-[2px] rounded-t-2xl ${
+                  s.isRunning
+                    ? 'bg-gradient-to-r from-cyan-500/80 via-cyan-400/40 to-transparent'
+                    : 'bg-gradient-to-r from-gray-700/50 to-transparent'
+                }`} />
                 <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
                 {/* Header row */}
