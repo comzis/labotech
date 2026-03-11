@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import Sparkline from './Sparkline';
+import { getEvents } from '../api';
 
 const WINDOW_OPTIONS = [
   { value: 5 * 60 * 1000, label: '5m' },
@@ -11,6 +12,18 @@ const WINDOW_OPTIONS = [
 
 const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
 const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
+const MAX_EVENTS = 1500;
+
+function isExpectedNoSignalError(message) {
+  const m = String(message || '').toLowerCase();
+  return (
+    m.includes('ffprobe exited 1') ||
+    m.includes('connection refused') ||
+    m.includes('input/output error') ||
+    m.includes('server returned 404') ||
+    m.includes('immediate exit requested')
+  );
+}
 
 function normalizeLaneId(rawId) {
   const id = String(rawId || '').trim();
@@ -90,6 +103,33 @@ function toEvent(msg) {
       },
     };
   }
+  if (msg.type === 'error') {
+    const laneId = normalizeLaneId(msg.id || 'system');
+    const isNoSignal = isExpectedNoSignalError(msg.message);
+    return {
+      key: `${ts}-${msg.id || 'system'}-error-${msg.message || ''}`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'system',
+      category: 'runtime_error',
+      severity: isNoSignal ? 'warning' : 'critical',
+      title: isNoSignal ? 'Input signal missing' : 'Engine error',
+      description: msg.message || 'Unknown runtime error',
+    };
+  }
+  if (msg.type === 'switched') {
+    const laneId = normalizeLaneId(msg.id || 'system');
+    return {
+      key: `${ts}-${msg.id || 'system'}-switched`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'system',
+      category: 'failover',
+      severity: 'warning',
+      title: 'Failover switch',
+      description: msg.message || 'Primary input switched to backup',
+    };
+  }
   return null;
 }
 
@@ -154,6 +194,15 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [freezeCursor, setFreezeCursor] = useState(false);
   const [scaleMode, setScaleMode] = useState('normalized');
 
+  const mergeTimelineEvents = (prev, incoming) => {
+    const byKey = new Map(prev.map((e) => [e.key, e]));
+    (incoming || []).forEach((e) => {
+      if (!e) return;
+      byKey.set(e.key, e);
+    });
+    return Array.from(byKey.values()).sort((a, b) => a.ts - b.ts).slice(-MAX_EVENTS);
+  };
+
   useEffect(() => {
     if (!lastMessage) return;
     const event = toEvent(lastMessage);
@@ -169,10 +218,27 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           return prev;
         }
       }
-      const next = [...prev, event];
-      return next.slice(-500);
+      return mergeTimelineEvents(prev, [event]);
     });
   }, [lastMessage]);
+
+  useEffect(() => {
+    let mounted = true;
+    const hydrate = async () => {
+      try {
+        const seed = await getEvents();
+        if (!mounted || !Array.isArray(seed)) return;
+        const normalized = seed.map(toEvent).filter(Boolean);
+        setEvents((prev) => mergeTimelineEvents(prev, normalized));
+      } catch (_) {}
+    };
+    hydrate();
+    const t = setInterval(hydrate, 10000);
+    return () => {
+      mounted = false;
+      clearInterval(t);
+    };
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
@@ -240,7 +306,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     if (!selectedLaneId || pointerUtc == null) return [];
     const halfWindowMs = 30 * 1000; // show nearby context around pointer
     return (laneMap[selectedLaneId] || [])
-      .filter((e) => e.category === 'etr290_alarm')
+      .filter((e) => e.severity === 'warning' || e.severity === 'critical')
       .filter((e) => Math.abs(e.ts - pointerUtc) <= halfWindowMs)
       .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
       .slice(0, 5);
@@ -397,13 +463,14 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
 
           {laneIds.length === 0 ? (
             <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-500">
-              Waiting for live ETR/TS analysis events...
+              Waiting for live runtime/ETR/TS events...
             </div>
           ) : (
             laneIds.map((id, laneIdx) => {
               const y = LANE_TOP_PX + laneIdx * LANE_STEP_PX;
               const laneEventAtPointer = lanePointerStatus.find((row) => row.id === id)?.event || null;
               const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
+              const laneAlerts = (laneMap[id] || []).filter((e) => e.severity === 'warning' || e.severity === 'critical');
               return (
                 <div key={id}>
                   <div
@@ -421,15 +488,15 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                   >
                     {id}
                   </div>
-                  {(laneMap[id] || []).filter((e) => e.category === 'etr290_alarm').map((e) => (
+                  {laneAlerts.map((e) => (
                     <div
                       key={e.key}
                       className="absolute -translate-x-1/2 -translate-y-1/2 border rounded-full"
                       style={{
                         left: `${e.xPct}%`,
                         top: `${y}px`,
-                        width: '10px',
-                        height: '10px',
+                        width: e.category === 'runtime_error' ? '8px' : '10px',
+                        height: e.category === 'runtime_error' ? '8px' : '10px',
                         background: colorForSeverity(e.severity),
                         borderColor: `${colorForSeverity(e.severity)}77`,
                         boxShadow: `0 0 8px ${colorForSeverity(e.severity)}88`,
@@ -460,9 +527,9 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 {selectedLaneEvent ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}` : 'No event at pointer'}
               </div>
               <div className="mt-2 border-t border-white/10 pt-2">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Nearby Errors (±30s)</div>
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Nearby Alerts (±30s)</div>
                 {lanePointerErrors.length === 0 ? (
-                  <div className="text-gray-500">No ETR alarms near pointer time.</div>
+                  <div className="text-gray-500">No warning/critical events near pointer time.</div>
                 ) : (
                   <div className="space-y-1.5 max-h-36 overflow-auto">
                     {lanePointerErrors.map((e) => (

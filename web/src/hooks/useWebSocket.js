@@ -25,8 +25,45 @@ export default function useWebSocket() {
       retries.current = 0;
     };
 
-    ws.onmessage = (evt) => {
-      try { setLastMessage(JSON.parse(evt.data)); } catch (_) {}
+    ws.onmessage = async (evt) => {
+      let raw = evt?.data;
+      if (raw == null) return;
+      if (typeof raw !== 'string') {
+        try {
+          raw = await raw.text();
+        } catch (_) {
+          return;
+        }
+      }
+      if (!raw) return;
+
+      const emitParsed = (value) => {
+        if (!value) return;
+        if (Array.isArray(value)) {
+          value.forEach(emitParsed);
+          return;
+        }
+        if (typeof value === 'object') {
+          setLastMessage(value);
+        }
+      };
+
+      try {
+        emitParsed(JSON.parse(raw));
+        return;
+      } catch (_) {
+        // Some proxies can batch newline-delimited JSON payloads.
+      }
+
+      const lines = raw.split('\n').map((s) => s.trim()).filter(Boolean);
+      if (lines.length === 0) return;
+      for (const line of lines) {
+        try {
+          emitParsed(JSON.parse(line));
+        } catch (_) {
+          // Ignore malformed payload fragments; keep connection alive.
+        }
+      }
     };
 
     ws.onclose = () => {

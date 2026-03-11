@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Radio, Plus, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import StatusDot from './StatusDot';
+import Sparkline from './Sparkline';
 import { Field } from './ui/MatrixField';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import useETR290 from '../hooks/useETR290';
@@ -20,6 +21,8 @@ const REFRESH_OPTIONS_MS = [
   { value: 15000, label: '15 seconds' },
   { value: 30000, label: '30 seconds' },
 ];
+const MAX_FORENSIC_SAMPLES = 120;
+const MAX_DECODER_EVENTS = 200;
 
 const ETR_CHECKS = {
   p1: [
@@ -59,6 +62,78 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (passphrase) params.push(`passphrase=${passphrase}`);
   if (params.length) url += `?${params.join('&')}`;
   return url;
+}
+
+function normalizeLaneId(rawId) {
+  const id = String(rawId || '').trim();
+  if (!id) return 'unknown';
+  return id.replace(/^etr[-_:]/i, '') || id;
+}
+
+function isExpectedNoSignalError(message) {
+  const m = String(message || '').toLowerCase();
+  return (
+    m.includes('ffprobe exited 1') ||
+    m.includes('connection refused') ||
+    m.includes('input/output error') ||
+    m.includes('server returned 404') ||
+    m.includes('immediate exit requested')
+  );
+}
+
+function toDecoderEvent(msg) {
+  if (!msg?.type || !msg?.id) return null;
+  const decoderId = normalizeLaneId(msg.id);
+  const ts = msg.time ? new Date(msg.time).getTime() : Date.now();
+  if (!Number.isFinite(ts)) return null;
+  if (msg.type === 'etr290_alarm') {
+    return {
+      key: `evt-${ts}-${decoderId}-etr-${msg.label || ''}`,
+      decoderId,
+      ts,
+      severity: msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info',
+      title: `ETR ${(msg.priority || 'p3').toUpperCase()} - ${msg.label || 'Alarm'}`,
+      details: msg.message || '',
+    };
+  }
+  if (msg.type === 'error') {
+    const warning = isExpectedNoSignalError(msg.message);
+    return {
+      key: `evt-${ts}-${decoderId}-error-${msg.message || ''}`,
+      decoderId,
+      ts,
+      severity: warning ? 'warning' : 'critical',
+      title: warning ? 'Input signal missing' : 'Runtime error',
+      details: msg.message || '',
+    };
+  }
+  if (msg.type === 'switched') {
+    return {
+      key: `evt-${ts}-${decoderId}-switched`,
+      decoderId,
+      ts,
+      severity: 'warning',
+      title: 'Failover switch',
+      details: msg.message || 'Primary input switched to backup',
+    };
+  }
+  if (msg.type === 'started' || msg.type === 'stopped') {
+    return {
+      key: `evt-${ts}-${decoderId}-${msg.type}`,
+      decoderId,
+      ts,
+      severity: msg.type === 'started' ? 'info' : 'warning',
+      title: msg.type === 'started' ? 'Decoder started' : 'Decoder stopped',
+      details: msg.message || '',
+    };
+  }
+  return null;
+}
+
+function severityClass(sev) {
+  if (sev === 'critical') return 'text-red-300 border-red-500/25 bg-red-900/15';
+  if (sev === 'warning') return 'text-amber-300 border-amber-500/25 bg-amber-900/15';
+  return 'text-sky-300 border-sky-500/25 bg-sky-900/10';
 }
 
 function newDecoderRow(seed = Date.now()) {
@@ -223,6 +298,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [captureNic, setCaptureNic] = useState('');
   const [selectedId, setSelectedId] = useState('');
   const [provisionSummary, setProvisionSummary] = useState(null);
+  const [forensicHistoryById, setForensicHistoryById] = useState({});
+  const [eventHistoryById, setEventHistoryById] = useState({});
 
   const {
     result,
@@ -248,6 +325,39 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     if (lastMessage) {
       onWsResult(lastMessage);
       etr.onWsMessage(lastMessage);
+
+      if (lastMessage.type === 'analyse_result' && lastMessage.id) {
+        const decoderId = normalizeLaneId(lastMessage.id);
+        const arrival = lastMessage?.dvb?.arrival || {};
+        const iat = arrival?.iatMs || {};
+        const sampleTs = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
+        if (Number.isFinite(sampleTs)) {
+          const sample = {
+            ts: sampleTs,
+            iatMin: Number(iat.min),
+            iatAvg: Number(iat.avg),
+            iatP95: Number(iat.p95),
+            jitter: Number(arrival.jitterMs),
+            loss: Number(arrival.packetLossPct),
+          };
+          setForensicHistoryById((prev) => {
+            const existing = prev[decoderId] || [];
+            const next = [...existing, sample]
+              .filter((s) => Number.isFinite(s.ts))
+              .slice(-MAX_FORENSIC_SAMPLES);
+            return { ...prev, [decoderId]: next };
+          });
+        }
+      }
+
+      const evt = toDecoderEvent(lastMessage);
+      if (evt) {
+        setEventHistoryById((prev) => {
+          const existing = prev[evt.decoderId] || [];
+          const next = [...existing, evt].slice(-MAX_DECODER_EVENTS);
+          return { ...prev, [evt.decoderId]: next };
+        });
+      }
     }
   }, [lastMessage, onWsResult, etr]);
 
@@ -286,6 +396,22 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const resolvedPidCount = selectedPidRows.filter(r => r.pid != null).length;
   const expectedPidCount = selectedResult?.dvb?.pidCount || 0;
   const unresolvedPidGap = expectedPidCount > 0 && resolvedPidCount < expectedPidCount;
+  const selectedForensic = forensicHistoryById[selectedId] || [];
+  const forensicSeries = useMemo(() => {
+    const pick = (k) => selectedForensic.map((s) => s[k]).filter((v) => Number.isFinite(v));
+    return {
+      iatMin: pick('iatMin'),
+      iatAvg: pick('iatAvg'),
+      iatP95: pick('iatP95'),
+      jitter: pick('jitter'),
+      loss: pick('loss'),
+      latest: selectedForensic.length ? selectedForensic[selectedForensic.length - 1] : null,
+    };
+  }, [selectedForensic]);
+  const selectedDecoderEvents = useMemo(
+    () => (eventHistoryById[selectedId] || []).slice().sort((a, b) => b.ts - a.ts),
+    [eventHistoryById, selectedId]
+  );
 
   useEffect(() => {
     if (!selectedId) return;
@@ -524,6 +650,40 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           <Stat label="Bitrate Source" value={selectedResult ? (selectedResult?.dvb?.bitrateSource || '-') : '-'} />
           <Stat label="Jitter" value={selectedResult?.dvb?.arrival?.jitterMs != null ? `${selectedResult.dvb.arrival.jitterMs} ms` : '-'} />
         </div>
+        <div className="mt-4 rounded-lg border border-white/10 bg-black/20 p-3">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-2">IAT / Arrival Forensics</div>
+          {forensicSeries.latest ? (
+            <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <div className="text-[10px] text-gray-500 uppercase">IAT Min (ms)</div>
+                <Sparkline data={forensicSeries.iatMin} width={120} height={24} color="#00ddff" />
+                <div className="font-mono text-gray-300 text-[11px]">{forensicSeries.latest.iatMin ?? '-'}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <div className="text-[10px] text-gray-500 uppercase">IAT Avg (ms)</div>
+                <Sparkline data={forensicSeries.iatAvg} width={120} height={24} color="#66ccff" />
+                <div className="font-mono text-gray-300 text-[11px]">{forensicSeries.latest.iatAvg ?? '-'}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <div className="text-[10px] text-gray-500 uppercase">IAT P95 (ms)</div>
+                <Sparkline data={forensicSeries.iatP95} width={120} height={24} color="#cc88ff" />
+                <div className="font-mono text-gray-300 text-[11px]">{forensicSeries.latest.iatP95 ?? '-'}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <div className="text-[10px] text-gray-500 uppercase">Jitter (ms)</div>
+                <Sparkline data={forensicSeries.jitter} width={120} height={24} color="#ffaa00" />
+                <div className="font-mono text-gray-300 text-[11px]">{forensicSeries.latest.jitter ?? '-'}</div>
+              </div>
+              <div className="rounded border border-white/10 bg-black/20 p-1.5">
+                <div className="text-[10px] text-gray-500 uppercase">Packet Loss (%)</div>
+                <Sparkline data={forensicSeries.loss} width={120} height={24} color="#ff5566" />
+                <div className="font-mono text-gray-300 text-[11px]">{forensicSeries.latest.loss ?? '-'}</div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-xs text-gray-500">No IAT history yet for selected decoder.</div>
+          )}
+        </div>
         {selectedResult?.dvb?.bitrateSource && (
           <div className="mt-1 text-[10px] text-gray-500">
             TS bitrate source: {selectedResult.dvb.bitrateSource}
@@ -689,6 +849,26 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             </div>
           </>
         )}
+        <div className="mt-3">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Decoder Events & Alarms</div>
+          <div className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/20 p-2">
+            {selectedDecoderEvents.length === 0 ? (
+              <div className="text-xs text-gray-500 px-1 py-1">No runtime events yet for selected decoder.</div>
+            ) : (
+              <div className="space-y-1.5">
+                {selectedDecoderEvents.slice(0, 50).map((evt) => (
+                  <div key={evt.key} className={`rounded border px-2 py-1 ${severityClass(evt.severity)}`}>
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-[11px] font-mono">{evt.title}</div>
+                      <div className="text-[10px] text-gray-400 font-mono">{formatUtc(evt.ts)}</div>
+                    </div>
+                    <div className="text-[11px] text-gray-400">{evt.details || '-'}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </BentoCard>
     </div>
   );
