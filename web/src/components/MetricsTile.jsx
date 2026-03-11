@@ -65,7 +65,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
   const outputActive = current?.bitrate > 0;
 
   return (
-    <div className="bg-black/20 border border-white/5 rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-sm">
+    <div className="bg-[#0d1117] border border-white/8 rounded-2xl p-4 flex flex-col gap-3 backdrop-blur-sm shadow-[0_1px_0_rgba(255,255,255,0.06)_inset,0_4px_24px_rgba(0,0,0,0.45)]">
 
       {/* Input / Output status row */}
       <div className="grid grid-cols-2 gap-2">
@@ -89,7 +89,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
       <div className="grid grid-cols-2 gap-2 text-xs">
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Input</span>
-          <span className={`font-mono text-sm font-bold ${inputMbps ? 'text-emerald-400' : inputBitrateMeasuring ? 'text-gray-400' : 'text-gray-600'}`}>
+          <span className={`font-mono text-xl font-bold tracking-tight ${inputMbps ? 'text-emerald-400' : inputBitrateMeasuring ? 'text-gray-400' : 'text-gray-600'}`}>
             {inputMbps
               ? `${inputMbps} Mbps`
               : inputBitrateMeasuring
@@ -99,7 +99,7 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
         </div>
         <div className="flex flex-col gap-0.5">
           <span className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Output</span>
-          <span className={`font-mono text-sm font-bold ${mbps ? 'text-sky-400' : 'text-gray-600'}`}>
+          <span className={`font-mono text-xl font-bold tracking-tight ${mbps ? 'text-sky-400' : 'text-gray-600'}`}>
             {mbps ? `${mbps} Mbps` : '—'}
           </span>
         </div>
