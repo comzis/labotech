@@ -11,6 +11,15 @@ function countPids(result) {
   return programCount + ((result.orphanStreams || []).length);
 }
 
+function resolveDisplayBitrateMbps(result) {
+  const formatBitrate = result?.dvb?.formatBitrateBps;
+  if (formatBitrate != null && formatBitrate > 0) return formatBitrate / 1e6;
+  const total = (result?.programs || [])
+    .flatMap(p => p.streams || [])
+    .reduce((sum, s) => sum + (s.bitrate || 0), 0);
+  return total > 0 ? total / 1e6 : null;
+}
+
 function audioPercent(levels) {
   if (!levels || levels.meanDb == null) return 0;
   const v = Math.max(-60, Math.min(0, levels.meanDb));
@@ -31,9 +40,12 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
 
 function Stat({ label, value }) {
   return (
-    <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
-      <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="text-gray-200 font-mono mt-1">{value}</div>
+    <div
+      className="px-2 py-1.5"
+      style={{ background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: '2px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)' }}
+    >
+      <div className="text-[9px] uppercase tracking-widest engraved mb-0.5">{label}</div>
+      <div className="text-gray-300 font-mono text-[11px]">{value}</div>
     </div>
   );
 }
@@ -50,57 +62,90 @@ function DecoderCard({ id, meta, result, onStop }) {
     setThumbFailed(false);
   }, [result?.thumbnailUrl, result?.probeTime]);
 
+  const hasThumb = thumbSrc && !thumbFailed;
+
   return (
-    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <StatusDot status="live" pulse />
-          <span className="font-mono text-sm text-gray-200">{id}</span>
-        </div>
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{ background: '#111', border: '1px solid #252525', borderRadius: '3px', boxShadow: '0 4px 16px rgba(0,0,0,0.6)' }}
+    >
+      {/* Bezel header */}
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 shrink-0"
+        style={{ background: 'linear-gradient(180deg, #242424 0%, #1a1a1a 100%)', borderBottom: '1px solid #0a0a0a', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}
+      >
+        <StatusDot status="live" pulse />
+        <span className="font-mono text-[10px] text-gray-400 truncate flex-1">{id}</span>
         <button
           onClick={onStop}
-          className="text-[10px] font-bold uppercase bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded border border-red-500/20"
+          className="text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
+          style={{ background: 'rgba(180,30,30,0.3)', border: '1px solid rgba(220,50,50,0.3)', color: '#f87171', borderRadius: '2px' }}
         >
           Stop
         </button>
       </div>
-      <div className="relative aspect-video bg-gray-950 rounded-xl overflow-hidden border border-white/5">
-        {thumbSrc && !thumbFailed ? (
+
+      {/* Thumbnail monitor — explicit 16:9 with visible frame */}
+      <div
+        className="relative w-full overflow-hidden shrink-0"
+        style={{ aspectRatio: '16/9', background: '#080808', borderBottom: '1px solid #1a1a1a', outline: '2px solid #1a1a1a' }}
+      >
+        {hasThumb ? (
           <img
             src={thumbSrc}
             alt={`${id} thumbnail`}
-            className="w-full h-full object-contain"
+            className="absolute inset-0 w-full h-full"
+            style={{ objectFit: 'cover', display: 'block' }}
             onError={() => setThumbFailed(true)}
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">
-            No thumbnail yet
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <div className="w-3 h-3 rounded-full" style={{ background: '#1a1a1a', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)' }} />
+            <span className="text-[9px] engraved uppercase tracking-widest">No Signal</span>
           </div>
         )}
+        {/* CRT scanline overlay */}
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{ backgroundImage: 'repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,0,0,0.07) 2px, rgba(0,0,0,0.07) 4px)' }}
+        />
       </div>
-      <div className="text-[11px] text-gray-500 font-mono truncate">{meta?.url || result?.url || '-'}</div>
-      <div className="text-xs text-gray-300">
-        <span className="text-gray-500">Service:</span> {primaryService}
-        {serviceProvider ? <span className="text-gray-500"> · {serviceProvider}</span> : null}
-      </div>
-      <div>
-        <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
-          <span>Audio Level</span>
-          <span className="font-mono">
-            {result?.audioLevels?.meanDb != null ? `${result.audioLevels.meanDb.toFixed(1)} dB` : 'n/a'}
-          </span>
+
+      {/* Info panel */}
+      <div className="p-2.5 space-y-2" style={{ background: '#141414' }}>
+        <div className="text-[10px] font-mono truncate engraved">{meta?.url || result?.url || '-'}</div>
+        <div className="text-[11px] text-gray-300 font-mono truncate">
+          <span className="engraved">SVC </span>{primaryService}
+          {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
         </div>
-        <div className="h-2 rounded bg-black/30 border border-white/10 overflow-hidden">
-          <div
-            className={`h-full ${levelPct > 75 ? 'bg-red-500' : levelPct > 45 ? 'bg-amber-400' : 'bg-green-500'}`}
-            style={{ width: `${levelPct}%` }}
-          />
+
+        {/* Audio bar */}
+        <div>
+          <div className="flex items-center justify-between text-[10px] mb-1">
+            <span className="engraved uppercase tracking-widest">Audio</span>
+            <span className="font-mono" style={{ color: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55' }}>
+              {result?.audioLevels?.meanDb != null ? `${result.audioLevels.meanDb.toFixed(1)} dB` : 'n/a'}
+            </span>
+          </div>
+          <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
+            <div
+              className="h-full transition-all duration-300"
+              style={{
+                width: `${levelPct}%`,
+                background: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55',
+                boxShadow: levelPct > 5 ? `0 0 5px ${levelPct > 75 ? '#ff223388' : levelPct > 45 ? '#ffaa0088' : '#00dd5588'}` : 'none',
+              }}
+            />
+          </div>
         </div>
-      </div>
-      <div className="grid grid-cols-3 gap-2 text-xs">
-        <Stat label="Programs" value={String(result?.programs?.length || 0)} />
-        <Stat label="PIDs" value={String(countPids(result))} />
-        <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-1">
+          <Stat label="Programs" value={String(result?.programs?.length || 0)} />
+          <Stat label="PIDs"     value={String(countPids(result))} />
+          <Stat label="Bitrate"  value={resolveDisplayBitrateMbps(result) != null ? `${resolveDisplayBitrateMbps(result).toFixed(2)} Mbps` : '-'} />
+          <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+        </div>
       </div>
     </div>
   );
