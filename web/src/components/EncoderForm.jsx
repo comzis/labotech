@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { Settings2, Zap, Server, ShieldCheck, Play, Radio, Activity, Plus, Trash2, Tv2 } from 'lucide-react';
+import { Settings2, Server, ShieldCheck, Play, Radio, Activity, Plus, Trash2, Tv2 } from 'lucide-react';
 import { startStream } from '../api';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
@@ -94,12 +94,12 @@ export default function EncoderForm({ onStarted }) {
           whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(34,211,238,0.2)' }}
           whileTap={{ scale: 0.98 }}
           onClick={() => setOpen(true)}
-          className="bg-midnight-glass border border-white/10 backdrop-blur-md rounded-2xl px-6 py-4 flex items-center justify-center gap-3 w-full hover:bg-white/5 transition-colors group cursor-pointer"
+          className="bg-gradient-to-r from-neon-blue/20 to-neon-cyan/20 border border-neon-cyan/35 backdrop-blur-md rounded-2xl px-6 py-3.5 flex items-center justify-center gap-3 w-full hover:from-neon-blue/30 hover:to-neon-cyan/30 transition-colors group cursor-pointer"
         >
-          <div className="w-10 h-10 rounded-full bg-neon-cyan/20 flex items-center justify-center group-hover:bg-neon-cyan/30 transition-colors">
-            <Zap className="w-5 h-5 text-neon-cyan" strokeWidth={1.5} />
+          <div className="w-9 h-9 rounded-full bg-black/35 border border-neon-cyan/30 flex items-center justify-center group-hover:border-neon-cyan/50 transition-colors">
+            <Radio className="w-4.5 h-4.5 text-neon-cyan" strokeWidth={1.8} />
           </div>
-          <span className="text-gray-200 font-semibold tracking-wide text-lg">Create Encoder Instance</span>
+          <span className="text-gray-100 font-semibold tracking-wide text-base uppercase">Create Encoder Instance</span>
         </motion.button>
       )}
 

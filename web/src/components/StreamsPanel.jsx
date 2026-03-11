@@ -101,12 +101,12 @@ export default function StreamsPanel({ lastMessage }) {
                 <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
 
                 {/* Header row */}
-                <div className="flex items-center justify-between">
+                <div className="flex items-start justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-2 min-w-0">
                     <StatusDot status={s.isRunning ? 'live' : 'stopped'} pulse />
                     <span className="font-mono text-sm font-semibold truncate">{s.id}</span>
                   </div>
-                  <div className="flex items-center gap-1.5 shrink-0">
+                  <div className="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
                     {/* Output mode badge */}
                     <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${MODE_STYLE[mode] || MODE_STYLE.srt}`}>
                       {mode}
@@ -161,7 +161,7 @@ export default function StreamsPanel({ lastMessage }) {
                 )}
 
                 {/* Destination + PIDs */}
-                <div className="flex items-center gap-3 text-xs text-gray-600 font-mono">
+                <div className="flex items-center gap-2 text-xs text-gray-600 font-mono flex-wrap">
                   <span>→ {s.host}:{s.port}</span>
                   {dvb && (
                     <span className="text-gray-700">
@@ -220,7 +220,7 @@ export default function StreamsPanel({ lastMessage }) {
                 )}
 
                 {s.isRunning && (
-                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3">
                     <MetricsTile
                       id={s.id}
                       stats={s.lastStats}
