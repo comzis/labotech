@@ -85,27 +85,16 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
   const [displaySrc, setDisplaySrc] = useState(null);
-  const [thumbFailed, setThumbFailed] = useState(false);
-  const candidateSrc = result?.thumbnailUrl
+  const [thumbRetry, setThumbRetry] = useState(0);
+  const candidateBaseSrc = result?.thumbnailUrl
     ? `${result.thumbnailUrl}${result.thumbnailUrl.includes('?') ? '&' : '?'}r=${result?.probeTime || Date.now()}`
     : null;
+  const candidateSrc = candidateBaseSrc ? `${candidateBaseSrc}&retry=${thumbRetry}` : null;
 
-  // Retry load for every new thumbnail token and keep displaying the last known-good frame.
-  const prevCandidateRef = React.useRef(null);
+  // Reset retry budget when backend publishes a new thumbnail token.
   useEffect(() => {
-    if (!candidateSrc || candidateSrc === prevCandidateRef.current) return;
-    prevCandidateRef.current = candidateSrc;
-    setThumbFailed(false);
-    const probeImg = new Image();
-    probeImg.onload = () => {
-      setDisplaySrc(candidateSrc);
-      setThumbFailed(false);
-    };
-    probeImg.onerror = () => {
-      setThumbFailed(true);
-    };
-    probeImg.src = candidateSrc;
-  }, [candidateSrc]);
+    setThumbRetry(0);
+  }, [candidateBaseSrc]);
 
   useEffect(() => {
     if (currentMeanDb == null) return;
@@ -132,7 +121,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   }, [nowMs, audioSeenAt, displayMeanDb]);
 
   // Keep showing the last known-good image even if a newer refresh token fails.
-  const hasThumb = Boolean(displaySrc) || (Boolean(candidateSrc) && !thumbFailed);
+  const hasThumb = Boolean(displaySrc || candidateSrc);
   const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
   const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
   const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
@@ -181,7 +170,17 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             alt={`${id} thumbnail`}
             className="absolute inset-0 w-full h-full"
             style={{ objectFit: 'cover', objectPosition: 'center', display: 'block' }}
-            onError={() => setThumbFailed(!displaySrc)}
+            onLoad={(e) => {
+              const loaded = e?.currentTarget?.currentSrc || e?.currentTarget?.src || null;
+              if (loaded) setDisplaySrc(loaded);
+            }}
+            onError={() => {
+              // Keep last good frame; when none exists, retry a few times for transient file-write gaps.
+              if (displaySrc) return;
+              if (thumbRetry < 3) {
+                setTimeout(() => setThumbRetry((v) => v + 1), 700);
+              }
+            }}
           />
         ) : (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
