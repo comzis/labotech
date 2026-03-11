@@ -37,6 +37,7 @@ class ETR290Analyser extends EventEmitter {
     super();
     this.id = options.id || `etr290-${Date.now()}`;
     this.url = options.url;
+    this.nicName = options.nicName || null;
     this.isRunning = false;
     this._proc = null;
     this._statusTimer = null;
@@ -215,7 +216,10 @@ class ETR290Analyser extends EventEmitter {
   }
 
   toJSON() {
-    return this._buildStatus();
+    return {
+      ...this._buildStatus(),
+      nicName: this.nicName || null,
+    };
   }
 }
 

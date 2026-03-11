@@ -333,5 +333,13 @@ describe('TSAnalyser', () => {
       TSA._resetNicNameCache();
       expect(TSA._getNicName()).toBe('eno2');
     });
+
+    test('caches the config after first call', () => {
+      const TSA = require('../src/ts-analyser');
+      TSA._resetNicNameCache();
+      const first = TSA._getNicName();
+      const second = TSA._getNicName();
+      expect(first).toBe(second);
+    });
   });
 });
