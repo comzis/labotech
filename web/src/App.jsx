@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal } from 'lucide-react';
+import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import StreamsPanel from './components/StreamsPanel';
 import TranscodePanel from './components/TranscodePanel';
@@ -9,6 +9,7 @@ import TSAnalyser from './components/TSAnalyser';
 import DecoderPanel from './components/DecoderPanel';
 import ConfidenceMonitor from './components/ConfidenceMonitor';
 import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
+import StreamViewPanel from './components/StreamViewPanel';
 import APIPanel from './components/APIPanel';
 import useWebSocket from './hooks/useWebSocket';
 import { getHealth } from './api';
@@ -21,6 +22,7 @@ const TABS = [
   { id: 'decoder',    label: 'Decoder',     icon: Cpu,         led: '#00ddff' },
   { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
   { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
+  { id: 'streamView', label: 'Live View',   icon: LineChart,   led: '#66ccff' },
   { id: 'confidence', label: 'Confidence',  icon: ShieldCheck, led: '#ff2233' },
   { id: 'api',        label: 'API',         icon: Terminal,    led: '#aaaaaa' },
 ];
@@ -288,6 +290,7 @@ export default function App() {
           {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} />}
           {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
           {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
+          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} />}
           {tab === 'confidence' && <ConfidenceMonitor lastMessage={lastMessage} />}
           {tab === 'api'        && <APIPanel />}
         </motion.div>

@@ -176,29 +176,6 @@ export default function StreamViewPanel({ lastMessage }) {
     });
   }, [mouseX, laneIds, laneMap]);
 
-  const globalRanges = useMemo(() => {
-    const collect = (field) => laneIds.flatMap((id) => forensicByLane[id]?.[field] || []);
-    const mk = (arr) => {
-      if (!arr.length) return { min: null, max: null };
-      return { min: Math.min(...arr), max: Math.max(...arr) };
-    };
-    return {
-      iatMin: mk(collect('iatMin')),
-      iatAvg: mk(collect('iatAvg')),
-      iatP95: mk(collect('iatP95')),
-      jitter: mk(collect('jitter')),
-      loss: mk(collect('loss')),
-    };
-  }, [forensicByLane, laneIds]);
-
-  const sparkScale = (metric) => {
-    if (scaleMode !== 'absolute') return { minValue: null, maxValue: null };
-    return {
-      minValue: globalRanges[metric]?.min ?? null,
-      maxValue: globalRanges[metric]?.max ?? null,
-    };
-  };
-
   const forensicByLane = useMemo(() => {
     const byLane = {};
     for (const id of laneIds) {
@@ -222,6 +199,29 @@ export default function StreamViewPanel({ lastMessage }) {
     }
     return byLane;
   }, [laneIds, laneMap]);
+
+  const globalRanges = useMemo(() => {
+    const collect = (field) => laneIds.flatMap((id) => forensicByLane[id]?.[field] || []);
+    const mk = (arr) => {
+      if (!arr.length) return { min: null, max: null };
+      return { min: Math.min(...arr), max: Math.max(...arr) };
+    };
+    return {
+      iatMin: mk(collect('iatMin')),
+      iatAvg: mk(collect('iatAvg')),
+      iatP95: mk(collect('iatP95')),
+      jitter: mk(collect('jitter')),
+      loss: mk(collect('loss')),
+    };
+  }, [forensicByLane, laneIds]);
+
+  const sparkScale = (metric) => {
+    if (scaleMode !== 'absolute') return { minValue: null, maxValue: null };
+    return {
+      minValue: globalRanges[metric]?.min ?? null,
+      maxValue: globalRanges[metric]?.max ?? null,
+    };
+  };
 
   return (
     <div className="space-y-6 font-sans">

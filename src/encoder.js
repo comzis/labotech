@@ -426,12 +426,20 @@ class SRTEncoder extends EventEmitter {
 
   // ─── Stats parsing ──────────────────────────────────────────────────────────
   parseStats(line) {
-    // ── 0. Input bitrate — parsed from FFmpeg demuxer startup line ───────────
-    // "  Duration: N/A, start: 1234.56, bitrate: 8192 kb/s"
-    const mInputBr = line.match(/Duration:.*bitrate:\s*([\d.]+)\s*kb\/s/);
+    // ── 0. Input bitrate — parsed from FFmpeg demuxer startup lines ──────────
+    // Examples:
+    // "Duration: N/A, start: 1234.56, bitrate: 8192 kb/s"
+    // "Input #0, mpegts, from ... bitrate: 7.0 Mb/s"
+    const mInputBr = line.match(/bitrate:\s*([\d.]+)\s*(kbits\/s|kb\/s|mbits\/s|mb\/s)/i);
     if (mInputBr) {
-      this.inputBitrate = parseFloat(mInputBr[1]);
-      this.emit('stats', { inputBitrate: this.inputBitrate });
+      const raw = parseFloat(mInputBr[1]);
+      const unit = (mInputBr[2] || '').toLowerCase();
+      let kbps = raw;
+      if (unit.startsWith('m')) kbps = raw * 1000;
+      if (Number.isFinite(kbps) && kbps > 0) {
+        this.inputBitrate = kbps;
+        this.emit('stats', { inputBitrate: this.inputBitrate });
+      }
     }
 
     // ── 0b. Input stream detection — parsed from FFmpeg stream info lines ────

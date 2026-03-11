@@ -7,6 +7,7 @@ import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
 import { motion } from 'framer-motion';
 
+const THUMB_BASE = '/logs/thumbnails';
 // Output mode pill — colour-coded for quick identification at a glance
 const MODE_STYLE = {
   srt: 'bg-sky-900/60    text-sky-300    border-sky-700/40',
@@ -14,6 +15,7 @@ const MODE_STYLE = {
   rtp: 'bg-violet-900/60 text-violet-300 border-violet-700/40',
 };
 const formatPidHex = (pid) => (pid == null ? 'N/A' : `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
+const formatPidDecHex = (pid) => (pid == null ? 'N/A' : `${pid} (${formatPidHex(pid)})`);
 
 export default function StreamsPanel({ lastMessage }) {
   const { streams, transcoders, loading, error, refresh } = useStreams();
@@ -152,9 +154,12 @@ export default function StreamsPanel({ lastMessage }) {
                   <span>→ {s.host}:{s.port}</span>
                   {dvb && (
                     <span className="text-gray-700">
-                      SID {dvb.serviceId} · V:{formatPidHex(dvb.videoPid)}
+                      SID {dvb.serviceId} · V:{formatPidDecHex(dvb.videoPid)} · PMT:{formatPidDecHex(dvb.pmtPid)}
                     </span>
                   )}
+                </div>
+                <div className="text-[11px] font-mono text-gray-500">
+                  Input bitrate: {s.inputBitrate ? `${(s.inputBitrate / 1000).toFixed(2)} Mbps` : 'pending sample'} · Output bitrate: {s.lastStats?.bitrate ? `${(s.lastStats.bitrate / 1000).toFixed(2)} Mbps` : 'pending sample'}
                 </div>
 
                 {/* Audio pairs summary */}
@@ -162,7 +167,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <div className="flex flex-wrap gap-1">
                     {s.audioPairs.map((p, i) => (
                       <span key={i} className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
-                        A{i} {p.codec} {formatPidHex(p.pid)}
+                        A{i} {p.codec} {formatPidDecHex(p.pid)}
                         {p.language ? ` [${p.language}]` : ''}
                       </span>
                     ))}
@@ -195,13 +200,52 @@ export default function StreamsPanel({ lastMessage }) {
                 )}
 
                 {s.isRunning && (
-                  <MetricsTile id={s.id} stats={s.lastStats} inputBitrate={s.inputBitrate} lastMessage={lastMessage} />
+                  <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                    <MetricsTile id={s.id} stats={s.lastStats} inputBitrate={s.inputBitrate} lastMessage={lastMessage} />
+                    <ConfidenceEmbed stream={s} />
+                  </div>
                 )}
               </motion.div>
             );
           })}
         </div>
       </section>
+    </div>
+  );
+}
+
+function ConfidenceEmbed({ stream }) {
+  const [imgError, setImgError] = React.useState(false);
+  const thumbUrl = `${THUMB_BASE}/${stream.id}.jpg?t=${Date.now()}`;
+  const outputMbps = stream?.lastStats?.bitrate ? (stream.lastStats.bitrate / 1000).toFixed(2) : null;
+  const inputMbps = stream?.inputBitrate ? (stream.inputBitrate / 1000).toFixed(2) : null;
+
+  return (
+    <div className="bg-black/20 border border-white/5 rounded-2xl p-3 space-y-2">
+      <div className="text-[10px] uppercase tracking-wider text-gray-500">Confidence (Embedded)</div>
+      <div className="relative rounded-lg overflow-hidden border border-white/10 bg-black/40 aspect-video">
+        {imgError ? (
+          <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-600">No thumbnail</div>
+        ) : (
+          <img
+            src={thumbUrl}
+            alt={stream.id}
+            onError={() => setImgError(true)}
+            onLoad={() => setImgError(false)}
+            className="w-full h-full object-contain"
+          />
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+        <div className="rounded border border-white/10 bg-black/30 px-2 py-1">
+          <span className="text-gray-500">Input</span>{' '}
+          <span className={inputMbps ? 'text-emerald-300' : 'text-gray-600'}>{inputMbps ? `${inputMbps} Mbps` : '-'}</span>
+        </div>
+        <div className="rounded border border-white/10 bg-black/30 px-2 py-1">
+          <span className="text-gray-500">Output</span>{' '}
+          <span className={outputMbps ? 'text-neon-cyan' : 'text-gray-600'}>{outputMbps ? `${outputMbps} Mbps` : '-'}</span>
+        </div>
+      </div>
     </div>
   );
 }

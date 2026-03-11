@@ -170,6 +170,18 @@ export default function TSAnalyser({ lastMessage }) {
                 <Stat label="PID Count" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
                 <Stat label="Aggregate Bitrate" value={`${((resultLocal?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
               </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+                <Stat label="TS ID" value={String(resultLocal?.dvb?.transportStreamId ?? '-')} />
+                <Stat label="ONID" value={String(resultLocal?.dvb?.originalNetworkId ?? '-')} />
+                <Stat label="Bitrate Source" value={resultLocal?.dvb?.bitrateSource || '-'} />
+                <Stat label="Jitter" value={resultLocal?.dvb?.arrival?.jitterMs != null ? `${resultLocal.dvb.arrival.jitterMs} ms` : '-'} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+                <Stat label="SI NIT" value={resultLocal?.dvb?.si?.compliance?.nit === undefined ? '-' : String(resultLocal.dvb.si.compliance.nit)} />
+                <Stat label="SI SDT" value={resultLocal?.dvb?.si?.compliance?.sdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.sdt)} />
+                <Stat label="SI EIT p/f" value={resultLocal?.dvb?.si?.compliance?.eitPf === undefined ? '-' : String(resultLocal.dvb.si.compliance.eitPf)} />
+                <Stat label="SI TDT" value={resultLocal?.dvb?.si?.compliance?.tdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.tdt)} />
+              </div>
               {(resultLocal?.dvb?.services?.length || 0) > 0 && (
                 <div className="mt-4 overflow-x-auto">
                   <table className="w-full text-xs font-mono">
@@ -188,8 +200,8 @@ export default function TSAnalyser({ lastMessage }) {
                           <td className="py-2 text-gray-300">{s.serviceId}</td>
                           <td className="py-2 text-gray-300">{s.serviceName || '-'}</td>
                           <td className="py-2 text-gray-400">{s.serviceProvider || '-'}</td>
-                          <td className="py-2"><PidBadge pid={s.pmtPid} /></td>
-                          <td className="py-2"><PidBadge pid={s.pcrPid} /></td>
+                          <td className="py-2"><PidBadge pid={s.pmtPid} pidHex={s.pmtPidHex} /></td>
+                          <td className="py-2"><PidBadge pid={s.pcrPid} pidHex={s.pcrPidHex} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -231,8 +243,8 @@ function ProgramBlock({ prog }) {
           </span>
         </div>
         <div className="flex gap-3 text-[10px] font-mono text-gray-500">
-          <span className="flex items-center gap-1.5">PMT <PidBadge pid={prog.pmtPid} /></span>
-          <span className="flex items-center gap-1.5">PCR <PidBadge pid={prog.pcrPid} /></span>
+          <span className="flex items-center gap-1.5">PMT <PidBadge pid={prog.pmtPid} pidHex={prog.pmtPidHex} /></span>
+          <span className="flex items-center gap-1.5">PCR <PidBadge pid={prog.pcrPid} pidHex={prog.pcrPidHex} /></span>
         </div>
       </div>
       <div className="space-y-1 relative z-10">
@@ -251,7 +263,7 @@ function StreamRow({ stream: s }) {
 
   return (
     <div className="flex items-center gap-3 text-xs py-1 border-b border-gray-800 last:border-0">
-      <PidBadge pid={s.pid} />
+      <PidBadge pid={s.pid} pidHex={s.pidHex} />
       <span className={`w-12 font-semibold ${typeColor}`}>{s.codecType}</span>
       <span className="text-gray-300 w-16">{s.codecName}</span>
       {s.width && <span className="text-gray-500">{s.width}×{s.height}</span>}
