@@ -60,8 +60,21 @@ module.exports = function (streams, wss, saveState = () => {}) {
       return res.status(409).json({ error: `Stream ${id} already exists` });
     }
 
+    const cleanHost = typeof host === 'string' ? host.trim() : host;
+    const effectiveMode = outputMode || (cleanHost ? 'srt' : 'null');
+    const validModes = ['srt', 'udp', 'rtp', 'null'];
+    if (!validModes.includes(effectiveMode)) {
+      return res.status(400).json({ error: `outputMode must be one of: ${validModes.join(', ')}` });
+    }
+    if (effectiveMode !== 'null' && (!cleanHost || cleanHost === 'null')) {
+      return res.status(400).json({ error: `host is required when outputMode is ${effectiveMode}` });
+    }
+    if (effectiveMode !== 'null' && !port) {
+      return res.status(400).json({ error: `port is required when outputMode is ${effectiveMode}` });
+    }
+
     const encoder = new SRTEncoder({
-      id, input, inputLocalAddr, host, port, latency, rateMode,
+      id, input, inputLocalAddr, host: cleanHost, port, latency, rateMode,
       videoBitrate, videoCodec, rateMode,
       preset, profile, gopSize, pixFmt, passphrase, streamId,
       outputMode, ttl, localAddr,

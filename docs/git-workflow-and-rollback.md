@@ -34,6 +34,20 @@ Use a fixed git reference (tag preferred) to avoid ambiguous "latest pull" deplo
 bash scripts/deploy-ref.sh v1.5.0
 ```
 
+## 3b) Standardized production upgrade command
+
+Use one command for routine upgrades (defaults to `origin/main`):
+
+```bash
+bash scripts/upgrade-prod.sh
+```
+
+Or upgrade to an explicit tag/commit:
+
+```bash
+bash scripts/upgrade-prod.sh v1.5.0
+```
+
 This script:
 
 - fetches refs/tags
@@ -41,6 +55,7 @@ This script:
 - installs dependencies
 - builds frontend
 - restarts `labotech` systemd service
+- verifies service active state and `/health`
 
 ## 4) Rollback plan
 

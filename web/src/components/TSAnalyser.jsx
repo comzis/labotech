@@ -5,6 +5,7 @@ import { motion } from 'framer-motion';
 import { Search, Activity, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
+import ETR290Panel from './ETR290Panel';
 
 const PROBE_MODES = [
   { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
@@ -142,6 +143,9 @@ export default function TSAnalyser({ lastMessage }) {
           {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
         </form>
       </BentoCard>
+
+      {/* Comprehensive ETR290 visibility inside TS Analyser */}
+      <ETR290Panel lastMessage={lastMessage} />
 
       {/* Structure Matrix */}
       {resultLocal && (
