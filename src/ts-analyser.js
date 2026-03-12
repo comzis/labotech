@@ -58,6 +58,9 @@ class TSAnalyser extends EventEmitter {
     this.interval = options.interval || 5000; // ms between continuous probes
 
     this._timer = null;
+    this._thumbnailTimer = null;
+    this._lastThumbnailUrl = null;
+    this._thumbnailCapturing = false;
     this.isRunning = false;
     this.lastResult = null;
     this._continuousProbeCount = 0;
@@ -72,12 +75,9 @@ class TSAnalyser extends EventEmitter {
     // Heavy transport/tsduck probing is expensive on live multicast.
     // In continuous mode, run it every 3rd cycle to keep UI responsive.
     const runHeavyProbe = !isContinuous || (this._continuousProbeCount % 3 === 1);
-    // Thumbnail refresh must remain deterministic for operator confidence.
-    // Use time-based cadence (default 5s), independent of heavy probe cycles.
-    const thumbIntervalSec = parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 3;
-    const thumbIntervalMs = Math.max(1000, thumbIntervalSec * 1000);
-    const nowMs = Date.now();
-    const runThumbnailCapture = !isContinuous || (nowMs - this._lastThumbnailAt >= thumbIntervalMs);
+    // In continuous mode thumbnails are managed by a separate timer (startContinuous).
+    // For one-shot probes only, capture synchronously here.
+    const runThumbnailCapture = !isContinuous;
 
     return new Promise((resolve, reject) => {
       const inputUrl = this._withLiveInputHints(this.url);
@@ -190,13 +190,15 @@ class TSAnalyser extends EventEmitter {
           }
           result.audioLevels = audioLevels;
           if (runThumbnailCapture) {
-            this._lastThumbnailAt = Date.now();
+            // One-shot probe: capture synchronously so the caller gets a fresh frame.
             try {
               await captureThumbnail(this.id, this.url);
               result.thumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+              this._lastThumbnailUrl = result.thumbnailUrl;
             } catch (err) {
-              // Keep last good frame if a single capture cycle fails.
-              if (this.lastResult?.thumbnailUrl) {
+              if (this._lastThumbnailUrl) {
+                result.thumbnailUrl = this._lastThumbnailUrl;
+              } else if (this.lastResult?.thumbnailUrl) {
                 result.thumbnailUrl = this.lastResult.thumbnailUrl;
               } else {
                 const cachedUrl = this._resolveCachedThumbnailUrl();
@@ -211,12 +213,17 @@ class TSAnalyser extends EventEmitter {
                 },
               };
             }
-          } else if (this.lastResult?.thumbnailUrl) {
-            // Keep the previous thumbnail between capture cycles to avoid flicker.
-            result.thumbnailUrl = this.lastResult.thumbnailUrl;
           } else {
-            const cachedUrl = this._resolveCachedThumbnailUrl();
-            if (cachedUrl) result.thumbnailUrl = cachedUrl;
+            // Continuous mode: thumbnails are captured by the independent timer.
+            // Just attach the most recently completed thumbnail URL.
+            if (this._lastThumbnailUrl) {
+              result.thumbnailUrl = this._lastThumbnailUrl;
+            } else if (this.lastResult?.thumbnailUrl) {
+              result.thumbnailUrl = this.lastResult.thumbnailUrl;
+            } else {
+              const cachedUrl = this._resolveCachedThumbnailUrl();
+              if (cachedUrl) result.thumbnailUrl = cachedUrl;
+            }
           }
           result = this._attachHealthAssessment(result);
           this.lastResult = result;
@@ -1556,6 +1563,33 @@ class TSAnalyser extends EventEmitter {
       this._iatSniffer.start();
     }
 
+    // Independent thumbnail timer — runs in parallel with the analysis loop so
+    // thumbnail refresh rate is not bottlenecked by the (slow) sub-probes.
+    const thumbIntervalMs = Math.max(1000, (parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5) * 1000);
+    const runThumbnail = async () => {
+      if (!this.isRunning) return;
+      if (!this._thumbnailCapturing) {
+        this._thumbnailCapturing = true;
+        try {
+          await captureThumbnail(this.id, this.url);
+          this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+        } catch (_) {
+          // Keep existing URL on failure; will retry next cycle.
+          if (!this._lastThumbnailUrl) {
+            const cached = this._resolveCachedThumbnailUrl();
+            if (cached) this._lastThumbnailUrl = cached;
+          }
+        } finally {
+          this._thumbnailCapturing = false;
+        }
+      }
+      if (this.isRunning) {
+        this._thumbnailTimer = setTimeout(runThumbnail, thumbIntervalMs);
+      }
+    };
+    // First thumbnail fires immediately so the UI shows a frame quickly.
+    runThumbnail();
+
     const run = async () => {
       const startedAt = Date.now();
       try {
@@ -1580,6 +1614,10 @@ class TSAnalyser extends EventEmitter {
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = null;
+    }
+    if (this._thumbnailTimer) {
+      clearTimeout(this._thumbnailTimer);
+      this._thumbnailTimer = null;
     }
     if (this._iatSniffer) {
       this._iatSniffer.stop();
