@@ -414,9 +414,11 @@ export default function ETR290Panel({ lastMessage }) {
   const unresolvedPidGap = expectedPidCount > 0 && resolvedPidCount < expectedPidCount;
   const videoBitrateMbps = selectedRows.filter(r => r.codecType === 'video').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
   const audioBitrateMbps = selectedRows.filter(r => r.codecType === 'audio').reduce((s, r) => s + (r.bitrate || 0), 0) / 1e6;
+  // Exclude format-derived bitrate (ffprobe probe-window estimate) — unreliable for live streams.
+  // Prefer: measured remux > tsduck > streams sum. Never use format-only estimate.
   const displayedBitrateMbps = (selectedDvb?.measuredBitrateBps ? selectedDvb.measuredBitrateBps / 1e6 : null)
-    ?? (selectedDvb?.formatBitrateBps ? selectedDvb.formatBitrateBps / 1e6 : null)
-    ?? (selectedDvb?.bitrateBps ? selectedDvb.bitrateBps / 1e6 : null);
+    ?? (selectedDvb?.tsduckBitrateBps ? selectedDvb.tsduckBitrateBps / 1e6 : null)
+    ?? (selectedDvb?.bitrateBps && selectedDvb?.bitrateSource !== 'format' ? selectedDvb.bitrateBps / 1e6 : null);
 
   const handleCopySnapshot = async () => {
     if (!status) return;
@@ -583,6 +585,16 @@ export default function ETR290Panel({ lastMessage }) {
         <div className="mt-2 text-[11px] text-gray-500 font-mono">
           Detector: {status.diagnostics.parser} · matched lines: {status.diagnostics.totalMatchedLines || 0}
           {status.diagnostics.lastMatchAt ? ` · last match: ${formatUtc(status.diagnostics.lastMatchAt)}` : ' · last match: none yet'}
+        </div>
+      )}
+      {status?.config && (
+        <div className="mt-1 text-[10px] text-gray-600 font-mono">
+          Profile: {status.config.profileName || 'none'} ·
+          PIDs: {status.config.includePids?.length > 0 ? status.config.includePids.join(', ') : 'all'} ·
+          Excl: {status.config.excludePids?.length > 0 ? status.config.excludePids.join(', ') : 'none'} ·
+          Non-default thresholds: {
+            Object.entries(status.config.thresholds || {}).filter(([, v]) => Number(v) !== 1).map(([k, v]) => `${k}=${v}`).join(' · ') || 'none'
+          }
         </div>
       )}
         {error && <p className="text-red-400 text-sm mt-2">{error}</p>}

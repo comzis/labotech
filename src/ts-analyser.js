@@ -237,8 +237,9 @@ class TSAnalyser extends EventEmitter {
       programId: prog.program_id,
       pmtPid: prog.pmt_pid,
       pcrPid: prog.pcr_pid,
-      name: prog.tags && prog.tags['service_name'] || null,
-      provider: prog.tags && prog.tags['service_provider'] || null,
+      // ffprobe uses 'service_name' for DVB-SI SDT entries; some streams expose 'title' or 'name'.
+      name: (prog.tags && (prog.tags['service_name'] || prog.tags['SERVICE_NAME'] || prog.tags['title'] || prog.tags['name'])) || null,
+      provider: (prog.tags && (prog.tags['service_provider'] || prog.tags['SERVICE_PROVIDER'] || prog.tags['service_provider_name'])) || null,
       // ffprobe program-level stream objects can omit PID/id fields depending on input.
       // Merge carefully with global stream entry by index so empty program values do not
       // clobber valid global PID metadata.
@@ -296,14 +297,16 @@ class TSAnalyser extends EventEmitter {
 
   _probeAudioLevels() {
     return new Promise((resolve) => {
+      // astats with reset=1 gives per-channel RMS and peak — the broadcast standard
+      // for stereo metering (L/R separation). volumedetect only gives aggregate.
       const args = [
         '-hide_banner',
         '-nostats',
         '-loglevel', 'info',
-        '-t', '1.0',
+        '-t', '1.5',
         '-i', this._withLiveInputHints(this.url),
         '-vn',
-        '-af', 'volumedetect',
+        '-af', 'astats=metadata=1:reset=1',
         '-f', 'null',
         '-',
       ];
@@ -312,7 +315,7 @@ class TSAnalyser extends EventEmitter {
       let stderr = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 3000);
+      }, 4000);
 
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('error', () => {
@@ -321,13 +324,45 @@ class TSAnalyser extends EventEmitter {
       });
       proc.on('exit', () => {
         clearTimeout(timeout);
-        const mean = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/i);
-        const max = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
-        if (!mean && !max) return resolve(null);
-        resolve({
-          meanDb: mean ? parseFloat(mean[1]) : null,
-          maxDb: max ? parseFloat(max[1]) : null,
-        });
+        // Parse per-channel astats output:
+        // "[Parsed_astats_0 @ ...] ch0 Peak_level: -3.2"
+        // "[Parsed_astats_0 @ ...] ch0 RMS_level: -18.4"
+        const channelPeak = {};
+        const channelRms = {};
+        for (const line of stderr.split('\n')) {
+          const peakM = line.match(/ch(\d+)\s+Peak_level:\s*(-?[\d.]+|inf|-inf)/i);
+          if (peakM) {
+            const ch = parseInt(peakM[1], 10);
+            const val = parseFloat(peakM[2]);
+            if (Number.isFinite(val)) channelPeak[ch] = val;
+          }
+          const rmsM = line.match(/ch(\d+)\s+RMS_level:\s*(-?[\d.]+|inf|-inf)/i);
+          if (rmsM) {
+            const ch = parseInt(rmsM[1], 10);
+            const val = parseFloat(rmsM[2]);
+            if (Number.isFinite(val)) channelRms[ch] = val;
+          }
+        }
+        const channels = [...new Set([...Object.keys(channelPeak), ...Object.keys(channelRms)])].map(Number).sort((a, b) => a - b);
+        if (channels.length === 0) {
+          // Fallback: try volumedetect summary lines (older ffmpeg or mono stream)
+          const mean = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/i);
+          const max = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
+          if (!mean && !max) return resolve(null);
+          const meanDb = mean ? parseFloat(mean[1]) : null;
+          return resolve({ meanDb, maxDb: max ? parseFloat(max[1]) : null, channels: [] });
+        }
+        const channelData = channels.map((ch) => ({
+          ch,
+          label: ch === 0 ? 'L' : ch === 1 ? 'R' : `Ch${ch + 1}`,
+          peakDb: channelPeak[ch] ?? null,
+          rmsDb: channelRms[ch] ?? null,
+        }));
+        const allRms = channelData.map((c) => c.rmsDb).filter((v) => v != null && Number.isFinite(v));
+        const allPeak = channelData.map((c) => c.peakDb).filter((v) => v != null && Number.isFinite(v));
+        const meanDb = allRms.length > 0 ? allRms.reduce((s, v) => s + v, 0) / allRms.length : null;
+        const maxDb = allPeak.length > 0 ? Math.max(...allPeak) : null;
+        resolve({ meanDb, maxDb, channels: channelData });
       });
     });
   }
@@ -372,8 +407,11 @@ class TSAnalyser extends EventEmitter {
           const k = line.slice(0, eq).trim();
           const v = line.slice(eq + 1).trim();
           if (k === 'total_size')  totalSize    = parseInt(v, 10)   || totalSize;
-          if (k === 'out_time_us') outTimeUs    = parseInt(v, 10)   || outTimeUs;
-          if (k === 'out_time_ms') outTimeUs    = parseInt(v, 10)   || outTimeUs; // also µs in FFmpeg
+          // out_time_us is always in microseconds (all FFmpeg versions).
+          // out_time_ms was microseconds in old FFmpeg but is milliseconds in ≥5.x.
+          // Prefer out_time_us; only fall back to out_time_ms when out_time_us was never set.
+          if (k === 'out_time_us') { const n = parseInt(v, 10); if (n > 0) outTimeUs = n; }
+          if (k === 'out_time_ms' && outTimeUs === 0) { const n = parseInt(v, 10); if (n > 0) outTimeUs = n; }
           if (k === 'bitrate') {
             // "bitrate=21234.6kbits/s"  or  "bitrate=N/A"
             const m = v.match(/([\d.]+)\s*kbits/i);
@@ -674,6 +712,12 @@ class TSAnalyser extends EventEmitter {
     const g = globalStream || {};
     const p = programStream || {};
     const merged = { ...g, ...p };
+
+    // Global stream analysis is authoritative for codec identification.
+    // Program PMT entries can contain stale/incomplete codec_type that overrides
+    // the correctly-analyzed global value, causing e.g. video showing on audio PIDs.
+    if (g.codec_type) merged.codec_type = g.codec_type;
+    if (g.codec_name) merged.codec_name = g.codec_name;
 
     const pPid = this._normalizePid(p.id);
     const gPid = this._normalizePid(g.id);

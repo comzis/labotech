@@ -41,26 +41,32 @@ const ETR_CHECK_FIELDS = [
 ];
 
 const RECOMMENDED_DECODER_PORT = "6501";
+// ETSI TR 101 290 compliant default alarm thresholds.
+// Value = number of consecutive violations before incident is created.
+// P1: any single occurrence is critical. P2: small debounce where FFmpeg noise is known.
 const RECOMMENDED_THRESHOLDS = {
-  ts_sync: 1,
-  sync_byte: 1,
-  pat_error: 1,
-  cc_error: 1,
-  pmt_error: 1,
-  pid_error: 1,
-  transport_error: 1,
-  crc_error: 1,
-  pcr_disc: 1,
-  pcr_acc: 40,
-  pcr_rep: 100,
-  pts_error: 1,
-  cat_error: 1,
-  nit_error: 10,
-  sdt_error: 1,
-  eit_error: 1,
-  rst_error: 100,
-  tdt_error: 1,
-  empty_buf: 1,
+  // P1 — Service not receivable (threshold=1: any single violation fires)
+  ts_sync: 1,         // 1.1 — TS sync loss: any occurrence
+  sync_byte: 1,       // 1.2 — Sync byte error: any occurrence
+  pat_error: 1,       // 1.3 — PAT missing/interval >500 ms
+  cc_error: 1,        // 1.4 — Continuity counter error: any
+  pmt_error: 1,       // 1.5 — PMT missing/interval >500 ms
+  pid_error: 1,       // 1.6 — Unreferenced PID for >5 s
+  // P2 — Quality impairment
+  transport_error: 1, // 2.1 — TEI bit set in TS packet
+  crc_error: 1,       // 2.2 — CRC error in PSI section
+  pcr_disc: 1,        // 2.3 — PCR discontinuity >100 ms
+  pcr_acc: 3,         // 2.4 — PCR jitter >500 ns; debounce=3 to reduce FFmpeg noise
+  pcr_rep: 1,         // 2.5 — PCR interval >40 ms
+  pts_error: 1,       // 2.6 — PTS error in video/audio
+  cat_error: 1,       // 2.7 — CAT missing/interval >500 ms (optional table)
+  // P3 — Informational
+  nit_error: 1,       // 3.1/3.2 — NIT error
+  sdt_error: 1,       // 3.5 — SDT error
+  eit_error: 1,       // 3.6 — EIT error
+  rst_error: 1,       // 3.7 — RST error
+  tdt_error: 1,       // 3.8 — TDT/TOT missing/interval >30 s
+  empty_buf: 1,       // Buffer empty (informational)
 };
 
 function newDecoderRow(seed = Date.now()) {
@@ -96,7 +102,6 @@ function collectAutoPids(result) {
     const n = Number(v);
     if (Number.isFinite(n) && n >= 0) pids.add(n);
   };
-  (result?.structure?.streams || []).forEach((s) => push(s.pid));
   (result?.programs || []).forEach((p) => (p.streams || []).forEach((s) => push(s.pid)));
   (result?.orphanStreams || []).forEach((s) => push(s.pid));
   (result?.dvb?.services || []).forEach((svc) => {
@@ -107,24 +112,31 @@ function collectAutoPids(result) {
   return Array.from(pids).sort((a, b) => a - b);
 }
 
-function qualityMetrics(status) {
-  const counts = status?.counts || {};
+function qualityMetrics(etrStatus, tsResult) {
+  const counts = etrStatus?.counts || {};
+  const dvb = tsResult?.dvb || {};
+  // Prefer live ETR290 incident counts when ETR is running; fall back to TS probe data.
   return {
-    packetLoss: (counts.ts_sync || 0) + (counts.transport_error || 0),
-    jitter: (counts.pcr_acc || 0) + (counts.pcr_disc || 0),
-    pcrErrors: (counts.pcr_acc || 0) + (counts.pcr_rep || 0) + (counts.pcr_disc || 0),
-    ccErrors: counts.cc_error || 0,
+    packetLoss: (counts.ts_sync || 0) + (counts.transport_error || 0)
+      || Math.round(Number(dvb.arrival?.packetLossPct) || 0),
+    jitter: (counts.pcr_acc || 0) + (counts.pcr_disc || 0)
+      || (dvb.timestampDiscontinuity?.pcrDiscontinuity || 0),
+    pcrErrors: (counts.pcr_acc || 0) + (counts.pcr_rep || 0) + (counts.pcr_disc || 0)
+      || (dvb.timestampDiscontinuity?.count || 0),
+    ccErrors: (counts.cc_error || 0) || (dvb.continuityCounterErrors?.count || 0),
   };
 }
 
 function extractPidRows(selectedResult) {
-  const streams = selectedResult?.structure?.streams || [];
-  return streams
+  const rows = [];
+  (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
+  (selectedResult?.orphanStreams || []).forEach((s) => rows.push(s));
+  return rows
     .map((s) => ({
       pid: s.pid,
       pidHex: s.pidHex,
       codecType: s.codecType || s.type || "unknown",
-      codec: s.codec || s.description || "-",
+      codec: s.codecName || s.codec || s.description || "-",
       bitrate: Number(s.bitrate || 0),
     }))
     .slice(0, 20);
@@ -215,6 +227,12 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [thresholds, setThresholds] = useState(() =>
     ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: String(RECOMMENDED_THRESHOLDS[c.id] || 1) }), {})
   );
+  const [etrP1Enabled, setEtrP1Enabled] = useState(true);
+  const [etrP2Enabled, setEtrP2Enabled] = useState(true);
+  const [etrP3Enabled, setEtrP3Enabled] = useState(true);
+  const [excludePidsText, setExcludePidsText] = useState("");
+  const [selectedServiceIds, setSelectedServiceIds] = useState([]);
+  const [busy, setBusy] = useState(false);
 
   const {
     result,
@@ -302,21 +320,53 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     () => (autoIncludePids.length ? autoIncludePids.join(", ") : "Awaiting TS input..."),
     [autoIncludePids]
   );
-  const etrConfig = useMemo(
-    () => ({
-      // PID scope is always auto-derived from analysed TS input.
-      includePids: autoIncludePids,
-      excludePids: [],
-      allowUnknownPid,
-      // Thresholds tune alarm triggering only, never measured values.
-      thresholds: Object.fromEntries(
-        Object.entries(thresholds)
-          .map(([k, v]) => [k, parseInt(v, 10)])
-          .filter(([, v]) => Number.isFinite(v) && v > 0)
-      ),
-    }),
-    [autoIncludePids, allowUnknownPid, thresholds]
+  // Map service ID → list of PIDs belonging to that service
+  const servicePidsByServiceId = useMemo(() => {
+    const map = {};
+    (selectedResult?.dvb?.services || []).forEach((svc) => {
+      const pids = [];
+      if (svc.pmtPid != null) pids.push(svc.pmtPid);
+      if (svc.pcrPid != null) pids.push(svc.pcrPid);
+      const prog = (selectedResult?.programs || []).find((p) => p.programId === svc.serviceId);
+      if (prog) (prog.streams || []).forEach((s) => { if (s.pid != null) pids.push(s.pid); });
+      map[svc.serviceId] = [...new Set(pids)];
+    });
+    return map;
+  }, [selectedResult]);
+
+  const parsedExcludePids = useMemo(
+    () =>
+      excludePidsText
+        .split(/[,\s]+/)
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n) && n >= 0),
+    [excludePidsText]
   );
+
+  const etrConfig = useMemo(() => {
+    const includePids =
+      selectedServiceIds.length > 0
+        ? [...new Set(selectedServiceIds.flatMap((sid) => servicePidsByServiceId[sid] || []))]
+        : autoIncludePids;
+    // Build thresholds: disabled priorities get threshold=99999 (effectively silenced)
+    const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
+    const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
+    const P3_KEYS = ['nit_error', 'sdt_error', 'eit_error', 'rst_error', 'tdt_error', 'empty_buf'];
+    const parsedThresholds = Object.fromEntries(
+      Object.entries(thresholds)
+        .map(([k, v]) => [k, parseInt(v, 10)])
+        .filter(([, v]) => Number.isFinite(v) && v > 0)
+    );
+    if (!etrP1Enabled) P1_KEYS.forEach((k) => { parsedThresholds[k] = 99999; });
+    if (!etrP2Enabled) P2_KEYS.forEach((k) => { parsedThresholds[k] = 99999; });
+    if (!etrP3Enabled) P3_KEYS.forEach((k) => { parsedThresholds[k] = 99999; });
+    return {
+      includePids,
+      excludePids: parsedExcludePids,
+      allowUnknownPid,
+      thresholds: parsedThresholds,
+    };
+  }, [autoIncludePids, allowUnknownPid, thresholds, selectedServiceIds, servicePidsByServiceId, parsedExcludePids, etrP1Enabled, etrP2Enabled, etrP3Enabled]);
 
   const selectedEtrStatus = useMemo(() => {
     if (!selectedId) return etr.status;
@@ -332,7 +382,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     return fromRow || "";
   }, [selectedId, resultsById, selectedResult, rowPlans]);
 
-  const m = qualityMetrics(selectedEtrStatus);
+  const m = qualityMetrics(selectedEtrStatus, selectedResult);
   const pids = extractPidRows(selectedResult);
   const forensic = forensicById[selectedId] || [];
   const latestForensic = forensic.length ? forensic[forensic.length - 1] : null;
@@ -393,23 +443,26 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   };
 
   const startDecoder = async () => {
-    await startRows(validRowPlans);
+    if (busy) return;
+    setBusy(true);
+    try { await startRows(validRowPlans); } finally { setBusy(false); }
   };
 
   const startSingleDecoderRow = async (rowKey) => {
+    if (busy) return;
     const rowPlan = rowPlans.find((r) => r.key === rowKey && r.url);
     if (!rowPlan) return;
-    await startRows([rowPlan]);
+    setBusy(true);
+    try { await startRows([rowPlan]); } finally { setBusy(false); }
   };
 
   const stopDecoder = async () => {
-    if (!selectedId) return;
+    if (!selectedId || busy) return;
+    setBusy(true);
     try {
       await stop(selectedId);
-    } catch (_) {}
-    try {
-      await refreshActives();
-    } catch (_) {}
+      try { await refreshActives(); } catch (_) {}
+    } finally { setBusy(false); }
   };
 
   const startEtrForSelected = async () => {
@@ -417,16 +470,21 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       setEtrActionNote({ type: "warn", text: "Select a decoder first." });
       return;
     }
+    if (busy) return;
     if (selectedEtrExists) {
-      await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
-      await etr.refreshActives();
-      setEtrActionNote({ type: "info", text: `ETR already running for ${selectedId}. Config updated.` });
+      setBusy(true);
+      try {
+        await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
+        await etr.refreshActives();
+        setEtrActionNote({ type: "info", text: `ETR already running for ${selectedId}. Config updated.` });
+      } finally { setBusy(false); }
       return;
     }
     if (!selectedDecoderUrl) {
       setEtrActionNote({ type: "warn", text: "Start decoder first so ETR can attach to a live URL." });
       return;
     }
+    setBusy(true);
     try {
       await etr.start(selectedEtrMonitorId, selectedDecoderUrl, captureNic || undefined, {
         profileName: selectedProfileName || undefined,
@@ -443,7 +501,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         return;
       }
       setEtrActionNote({ type: "err", text: msg });
-    }
+    } finally { setBusy(false); }
   };
 
   const stopEtrForSelected = async () => {
@@ -451,13 +509,13 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       setEtrActionNote({ type: "warn", text: "Select a decoder first." });
       return;
     }
-    if (!selectedEtrExists) {
-      setEtrActionNote({ type: "info", text: `No ETR monitor is running for ${selectedId}.` });
-      return;
-    }
-    await etr.stop(selectedEtrMonitorId);
-    await etr.refreshActives();
-    setEtrActionNote({ type: "ok", text: `ETR stopped for ${selectedId}.` });
+    if (!selectedEtrExists || busy) return;
+    setBusy(true);
+    try {
+      await etr.stop(selectedEtrMonitorId);
+      await etr.refreshActives();
+      setEtrActionNote({ type: "ok", text: `ETR stopped for ${selectedId}.` });
+    } finally { setBusy(false); }
   };
 
   const applyProfileToForm = (name) => {
@@ -473,6 +531,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       }
       return next;
     });
+    if (Array.isArray(cfg.excludePids) && cfg.excludePids.length > 0) {
+      setExcludePidsText(cfg.excludePids.join(", "));
+    }
   };
 
   const saveCurrentProfile = async () => {
@@ -555,20 +616,21 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   </Field>
                   <button
                     onClick={() => startSingleDecoderRow(row.key)}
-                    disabled={!row.host || !row.port}
+                    disabled={!row.host || !row.port || busy}
                     style={{
                       height: 34,
                       borderRadius: 2,
-                      border: `1px solid ${row.host && row.port ? C.ok : C.border}`,
-                      color: row.host && row.port ? C.bg : C.muted,
-                      background: row.host && row.port ? C.ok : "transparent",
-                      boxShadow: row.host && row.port ? `0 0 8px ${C.ok}44` : "none",
+                      border: `1px solid ${row.host && row.port && !busy ? C.ok : C.border}`,
+                      color: row.host && row.port && !busy ? C.bg : C.muted,
+                      background: row.host && row.port && !busy ? C.ok : "transparent",
+                      boxShadow: row.host && row.port && !busy ? `0 0 8px ${C.ok}44` : "none",
                       fontSize: 10,
                       fontWeight: 700,
-                      cursor: row.host && row.port ? "pointer" : "not-allowed",
+                      cursor: row.host && row.port && !busy ? "pointer" : "not-allowed",
+                      opacity: busy ? 0.5 : 1,
                     }}
                   >
-                    Start
+                    {busy ? "…" : "Start"}
                   </button>
                   <button
                     onClick={() => removeDecoderRow(row.key)}
@@ -604,36 +666,38 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </button>
                 <button
                   onClick={startDecoder}
-                  disabled={!validRowPlans.length}
+                  disabled={!validRowPlans.length || busy}
                   style={{
                     borderRadius: 2,
-                    border: `1px solid ${validRowPlans.length ? C.ok : C.border}`,
-                    color: validRowPlans.length ? C.bg : C.muted,
-                    background: validRowPlans.length ? C.ok : "transparent",
+                    border: `1px solid ${validRowPlans.length && !busy ? C.ok : C.border}`,
+                    color: validRowPlans.length && !busy ? C.bg : C.muted,
+                    background: validRowPlans.length && !busy ? C.ok : "transparent",
                     padding: "6px 8px",
                     fontSize: 10,
                     fontWeight: 700,
-                    cursor: validRowPlans.length ? "pointer" : "not-allowed",
-                    boxShadow: validRowPlans.length ? `0 0 10px ${C.ok}55` : "none",
+                    cursor: validRowPlans.length && !busy ? "pointer" : "not-allowed",
+                    boxShadow: validRowPlans.length && !busy ? `0 0 10px ${C.ok}55` : "none",
+                    opacity: busy ? 0.5 : 1,
                   }}
                 >
-                  ▶ START BATCH
+                  {busy ? "STARTING…" : "▶ START BATCH"}
                 </button>
                 <button
                   onClick={stopDecoder}
-                  disabled={!selectedId}
+                  disabled={!selectedId || busy}
                   style={{
                     borderRadius: 2,
-                    border: `1px solid ${selectedId ? C.err : C.border}`,
-                    color: selectedId ? C.err : C.muted,
+                    border: `1px solid ${selectedId && !busy ? C.err : C.border}`,
+                    color: selectedId && !busy ? C.err : C.muted,
                     background: "transparent",
                     padding: "6px 8px",
                     fontSize: 10,
                     fontWeight: 700,
-                    cursor: selectedId ? "pointer" : "not-allowed",
+                    cursor: selectedId && !busy ? "pointer" : "not-allowed",
+                    opacity: busy ? 0.5 : 1,
                   }}
                 >
-                  ■ STOP DECODER
+                  {busy ? "STOPPING…" : "■ STOP DECODER"}
                 </button>
               </div>
 
@@ -688,6 +752,27 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               <PanelBox style={{ borderColor: C.borderHi }}>
                 <SectionHead icon="🧪" title="ETR 290 Tuning" right={<Badge label="LIVE CONFIG" color={C.warn} small />} />
                 <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
+                  {/* Per-priority enable/disable */}
+                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ fontSize: 9, color: C.muted, marginRight: 2 }}>Monitor priorities:</span>
+                    {[
+                      { label: "P1 Critical", enabled: etrP1Enabled, set: setEtrP1Enabled, color: C.err },
+                      { label: "P2 Quality",  enabled: etrP2Enabled, set: setEtrP2Enabled, color: C.warn },
+                      { label: "P3 Info",     enabled: etrP3Enabled, set: setEtrP3Enabled, color: C.info },
+                    ].map(({ label, enabled, set, color }) => (
+                      <button key={label} onClick={() => set((v) => !v)} style={{
+                        padding: "2px 8px", fontSize: 9, fontWeight: 700,
+                        border: `1px solid ${enabled ? color : C.border}`,
+                        color: enabled ? color : C.muted,
+                        background: enabled ? `${color}18` : "transparent",
+                        borderRadius: 2, cursor: "pointer",
+                        display: "flex", alignItems: "center", gap: 4,
+                      }}>
+                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block" }} />
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <div style={{ fontSize: 9, color: C.muted }}>
                       Recommended baseline is preloaded for broadcast ingest (PCR/CC strict, SI timing tuned).
@@ -749,10 +834,64 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     </Field>
                   </div>
 
+                  {/* Service filter — restrict ETR to specific services */}
+                  {(selectedResult?.dvb?.services || []).length > 0 && (
+                    <div>
+                      <div style={{ fontSize: 9, color: C.muted, marginBottom: 4 }}>
+                        Service Filter (unchecked = monitor all services)
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                        {(selectedResult.dvb.services || []).map((svc) => {
+                          const checked = selectedServiceIds.includes(svc.serviceId);
+                          return (
+                            <label
+                              key={svc.serviceId}
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: 4,
+                                fontSize: 9,
+                                color: checked ? C.cyan : C.muted,
+                                background: checked ? `${C.cyan}12` : C.dim,
+                                border: `1px solid ${checked ? C.cyan : C.border}`,
+                                borderRadius: 2,
+                                padding: "3px 6px",
+                                cursor: "pointer",
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={(e) =>
+                                  setSelectedServiceIds((prev) =>
+                                    e.target.checked
+                                      ? [...prev, svc.serviceId]
+                                      : prev.filter((id) => id !== svc.serviceId)
+                                  )
+                                }
+                                style={{ accentColor: C.cyan }}
+                              />
+                              {svc.serviceName || `SID ${svc.serviceId}`}
+                              {(servicePidsByServiceId[svc.serviceId] || []).length > 0 && (
+                                <span style={{ color: C.muted }}>
+                                  ({(servicePidsByServiceId[svc.serviceId] || []).length} PIDs)
+                                </span>
+                              )}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <Field label="Input PIDs (auto-derived)">
                       <Input
-                        value={autoIncludePidsText}
+                        value={
+                          selectedServiceIds.length > 0
+                            ? [...new Set(selectedServiceIds.flatMap((sid) => servicePidsByServiceId[sid] || []))].join(", ") || "No PIDs for selection"
+                            : autoIncludePidsText
+                        }
                         onChange={() => {}}
                         readOnly
                         placeholder="Awaiting TS input..."
@@ -760,17 +899,26 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         style={{ color: C.muted }}
                       />
                     </Field>
-                    <Field label="Excluded PIDs">
+                    <Field label="Excluded PIDs (comma-separated)">
                       <Input
-                        value="None (automatic mode)"
-                        onChange={() => {}}
-                        readOnly
-                        placeholder="None"
+                        value={excludePidsText}
+                        onChange={(e) => setExcludePidsText(e.target.value)}
+                        placeholder="e.g. 8191, 0x1FFF"
                         mono
-                        style={{ color: C.muted }}
                       />
                     </Field>
                   </div>
+
+                  {/* Active ETR thresholds on running monitor */}
+                  {selectedEtrStatus?.config?.thresholds && (
+                    <div style={{ fontSize: 9, color: C.muted, background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "4px 6px" }}>
+                      <span style={{ color: C.head }}>Active on monitor: </span>
+                      {Object.entries(selectedEtrStatus.config.thresholds)
+                        .filter(([, v]) => Number(v) !== 1)
+                        .map(([k, v]) => `${k}=${v}`)
+                        .join("  ·  ") || "all thresholds = 1 (default)"}
+                    </div>
+                  )}
 
                   <label style={{ display: "flex", alignItems: "center", gap: 6, color: allowUnknownPid ? C.ok : C.warn, fontSize: 10 }}>
                     <input type="checkbox" checked={allowUnknownPid} onChange={(e) => setAllowUnknownPid(e.target.checked)} style={{ accentColor: C.ok }} />
@@ -780,19 +928,31 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     ETR tuning changes alarm trigger thresholds only; measured TS/PID values remain untouched.
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 6 }}>
-                    {ETR_CHECK_FIELDS.map((c) => (
-                      <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px", gap: 5, alignItems: "center", background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "4px 6px" }}>
-                        <span style={{ fontSize: 9, color: C.muted }}>{c.label}</span>
-                        <Input
-                          value={thresholds[c.id]}
-                          onChange={(e) => setThresholds((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                          mono
-                          style={{ color: Number(thresholds[c.id]) === Number(RECOMMENDED_THRESHOLDS[c.id] || 1) ? C.muted : C.text }}
-                        />
+                  {[
+                    { p: 1, label: "P1 — Critical (Service not receivable)", color: C.err, enabled: etrP1Enabled, keys: ['ts_sync','sync_byte','pat_error','cc_error','pmt_error','pid_error'] },
+                    { p: 2, label: "P2 — Quality impairment", color: C.warn, enabled: etrP2Enabled, keys: ['transport_error','crc_error','pcr_disc','pcr_acc','pcr_rep','pts_error','cat_error'] },
+                    { p: 3, label: "P3 — Informational", color: C.info, enabled: etrP3Enabled, keys: ['nit_error','sdt_error','eit_error','rst_error','tdt_error','empty_buf'] },
+                  ].map(({ p, label, color, enabled, keys }) => (
+                    <div key={p}>
+                      <div style={{ fontSize: 8, color: enabled ? color : C.muted, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4, opacity: enabled ? 1 : 0.5 }}>
+                        {label}{!enabled ? " — DISABLED" : ""}
                       </div>
-                    ))}
-                  </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 4, opacity: enabled ? 1 : 0.35 }}>
+                        {ETR_CHECK_FIELDS.filter((c) => keys.includes(c.id)).map((c) => (
+                          <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 52px", gap: 4, alignItems: "center", background: C.dim, border: `1px solid ${enabled ? C.border : C.dim}`, borderRadius: 2, padding: "3px 6px" }}>
+                            <span style={{ fontSize: 8, color: C.muted }}>{c.label}</span>
+                            <Input
+                              value={thresholds[c.id] ?? String(RECOMMENDED_THRESHOLDS[c.id] || 1)}
+                              onChange={(e) => setThresholds((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                              mono
+                              disabled={!enabled}
+                              style={{ color: Number(thresholds[c.id]) === Number(RECOMMENDED_THRESHOLDS[c.id] || 1) ? C.muted : color }}
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
 
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <Field label="Profile name">
@@ -810,37 +970,39 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
                       onClick={startEtrForSelected}
-                      disabled={!selectedId || !selectedDecoderUrl}
+                      disabled={!selectedId || !selectedDecoderUrl || busy}
                       style={{
                         flex: 1,
                         borderRadius: 2,
-                        border: `1px solid ${selectedId && selectedDecoderUrl ? C.info : C.border}`,
-                        color: selectedId && selectedDecoderUrl ? C.info : C.muted,
+                        border: `1px solid ${selectedId && selectedDecoderUrl && !busy ? C.info : C.border}`,
+                        color: selectedId && selectedDecoderUrl && !busy ? C.info : C.muted,
                         background: selectedEtrExists ? `${C.info}10` : "transparent",
                         padding: "5px 8px",
                         fontSize: 10,
                         fontWeight: 700,
-                        cursor: selectedId && selectedDecoderUrl ? "pointer" : "not-allowed",
+                        cursor: selectedId && selectedDecoderUrl && !busy ? "pointer" : "not-allowed",
+                        opacity: busy ? 0.5 : 1,
                       }}
                     >
-                      {selectedEtrExists ? "Enable ETR (Apply)" : "Enable ETR"}
+                      {busy ? "WORKING…" : selectedEtrExists ? "Enable ETR (Apply)" : "Enable ETR"}
                     </button>
                     <button
                       onClick={stopEtrForSelected}
-                      disabled={!selectedId}
+                      disabled={!selectedId || busy}
                       style={{
                         flex: 1,
                         borderRadius: 2,
-                        border: `1px solid ${selectedId ? C.err : C.border}`,
-                        color: selectedId ? C.err : C.muted,
+                        border: `1px solid ${selectedId && !busy ? C.err : C.border}`,
+                        color: selectedId && !busy ? C.err : C.muted,
                         background: "transparent",
                         padding: "5px 8px",
                         fontSize: 10,
                         fontWeight: 700,
-                        cursor: selectedId ? "pointer" : "not-allowed",
+                        cursor: selectedId && !busy ? "pointer" : "not-allowed",
+                        opacity: busy ? 0.5 : 1,
                       }}
                     >
-                      Stop ETR
+                      {busy ? "WORKING…" : "Stop ETR"}
                     </button>
                   </div>
 
@@ -933,11 +1095,47 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
           {subTab === "quality" && (
             <>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
-                <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
-                <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
-                <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
-                <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
+              <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "1fr 180px" : "1fr", gap: 8, alignItems: "start" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                    <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
+                    <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
+                    <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
+                    <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
+                  </div>
+                  {/* IAT / Network inline metrics */}
+                  {selectedResult?.dvb?.arrival && (() => {
+                    const arr = selectedResult.dvb.arrival;
+                    const iat = arr.iatMs || {};
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                        <StatBox label="IAT avg" value={iat.avg != null ? `${Number(iat.avg).toFixed(2)} ms` : "-"} color={Number(iat.avg) > 50 ? C.warn : C.ok} />
+                        <StatBox label="IAT p95" value={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} color={Number(iat.p95) > 150 ? C.err : C.ok} />
+                        <StatBox label="Net Jitter" value={arr.jitterMs != null ? `${Number(arr.jitterMs).toFixed(2)} ms` : "-"} color={Number(arr.jitterMs) > 5 ? C.warn : C.ok} />
+                        <StatBox label="Pkt Loss %" value={arr.packetLossPct != null ? `${Number(arr.packetLossPct).toFixed(3)}` : "-"} color={Number(arr.packetLossPct) > 0.01 ? C.err : C.ok} />
+                      </div>
+                    );
+                  })()}
+                </div>
+                {/* Live thumbnail */}
+                {selectedResult?.thumbnailUrl && (
+                  <div style={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ fontSize: 8, color: C.muted, padding: "4px 6px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                      Live Frame
+                    </div>
+                    <img
+                      src={selectedResult.thumbnailUrl}
+                      alt="Stream frame"
+                      style={{ width: "100%", display: "block" }}
+                      onError={(e) => { e.target.parentElement.style.display = "none"; }}
+                    />
+                    {selectedResult?.dvb?.services?.[0]?.serviceName && (
+                      <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        {selectedResult.dvb.services[0].serviceName}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
 
               <PanelBox>

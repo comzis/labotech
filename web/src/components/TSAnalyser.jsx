@@ -225,6 +225,17 @@ export default function TSAnalyser({ lastMessage }) {
   const [activeIdB, setActiveIdB] = useState("");
   const [monitorLabel, setMonitorLabel] = useState("");
   const [eventRows, setEventRows] = useState([]);
+  // ETR per-priority enable/disable and per-check thresholds
+  const [etrP1, setEtrP1] = useState(true);
+  const [etrP2, setEtrP2] = useState(true);
+  const [etrP3, setEtrP3] = useState(true);
+  // ETSI TR 101 290 compliant default thresholds
+  const [etrThresholds, setEtrThresholds] = useState({
+    ts_sync: 1, sync_byte: 1, pat_error: 1, cc_error: 1, pmt_error: 1, pid_error: 1,
+    transport_error: 1, crc_error: 1, pcr_disc: 1, pcr_acc: 3, pcr_rep: 1,
+    pts_error: 1, cat_error: 1, nit_error: 1, sdt_error: 1, eit_error: 1,
+    rst_error: 1, tdt_error: 1, empty_buf: 1,
+  });
 
   const {
     result,
@@ -373,8 +384,8 @@ export default function TSAnalyser({ lastMessage }) {
   const programs = useMemo(() => {
     return (activeResult?.programs || []).map((p) => ({
       num: Number.isFinite(Number(p.programId)) ? Number(p.programId) : null,
-      name: p.serviceName || `Service ${p.programId}`,
-      provider: p.providerName || "-",
+      name: p.name || p.serviceName || `Service ${p.programId}`,
+      provider: p.provider || p.providerName || "-",
       running: 4,
       scrambled: Boolean(p.scrambled),
       eit: true,
@@ -413,7 +424,7 @@ export default function TSAnalyser({ lastMessage }) {
         ok: services.length > 0,
         tsid: activeResult?.dvb?.tsid || "-",
         desc: "Service names/provider and running status from parsed service list.",
-        entries: services.map((s) => ({ num: s.serviceId, pid: "run:4", label: `${s.serviceName || "-"} / ${s.providerName || "-"}` })),
+        entries: services.map((s) => ({ num: s.serviceId, pid: "run:4", label: `${s.serviceName || "-"} / ${s.serviceProvider || s.providerName || "-"}` })),
       },
       {
         pid: "0x00PM",
@@ -489,6 +500,19 @@ export default function TSAnalyser({ lastMessage }) {
     return `${stem}-${Date.now()}`;
   };
 
+  // Build ETR config respecting per-priority enables.
+  // Disabled priority checks get threshold=99999 (effectively disabled).
+  const buildEtrConfig = () => {
+    const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
+    const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
+    const P3_KEYS = ['nit_error', 'sdt_error', 'eit_error', 'rst_error', 'tdt_error', 'empty_buf'];
+    const thresholds = { ...etrThresholds };
+    if (!etrP1) P1_KEYS.forEach((k) => { thresholds[k] = 99999; });
+    if (!etrP2) P2_KEYS.forEach((k) => { thresholds[k] = 99999; });
+    if (!etrP3) P3_KEYS.forEach((k) => { thresholds[k] = 99999; });
+    return { thresholds };
+  };
+
   const handleProbe = async (e) => {
     e.preventDefault();
     const urlA = buildProbeUrl({ mode, host, port, latency, passphrase });
@@ -498,7 +522,7 @@ export default function TSAnalyser({ lastMessage }) {
       const idA = makeMonitorId(monitorLabel || "analyser");
       await startContinuous(idA, urlA, 5000);
       setActiveId(idA);
-      await etr.start(`etr-${idA}`, urlA);
+      await etr.start(`etr-${idA}`, urlA, undefined, { config: buildEtrConfig() });
       if (dualLeg) {
         const urlB = buildProbeUrl({ mode, host: hostB, port: portB, latency, passphrase });
         if (urlB) {
@@ -529,6 +553,26 @@ export default function TSAnalyser({ lastMessage }) {
     }
     setActiveId("");
     setActiveIdB("");
+  };
+
+  const [applyConfigStatus, setApplyConfigStatus] = useState(null); // null | 'ok' | 'err'
+  const handleApplyEtrConfig = async () => {
+    const cfg = buildEtrConfig();
+    const targets = activeId
+      ? [`etr-${activeId}`]
+      : monitoredIds.map((id) => `etr-${id}`);
+    let ok = 0;
+    let fail = 0;
+    for (const monId of targets) {
+      try {
+        await etr.updateConfig(monId, cfg);
+        ok += 1;
+      } catch (_) {
+        fail += 1;
+      }
+    }
+    setApplyConfigStatus(fail === 0 ? 'ok' : 'err');
+    setTimeout(() => setApplyConfigStatus(null), 2000);
   };
 
   const ts = new Date().toTimeString().slice(0, 8);
@@ -602,30 +646,86 @@ export default function TSAnalyser({ lastMessage }) {
       </div>
 
       {tab === "ETR 290" && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 6 }}>
-          <Panel title="ETR 290 Priority Checks" right="ETSI TR 101 290">
-            <table style={{ width: "100%", borderCollapse: "collapse" }}>
-              <thead><tr><TH>ID</TH><TH>Priority</TH><TH>Description</TH><TH right>Count</TH><TH>Status</TH></tr></thead>
-              <tbody>
-                {[1, 2, 3].map((p) => (
-                  etrChecks.filter((r) => r.p === p).length ? (
-                    [
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 280px", gap: 6 }}>
+          {/* LEFT: Priority checks table */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {/* Per-priority enable/disable header */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 8px", background: C.panelB, border: `1px solid ${C.border}`, borderRadius: 3 }}>
+              <span style={{ fontSize: 9, color: C.head, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 4 }}>Monitor:</span>
+              {[
+                { key: 'p1', label: 'P1 Critical', color: C.err, enabled: etrP1, set: setEtrP1 },
+                { key: 'p2', label: 'P2 Quality', color: C.warn, enabled: etrP2, set: setEtrP2 },
+                { key: 'p3', label: 'P3 Info', color: C.info, enabled: etrP3, set: setEtrP3 },
+              ].map(({ key, label, color, enabled, set }) => (
+                <button key={key} onClick={() => set((v) => !v)} style={{
+                  display: "flex", alignItems: "center", gap: 4, padding: "2px 8px",
+                  border: `1px solid ${enabled ? color : C.border}`,
+                  background: enabled ? `${color}18` : "transparent",
+                  borderRadius: 2, cursor: "pointer",
+                  color: enabled ? color : C.muted, fontSize: 9, fontWeight: 700,
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block" }} />
+                  {label}
+                </button>
+              ))}
+              <button
+                onClick={handleApplyEtrConfig}
+                disabled={monitoredIds.length === 0}
+                style={{
+                  marginLeft: "auto", height: 22, padding: "0 10px", borderRadius: 2, cursor: "pointer",
+                  border: `1px solid ${applyConfigStatus === 'ok' ? C.ok : applyConfigStatus === 'err' ? C.err : C.cyan}`,
+                  color: applyConfigStatus === 'ok' ? C.ok : applyConfigStatus === 'err' ? C.err : C.cyan,
+                  background: "transparent", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em",
+                  opacity: monitoredIds.length === 0 ? 0.4 : 1,
+                }}
+              >
+                {applyConfigStatus === 'ok' ? 'APPLIED' : applyConfigStatus === 'err' ? 'FAILED' : 'APPLY CONFIG'}
+              </button>
+            </div>
+
+            <Panel title="ETR 290 Priority Checks" right="ETSI TR 101 290">
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead><tr><TH>ID</TH><TH>Priority</TH><TH>Description</TH><TH right>Count</TH><TH right>Threshold</TH><TH>Status</TH></tr></thead>
+                <tbody>
+                  {[
+                    { p: 1, enabled: etrP1, color: C.err },
+                    { p: 2, enabled: etrP2, color: C.warn },
+                    { p: 3, enabled: etrP3, color: C.info },
+                  ].map(({ p, enabled, color }) => {
+                    const rows = etrChecks.filter((r) => r.p === p);
+                    if (!rows.length) return null;
+                    return [
                       <tr key={`hdr-${p}`}>
-                        <td colSpan={5} style={{ background: C.panelB, padding: "3px 4px", fontSize: 8, fontWeight: 800, color: C.head, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                          Priority {p}
+                        <td colSpan={6} style={{ background: C.panelB, padding: "3px 4px", fontSize: 8, fontWeight: 800, color: enabled ? color : C.muted, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                          Priority {p} {enabled ? "" : "— DISABLED"}
                         </td>
                       </tr>,
-                      ...etrChecks.filter((r) => r.p === p).map((r) => (
-                        <tr key={r.id} style={{ background: !r.ok ? "rgba(255,61,87,0.05)" : "transparent" }}>
-                          <TD mono small>{r.id}</TD><TD><span style={{ color: p === 1 ? C.err : p === 2 ? C.warn : C.info, fontSize: 9 }}>P{p}</span></TD><TD>{r.label}</TD><TD right mono><span style={{ color: r.count > 0 ? C.err : C.muted }}>{r.count}</span></TD><TD><Badge label={r.ok ? "PASS" : "FAIL"} color={r.ok ? C.ok : C.err} small /></TD>
+                      ...rows.map((r) => (
+                        <tr key={r.id} style={{ background: !r.ok && enabled ? `${color}0a` : "transparent", opacity: enabled ? 1 : 0.4 }}>
+                          <TD mono small>{r.id}</TD>
+                          <TD><span style={{ color, fontSize: 9 }}>P{p}</span></TD>
+                          <TD>{r.label}</TD>
+                          <TD right mono><span style={{ color: r.count > 0 ? color : C.muted }}>{r.count}</span></TD>
+                          <TD right>
+                            <input
+                              type="number" min={1} max={9999}
+                              value={etrThresholds[r.key] ?? 1}
+                              onChange={(e) => r.key && setEtrThresholds((prev) => ({ ...prev, [r.key]: Math.max(1, parseInt(e.target.value, 10) || 1) }))}
+                              disabled={!r.key || !enabled}
+                              style={{ width: 44, background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, color: C.text, fontSize: 9, padding: "1px 3px", textAlign: "right" }}
+                            />
+                          </TD>
+                          <TD><Badge label={!enabled ? "OFF" : r.ok ? "PASS" : "FAIL"} color={!enabled ? C.muted : r.ok ? C.ok : color} small /></TD>
                         </tr>
                       )),
-                    ]
-                  ) : null
-                ))}
-              </tbody>
-            </table>
-          </Panel>
+                    ];
+                  })}
+                </tbody>
+              </table>
+            </Panel>
+          </div>
+
+          {/* RIGHT: Timing + IAT + Thumbnail */}
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             <Panel title="PCR / Timing">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}>
@@ -633,10 +733,56 @@ export default function TSAnalyser({ lastMessage }) {
                 <PidRef pidLike={activeResult?.dvb?.pcr?.pid ?? activeResult?.dvb?.pcr?.pidHex} color={C.accent} />
               </div>
               <KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} />
-              <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={C.ok} />
+              <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={pcrJitter != null && pcrJitter > 5 ? C.warn : C.ok} />
               <KV k="CC Errors" v={String(ccErrors)} vc={ccErrors > 0 ? C.err : C.ok} />
             </Panel>
-            <Panel title="Stream Info" status={activeResult ? "OK" : "WARN"}><KV k="Source" v={target.host} /><KV k="Protocol" v={target.protocol} vc={C.accent} /><KV k="Port" v={target.port} /><KV k="SMPTE 2022-7" v={dualLeg ? "Enabled" : "Disabled"} vc={dualLeg ? C.gold : C.muted} /></Panel>
+
+            {/* IAT / Network panel */}
+            <Panel title="IAT / Network">
+              {(() => {
+                const arr = activeResult?.dvb?.arrival || {};
+                const iat = arr.iatMs || {};
+                const hasIat = iat.avg != null;
+                const jitter = arr.jitterMs;
+                const loss = arr.packetLossPct;
+                return hasIat || jitter != null || loss != null ? (
+                  <div>
+                    {hasIat && <>
+                      <KV k="IAT avg" v={`${Number(iat.avg).toFixed(2)} ms`} vc={Number(iat.avg) > 50 ? C.warn : C.ok} />
+                      <KV k="IAT min" v={iat.min != null ? `${Number(iat.min).toFixed(2)} ms` : "-"} />
+                      <KV k="IAT max" v={iat.max != null ? `${Number(iat.max).toFixed(2)} ms` : "-"} />
+                      <KV k="IAT p95" v={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} vc={Number(iat.p95) > 150 ? C.err : C.ok} />
+                    </>}
+                    {jitter != null && <KV k="Jitter" v={`${Number(jitter).toFixed(2)} ms`} vc={Number(jitter) > 5 ? C.warn : C.ok} />}
+                    {loss != null && <KV k="Pkt Loss" v={`${Number(loss).toFixed(3)} %`} vc={Number(loss) > 0.01 ? C.err : C.ok} />}
+                  </div>
+                ) : (
+                  <span style={{ fontSize: 9, color: C.muted }}>IAT sniffer not active (set Capture NIC)</span>
+                );
+              })()}
+            </Panel>
+
+            <Panel title="Stream Info" status={activeResult ? "OK" : "WARN"}>
+              <KV k="Source" v={target.host} />
+              <KV k="Protocol" v={target.protocol} vc={C.accent} />
+              <KV k="Port" v={target.port} />
+              <KV k="SMPTE 2022-7" v={dualLeg ? "Enabled" : "Disabled"} vc={dualLeg ? C.gold : C.muted} />
+              {activeResult?.dvb?.services?.[0]?.serviceName && (
+                <KV k="Service" v={activeResult.dvb.services[0].serviceName} vc={C.cyan} />
+              )}
+            </Panel>
+
+            {/* Live thumbnail */}
+            {activeResult?.thumbnailUrl && (
+              <Panel title="Thumbnail">
+                <img
+                  src={activeResult.thumbnailUrl}
+                  alt="Stream thumbnail"
+                  style={{ width: "100%", borderRadius: 2, display: "block" }}
+                  onError={(e) => { e.target.style.display = "none"; }}
+                />
+              </Panel>
+            )}
           </div>
         </div>
       )}

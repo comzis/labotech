@@ -110,10 +110,11 @@ function toLogEntry(msg) {
       details = `${details}${details ? ' · ' : ''}PID ${evidence.pid}`;
     }
   } else if (msg.type === 'etr290_status') {
-    status = 'alarm';
-    title = 'ETR status update';
-    const active = Object.entries(msg.status || {}).filter(([, v]) => v === 'error').map(([k]) => k);
-    details = active.length > 0 ? `Active checks: ${active.join(', ')}` : 'No active ETR errors';
+    // Heartbeat broadcast every 1s — not an alarm, do not add to log
+    return null;
+  } else if (msg.type === 'analyse_result') {
+    // Routine probe result every 5s — not an alarm event
+    return null;
   } else if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
     status = 'alarm';
     title = `ETR incident ${msg.type.endsWith('started') ? 'started' : 'updated'} - ${msg.label || msg.checkId || 'check'}`;
@@ -125,15 +126,6 @@ function toLogEntry(msg) {
     status = 'info';
     title = `ETR incident cleared - ${msg.label || msg.checkId || 'check'}`;
     details = msg.lastMessage || msg.message || '';
-  } else if (msg.type === 'analyse_result') {
-    status = 'info';
-    title = 'TS analysis result';
-    const dvb = msg.dvb || {};
-    const bitrate = Number.isFinite(Number(dvb.bitrateBps)) ? `${(Number(dvb.bitrateBps) / 1e6).toFixed(2)} Mbps` : null;
-    const pidCount = Number.isFinite(Number(dvb.pidCount)) ? `${dvb.pidCount} PID` : null;
-    const serviceCount = Number.isFinite(Number(dvb.serviceCount)) ? `${dvb.serviceCount} svc` : null;
-    const parts = [bitrate, pidCount, serviceCount].filter(Boolean);
-    details = parts.length > 0 ? parts.join(' · ') : (msg.message || 'Analysis sample');
   } else if (msg.type === 'switched') {
     status = 'failover';
     title = 'Failover switch';
