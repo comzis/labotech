@@ -306,7 +306,10 @@ export default function TSAnalyser({ lastMessage }) {
 
   const activeResult = useMemo(() => {
     if (activeId && resultsById[activeId]) return resultsById[activeId];
-    if (result) return result;
+    // Only use the one-shot probe result when no continuous monitor is selected —
+    // never fall through to a stale global result when a decoder is active, as
+    // that would show another decoder's data.
+    if (!activeId && result) return result;
     if (activeIds.length > 0 && resultsById[activeIds[0]]) return resultsById[activeIds[0]];
     return null;
   }, [activeId, activeIds, result, resultsById]);
