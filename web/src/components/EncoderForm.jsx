@@ -116,7 +116,7 @@ export default function EncoderForm({ onStarted }) {
           <div className="w-9 h-9 rounded-full bg-black/35 border border-neon-cyan/30 flex items-center justify-center group-hover:border-neon-cyan/50 transition-colors">
             <Radio className="w-4.5 h-4.5 text-neon-cyan" strokeWidth={1.8} />
           </div>
-          <span className="text-gray-100 font-semibold tracking-wide text-base uppercase">Create Encoder Instance</span>
+          <span className="text-gray-100 font-semibold tracking-wide text-base uppercase">Create Stream Instance</span>
         </motion.button>
       )}
 
@@ -132,7 +132,7 @@ export default function EncoderForm({ onStarted }) {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <Settings2 className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-              Encoder Configuration
+              Stream Configuration
             </h2>
             <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors text-sm font-medium">
               ✕ Cancel
@@ -329,7 +329,7 @@ export default function EncoderForm({ onStarted }) {
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  START ENCODER
+                  START STREAM
                 </>
               )}
             </motion.button>

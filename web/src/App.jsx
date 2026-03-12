@@ -6,7 +6,7 @@ import StreamsPanel from './components/StreamsPanel';
 import TranscodePanel from './components/TranscodePanel';
 import MulticastPanel from './components/MulticastPanel';
 import TSAnalyser from './components/TSAnalyser';
-import DecoderPanel from './components/DecoderPanel';
+import DecoderPanel from './components/DecoderPanelRevamp';
 import DecoderMultiviewPanel from './components/DecoderMultiviewPanel';
 import StreamViewPanel from './components/StreamViewPanel';
 import APIPanel from './components/APIPanel';

@@ -1,16 +1,32 @@
 import { useState, useCallback } from 'react';
-import { startETR290, stopETR290, getETR290Monitors } from '../api';
+import {
+  startETR290,
+  stopETR290,
+  getETR290Monitors,
+  updateETR290Config,
+  getETR290Profiles,
+  saveETR290Profile,
+  deleteETR290Profile,
+} from '../api';
 
 export default function useETR290() {
   const [statusById, setStatusById] = useState({});
   const [activeId, setActiveId] = useState(null);
   const [activeIds, setActiveIds] = useState([]);
   const [error,    setError]    = useState(null);
+  const [profiles, setProfiles] = useState([]);
 
-  const start = useCallback(async (id, url, nicName) => {
+  const start = useCallback(async (id, url, nicName, options = {}) => {
     setError(null);
     try {
-      const s = await startETR290({ id, url, ...(nicName ? { nicName } : {}) });
+      const payload = {
+        id,
+        url,
+        ...(nicName ? { nicName } : {}),
+        ...(options.profileName ? { profileName: options.profileName } : {}),
+        ...(options.config ? { config: options.config } : {}),
+      };
+      const s = await startETR290(payload);
       setStatusById(prev => ({ ...prev, [id]: s }));
       setActiveIds(prev => (prev.includes(id) ? prev : [...prev, id]));
       setActiveId(id);
@@ -57,6 +73,35 @@ export default function useETR290() {
     }
   }, [activeId]);
 
+  const loadProfiles = useCallback(async () => {
+    try {
+      const rows = await getETR290Profiles();
+      setProfiles(Array.isArray(rows) ? rows : []);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, []);
+
+  const saveProfile = useCallback(async (name, config, description = '') => {
+    const saved = await saveETR290Profile({ name, description, config });
+    await loadProfiles();
+    return saved;
+  }, [loadProfiles]);
+
+  const deleteProfile = useCallback(async (name) => {
+    await deleteETR290Profile(name);
+    await loadProfiles();
+  }, [loadProfiles]);
+
+  const updateConfig = useCallback(async (id, config, profileName = null) => {
+    const updated = await updateETR290Config(id, {
+      config,
+      ...(profileName ? { profileName } : {}),
+    });
+    setStatusById(prev => ({ ...prev, [id]: updated }));
+    return updated;
+  }, []);
+
   // Called from parent with each WS message
   const onWsMessage = useCallback((msg) => {
     if (!msg) return;
@@ -89,11 +134,16 @@ export default function useETR290() {
     statusById,
     activeId,
     activeIds,
+    profiles,
     error,
     start,
     stop,
     setActiveId,
     refreshActives,
     onWsMessage,
+    loadProfiles,
+    saveProfile,
+    deleteProfile,
+    updateConfig,
   };
 }
