@@ -243,7 +243,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
 }
 
 export default function DecoderMultiviewPanel({ lastMessage }) {
-  const { activeIds, resultsById, decoderMeta, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const { activeIds, resultsById, decoderMeta, error, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
   const [openCreate, setOpenCreate] = useState(false);
   const [mode, setMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -257,6 +257,13 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
   useEffect(() => {
     refreshActives();
+  }, [refreshActives]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      refreshActives();
+    }, 4000);
+    return () => clearInterval(t);
   }, [refreshActives]);
 
   useEffect(() => {
@@ -275,6 +282,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     const id = decoderId || `decoder-${Date.now()}`;
     try {
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
+      await refreshActives();
       setOpenCreate(false);
       setDecoderId('');
     } catch (_) {
@@ -352,6 +360,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
         {activeIds.length === 0 && (
           <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from Decoder tab.</p>
+        )}
+        {error && (
+          <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 mt-4">
