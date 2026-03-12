@@ -127,6 +127,8 @@ function qualityMetrics(etrStatus, tsResult) {
   };
 }
 
+const PID_TYPE_ORDER = { video: 0, audio: 1, data: 2, subtitle: 3, unknown: 9 };
+
 function extractPidRows(selectedResult) {
   const rows = [];
   (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
@@ -139,6 +141,12 @@ function extractPidRows(selectedResult) {
       codec: s.codecName || s.codec || s.description || "-",
       bitrate: Number(s.bitrate || 0),
     }))
+    .sort((a, b) => {
+      const ta = PID_TYPE_ORDER[a.codecType] ?? 9;
+      const tb = PID_TYPE_ORDER[b.codecType] ?? 9;
+      if (ta !== tb) return ta - tb;
+      return (Number(a.pid) || 0) - (Number(b.pid) || 0);
+    })
     .slice(0, 20);
 }
 
