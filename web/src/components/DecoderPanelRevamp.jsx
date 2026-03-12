@@ -99,6 +99,19 @@ function extractPidRows(selectedResult) {
     .slice(0, 20);
 }
 
+function makeUniqueDecoderId(baseId, usedSet) {
+  const cleanBase = String(baseId || "decoder").trim() || "decoder";
+  if (!usedSet.has(cleanBase)) {
+    usedSet.add(cleanBase);
+    return cleanBase;
+  }
+  let i = 2;
+  while (usedSet.has(`${cleanBase}-${i}`)) i += 1;
+  const candidate = `${cleanBase}-${i}`;
+  usedSet.add(candidate);
+  return candidate;
+}
+
 function renderPidRef(pid, pidHex) {
   const hasDec = Number.isFinite(Number(pid));
   const dec = hasDec ? Number(pid) : null;
@@ -288,16 +301,18 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     setDecoderRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== rowKey)));
   };
 
-  const startDecoder = async () => {
-    if (!validRowPlans.length) return;
+  const startRows = async (plansToStart) => {
+    if (!plansToStart.length) return;
     const runStamp = Date.now();
     const started = [];
     const failed = [];
     const etrStarted = [];
     const etrFailed = [];
-    for (let i = 0; i < validRowPlans.length; i += 1) {
-      const row = validRowPlans[i];
-      const id = row.decoderId?.trim() || `decoder-${runStamp}-${i + 1}`;
+    const usedIds = new Set([...(activeIds || [])]);
+    for (let i = 0; i < plansToStart.length; i += 1) {
+      const row = plansToStart[i];
+      const requestedId = row.decoderId?.trim() || `decoder-${runStamp}`;
+      const id = makeUniqueDecoderId(requestedId, usedIds);
       try {
         if (addToMultiview) {
           await startContinuous(id, row.url, parseInt(intervalMs, 10) || 5000, captureNic || undefined);
@@ -329,6 +344,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       await etr.refreshActives();
     } catch (_) {}
     setProvisionSummary({ started, failed: [...failed, ...etrFailed], etrStarted, at: Date.now() });
+  };
+
+  const startDecoder = async () => {
+    await startRows(validRowPlans);
+  };
+
+  const startSingleDecoderRow = async (rowKey) => {
+    const rowPlan = rowPlans.find((r) => r.key === rowKey && r.url);
+    if (!rowPlan) return;
+    await startRows([rowPlan]);
   };
 
   const stopDecoder = async () => {
@@ -431,7 +456,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </div>
 
               {decoderRows.map((row) => (
-                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.2fr 86px", gap: 8, alignItems: "end" }}>
+                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
                     <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono />
                   </Field>
@@ -441,6 +466,23 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   <Field label="Decoder ID (optional)">
                     <Input value={row.decoderId} onChange={(e) => updateRow(row.key, { decoderId: e.target.value })} placeholder="decoder-a" mono />
                   </Field>
+                  <button
+                    onClick={() => startSingleDecoderRow(row.key)}
+                    disabled={!row.host || !row.port}
+                    style={{
+                      height: 34,
+                      borderRadius: 2,
+                      border: `1px solid ${row.host && row.port ? C.ok : C.border}`,
+                      color: row.host && row.port ? C.bg : C.muted,
+                      background: row.host && row.port ? C.ok : "transparent",
+                      boxShadow: row.host && row.port ? `0 0 8px ${C.ok}44` : "none",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: row.host && row.port ? "pointer" : "not-allowed",
+                    }}
+                  >
+                    Start
+                  </button>
                   <button
                     onClick={() => removeDecoderRow(row.key)}
                     disabled={decoderRows.length <= 1}
@@ -478,16 +520,17 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   disabled={!validRowPlans.length}
                   style={{
                     borderRadius: 2,
-                    border: `1px solid ${validRowPlans.length ? C.info : C.border}`,
-                    color: validRowPlans.length ? C.info : C.muted,
-                    background: validRowPlans.length ? `${C.info}14` : "transparent",
+                    border: `1px solid ${validRowPlans.length ? C.ok : C.border}`,
+                    color: validRowPlans.length ? C.bg : C.muted,
+                    background: validRowPlans.length ? C.ok : "transparent",
                     padding: "6px 8px",
                     fontSize: 10,
                     fontWeight: 700,
                     cursor: validRowPlans.length ? "pointer" : "not-allowed",
+                    boxShadow: validRowPlans.length ? `0 0 10px ${C.ok}55` : "none",
                   }}
                 >
-                  ▶ START DECODER
+                  ▶ START BATCH
                 </button>
                 <button
                   onClick={stopDecoder}
