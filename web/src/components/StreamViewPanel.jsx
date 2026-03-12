@@ -22,6 +22,8 @@ const EVENT_BLOCK_DURATION_MS = {
   etr290_incident: 18000,
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
+  runtime_started: 8000,
+  runtime_stopped: 8000,
   failover: 16000,
   analyse_result: 7000,
   etr290_status: 5000,
@@ -31,6 +33,8 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
   runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
+  runtime_started: { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' },
+  runtime_stopped: { alpha: 'bb', borderAlpha: '99', glowAlpha: '55' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
   analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
   etr290_status: { alpha: '94', borderAlpha: '82', glowAlpha: '44' },
@@ -326,6 +330,32 @@ function toEvent(msg) {
       description: msg.message || 'Primary input switched to backup',
     };
   }
+  if (msg.type === 'started') {
+    const laneId = normalizeLaneId(msg.id || 'system');
+    return {
+      key: `${ts}-${msg.id || 'system'}-started`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'system',
+      category: 'runtime_started',
+      severity: 'ok',
+      title: 'Stream started',
+      description: msg.message || `${msg.id} started`,
+    };
+  }
+  if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped') {
+    const laneId = normalizeLaneId(msg.id || 'system');
+    return {
+      key: `${ts}-${msg.id || 'system'}-stopped`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'system',
+      category: 'runtime_stopped',
+      severity: 'unknown',
+      title: 'Stream stopped',
+      description: msg.message || `${msg.id} stopped`,
+    };
+  }
   return null;
 }
 
@@ -350,29 +380,32 @@ function colorForLaneSeverity(severity) {
   if (severity === 'critical') return '#ff6b6b';
   if (severity === 'warning') return '#ffe680';
   if (severity === 'ok') return '#00dd55';
-  return '#66ccff';
+  return '#445566'; // unknown / no data — neutral blue-gray
 }
 
 function buildLaneGradient(events, timeStart, windowMs) {
+  // No events at all → unknown (gray), never green by default
   if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) {
-    return 'linear-gradient(90deg, #00dd5530 0%, #00dd5530 100%)';
+    return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
-  let currentSeverity = 'ok';
+  // Determine initial severity: last known state BEFORE the window.
+  // If no events precede the window, use 'unknown' (gray) — not 'ok'.
+  let currentSeverity = 'unknown';
   for (const e of sorted) {
     if (e.ts <= timeStart) currentSeverity = e.severity || currentSeverity;
     else break;
   }
-  const parts = [`${colorForLaneSeverity(currentSeverity)}66 0%`];
+  const parts = [`${colorForLaneSeverity(currentSeverity)}55 0%`];
   for (const e of sorted) {
     if (e.ts < timeStart || e.ts > timeStart + windowMs) continue;
     const x = Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100));
     const nextSeverity = e.severity || currentSeverity;
-    parts.push(`${colorForLaneSeverity(currentSeverity)}66 ${x}%`);
-    parts.push(`${colorForLaneSeverity(nextSeverity)}66 ${x}%`);
+    parts.push(`${colorForLaneSeverity(currentSeverity)}55 ${x}%`);
+    parts.push(`${colorForLaneSeverity(nextSeverity)}55 ${x}%`);
     currentSeverity = nextSeverity;
   }
-  parts.push(`${colorForLaneSeverity(currentSeverity)}66 100%`);
+  parts.push(`${colorForLaneSeverity(currentSeverity)}55 100%`);
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 

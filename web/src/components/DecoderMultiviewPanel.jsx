@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Monitor, Plus } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
@@ -27,45 +27,60 @@ function resolveDisplayBitrateMbps(result) {
   return total > 0 ? total / 1e6 : null;
 }
 
-function audioPercent(meanDb) {
-  if (meanDb == null || !Number.isFinite(meanDb)) return 0;
-  const v = Math.max(-60, Math.min(0, meanDb));
-  return Math.round(((v + 60) / 60) * 100);
+// Map dBFS value (-60..0) to bar percentage
+function dbToPercent(db) {
+  if (db == null || !Number.isFinite(db)) return 0;
+  return Math.round(((Math.max(-60, Math.min(0, db)) + 60) / 60) * 100);
 }
 
-function audioColor(levelPct) {
-  if (levelPct > 75) return '#ff2233';
-  if (levelPct > 45) return '#ffaa00';
-  return '#00dd55';
+// Broadcast-standard meter zone colours
+function meterColor(db) {
+  if (db == null || !Number.isFinite(db)) return '#00dd55';
+  if (db > -9)  return '#ff2233'; // red: clip risk
+  if (db > -18) return '#ffaa00'; // amber: hot
+  return '#00dd55';               // green: nominal
 }
 
-function collectAudioStreams(result) {
-  const fromPrograms = (result?.programs || [])
-    .flatMap((p) => (p.streams || []))
-    .filter((s) => s.codecType === 'audio');
-  const orphan = (result?.orphanStreams || []).filter((s) => s.codecType === 'audio');
-  return [...fromPrograms, ...orphan];
-}
-
-function buildAudioPairRows(result, displayMeanDb) {
-  const pairLevels = Array.isArray(result?.audioLevels?.pairs) ? result.audioLevels.pairs : [];
-  if (pairLevels.length > 0) {
-    return pairLevels.map((p, idx) => ({
-      key: p.pid || p.id || idx,
-      label: p.label || `Pair ${idx + 1}`,
-      pid: p.pid || null,
-      meanDb: Number.isFinite(Number(p.meanDb)) ? Number(p.meanDb) : null,
-    }));
-  }
-
-  const streams = collectAudioStreams(result);
-  // No per-pair telemetry yet: only show live meter if there is a single audio pair.
-  return streams.slice(0, 8).map((s, idx) => ({
-    key: `${s.pid || idx}`,
-    label: `Pair ${idx + 1}`,
-    pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
-    meanDb: streams.length === 1 ? displayMeanDb : null,
-  }));
+// Single horizontal VU bar: rmsDb = moving bar, peakDb = peak hold marker
+function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
+  const rmsPct  = dbToPercent(rmsDb);
+  const peakPct = dbToPercent(peakDb);
+  const active  = rmsDb != null;
+  const color   = meterColor(rmsDb);
+  const peakColor = meterColor(peakDb);
+  return (
+    <div className="grid items-center gap-1" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
+      <span className="text-[9px] font-mono font-bold" style={{ color: active ? color : '#555' }}>{label}</span>
+      <div style={{ position: 'relative', height: '6px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'visible' }}>
+        {/* Zone demarcation ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: '1px', background: '#1e1e1e', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', left: '85%', top: 0, bottom: 0, width: '1px', background: '#1e1e1e', pointerEvents: 'none' }} />
+        {/* RMS moving bar */}
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0,
+          width: `${active ? Math.max(rmsPct, 2) : 8}%`,
+          background: active ? color : '#2a3a4a',
+          boxShadow: active && rmsPct > 5 ? `0 0 5px ${color}88` : 'none',
+          transition: 'width 0.15s linear',
+          overflow: 'hidden',
+          borderRadius: '1px',
+        }} />
+        {/* Peak hold marker */}
+        {showPeak && peakDb != null && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: `${Math.min(peakPct, 98)}%`,
+            width: '2px',
+            background: peakColor,
+            boxShadow: `0 0 3px ${peakColor}`,
+          }} />
+        )}
+      </div>
+      <span className="text-[9px] font-mono text-right" style={{ color: active ? color : '#555' }}>
+        {rmsDb != null ? `${rmsDb.toFixed(1)}` : 'n/a'}
+      </span>
+    </div>
+  );
 }
 
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
@@ -113,13 +128,25 @@ function extractThumbTimestamp(thumbnailUrl) {
 function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  // Per-channel audio levels from astats probe
+  const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
   const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
-  const [displayMeanDb, setDisplayMeanDb] = useState(null);
-  const [audioSeenAt, setAudioSeenAt] = useState(0);
-  const levelPct = audioPercent(displayMeanDb);
-  const showAudioFill = displayMeanDb != null;
-  const audioFillPct = showAudioFill ? Math.max(levelPct, 2) : 12;
-  const audioPairRows = buildAudioPairRows(result, displayMeanDb);
+  // Peak hold: { ch: number, peakDb: number, heldAt: number }[]
+  const peakHoldRef = useRef({});
+  const PEAK_HOLD_MS = 3000;
+  // Update peak hold on new level data
+  if (currentChannels.length > 0) {
+    const now = Date.now();
+    currentChannels.forEach((ch) => {
+      const key = ch.ch;
+      const existing = peakHoldRef.current[key];
+      const peakDb = ch.peakDb ?? ch.rmsDb;
+      if (peakDb == null) return;
+      if (!existing || peakDb > existing.peakDb || (now - existing.heldAt) > PEAK_HOLD_MS) {
+        peakHoldRef.current[key] = { peakDb, heldAt: now };
+      }
+    });
+  }
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -130,34 +157,11 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const candidateBaseSrc = result?.thumbnailUrl || null;
   const candidateSrc = candidateBaseSrc ? `${candidateBaseSrc}&retry=${thumbRetry}` : null;
 
-  // Reset retry budget when backend publishes a new thumbnail token.
+  // Reset retry budget and force reload when backend publishes a new thumbnail token.
   useEffect(() => {
     setThumbRetry(0);
+    setDisplaySrc(null);
   }, [candidateBaseSrc]);
-
-  useEffect(() => {
-    if (currentMeanDb == null) return;
-    setDisplayMeanDb((prev) => {
-      if (prev == null || !Number.isFinite(prev)) return currentMeanDb;
-      // Smooth fast probe-to-probe jumps and cap per-update movement.
-      const blended = (prev * 0.75) + (currentMeanDb * 0.25);
-      const delta = blended - prev;
-      const maxStepDb = 3;
-      const limited = prev + Math.max(-maxStepDb, Math.min(maxStepDb, delta));
-      return Math.max(-60, Math.min(0, limited));
-    });
-    setAudioSeenAt(Date.now());
-  }, [currentMeanDb]);
-
-  useEffect(() => {
-    if (displayMeanDb == null || !audioSeenAt) return;
-    // If analyzer skips samples, decay slowly instead of hard-dropping to zero.
-    if ((nowMs - audioSeenAt) <= 10000) return;
-    setDisplayMeanDb((prev) => {
-      if (prev == null || !Number.isFinite(prev)) return prev;
-      return Math.max(-60, prev - 1.5);
-    });
-  }, [nowMs, audioSeenAt, displayMeanDb]);
 
   // Keep showing the last known-good image even if a newer refresh token fails.
   const hasThumb = Boolean(displaySrc || candidateSrc);
@@ -249,60 +253,46 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
         </div>
 
-        {/* Audio meters */}
+        {/* Audio meters — per-channel L/R with peak hold (EBU-style dBFS scale) */}
         <div>
-          <div className="flex items-center justify-between text-[10px] mb-1">
-            <span className="engraved uppercase tracking-widest">Audio Aggregate</span>
-            <span className="font-mono" style={{ color: audioColor(levelPct) }}>
-              {displayMeanDb != null ? `${displayMeanDb.toFixed(1)} dBFS` : 'n/a'}
+          <div className="flex items-center justify-between text-[10px] mb-1.5">
+            <span className="engraved uppercase tracking-widest">Audio Levels</span>
+            <span className="font-mono text-[9px]" style={{ color: currentMeanDb != null ? meterColor(currentMeanDb) : '#555' }}>
+              {currentMeanDb != null ? `${currentMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
-          <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
-            <div
-              className="h-full transition-all duration-300"
-              style={{
-                width: `${audioFillPct}%`,
-                background: showAudioFill
-                  ? audioColor(levelPct)
-                  : '#3e506a',
-                boxShadow: showAudioFill && levelPct > 5 ? `0 0 5px ${audioColor(levelPct)}88` : 'none',
-              }}
-            />
-          </div>
-
-          <div className="mt-1.5 space-y-1">
-            <div className="flex items-center justify-between text-[9px]">
-              <span className="engraved uppercase tracking-widest">Audio Pairs</span>
-              <span className="font-mono text-gray-500">{audioPairRows.length}</span>
-            </div>
-            {audioPairRows.length === 0 ? (
-              <div className="text-[9px] text-gray-500 font-mono">No audio pairs detected.</div>
-            ) : audioPairRows.map((row) => {
-              const pct = audioPercent(row.meanDb);
-              const active = row.meanDb != null;
-              const fill = active ? Math.max(pct, 2) : 12;
-              return (
-                <div key={row.key} className="grid grid-cols-[70px_1fr_56px] items-center gap-1.5">
-                  <span className="text-[9px] font-mono text-gray-400 truncate">
-                    {row.label}{row.pid != null ? ` (${row.pid})` : ''}
-                  </span>
-                  <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
-                    <div
-                      className="h-full transition-all duration-300"
-                      style={{
-                        width: `${fill}%`,
-                        background: active ? audioColor(pct) : '#3e506a',
-                        boxShadow: active && pct > 5 ? `0 0 4px ${audioColor(pct)}88` : 'none',
-                      }}
-                    />
-                  </div>
-                  <span className="text-[9px] font-mono text-right" style={{ color: active ? audioColor(pct) : '#6b7280' }}>
-                    {active ? `${row.meanDb.toFixed(1)} dB` : 'n/a'}
-                  </span>
+          {currentChannels.length > 0 ? (
+            <div className="space-y-1">
+              {/* Scale markers */}
+              <div className="grid items-center gap-1 text-[8px] font-mono text-gray-600" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
+                <span />
+                <div style={{ position: 'relative', paddingTop: '1px' }}>
+                  <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>-18</span>
+                  <span style={{ position: 'absolute', left: '85%', transform: 'translateX(-50%)' }}>-9</span>
+                  <span style={{ position: 'absolute', right: 0 }}>0</span>
                 </div>
-              );
-            })}
-          </div>
+                <span />
+              </div>
+              {currentChannels.map((ch) => {
+                const held = peakHoldRef.current[ch.ch];
+                const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
+                return (
+                  <VuBar
+                    key={ch.ch}
+                    label={ch.label || `Ch${ch.ch + 1}`}
+                    rmsDb={ch.rmsDb}
+                    peakDb={heldPeak}
+                    showPeak
+                  />
+                );
+              })}
+            </div>
+          ) : currentMeanDb != null ? (
+            // Fallback: only aggregate available (mono or older probe)
+            <VuBar label="Mix" rmsDb={currentMeanDb} peakDb={result?.audioLevels?.maxDb} showPeak />
+          ) : (
+            <div className="text-[9px] font-mono" style={{ color: '#555' }}>Awaiting audio probe…</div>
+          )}
         </div>
 
         {/* Stats */}

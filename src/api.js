@@ -200,9 +200,17 @@ function start() {
   const { THUMBNAIL_DIR } = require('./monitoring');
   app.use('/logs/thumbnails', express.static(THUMBNAIL_DIR));
 
+  // Message types that are routine telemetry/heartbeats — high-frequency, not alarm events.
+  // These are broadcast to WebSocket clients but NOT persisted to the event log.
+  const TELEMETRY_TYPES = new Set([
+    'etr290_status',  // heartbeat every 1s per ETR monitor
+    'analyse_result', // probe result every 5s per decoder
+    'stats',          // encoder stats heartbeat
+  ]);
+
   function broadcast(msg) {
     if (!msg || typeof msg !== 'object') return;
-    eventLog.push(msg);
+    if (!TELEMETRY_TYPES.has(msg.type)) eventLog.push(msg);
     const data = JSON.stringify(msg);
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);
