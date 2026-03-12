@@ -5,13 +5,14 @@ import { motion } from 'framer-motion';
 import { Search, Activity, ShieldAlert } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
-import ETR290Panel from './ETR290Panel';
 
 const PROBE_MODES = [
   { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
   { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
   { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
 ];
+const ETR_P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
+const ETR_P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
   if (mode === 'udp') return `udp://${host}:${port}`;
@@ -49,6 +50,29 @@ function toneClass(state) {
   if (s === 'warning' || s === 'insufficient_data') return 'text-amber-300';
   if (s === 'ok' || s === 'compliant' || s === 'true') return 'text-green-300';
   return 'text-gray-400';
+}
+
+function parseTargetFromUrl(url) {
+  if (!url) return { host: null, port: null };
+  try {
+    const u = new URL(url);
+    return { host: u.hostname || null, port: u.port || null };
+  } catch (_) {
+    const m = String(url).match(/^[a-z]+:\/\/([^/:?#]+):(\d+)/i);
+    if (!m) return { host: null, port: null };
+    return { host: m[1], port: m[2] };
+  }
+}
+
+function inferFecMode(url) {
+  const s = String(url || '').toLowerCase();
+  if (!s) return '-';
+  if (s.includes('fec=')) {
+    const m = s.match(/[?&]fec=([^&]+)/);
+    return m ? decodeURIComponent(m[1]) : 'enabled';
+  }
+  if (s.includes('rtp://')) return 'none';
+  return '-';
 }
 
 function collectPidRows(result) {
@@ -160,6 +184,63 @@ function buildDual20227Assessment(legA, legB) {
   };
 }
 
+function buildDvbPidInventory(result) {
+  if (!result) return [];
+  const byPid = new Map();
+  const upsert = (pid, patch = {}) => {
+    if (pid == null || !Number.isFinite(Number(pid))) return;
+    const key = Number(pid);
+    const prev = byPid.get(key) || {
+      pid: key,
+      pidHex: `0x${key.toString(16).toUpperCase().padStart(4, '0')}`,
+      roles: new Set(),
+      serviceRefs: new Set(),
+      codecName: '-',
+      streamType: '-',
+    };
+    if (patch.role) prev.roles.add(patch.role);
+    if (patch.serviceRef) prev.serviceRefs.add(String(patch.serviceRef));
+    if (patch.codecName && prev.codecName === '-') prev.codecName = patch.codecName;
+    if (patch.streamType && prev.streamType === '-') prev.streamType = patch.streamType;
+    byPid.set(key, prev);
+  };
+
+  // PAT is mandatory in compliant MPEG-TS.
+  upsert(0, { role: 'PAT', serviceRef: 'global' });
+
+  (result?.dvb?.services || []).forEach((s) => {
+    upsert(Number(s.pmtPid), { role: 'PMT', serviceRef: s.serviceId ?? s.serviceName ?? 'service' });
+    upsert(Number(s.pcrPid), { role: 'PCR', serviceRef: s.serviceId ?? s.serviceName ?? 'service' });
+  });
+
+  (result.programs || []).forEach((p) => {
+    (p.streams || []).forEach((st) => {
+      upsert(Number(st.pid), {
+        role: `ES-${String(st.codecType || 'data').toUpperCase()}`,
+        serviceRef: p.programId,
+        codecName: st.codecName || '-',
+        streamType: st.streamType || '-',
+      });
+    });
+  });
+  (result.orphanStreams || []).forEach((st) => {
+    upsert(Number(st.pid), {
+      role: `ES-${String(st.codecType || 'data').toUpperCase()}`,
+      serviceRef: 'orphan',
+      codecName: st.codecName || '-',
+      streamType: st.streamType || '-',
+    });
+  });
+
+  return Array.from(byPid.values())
+    .map((r) => ({
+      ...r,
+      roles: Array.from(r.roles).join(', '),
+      serviceRefs: Array.from(r.serviceRefs).join(', '),
+    }))
+    .sort((a, b) => a.pid - b.pid);
+}
+
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -174,6 +255,11 @@ export default function TSAnalyser({ lastMessage }) {
   const [dualConsolidation, setDualConsolidation] = useState(null);
   const [probeHistory, setProbeHistory] = useState([]);
   const [alarmLog, setAlarmLog] = useState([]);
+  const [etrView, setEtrView] = useState({
+    severity: 'unknown',
+    activeChecks: [],
+    lastEventTs: null,
+  });
 
   const { loading, error, probe, onWsResult } = useTSAnalysis();
 
@@ -206,8 +292,37 @@ export default function TSAnalyser({ lastMessage }) {
     ]).slice(0, 60));
   }, [lastMessage]);
 
+  useEffect(() => {
+    if (!lastMessage) return;
+    const ts = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
+    if (lastMessage.type === 'etr290_status') {
+      const status = lastMessage.status || {};
+      const activeChecks = Object.keys(status).filter((k) => status[k] === 'error');
+      const hasP1 = ETR_P1_KEYS.some((k) => status[k] === 'error');
+      const hasP2 = ETR_P2_KEYS.some((k) => status[k] === 'error');
+      setEtrView({
+        severity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
+        activeChecks,
+        lastEventTs: ts,
+      });
+      return;
+    }
+    if (lastMessage.type === 'etr290_alarm') {
+      setEtrView((prev) => ({
+        ...prev,
+        severity: lastMessage.priority === 'p1' ? 'critical' : 'warning',
+        lastEventTs: ts,
+      }));
+    }
+  }, [lastMessage]);
+
   const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
   const builtUrlB = buildProbeUrl({ mode: probeMode, host: hostB, port: portB, latency, passphrase });
+  const successfulBitrates = probeHistory
+    .filter((r) => r.status === 'ok' && Number.isFinite(r.bitrateMbps))
+    .map((r) => r.bitrateMbps);
+  const minBitrateMbps = successfulBitrates.length ? Math.min(...successfulBitrates) : null;
+  const maxBitrateMbps = successfulBitrates.length ? Math.max(...successfulBitrates) : null;
 
   const handleProbe = async (e) => {
     e.preventDefault();
@@ -232,6 +347,7 @@ export default function TSAnalyser({ lastMessage }) {
           pidCount: r?.dvb?.pidCount ?? countPids(r),
           serviceCount: r?.dvb?.serviceCount ?? (r?.programs?.length || 0),
           health: r?.dvb?.health?.score ?? null,
+          bitrateMbps: Number(r?.dvb?.bitrateBps) > 0 ? Number((r.dvb.bitrateBps / 1e6).toFixed(3)) : null,
           dualState: dualLeg ? (buildDual20227Assessment(r, rB)?.state || null) : null,
         },
         ...prev,
@@ -249,6 +365,7 @@ export default function TSAnalyser({ lastMessage }) {
           pidCount: null,
           serviceCount: null,
           health: null,
+          bitrateMbps: null,
         },
         ...prev,
       ]).slice(0, 30));
@@ -266,26 +383,27 @@ export default function TSAnalyser({ lastMessage }) {
         <p className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider font-medium opacity-80">Compact professional TS probe and DVB evidence</p>
       </div>
 
-      {/* Control Bento Card */}
-      <BentoCard icon={Activity} title="Probe Provisioning (Compact)">
-        <form onSubmit={handleProbe} className="space-y-3">
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+        {/* Left: compact input/probe */}
+        <div className="xl:col-span-2">
+          <BentoCard icon={Activity} title="Probe Input">
+            <form onSubmit={handleProbe} className="space-y-3">
 
             {/* Protocol selector */}
             <div>
-              <label className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1.5 block">Protocol</label>
-              <div className="grid grid-cols-3 gap-2">
+              <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider pl-1 mb-1 block">Protocol</label>
+              <div className="flex items-center gap-1.5">
                 {PROBE_MODES.map(m => (
                   <button
                     key={m.value}
                     type="button"
                     onClick={() => setProbeMode(m.value)}
-                    className={`px-2 py-1.5 rounded-lg border text-center transition-all ${probeMode === m.value
+                    className={`px-2 py-1 rounded border text-center transition-all text-[10px] ${probeMode === m.value
                       ? 'bg-neon-cyan/15 border-neon-cyan/40 text-white'
                       : 'bg-black/20 border-white/10 text-gray-500 hover:border-white/20'
                     }`}
                   >
-                    <div className="text-[11px] font-semibold">{m.label}</div>
-                    <div className="text-[9px] opacity-60 mt-0.5 uppercase tracking-tighter">{m.desc}</div>
+                    <div className="font-semibold">{m.label}</div>
                   </button>
                 ))}
               </div>
@@ -371,8 +489,48 @@ export default function TSAnalyser({ lastMessage }) {
           {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
         </form>
       </BentoCard>
+        </div>
 
-      <BentoCard icon={ShieldAlert} title="Provisioned Probe Log">
+        {/* Right: compact ETR view */}
+        <div className="xl:col-span-1">
+          <BentoCard icon={ShieldAlert} title="ETR View">
+            <div className="grid grid-cols-2 gap-2 text-xs mb-2">
+              <Stat label="State" value={etrView.severity} />
+              <Stat label="Last ETR" value={etrView.lastEventTs ? new Date(etrView.lastEventTs).toLocaleTimeString() : '-'} />
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Active Checks</div>
+            <div className="rounded-lg border border-white/10 bg-black/20 px-2 py-1.5 text-xs text-gray-300 font-mono min-h-[34px]">
+              {etrView.activeChecks.length > 0 ? etrView.activeChecks.join(', ') : 'No active ETR checks'}
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-gray-500 mt-2 mb-1">Recent ETR Alarms</div>
+            <div className="max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/20">
+              <table className="w-full text-[11px] font-mono">
+                <thead>
+                  <tr className="text-gray-500 border-b border-white/10">
+                    <th className="text-left py-1 px-2">Time</th>
+                    <th className="text-left py-1 px-2">Pri</th>
+                    <th className="text-left py-1 px-2">Check</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {alarmLog.slice(0, 12).map((a) => (
+                    <tr key={a.key} className="border-b border-white/5">
+                      <td className="py-1 px-2 text-gray-400">{new Date(a.ts).toLocaleTimeString()}</td>
+                      <td className={`py-1 px-2 ${toneClass(a.priority === 'p1' ? 'critical' : a.priority === 'p2' ? 'warning' : 'ok')}`}>{String(a.priority || '-').toUpperCase()}</td>
+                      <td className="py-1 px-2 text-gray-300 truncate max-w-[120px]">{a.check}</td>
+                    </tr>
+                  ))}
+                  {alarmLog.length === 0 && (
+                    <tr><td colSpan={3} className="py-2 px-2 text-gray-500">No ETR alarms in session.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </BentoCard>
+        </div>
+      </div>
+
+      <BentoCard icon={ShieldAlert} title="Probe Log">
         {probeHistory.length === 0 ? (
           <div className="text-xs text-gray-500">No probe runs yet.</div>
         ) : (
@@ -479,30 +637,81 @@ export default function TSAnalyser({ lastMessage }) {
                 <table className="w-full text-[11px] font-mono">
                   <thead>
                     <tr className="text-gray-500 border-b border-white/10">
+                      <th className="text-left py-1.5 px-2">Thumb</th>
                       <th className="text-left py-1.5 px-2">Name</th>
-                      <th className="text-left py-1.5 px-2">SID</th>
+                      <th className="text-left py-1.5 px-2">Service ID</th>
+                      <th className="text-left py-1.5 px-2">Mapping</th>
                       <th className="text-left py-1.5 px-2">PMT</th>
+                      <th className="text-left py-1.5 px-2">PAT</th>
                       <th className="text-left py-1.5 px-2">PCR</th>
+                      <th className="text-left py-1.5 px-2">CC Errs</th>
+                      <th className="text-left py-1.5 px-2">Curr Bitrate</th>
+                      <th className="text-left py-1.5 px-2">Min Bitrate</th>
+                      <th className="text-left py-1.5 px-2">Max Bitrate</th>
+                      <th className="text-left py-1.5 px-2">Src Address</th>
+                      <th className="text-left py-1.5 px-2">Dest Address</th>
+                      <th className="text-left py-1.5 px-2">TOS</th>
+                      <th className="text-left py-1.5 px-2">TTL</th>
+                      <th className="text-left py-1.5 px-2">VLAN ID</th>
+                      <th className="text-left py-1.5 px-2">IAT Avg</th>
+                      <th className="text-left py-1.5 px-2">IAT Min</th>
+                      <th className="text-left py-1.5 px-2">IAT Max</th>
+                      <th className="text-left py-1.5 px-2">RTP Drops</th>
+                      <th className="text-left py-1.5 px-2">RTP OOO</th>
+                      <th className="text-left py-1.5 px-2">FEC Mode</th>
                       <th className="text-left py-1.5 px-2">Health</th>
                       <th className="text-left py-1.5 px-2">2022-7</th>
-                      <th className="text-left py-1.5 px-2">Bitrate</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(resultLocal?.dvb?.services || []).map((s, idx) => (
-                      <tr key={`${s.serviceId}-${idx}`} className="border-b border-white/5">
-                        <td className="py-1.5 px-2 text-gray-300">{s.serviceName || `service-${s.serviceId || idx + 1}`}</td>
-                        <td className="py-1.5 px-2 text-gray-300">{s.serviceId ?? '-'}</td>
-                        <td className="py-1.5 px-2 text-gray-400">{s.pmtPid ?? '-'}</td>
-                        <td className="py-1.5 px-2 text-gray-400">{s.pcrPid ?? '-'}</td>
-                        <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.health?.severity)}`}>{resultLocal?.dvb?.health?.severity || '-'}</td>
-                        <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.smpte20227?.state)}`}>{resultLocal?.dvb?.smpte20227?.state || '-'}</td>
-                        <td className="py-1.5 px-2 text-gray-300">{toMbps(resultLocal?.dvb?.bitrateBps)}</td>
-                      </tr>
-                    ))}
+                    {(resultLocal?.dvb?.services || []).map((s, idx) => {
+                      const target = parseTargetFromUrl(resultLocal?.url);
+                      const program = (resultLocal?.programs || []).find((p) => Number(p.programId) === Number(s.serviceId));
+                      const mapping = program ? `program-${program.programId}` : (s.serviceId != null ? `service-${s.serviceId}` : '-');
+                      return (
+                        <tr key={`${s.serviceId}-${idx}`} className="border-b border-white/5">
+                          <td className="py-1.5 px-2">
+                            {resultLocal?.thumbnailUrl ? (
+                              <img
+                                src={resultLocal.thumbnailUrl}
+                                alt="thumb"
+                                className="w-10 h-6 object-cover rounded border border-white/10"
+                              />
+                            ) : (
+                              <span className="text-gray-500">-</span>
+                            )}
+                          </td>
+                          <td className="py-1.5 px-2 text-gray-300">{s.serviceName || `service-${s.serviceId || idx + 1}`}</td>
+                          <td className="py-1.5 px-2 text-gray-300">{s.serviceId ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{mapping}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{s.pmtPid ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">0</td>
+                          <td className="py-1.5 px-2 text-gray-400">{s.pcrPid ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-300">{resultLocal?.dvb?.continuityCounterErrors?.count ?? 0}</td>
+                          <td className="py-1.5 px-2 text-gray-300">{toMbps(resultLocal?.dvb?.bitrateBps)}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{minBitrateMbps != null ? `${minBitrateMbps.toFixed(3)} Mbps` : '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{maxBitrateMbps != null ? `${maxBitrateMbps.toFixed(3)} Mbps` : '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.network?.sourceIp || '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">
+                            {resultLocal?.dvb?.arrival?.network?.destIp || (target.host && target.port ? `${target.host}:${target.port}` : '-')}
+                          </td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.network?.tos || '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.network?.ttl ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.network?.vlanId ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.iatMs?.avg != null ? `${resultLocal.dvb.arrival.iatMs.avg} ms` : '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.iatMs?.min != null ? `${resultLocal.dvb.arrival.iatMs.min} ms` : '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{resultLocal?.dvb?.arrival?.iatMs?.max != null ? `${resultLocal.dvb.arrival.iatMs.max} ms` : '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-300">{resultLocal?.dvb?.arrival?.rtpDrops ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-300">{resultLocal?.dvb?.arrival?.rtpOutOfOrder ?? '-'}</td>
+                          <td className="py-1.5 px-2 text-gray-400">{inferFecMode(resultLocal?.url)}</td>
+                          <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.health?.severity)}`}>{resultLocal?.dvb?.health?.severity || '-'}</td>
+                          <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.smpte20227?.state)}`}>{resultLocal?.dvb?.smpte20227?.state || '-'}</td>
+                        </tr>
+                      );
+                    })}
                     {(resultLocal?.dvb?.services || []).length === 0 && (
                       <tr>
-                        <td colSpan={7} className="py-2 px-2 text-gray-500">No service rows available for current probe.</td>
+                        <td colSpan={24} className="py-2 px-2 text-gray-500">No service rows available for current probe.</td>
                       </tr>
                     )}
                   </tbody>
@@ -625,6 +834,43 @@ export default function TSAnalyser({ lastMessage }) {
               )}
             </BentoCard>
 
+            <BentoCard icon={ShieldAlert} title="Full DVB PID Table">
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+                Explicit PID inventory (PAT/PMT/PCR + elementary streams)
+              </div>
+              <div className="max-h-72 overflow-auto rounded-lg border border-white/10 bg-black/20">
+                <table className="w-full text-xs font-mono">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-white/10">
+                      <th className="text-left py-1.5 px-2">PID</th>
+                      <th className="text-left py-1.5 px-2">PID Hex</th>
+                      <th className="text-left py-1.5 px-2">Roles</th>
+                      <th className="text-left py-1.5 px-2">Service / Program</th>
+                      <th className="text-left py-1.5 px-2">Codec</th>
+                      <th className="text-left py-1.5 px-2">Stream Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {buildDvbPidInventory(resultLocal).map((row) => (
+                      <tr key={`full-pid-${row.pid}`} className="border-b border-white/5">
+                        <td className="py-1.5 px-2 text-gray-300">{row.pid}</td>
+                        <td className="py-1.5 px-2"><PidBadge pid={row.pid} pidHex={row.pidHex} /></td>
+                        <td className="py-1.5 px-2 text-gray-300">{row.roles}</td>
+                        <td className="py-1.5 px-2 text-gray-400">{row.serviceRefs || '-'}</td>
+                        <td className="py-1.5 px-2 text-gray-300">{row.codecName || '-'}</td>
+                        <td className="py-1.5 px-2 text-gray-400">{row.streamType || '-'}</td>
+                      </tr>
+                    ))}
+                    {buildDvbPidInventory(resultLocal).length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="py-2 px-2 text-gray-500">No PID inventory available from this probe.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </BentoCard>
+
             <div className="grid grid-cols-1 gap-3">
               {resultLocal.programs?.map(prog => (
                 <ProgramBlock key={prog.programId} prog={prog} />
@@ -643,8 +889,6 @@ export default function TSAnalyser({ lastMessage }) {
         </motion.div>
       )}
 
-      {/* Keep full ETR visibility, but place after TS analysis sections */}
-      <ETR290Panel lastMessage={lastMessage} />
     </div>
   );
 }

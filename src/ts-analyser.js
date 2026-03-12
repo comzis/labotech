@@ -796,6 +796,9 @@ class TSAnalyser extends EventEmitter {
         packetLossPct: nicMetrics.packetLossPct,
         captureMethod: nicMetrics.captureMethod,
         sampleCount: nicMetrics.sampleCount,
+        rtpDrops: Number.isFinite(nicMetrics.rtpDrops) ? nicMetrics.rtpDrops : null,
+        rtpOutOfOrder: Number.isFinite(nicMetrics.rtpOutOfOrder) ? nicMetrics.rtpOutOfOrder : null,
+        network: nicMetrics.network || null,
         rtpSequence: nicMetrics.rtpSequence || null,
       };
     } else if (tsduckData && tsduckData.arrivalMetrics) {

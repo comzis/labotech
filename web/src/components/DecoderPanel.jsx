@@ -129,7 +129,7 @@ function toDecoderEvent(msg) {
       details: msg.message || '',
     };
   }
-  if (msg.type === 'switched') {
+  if (msg.type === 'switched') {image.png
     return {
       key: `evt-${ts}-${decoderId}-switched`,
       decoderId,
@@ -513,11 +513,21 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       try {
         if (addToMultiview) {
           await startContinuous(id, row.url, parseInt(interval, 10) || 5000, captureNic || undefined);
+          // Prime first sample immediately so UI/multiview does not look idle.
+          try { await probe(row.url); } catch (_) {}
         } else {
           await probe(row.url);
         }
-        await etr.start(`etr-${id}`, row.url, captureNic || undefined);
         started.push(id);
+        // ETR monitor attach should never block decoder provisioning itself.
+        try {
+          await etr.start(`etr-${id}`, row.url, captureNic || undefined);
+        } catch (etrErr) {
+          failed.push({
+            id,
+            message: `ETR attach warning: ${etrErr?.message || 'ETR start failed (decoder is running)'}`,
+          });
+        }
       } catch (err) {
         failed.push({ id, message: err?.message || 'Provision failed' });
       }
@@ -527,17 +537,22 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       setSelectedId(started[started.length - 1]);
       setDecoderRows((rows) => rows.map((r) => ({ ...r, decoderId: '' })));
     }
+    // Re-sync actives after provisioning to avoid stale local state.
+    try { await refreshActives(); } catch (_) {}
+    try { await etr.refreshActives(); } catch (_) {}
     setProvisionSummary({ started, failed, at: Date.now() });
   };
 
   const stopDecoder = async () => {
     if (selectedId) {
-      await stop(selectedId);
-      await etr.stop(`etr-${selectedId}`);
+      try { await stop(selectedId); } catch (_) {}
+      try { await etr.stop(`etr-${selectedId}`); } catch (_) {}
       setSelectedId('');
       return;
     }
-    if (etr.activeId) await etr.stop(etr.activeId);
+    if (etr.activeId) {
+      try { await etr.stop(etr.activeId); } catch (_) {}
+    }
   };
 
   return (
@@ -717,7 +732,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             )}
           </div>
         )}
-        {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+        {error && <p className="text-red-400 text-sm mt-2">Decoder analyser error: {error}</p>}
+        {etr.error && <p className="text-amber-300 text-sm mt-1">ETR monitor warning: {etr.error}</p>}
       </BentoCard>
 
       <BentoCard icon={ShieldAlert} title="Decoder Quality Dashboard">
