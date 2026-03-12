@@ -55,6 +55,12 @@ function classifySeverity(msg) {
     if (msg.priority === 'p2') return 'warning';
     return 'info';
   }
+  if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
+    if (msg.priority === 'p1') return 'critical';
+    if (msg.priority === 'p2') return 'warning';
+    return 'info';
+  }
+  if (msg.type === 'etr290_incident_cleared') return 'info';
   if (msg.type === 'error') {
     return isExpectedNoSignalError(msg.message) ? 'warning' : 'critical';
   }
@@ -219,17 +225,24 @@ export default function App() {
 
   useEffect(() => {
     let mounted = true;
-    (async () => {
+    const hydrate = async () => {
       try {
         const seed = await getEvents();
         if (!mounted || !Array.isArray(seed)) return;
         const normalized = seed.map(toLogEntry).filter(Boolean);
-        const dedup = new Map();
-        normalized.forEach((e) => dedup.set(e.key, e));
-        setEventLog(Array.from(dedup.values()).slice(-1000));
+        // Merge with existing in-session WS events so we don't lose live entries.
+        setEventLog((prev) => {
+          const dedup = new Map(prev.map((e) => [e.key, e]));
+          normalized.forEach((e) => { if (!dedup.has(e.key)) dedup.set(e.key, e); });
+          return Array.from(dedup.values())
+            .sort((a, b) => (a.when || 0) - (b.when || 0))
+            .slice(-1000);
+        });
       } catch (_) {}
-    })();
-    return () => { mounted = false; };
+    };
+    hydrate();
+    const t = setInterval(hydrate, 10000);
+    return () => { mounted = false; clearInterval(t); };
   }, []);
 
   useEffect(() => {
