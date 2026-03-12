@@ -59,6 +59,10 @@ export const getETR290Monitors = () => request('GET', '/etr290');
 export const startETR290 = (body) => request('POST', '/etr290/start', body);
 export const getETR290 = (id) => request('GET', `/etr290/${id}`);
 export const stopETR290 = (id) => request('DELETE', `/etr290/${id}`);
+export const updateETR290Config = (id, body) => request('PUT', `/etr290/${id}/config`, body);
+export const getETR290Profiles = () => request('GET', '/etr290/profiles');
+export const saveETR290Profile = (body) => request('POST', '/etr290/profiles', body);
+export const deleteETR290Profile = (name) => request('DELETE', `/etr290/profiles/${encodeURIComponent(name)}`);
 
 // Health
 export const getHealth = () => request('GET', '/health');

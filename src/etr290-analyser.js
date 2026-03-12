@@ -34,6 +34,36 @@ const CHECKS = {
   ],
 };
 
+const ALL_CHECK_IDS = Object.values(CHECKS).flat().map((c) => c.id);
+
+function normalisePidList(list) {
+  if (!Array.isArray(list)) return [];
+  const out = [];
+  for (const raw of list) {
+    if (raw == null || raw === '') continue;
+    if (typeof raw === 'number' && Number.isFinite(raw)) {
+      out.push(raw);
+      continue;
+    }
+    const text = String(raw).trim();
+    if (!text) continue;
+    const parsed = text.toLowerCase().startsWith('0x') ? parseInt(text, 16) : parseInt(text, 10);
+    if (Number.isFinite(parsed)) out.push(parsed);
+  }
+  return [...new Set(out)];
+}
+
+function normaliseThresholds(input) {
+  const thresholds = {};
+  for (const id of ALL_CHECK_IDS) thresholds[id] = 1;
+  if (!input || typeof input !== 'object') return thresholds;
+  for (const id of ALL_CHECK_IDS) {
+    const v = parseInt(input[id], 10);
+    if (Number.isFinite(v) && v > 0) thresholds[id] = v;
+  }
+  return thresholds;
+}
+
 class ETR290Analyser extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -47,6 +77,7 @@ class ETR290Analyser extends EventEmitter {
     this._counts = {};   // checkId → count
     this._status = {};   // checkId → 'ok' | 'error'
     this._activeIncidents = {}; // checkId -> incident
+    this._pendingCounts = {}; // checkId -> matches not yet escalated to incident
     this._incidentSeq = 0;
     this._runtime = {
       bitrateMbps: null,
@@ -66,6 +97,7 @@ class ETR290Analyser extends EventEmitter {
       for (const c of checks) {
         this._counts[c.id] = 0;
         this._status[c.id] = 'ok';
+        this._pendingCounts[c.id] = 0;
         this._diagnostics.perCheck[c.id] = {
           matches: 0,
           lastMatchAt: null,
@@ -73,6 +105,36 @@ class ETR290Analyser extends EventEmitter {
         };
       }
     }
+
+    this.setConfig(options.config || {}, {
+      profileName: options.profileName || null,
+      silent: true,
+    });
+  }
+
+  setConfig(config = {}, extra = {}) {
+    const thresholds = normaliseThresholds(config.thresholds);
+    this._config = {
+      includePids: normalisePidList(config.includePids),
+      excludePids: normalisePidList(config.excludePids),
+      allowUnknownPid: config.allowUnknownPid !== false,
+      thresholds,
+      profileName: extra.profileName || config.profileName || this._config?.profileName || null,
+    };
+    this._recomputeStatuses();
+  }
+
+  _recomputeStatuses() {
+    for (const id of ALL_CHECK_IDS) {
+      this._status[id] = this._activeIncidents[id] ? 'error' : 'ok';
+    }
+  }
+
+  _pidAllowed(pid) {
+    if (pid == null) return this._config.allowUnknownPid;
+    if (this._config.includePids.length > 0 && !this._config.includePids.includes(pid)) return false;
+    if (this._config.excludePids.includes(pid)) return false;
+    return true;
   }
 
   start() {
@@ -154,8 +216,11 @@ class ETR290Analyser extends EventEmitter {
         if (c.pattern.test(line)) {
           const now = Date.now();
           const evidence = this._extractEvidence(lineTrim);
+          if (!this._pidAllowed(evidence.pid)) {
+            continue;
+          }
           this._counts[c.id]++;
-          this._status[c.id] = 'error';
+          this._pendingCounts[c.id] = (this._pendingCounts[c.id] || 0) + 1;
           this._diagnostics.lastMatchAt = now;
           this._diagnostics.totalMatchedLines += 1;
           this._diagnostics.perCheck[c.id] = {
@@ -165,6 +230,11 @@ class ETR290Analyser extends EventEmitter {
           };
 
           const existing = this._activeIncidents[c.id];
+          const threshold = this._config.thresholds[c.id] || 1;
+          if (!existing && this._pendingCounts[c.id] < threshold) {
+            matched = true;
+            break;
+          }
           if (!existing) {
             const incident = {
               incidentId: `${this.id}-${c.id}-${++this._incidentSeq}`,
@@ -181,6 +251,8 @@ class ETR290Analyser extends EventEmitter {
               pidHex: evidence.pidHex,
             };
             this._activeIncidents[c.id] = incident;
+            this._pendingCounts[c.id] = 0;
+            this._status[c.id] = 'error';
             this.emit('incident_started', { ...incident });
           } else {
             existing.lastSeen = now;
@@ -189,6 +261,7 @@ class ETR290Analyser extends EventEmitter {
             existing.messages = [...(existing.messages || []), lineTrim.slice(0, 240)].slice(-INCIDENT_SAMPLE_LINES);
             if (existing.pid == null && evidence.pid != null) existing.pid = evidence.pid;
             if (!existing.pidHex && evidence.pidHex) existing.pidHex = evidence.pidHex;
+            this._status[c.id] = 'error';
             this.emit('incident_updated', { ...existing });
           }
 
@@ -244,6 +317,7 @@ class ETR290Analyser extends EventEmitter {
       };
       delete this._activeIncidents[checkId];
       this._status[checkId] = 'ok';
+      this._pendingCounts[checkId] = 0;
       this.emit('incident_cleared', cleared);
       changed = true;
     }
@@ -294,6 +368,13 @@ class ETR290Analyser extends EventEmitter {
       activeIncidents: Object.values(this._activeIncidents).map((i) => ({ ...i })),
       runtime: { ...this._runtime },
       diagnostics: { ...this._diagnostics },
+      config: {
+        includePids: [...this._config.includePids],
+        excludePids: [...this._config.excludePids],
+        allowUnknownPid: this._config.allowUnknownPid,
+        thresholds: { ...this._config.thresholds },
+        profileName: this._config.profileName || null,
+      },
     };
   }
 
@@ -320,5 +401,6 @@ class ETR290Analyser extends EventEmitter {
 }
 
 ETR290Analyser.CHECKS = CHECKS;
+ETR290Analyser.CHECK_IDS = ALL_CHECK_IDS;
 
 module.exports = ETR290Analyser;
