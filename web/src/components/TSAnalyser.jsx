@@ -184,9 +184,30 @@ function toMbpsNumber(bps) {
   return Number.isFinite(n) && n > 0 ? Number((n / 1e6).toFixed(3)) : 0;
 }
 
-function toHexPid(pid) {
-  if (!Number.isFinite(Number(pid))) return "-";
-  return `0x${Number(pid).toString(16).toUpperCase().padStart(4, "0")}`;
+function toPidParts(pidLike) {
+  if (pidLike == null) return { dec: null, hex: null };
+  if (Number.isFinite(Number(pidLike))) {
+    const dec = Number(pidLike);
+    return { dec, hex: `0x${dec.toString(16).toUpperCase().padStart(4, "0")}` };
+  }
+  if (typeof pidLike === "string" && /^0x[0-9a-f]+$/i.test(pidLike.trim())) {
+    const dec = parseInt(pidLike, 16);
+    return { dec, hex: pidLike.toUpperCase() };
+  }
+  return { dec: null, hex: null };
+}
+
+function PidRef({ pidLike, color = C.accent }) {
+  const p = toPidParts(pidLike);
+  if (p.dec == null && !p.hex) {
+    return <span style={{ color: C.muted, fontFamily: "'Courier New',monospace", fontSize: 9 }}>{pidLike != null ? String(pidLike) : "-"}</span>;
+  }
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+      {p.dec != null ? <span style={{ color, fontFamily: "'Courier New',monospace" }}>{p.dec}</span> : null}
+      {p.hex ? <span style={{ color: C.muted, fontFamily: "'Courier New',monospace", fontSize: 9 }}>{p.hex}</span> : null}
+    </span>
+  );
 }
 
 export default function TSAnalyser({ lastMessage }) {
@@ -202,6 +223,7 @@ export default function TSAnalyser({ lastMessage }) {
   const [passphrase, setPassphrase] = useState("");
   const [activeId, setActiveId] = useState("");
   const [activeIdB, setActiveIdB] = useState("");
+  const [monitorLabel, setMonitorLabel] = useState("");
   const [eventRows, setEventRows] = useState([]);
 
   const {
@@ -283,6 +305,21 @@ export default function TSAnalyser({ lastMessage }) {
     return resultsById[activeIdB] || null;
   }, [activeIdB, resultsById]);
 
+  const monitoredIds = useMemo(() => {
+    const ids = new Set();
+    (activeIds || []).forEach((id) => ids.add(id));
+    Object.keys(resultsById || {}).forEach((id) => ids.add(id));
+    return Array.from(ids).sort();
+  }, [activeIds, resultsById]);
+
+  useEffect(() => {
+    if (!activeId && monitoredIds.length > 0) setActiveId(monitoredIds[0]);
+    if (activeId && monitoredIds.length > 0 && !monitoredIds.includes(activeId)) {
+      setActiveId(monitoredIds[0]);
+    }
+    if (monitoredIds.length === 0) setActiveId("");
+  }, [activeId, monitoredIds]);
+
   const activeUrl = activeResult?.url || buildProbeUrl({ mode, host, port, latency, passphrase });
   const target = parseTargetFromUrl(activeUrl);
   const bps = toMbpsNumber(activeResult?.dvb?.bitrateBps || activeResult?.dvb?.measuredBitrateBps);
@@ -319,7 +356,8 @@ export default function TSAnalyser({ lastMessage }) {
     (activeResult?.programs || []).forEach((p) => {
       (p.streams || []).forEach((s) => {
         rows.push({
-          pid: toHexPid(s.pid),
+          pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+          pidHex: s.pidHex || null,
           type: (s.codecType || "data").toUpperCase(),
           label: s.codecName || s.streamType || "-",
           bps: s.bitrateBps ? `${(Number(s.bitrateBps) / 1000).toFixed(1)} kbps` : "-",
@@ -334,14 +372,15 @@ export default function TSAnalyser({ lastMessage }) {
 
   const programs = useMemo(() => {
     return (activeResult?.programs || []).map((p) => ({
-      num: toHexPid(p.programId),
+      num: Number.isFinite(Number(p.programId)) ? Number(p.programId) : null,
       name: p.serviceName || `Service ${p.programId}`,
       provider: p.providerName || "-",
       running: 4,
       scrambled: Boolean(p.scrambled),
       eit: true,
       streams: (p.streams || []).map((s) => ({
-        pid: toHexPid(s.pid),
+        pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+        pidHex: s.pidHex || null,
         type: (s.codecType || "data").toUpperCase(),
         codec: s.codecName || "-",
         kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
@@ -362,7 +401,7 @@ export default function TSAnalyser({ lastMessage }) {
         ok: services.length > 0,
         tsid: activeResult?.dvb?.tsid || "-",
         desc: "Program map and PMT routing for current transport stream.",
-        entries: services.map((s) => ({ num: toHexPid(s.serviceId), pid: toHexPid(s.pmtPid), label: s.serviceName || "-" })),
+        entries: services.map((s) => ({ num: s.serviceId, pid: s.pmtPid, label: s.serviceName || "-" })),
       },
       {
         pid: "0x0011",
@@ -374,7 +413,7 @@ export default function TSAnalyser({ lastMessage }) {
         ok: services.length > 0,
         tsid: activeResult?.dvb?.tsid || "-",
         desc: "Service names/provider and running status from parsed service list.",
-        entries: services.map((s) => ({ num: toHexPid(s.serviceId), pid: "run:4", label: `${s.serviceName || "-"} / ${s.providerName || "-"}` })),
+        entries: services.map((s) => ({ num: s.serviceId, pid: "run:4", label: `${s.serviceName || "-"} / ${s.providerName || "-"}` })),
       },
       {
         pid: "0x00PM",
@@ -440,13 +479,23 @@ export default function TSAnalyser({ lastMessage }) {
     return rows;
   }, [activeResult, activeResultB]);
 
+  const makeMonitorId = (base = "analyser") => {
+    const clean = String(base || "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9-_]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+    const stem = clean || "analyser";
+    return `${stem}-${Date.now()}`;
+  };
+
   const handleProbe = async (e) => {
     e.preventDefault();
     const urlA = buildProbeUrl({ mode, host, port, latency, passphrase });
     if (!urlA) return;
     try {
       await probe(urlA);
-      const idA = activeId || `analyser-${Date.now()}`;
+      const idA = makeMonitorId(monitorLabel || "analyser");
       await startContinuous(idA, urlA, 5000);
       setActiveId(idA);
       await etr.start(`etr-${idA}`, urlA);
@@ -454,7 +503,7 @@ export default function TSAnalyser({ lastMessage }) {
         const urlB = buildProbeUrl({ mode, host: hostB, port: portB, latency, passphrase });
         if (urlB) {
           await probe(urlB);
-          const idB = activeIdB || `analyser-b-${Date.now()}`;
+          const idB = makeMonitorId(`${monitorLabel || "analyser"}-b`);
           await startContinuous(idB, urlB, 5000);
           setActiveIdB(idB);
         }
@@ -464,16 +513,22 @@ export default function TSAnalyser({ lastMessage }) {
     } catch (_) {}
   };
 
-  const handleStop = async () => {
+  const handleStopSelected = async () => {
     if (activeId) {
       await stop(activeId);
       try { await etr.stop(`etr-${activeId}`); } catch (_) {}
+      if (activeId === activeIdB) setActiveIdB("");
       setActiveId("");
     }
-    if (activeIdB) {
-      await stop(activeIdB);
-      setActiveIdB("");
+  };
+
+  const handleStopAll = async () => {
+    for (const id of monitoredIds) {
+      try { await stop(id); } catch (_) {}
+      try { await etr.stop(`etr-${id}`); } catch (_) {}
     }
+    setActiveId("");
+    setActiveIdB("");
   };
 
   const ts = new Date().toTimeString().slice(0, 8);
@@ -499,7 +554,7 @@ export default function TSAnalyser({ lastMessage }) {
         </div>
       </div>
 
-      <form onSubmit={handleProbe} style={{ display: "grid", gridTemplateColumns: dualLeg ? "96px 1fr 90px 1fr 90px 80px 100px auto" : "96px 1fr 90px 80px 100px auto", gap: 6, marginBottom: 8 }}>
+      <form onSubmit={handleProbe} style={{ display: "grid", gridTemplateColumns: dualLeg ? "96px 1fr 90px 1fr 90px 150px 80px 116px auto auto" : "96px 1fr 90px 150px 80px 116px auto auto", gap: 6, marginBottom: 8 }}>
         <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28 }}>
           <option value="rtp">RTP</option>
           <option value="udp">UDP</option>
@@ -509,10 +564,23 @@ export default function TSAnalyser({ lastMessage }) {
         <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="Port A" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />
         {dualLeg && <input value={hostB} onChange={(e) => setHostB(e.target.value)} placeholder="Host/IP B" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />}
         {dualLeg && <input value={portB} onChange={(e) => setPortB(e.target.value)} placeholder="Port B" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />}
+        <input value={monitorLabel} onChange={(e) => setMonitorLabel(e.target.value)} placeholder="Monitor ID prefix (optional)" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />
         <button type="button" onClick={() => setDualLeg((v) => !v)} style={{ height: 28, borderRadius: 3, border: `1px solid ${dualLeg ? C.gold : C.border}`, color: dualLeg ? C.gold : C.muted, background: "transparent" }}>{dualLeg ? "A+B" : "Single"}</button>
         <button type="submit" disabled={loading} style={{ height: 28, borderRadius: 3, border: `1px solid ${C.cyan}`, color: C.cyan, background: `${C.cyan}14` }}>{loading ? "Probing..." : "Start Probe"}</button>
-        <button type="button" onClick={handleStop} style={{ height: 28, borderRadius: 3, border: `1px solid ${C.err}`, color: C.err, background: "transparent" }}>Stop</button>
+        <button type="button" onClick={handleStopSelected} disabled={!activeId} style={{ height: 28, borderRadius: 3, border: `1px solid ${activeId ? C.err : C.border}`, color: activeId ? C.err : C.muted, background: "transparent" }}>Stop Selected</button>
+        <button type="button" onClick={handleStopAll} disabled={monitoredIds.length === 0} style={{ height: 28, borderRadius: 3, border: `1px solid ${monitoredIds.length ? C.warn : C.border}`, color: monitoredIds.length ? C.warn : C.muted, background: "transparent" }}>Stop All</button>
       </form>
+
+      <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 6, marginBottom: 8 }}>
+        <select value={activeId} onChange={(e) => setActiveId(e.target.value)} style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }}>
+          <option value="">Select active monitor</option>
+          {monitoredIds.map((id) => <option key={id} value={id}>{id}</option>)}
+        </select>
+        <div style={{ border: `1px solid ${C.border}`, background: C.panel, borderRadius: 3, height: 28, display: "flex", alignItems: "center", padding: "0 8px", fontSize: 10, color: C.muted }}>
+          Active monitors: <span style={{ color: C.cyan, marginLeft: 6 }}>{monitoredIds.length}</span>
+          {activeId ? <span style={{ marginLeft: 10 }}>Viewing: <span style={{ color: C.text }}>{activeId}</span></span> : null}
+        </div>
+      </div>
 
       {error && <div style={{ color: C.err, marginBottom: 8 }}>{error}</div>}
 
@@ -559,7 +627,15 @@ export default function TSAnalyser({ lastMessage }) {
             </table>
           </Panel>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            <Panel title="PCR / Timing"><KV k="PCR PID" v={activeResult?.dvb?.pcr?.pidHex || "-"} vc={C.accent} /><KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} /><KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={C.ok} /><KV k="CC Errors" v={String(ccErrors)} vc={ccErrors > 0 ? C.err : C.ok} /></Panel>
+            <Panel title="PCR / Timing">
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}>
+                <span style={{ fontSize: 9, color: C.muted }}>PCR PID</span>
+                <PidRef pidLike={activeResult?.dvb?.pcr?.pid ?? activeResult?.dvb?.pcr?.pidHex} color={C.accent} />
+              </div>
+              <KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} />
+              <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={C.ok} />
+              <KV k="CC Errors" v={String(ccErrors)} vc={ccErrors > 0 ? C.err : C.ok} />
+            </Panel>
             <Panel title="Stream Info" status={activeResult ? "OK" : "WARN"}><KV k="Source" v={target.host} /><KV k="Protocol" v={target.protocol} vc={C.accent} /><KV k="Port" v={target.port} /><KV k="SMPTE 2022-7" v={dualLeg ? "Enabled" : "Disabled"} vc={dualLeg ? C.gold : C.muted} /></Panel>
           </div>
         </div>
@@ -592,7 +668,7 @@ export default function TSAnalyser({ lastMessage }) {
               <div key={t.table} style={{ background: C.panel, border: `1px solid ${open ? C.borderHi : C.border}`, borderRadius: 3, overflow: "hidden" }}>
                 <div onClick={() => setExpanded((e) => ({ ...e, [t.table]: !e[t.table] }))} style={{ display: "grid", gridTemplateColumns: "22px 60px 1fr 80px 90px 90px 80px 60px", gap: 8, padding: "5px 8px", cursor: "pointer", alignItems: "center", background: open ? C.panelB : C.panel }}>
                   <span style={{ fontSize: 9, color: C.muted }}>{open ? "v" : ">"}</span>
-                  <span style={{ fontSize: 10, color: C.accent }}>{t.pid}</span>
+                  <span style={{ fontSize: 10 }}><PidRef pidLike={t.pid} /></span>
                   <div><span style={{ fontSize: 10, fontWeight: 700, color: t.ok ? C.cyan : C.err, marginRight: 8 }}>{t.table}</span><span style={{ fontSize: 9, color: C.muted }}>{t.name}</span></div>
                   <span style={{ fontSize: 9, color: C.muted }}>ver {t.ver}</span>
                   <span style={{ fontSize: 9, color: C.muted }}>int {t.interval_ms}</span>
@@ -603,7 +679,7 @@ export default function TSAnalyser({ lastMessage }) {
                 {open && (
                   <div style={{ borderTop: `1px solid ${C.borderHi}`, padding: "8px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <div><div style={{ fontSize: 8, color: C.muted, marginBottom: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>Description</div><div style={{ fontSize: 10, color: C.text, lineHeight: 1.5 }}>{t.desc}</div></div>
-                    <div><div style={{ fontSize: 8, color: C.muted, marginBottom: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>Entries</div>{t.entries.length === 0 ? <span style={{ fontSize: 9, color: C.muted }}>No entries parsed</span> : t.entries.map((e, j) => <div key={`${t.table}-${j}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}><Mono v={e.num} c={C.accent} size={9} /><Mono v={e.pid} c={C.muted} size={9} /><span style={{ fontSize: 9, color: C.text }}>{e.label}</span></div>)}</div>
+                    <div><div style={{ fontSize: 8, color: C.muted, marginBottom: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>Entries</div>{t.entries.length === 0 ? <span style={{ fontSize: 9, color: C.muted }}>No entries parsed</span> : t.entries.map((e, j) => <div key={`${t.table}-${j}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}><PidRef pidLike={e.num} /><PidRef pidLike={e.pid} color={C.muted} /><span style={{ fontSize: 9, color: C.text }}>{e.label}</span></div>)}</div>
                   </div>
                 )}
               </div>
@@ -619,7 +695,7 @@ export default function TSAnalyser({ lastMessage }) {
             <tbody>
               {pidRows.map((p, i) => (
                 <tr key={`pid-${i}`}>
-                  <TD mono><Mono v={p.pid} c={C.accent} size={10} /></TD><TD><Badge label={p.type} color={p.type === "VIDEO" ? C.purple : p.type === "AUDIO" ? C.info : C.head} small /></TD><TD>{p.label}</TD><TD right mono><Mono v={p.bps} c={C.cyan} size={10} /></TD><TD right mono><span style={{ color: p.cc > 0 ? C.err : C.muted }}>{p.cc}</span></TD><TD><Badge label={p.ok ? "OK" : "ERR"} color={p.ok ? C.ok : C.err} small /></TD>
+                  <TD mono><PidRef pidLike={p.pid ?? p.pidHex} /></TD><TD><Badge label={p.type} color={p.type === "VIDEO" ? C.purple : p.type === "AUDIO" ? C.info : C.head} small /></TD><TD>{p.label}</TD><TD right mono><Mono v={p.bps} c={C.cyan} size={10} /></TD><TD right mono><span style={{ color: p.cc > 0 ? C.err : C.muted }}>{p.cc}</span></TD><TD><Badge label={p.ok ? "OK" : "ERR"} color={p.ok ? C.ok : C.err} small /></TD>
                 </tr>
               ))}
               {pidRows.length === 0 && <tr><TD colSpan={6}>No PID inventory yet.</TD></tr>}
@@ -631,14 +707,14 @@ export default function TSAnalyser({ lastMessage }) {
       {tab === "Programs" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {programs.map((p) => (
-            <Panel key={p.num} title={`${p.name} · ${p.num}`} status={p.scrambled ? "SCRAMBLED" : "FTA"} right={p.provider}>
+            <Panel key={String(p.num)} title={`${p.name} · ${p.num ?? "-"}`} status={p.scrambled ? "SCRAMBLED" : "FTA"} right={p.provider}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 12 }}>
-                <div><KV k="Program Num" v={p.num} vc={C.accent} /><KV k="Service Name" v={p.name} vc={C.cyan} /><KV k="Provider" v={p.provider} /><KV k="Running" v={p.running === 4 ? "Running" : "Not running"} vc={C.ok} /><KV k="Scrambled" v={p.scrambled ? "YES" : "NO"} vc={p.scrambled ? C.err : C.ok} /></div>
+                <div><KV k="Program Num" v={p.num != null ? String(p.num) : "-"} vc={C.accent} /><KV k="Service Name" v={p.name} vc={C.cyan} /><KV k="Provider" v={p.provider} /><KV k="Running" v={p.running === 4 ? "Running" : "Not running"} vc={C.ok} /><KV k="Scrambled" v={p.scrambled ? "YES" : "NO"} vc={p.scrambled ? C.err : C.ok} /></div>
                 <div>
                   <div style={{ fontSize: 8, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Elementary Streams</div>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead><tr><TH>PID</TH><TH>Stream Type</TH><TH>Codec</TH><TH right>Bitrate</TH></tr></thead>
-                    <tbody>{p.streams.map((s, j) => <tr key={`${p.num}-${j}`}><TD mono><Mono v={s.pid} c={C.accent} size={10} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
+                    <tbody>{p.streams.map((s, j) => <tr key={`${p.num}-${j}`}><TD mono><PidRef pidLike={s.pid ?? s.pidHex} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
                   </table>
                 </div>
               </div>

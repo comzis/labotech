@@ -27,9 +27,27 @@ function statusColor(status) {
   return map[status] || C.muted;
 }
 
+function formatPidHex(pid) {
+  if (!Number.isFinite(Number(pid))) return null;
+  return `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`;
+}
+
+function PidDisplay({ pid, pidHex }) {
+  const dec = Number.isFinite(Number(pid)) ? Number(pid) : null;
+  const hex = pidHex || (dec != null ? formatPidHex(dec) : null);
+  if (dec == null && !hex) return <span style={{ color: C.muted }}>-</span>;
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 8 }}>
+      {dec != null ? <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{dec}</span> : null}
+      {hex ? <span style={{ color: C.muted, fontFamily: "'Courier New',monospace", fontSize: 9 }}>{hex}</span> : null}
+    </span>
+  );
+}
+
 export default function EventLogPanel({ events = [], onClear = () => {} }) {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [selectedRowKey, setSelectedRowKey] = useState(null);
 
   const exportJsonl = () => {
     const lines = events.map((e) => JSON.stringify(e)).join('\n');
@@ -90,8 +108,13 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
           String(e.status || '').toLowerCase().includes(q)
         );
       })
-      .slice(0, 500);
+      .slice(0, 500)
+      .map((e, idx) => ({
+        ...e,
+        __key: e.key || `${e.when || 'na'}-${e.id || 'system'}-${idx}`,
+      }));
   }, [events, severityFilter, query]);
+  const selected = useMemo(() => rows.find((r) => r.__key === selectedRowKey) || null, [rows, selectedRowKey]);
 
   return (
     <div style={{ fontFamily: "'Courier New',monospace", color: C.text }}>
@@ -182,7 +205,8 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
           </div>
         </div>
 
-        <div style={{ maxHeight: '70vh', overflow: 'auto', background: C.panel }}>
+        <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 320px' : '1fr', minHeight: 360 }}>
+          <div style={{ maxHeight: '70vh', overflow: 'auto', background: C.panel }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
             <thead style={{ position: 'sticky', top: 0, background: C.panelAlt, zIndex: 2 }}>
               <tr style={{ borderBottom: `1px solid ${C.borderHi}` }}>
@@ -207,10 +231,12 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
                   const stat = statusColor(e.status);
                   return (
                     <tr
-                      key={e.key || `${e.when || 'na'}-${e.id || 'system'}-${idx}`}
+                      key={e.__key}
+                      onClick={() => setSelectedRowKey(e.__key)}
                       style={{
                         borderBottom: `1px solid ${C.border}`,
-                        background: idx % 2 ? `${C.panelAlt}66` : 'transparent',
+                        background: selectedRowKey === e.__key ? `${C.cyan}10` : (idx % 2 ? `${C.panelAlt}66` : 'transparent'),
+                        cursor: 'pointer',
                       }}
                     >
                       <td
@@ -241,6 +267,67 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
               )}
             </tbody>
           </table>
+          </div>
+          {selected && (
+            <div style={{ borderLeft: `1px solid ${C.border}`, background: C.panelAlt, padding: '10px 12px', display: 'grid', gap: 10 }}>
+              <SectionHead title="Event QoS Detail" icon="🧭" right={<Badge label={String(selected.severity || 'info')} color={sevColor(selected.severity)} small />} />
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
+                <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Timestamps</div>
+                <div style={{ fontSize: 10, color: C.text }}>{toUtc(selected.when)}</div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
+                <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Impact Summary</div>
+                <div style={{ fontSize: 10, color: C.text }}>{selected.title || '-'}</div>
+                <div style={{ fontSize: 10, color: C.muted, marginTop: 4 }}>{selected.details || '-'}</div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
+                <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>PID / ETR Evidence</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 4, fontSize: 10 }}>
+                  <span style={{ color: C.muted }}>PID</span>
+                  <PidDisplay pid={selected?.evidence?.pid} pidHex={selected?.evidence?.pidHex} />
+                  <span style={{ color: C.muted }}>Priority</span>
+                  <span style={{ color: C.text }}>{selected?.evidence?.priority || '-'}</span>
+                  <span style={{ color: C.muted }}>Check ID</span>
+                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{selected?.evidence?.checkId || '-'}</span>
+                  <span style={{ color: C.muted }}>Incident ID</span>
+                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{selected?.evidence?.incidentId || '-'}</span>
+                </div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
+                <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>DVB / SI Evidence</div>
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 4, fontSize: 10 }}>
+                  <span style={{ color: C.muted }}>NIT / SDT / EIT / TDT</span>
+                  <span style={{ color: C.text }}>
+                    {selected?.evidence?.siCompliance
+                      ? `NIT ${String(selected.evidence.siCompliance.nit)} · SDT ${String(selected.evidence.siCompliance.sdt)} · EIT ${String(selected.evidence.siCompliance.eitPf)} · TDT ${String(selected.evidence.siCompliance.tdt)}`
+                      : '-'}
+                  </span>
+                  <span style={{ color: C.muted }}>SI intervals</span>
+                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>
+                    {selected?.evidence?.siIntervalsSec ? JSON.stringify(selected.evidence.siIntervalsSec) : '-'}
+                  </span>
+                  <span style={{ color: C.muted }}>DVB health</span>
+                  <span style={{ color: C.text }}>
+                    {selected?.evidence?.dvb?.health
+                      ? `${selected.evidence.dvb.health.score ?? '-'} / 100 (${selected.evidence.dvb.health.severity || '-'})`
+                      : '-'}
+                  </span>
+                </div>
+              </div>
+              <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
+                <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>Raw Event Data</div>
+                <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontSize: 9, color: C.muted, maxHeight: 180, overflow: 'auto' }}>
+                  {JSON.stringify(selected, null, 2)}
+                </pre>
+              </div>
+              <button
+                onClick={() => setSelectedRowKey(null)}
+                style={{ border: `1px solid ${C.border}`, background: 'transparent', color: C.muted, borderRadius: 2, padding: '6px 8px', fontSize: 10, cursor: 'pointer' }}
+              >
+                Close detail
+              </button>
+            </div>
+          )}
         </div>
       </PanelBox>
     </div>

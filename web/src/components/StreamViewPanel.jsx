@@ -406,6 +406,13 @@ function buildEventBlocks(events, timeStart, windowMs) {
     .filter(Boolean);
 }
 
+function getEventVisualDurationMs(event) {
+  if (!event) return 6000;
+  const baseDur = EVENT_BLOCK_DURATION_MS[event.category] || 6000;
+  const severityFactor = event.severity === 'critical' ? 1.35 : event.severity === 'warning' ? 1.15 : 1.0;
+  return Math.round(baseDur * severityFactor);
+}
+
 function getEventVisualStyle(category, severity) {
   const style = EVENT_STYLE_BY_CATEGORY[category] || { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' };
   let color = colorForSeverity(severity);
@@ -558,12 +565,34 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const selectedLaneExactEvents = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
     return (laneMap[selectedLaneId] || [])
-      .filter((e) => Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs)
+      .filter((e) => {
+        const tsMatch = Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs;
+        const durationMs = getEventVisualDurationMs(e);
+        const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
+        return tsMatch || inVisualBlock;
+      })
       .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
       .slice(0, 5);
   }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs]);
+  const selectedLaneNearestEvent = useMemo(() => {
+    if (!selectedLaneId || pointerUtc == null) return null;
+    const laneEvents = laneMap[selectedLaneId] || [];
+    if (laneEvents.length === 0) return null;
+    let best = null;
+    let bestDist = Infinity;
+    for (const e of laneEvents) {
+      const durationMs = getEventVisualDurationMs(e);
+      const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
+      const dist = inVisualBlock ? 0 : Math.abs(e.ts - pointerUtc);
+      if (dist < bestDist) {
+        best = e;
+        bestDist = dist;
+      }
+    }
+    return best;
+  }, [selectedLaneId, pointerUtc, laneMap]);
   const selectedLaneEvent = selectedLaneExactEvents[0] || null;
-  const selectedEvent = selectedLaneEvent;
+  const selectedEvent = selectedLaneEvent || selectedLaneNearestEvent;
 
   const forensicByLane = useMemo(() => {
     const byLane = {};
@@ -671,7 +700,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
 
   return (
     <div className="broadcast-legacy" style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
-      <BentoCard icon={Activity} title="Stream View">
+      <BentoCard icon={Activity} title="Live View">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="text-[11px] text-gray-400">Horizontal UTC timeline by monitor/analyser lane</div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -892,14 +921,22 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 <div className="font-mono text-gray-500">{pointerUtc ? toUtc(pointerUtc) : '-'}</div>
               </div>
               <div className="mt-1 text-gray-400">
-                {selectedLaneEvent ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}` : 'No event at pointer'}
+                {selectedLaneEvent
+                  ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}`
+                  : selectedLaneNearestEvent
+                    ? `${selectedLaneNearestEvent.title} @ ${toUtc(selectedLaneNearestEvent.ts)} (nearest)`
+                    : 'No event at pointer'}
               </div>
               <div className="mt-2 border-t border-white/10 pt-2">
                 <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
                   Events At Pointer (±{pointerMatchWindowMs}ms)
                 </div>
                 {selectedLaneExactEvents.length === 0 ? (
-                  <div className="text-gray-500">No event exactly at selected pointer time.</div>
+                  <div className="text-gray-500">
+                    {selectedLaneNearestEvent
+                      ? `No exact event at pointer. Showing nearest event at ${toUtc(selectedLaneNearestEvent.ts)}.`
+                      : 'No event exactly at selected pointer time.'}
+                  </div>
                 ) : (
                   <div className="space-y-1.5 max-h-36 overflow-auto">
                     {selectedLaneExactEvents.map((e) => (

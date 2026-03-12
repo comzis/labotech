@@ -21,6 +21,7 @@ const DEFAULTS = {
 };
 
 const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
+const formatPidHex = (pid) => (pid == null || Number.isNaN(Number(pid)) ? null : `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`);
 
 function buildInputUrl(inputMode, inputHost, inputPort, rawInput) {
   if (inputMode === 'custom') return (rawInput || '').trim();
@@ -303,6 +304,47 @@ export default function EncoderForm({ onStarted }) {
               </div>
               <div className="mt-2 text-[10px] text-gray-500">
                 Enter Mbps as a number. No fixed app cap; practical range depends on codec, profile, and transport capacity.
+              </div>
+            </BentoCard>
+
+            <BentoCard icon={Tv2} title="PID Map" className="md:col-span-1 border-neon-purple/20 bg-neon-purple/5">
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between"><span className="text-gray-500">PMT PID</span><span className="font-mono text-gray-300">{form.pmtPid} <span className="text-gray-500">{formatPidHex(form.pmtPid) || ''}</span></span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Video PID</span><span className="font-mono text-gray-300">{form.videoPid} <span className="text-gray-500">{formatPidHex(form.videoPid) || ''}</span></span></div>
+                {audioPairs.map((p, i) => (
+                  <div key={`pidrow-${i}`} className="flex justify-between">
+                    <span className="text-gray-500">Audio {i + 1}</span>
+                    <span className="font-mono text-gray-300">
+                      {p.pid !== '' ? (
+                        <>
+                          {p.pid} <span className="text-gray-500">{formatPidHex(p.pid) || ''}</span>
+                        </>
+                      ) : (
+                        `auto(${Number(form.videoPid || 0) + i + 1})`
+                      )}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+
+            <BentoCard icon={Server} title="Mux Settings" className="md:col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between"><span className="text-gray-500">Output mode</span><span className="font-mono text-gray-300 uppercase">{form.outputMode}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">TTL</span><span className="font-mono text-gray-300">{form.ttl}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Adapter</span><span className="font-mono text-gray-300">{form.adapter || form.localAddr || '-'}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Service ID</span><span className="font-mono text-gray-300">{form.serviceId}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">TS / ONID</span><span className="font-mono text-gray-300">{form.transportStreamId} / {form.originalNetworkId}</span></div>
+              </div>
+            </BentoCard>
+
+            <BentoCard icon={Settings2} title="Presets" className="md:col-span-1 border-neon-green/20 bg-neon-green/5">
+              <div className="space-y-3">
+                <SelectField label="Quick preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
+                <SelectField label="Rate profile" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
+                <div className="text-[10px] text-gray-500">
+                  Preset choices are applied directly to this stream instance before start.
+                </div>
               </div>
             </BentoCard>
 

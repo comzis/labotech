@@ -495,6 +495,18 @@ export default function TranscodePanel({ lastMessage }) {
                 )}
               </div>
             </BentoCard>
+
+            <BentoCard icon={Settings2} title="Advanced Codec Options" className="border-neon-purple/20 bg-neon-purple/5">
+              <div className="grid grid-cols-2 gap-4">
+                <Field label="Video Codec Override" placeholder="libx264 / libx265 / copy" value={form.videoCodec} onChange={v => set('videoCodec', v)} color="purple" />
+                <Field label="Audio Codec Override" placeholder="aac / mp2 / ac3 / copy" value={form.audioCodec} onChange={v => set('audioCodec', v)} color="purple" />
+                <Field label="Video Bitrate Override" placeholder="e.g. 10M" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} color="purple" />
+                <Field label="Audio Bitrate Override" placeholder="e.g. 256k" value={form.audioBitrate} onChange={v => set('audioBitrate', v)} color="purple" />
+              </div>
+              <div className="mt-3 text-[10px] text-gray-500">
+                Leave overrides empty to use selected profile or preset slot defaults.
+              </div>
+            </BentoCard>
           </motion.div>
 
           {error && (
@@ -519,45 +531,45 @@ export default function TranscodePanel({ lastMessage }) {
 
       {/* Active transcoders Section */}
       <section>
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-sm text-gray-400 uppercase tracking-widest font-bold opacity-80">
+        <BentoCard icon={Activity} title="Pipeline Status" className="border-neon-cyan/20 bg-neon-cyan/5">
+          <div className="text-sm text-gray-400 uppercase tracking-widest font-bold opacity-80 mb-4">
             Active Broadcast Pipelines ({transcoders.length})
-          </h2>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {transcoders.map(t => (
-            <motion.div
-              key={t.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-              <div className="flex items-center justify-between relative z-10">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={t.isRunning ? 'live' : 'stopped'} pulse />
-                  <span className="font-mono text-sm font-semibold text-gray-200">{t.id}</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {transcoders.map(t => (
+              <motion.div
+                key={t.id}
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
+              >
+                <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
+                <div className="flex items-center justify-between relative z-10">
+                  <div className="flex items-center gap-2">
+                    <StatusDot status={t.isRunning ? 'live' : 'stopped'} pulse />
+                    <span className="font-mono text-sm font-semibold text-gray-200">{t.id}</span>
+                  </div>
+                  {t.isRunning && (
+                    <button
+                      onClick={() => handleStop(t.id)}
+                      className="text-[10px] font-bold uppercase tracking-tighter bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded-md border border-red-500/20 transition-colors"
+                    >
+                      Terminate
+                    </button>
+                  )}
                 </div>
-                {t.isRunning && (
-                  <button
-                    onClick={() => handleStop(t.id)}
-                    className="text-[10px] font-bold uppercase tracking-tighter bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded-md border border-red-500/20 transition-colors"
-                  >
-                    Terminate
-                  </button>
+                <div className="text-xs font-bold text-neon-purple/80 uppercase tracking-wide relative z-10">{t.presetName || 'Custom'}</div>
+                <div className="text-[11px] text-gray-500 truncate relative z-10 font-mono">{t.input}</div>
+                {t.encodeProfile && (
+                  <div className="text-[10px] text-gray-500 font-mono relative z-10">
+                    {t.encodeProfile.videoCodec || '-'} / {(t.audioPairs?.[0]?.codec) || 'audio-auto'} / {t.encodeProfile.rateMode || 'cbr'}
+                  </div>
                 )}
-              </div>
-              <div className="text-xs font-bold text-neon-purple/80 uppercase tracking-wide relative z-10">{t.presetName || 'Custom'}</div>
-              <div className="text-[11px] text-gray-500 truncate relative z-10 font-mono">{t.input}</div>
-              {t.encodeProfile && (
-                <div className="text-[10px] text-gray-500 font-mono relative z-10">
-                  {t.encodeProfile.videoCodec || '-'} / {(t.audioPairs?.[0]?.codec) || 'audio-auto'} / {t.encodeProfile.rateMode || 'cbr'}
-                </div>
-              )}
-              {t.isRunning && <div className="relative z-10 pt-2"><MetricsTile id={t.id} stats={t.lastStats} lastMessage={lastMessage} /></div>}
-            </motion.div>
-          ))}
-        </div>
+                {t.isRunning && <div className="relative z-10 pt-2"><MetricsTile id={t.id} stats={t.lastStats} lastMessage={lastMessage} /></div>}
+              </motion.div>
+            ))}
+          </div>
+        </BentoCard>
       </section>
     </div>
   );
