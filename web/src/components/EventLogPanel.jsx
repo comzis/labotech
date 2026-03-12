@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
-import BentoCard from './ui/BentoCard';
+import { C, Badge, Dot, PanelBox, SectionHead, Input } from './BroadcastUI';
 
 function toUtc(ts) {
   const d = new Date(ts);
@@ -8,23 +8,23 @@ function toUtc(ts) {
   return d.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
-function pillClass(sev) {
-  if (sev === 'critical') return 'bg-red-900/30 border-red-500/40 text-red-300';
-  if (sev === 'warning') return 'bg-amber-900/30 border-amber-500/40 text-amber-300';
-  return 'bg-sky-900/30 border-sky-500/40 text-sky-300';
+function sevColor(sev) {
+  if (sev === 'critical') return C.crit;
+  if (sev === 'warning') return C.warn;
+  return C.info;
 }
 
-function statusClass(status) {
+function statusColor(status) {
   const map = {
-    alarm: 'text-red-300',
-    error: 'text-red-300',
-    'no-signal': 'text-amber-300',
-    failover: 'text-amber-300',
-    started: 'text-green-300',
-    stopped: 'text-gray-500',
-    info: 'text-sky-300',
+    alarm: C.crit,
+    error: C.crit,
+    'no-signal': C.warn,
+    failover: C.warn,
+    started: C.ok,
+    stopped: C.muted,
+    info: C.info,
   };
-  return map[status] || 'text-gray-400';
+  return map[status] || C.muted;
 }
 
 export default function EventLogPanel({ events = [], onClear = () => {} }) {
@@ -94,85 +94,155 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
   }, [events, severityFilter, query]);
 
   return (
-    <div className="space-y-6 font-sans">
-      <BentoCard icon={ShieldCheck} title="Alarm & Event Log">
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          {['all', 'critical', 'warning', 'info'].map((s) => (
+    <div style={{ fontFamily: "'Courier New',monospace", color: C.text }}>
+      <PanelBox>
+        <SectionHead
+          icon={<ShieldCheck size={12} />}
+          title="Alarm & Event Log"
+          activeDotColor={C.err}
+          right={<Badge label="LIVE" color={C.ok} small />}
+        />
+
+        <div style={{ padding: '8px 10px', borderBottom: `1px solid ${C.border}`, background: C.panel }}>
+          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            {['all', 'critical', 'warning', 'info'].map((s) => (
+              <button
+                key={s}
+                onClick={() => setSeverityFilter(s)}
+                style={{
+                  border: `1px solid ${severityFilter === s ? C.cyan : C.border}`,
+                  background: severityFilter === s ? `${C.cyan}12` : C.input,
+                  color: severityFilter === s ? C.cyan : C.muted,
+                  borderRadius: 2,
+                  padding: '3px 8px',
+                  fontSize: 9,
+                  fontWeight: 800,
+                  letterSpacing: '0.09em',
+                  textTransform: 'uppercase',
+                  cursor: 'pointer',
+                }}
+              >
+                {s}
+              </button>
+            ))}
+
+            <div style={{ marginLeft: 'auto', minWidth: 260 }}>
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Filter by instance/message..."
+                mono
+              />
+            </div>
+
             <button
-              key={s}
-              onClick={() => setSeverityFilter(s)}
-              className={`text-xs px-2 py-1 rounded border ${
-                severityFilter === s
-                  ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
-                  : 'border-white/10 text-gray-400 bg-black/20'
-              }`}
+              onClick={onClear}
+              style={{
+                border: `1px solid ${C.border}`,
+                background: 'transparent',
+                color: C.muted,
+                borderRadius: 2,
+                padding: '4px 8px',
+                fontSize: 9,
+                cursor: 'pointer',
+              }}
             >
-              {s.toUpperCase()}
+              Clear
             </button>
-          ))}
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Filter by instance/message..."
-            className="ml-auto min-w-[240px] bg-black/30 border border-white/10 rounded px-2 py-1.5 text-xs text-gray-300"
-          />
-          <button
-            onClick={onClear}
-            className="text-xs px-2 py-1 rounded border border-white/10 text-gray-500 hover:text-red-400"
-          >
-            Clear
-          </button>
-          <button
-            onClick={exportJsonl}
-            className="text-xs px-2 py-1 rounded border border-white/10 text-gray-400 hover:text-neon-cyan"
-          >
-            Download JSONL
-          </button>
-          <button
-            onClick={exportCsv}
-            className="text-xs px-2 py-1 rounded border border-white/10 text-gray-400 hover:text-neon-cyan"
-          >
-            Download CSV
-          </button>
+
+            <button
+              onClick={exportJsonl}
+              style={{
+                border: `1px solid ${C.border}`,
+                background: 'transparent',
+                color: C.muted,
+                borderRadius: 2,
+                padding: '4px 8px',
+                fontSize: 9,
+                cursor: 'pointer',
+              }}
+            >
+              Download JSONL
+            </button>
+
+            <button
+              onClick={exportCsv}
+              style={{
+                border: `1px solid ${C.border}`,
+                background: 'transparent',
+                color: C.muted,
+                borderRadius: 2,
+                padding: '4px 8px',
+                fontSize: 9,
+                cursor: 'pointer',
+              }}
+            >
+              Download CSV
+            </button>
+          </div>
         </div>
 
-        <div className="rounded-lg border border-white/10 bg-black/20 overflow-auto max-h-[70vh]">
-          <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-black/70 backdrop-blur">
-              <tr className="text-gray-500 border-b border-white/10">
-                <th className="text-left py-2 px-2">Time (UTC)</th>
-                <th className="text-left py-2 px-2">Instance</th>
-                <th className="text-left py-2 px-2">Severity</th>
-                <th className="text-left py-2 px-2">Status</th>
-                <th className="text-left py-2 px-2">Event</th>
-                <th className="text-left py-2 px-2">Details</th>
+        <div style={{ maxHeight: '70vh', overflow: 'auto', background: C.panel }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+            <thead style={{ position: 'sticky', top: 0, background: C.panelAlt, zIndex: 2 }}>
+              <tr style={{ borderBottom: `1px solid ${C.borderHi}` }}>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Time (UTC)</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Instance</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Severity</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Status</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Event</th>
+                <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Details</th>
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 ? (
                 <tr>
-                  <td colSpan={6} className="py-4 px-2 text-gray-500">No events in current filter.</td>
+                  <td colSpan={6} style={{ padding: '12px 8px', color: C.muted }}>
+                    No events in current filter.
+                  </td>
                 </tr>
               ) : (
-                rows.map((e) => (
-                  <tr key={e.key} className="border-b border-white/5 align-top">
-                    <td className="py-2 px-2 font-mono text-gray-400 whitespace-nowrap">{toUtc(e.when)}</td>
-                    <td className="py-2 px-2 font-mono text-gray-300">{e.id}</td>
-                    <td className="py-2 px-2">
-                      <span className={`inline-block text-[10px] uppercase px-1.5 py-0.5 rounded border ${pillClass(e.severity)}`}>
-                        {e.severity}
-                      </span>
-                    </td>
-                    <td className={`py-2 px-2 uppercase font-mono ${statusClass(e.status)}`}>{e.status}</td>
-                    <td className="py-2 px-2 text-gray-200">{e.title}</td>
-                    <td className="py-2 px-2 text-gray-400">{e.details || '-'}</td>
-                  </tr>
-                ))
+                rows.map((e, idx) => {
+                  const sev = sevColor(e.severity);
+                  const stat = statusColor(e.status);
+                  return (
+                    <tr
+                      key={e.key || `${e.when || 'na'}-${e.id || 'system'}-${idx}`}
+                      style={{
+                        borderBottom: `1px solid ${C.border}`,
+                        background: idx % 2 ? `${C.panelAlt}66` : 'transparent',
+                      }}
+                    >
+                      <td
+                        style={{
+                          padding: '6px 8px',
+                          fontFamily: "'Courier New',monospace",
+                          color: C.muted,
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {toUtc(e.when)}
+                      </td>
+                      <td style={{ padding: '6px 8px', fontFamily: "'Courier New',monospace", color: C.text }}>{e.id}</td>
+                      <td style={{ padding: '6px 8px' }}>
+                        <Badge label={String(e.severity || 'info')} color={sev} small />
+                      </td>
+                      <td style={{ padding: '6px 8px', color: stat, textTransform: 'uppercase' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                          <Dot color={stat} size={6} glow={false} />
+                          {String(e.status || '')}
+                        </span>
+                      </td>
+                      <td style={{ padding: '6px 8px', color: C.text }}>{e.title}</td>
+                      <td style={{ padding: '6px 8px', color: C.muted }}>{e.details || '-'}</td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
         </div>
-      </BentoCard>
+      </PanelBox>
     </div>
   );
 }

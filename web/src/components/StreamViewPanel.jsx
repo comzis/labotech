@@ -3,6 +3,7 @@ import { Activity } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import Sparkline from './Sparkline';
 import { getEvents } from '../api';
+import { C } from './BroadcastUI';
 
 const WINDOW_OPTIONS = [
   { value: 5 * 60 * 1000, label: '5m' },
@@ -669,7 +670,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   };
 
   return (
-    <div className="space-y-6 font-sans">
+    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
       <BentoCard icon={Activity} title="Stream View">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="text-[11px] text-gray-400">Horizontal UTC timeline by monitor/analyser lane</div>

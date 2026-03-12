@@ -6,6 +6,7 @@ import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
 import { motion } from 'framer-motion';
+import { C } from './BroadcastUI';
 
 const THUMB_BASE = '/logs/thumbnails';
 const EMBED_REFRESH_MS = parseInt(import.meta.env?.VITE_THUMB_INTERVAL_MS, 10) || 5000;
@@ -52,7 +53,7 @@ export default function StreamsPanel({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-6">
+    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
       <EncoderForm onStarted={refresh} />
 
       <section>
