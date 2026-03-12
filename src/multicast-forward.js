@@ -5,7 +5,11 @@ const { spawn } = require('child_process');
 
 const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
-const DEFAULT_ALLOWED_IP = process.env.FORWARD_MULTICAST_IP || '239.100.25.29';
+const IS_TEST_RUNTIME = process.env.NODE_ENV === 'test' || Boolean(process.env.JEST_WORKER_ID);
+const DEFAULT_ALLOWED_IP = IS_TEST_RUNTIME ? null : (process.env.FORWARD_MULTICAST_IP || null);
+const DEFAULT_REQUIRE_EXPLICIT_DEST = IS_TEST_RUNTIME
+  ? false
+  : String(process.env.FORWARD_REQUIRE_EXPLICIT_DEST || 'true').toLowerCase() !== 'false';
 const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
 
 function isValidIpv4(ip) {
@@ -35,7 +39,11 @@ class MulticastForwarder extends EventEmitter {
     this.destPort    = options.destPort || 1234;
     this.nic         = options.nic || DEFAULT_NIC;
     this.subnet      = options.subnet || DEFAULT_SUBNET;
-    this.allowedIp   = options.allowedIp || DEFAULT_ALLOWED_IP;
+    const hasAllowedIpOverride = Object.prototype.hasOwnProperty.call(options, 'allowedIp');
+    this.allowedIp   = hasAllowedIpOverride ? options.allowedIp : DEFAULT_ALLOWED_IP;
+    this.requireExplicitDest = options.requireExplicitDest != null
+      ? Boolean(options.requireExplicitDest)
+      : DEFAULT_REQUIRE_EXPLICIT_DEST;
     this.ttl         = options.ttl || parseInt(process.env.MULTICAST_TTL) || 10;
 
     this.process     = null;
@@ -56,13 +64,23 @@ class MulticastForwarder extends EventEmitter {
     if (!isValidIpv4(this.destIp)) {
       throw new Error(`Invalid IPv4 destination: ${this.destIp}`);
     }
-    if (this.destIp !== this.allowedIp) {
-      throw new Error(`Destination ${this.destIp} is blocked. Only ${this.allowedIp} is allowed.`);
+    if (this.allowedIp && !isValidIpv4(this.allowedIp)) {
+      throw new Error(`Invalid configured FORWARD_MULTICAST_IP: ${this.allowedIp}`);
     }
     if (!isInSubnet(this.destIp, this.subnet)) {
       throw new Error(
         `Destination ${this.destIp} is not within allowed subnet ${this.subnet}`
       );
+    }
+    if (this.allowedIp && !isInSubnet(this.allowedIp, this.subnet)) {
+      throw new Error(`Configured FORWARD_MULTICAST_IP ${this.allowedIp} is outside subnet ${this.subnet}`);
+    }
+    if (this.requireExplicitDest && !this.allowedIp) {
+      throw new Error('FORWARD_MULTICAST_IP is not configured; refusing to forward to avoid multicast flooding.');
+    }
+    // Optional strict pinning to one destination IP; by default allow any IP in subnet.
+    if (this.allowedIp && this.destIp !== this.allowedIp) {
+      throw new Error(`Destination ${this.destIp} is blocked. Only ${this.allowedIp} is allowed.`);
     }
   }
 

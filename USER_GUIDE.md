@@ -383,10 +383,14 @@ Probes any MPEG-TS stream and displays the full PAT/PMT/PID tree.
    - Programme Association Table (PAT)
    - Programme Map Tables (PMT) per service
    - All PIDs with type, codec, bitrate, and language
+   - Health summary (`dvb.health.score`, `dvb.health.severity`, `dvb.health.reasons`)
+   - Timestamp discontinuity counters (`dvb.timestampDiscontinuity`)
+   - Continuity Counter error counters (`dvb.continuityCounterErrors`)
    - Arrival telemetry provenance (`dvb.arrival.captureMethod`) for IAT/jitter/loss:
      - `tshark` / `tcpdump` = NIC-capture
      - `tsduck` = analyser-derived
      - `unavailable` = capture tool missing
+   - Optional Dolby E adapter diagnostics (`dvb.dolbyE`) when enabled
 
 Useful for verifying DVB compliance and diagnosing multiplexer issues.
 

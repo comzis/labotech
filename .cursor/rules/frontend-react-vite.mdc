@@ -12,3 +12,6 @@ alwaysApply: false
 - Validate and normalize numeric form values before sending payloads.
 - Keep polling/websocket handlers scoped to active resource IDs when events are broadcast.
 - Maintain consistent API path usage with Vite proxy configuration.
+- For timeline UIs, prefer duration-block representations for persistent incidents over sparse dot-only markers.
+- Keep inspector popups dynamically positioned relative to cursor to avoid obscuring inspected lane content.
+- Keep legend and timeline event styles sourced from shared constants to avoid drift.

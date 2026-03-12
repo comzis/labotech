@@ -13,3 +13,5 @@ alwaysApply: false
 - Keep WebSocket message types explicit and stable.
 - Avoid duplicate logic when helper functions already exist.
 - Add or update tests for route behavior when changing request validation or orchestration logic.
+- Keep optional external adapters (e.g., Dolby E decoder) non-fatal: capture errors in diagnostics/state rather than crashing route/analyser workflows.
+- Preserve analyzer payload compatibility when extending telemetry (append fields like `dvb.health`, timestamp/CC counters without breaking existing consumers).

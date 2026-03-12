@@ -4,6 +4,7 @@ import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
+const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 
 function countPids(result) {
   if (!result) return 0;
@@ -243,7 +244,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
 }
 
 export default function DecoderMultiviewPanel({ lastMessage }) {
-  const { activeIds, resultsById, decoderMeta, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const { activeIds, resultsById, decoderMeta, error, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
   const [openCreate, setOpenCreate] = useState(false);
   const [mode, setMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -256,7 +257,50 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [engineerMode, setEngineerMode] = useState(true);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(MULTIVIEW_STATE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
+      if (parsed?.mode) setMode(parsed.mode);
+      if (parsed?.host != null) setHost(String(parsed.host));
+      if (parsed?.port != null) setPort(String(parsed.port));
+      if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
+      if (parsed?.interval != null) setInterval(String(parsed.interval));
+      if (parsed?.latency != null) setLatency(String(parsed.latency));
+      if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
+      if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        MULTIVIEW_STATE_KEY,
+        JSON.stringify({
+          openCreate,
+          mode,
+          host,
+          port,
+          decoderId,
+          interval,
+          latency,
+          passphrase,
+          engineerMode,
+        })
+      );
+    } catch (_) {}
+  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode]);
+
+  useEffect(() => {
     refreshActives();
+  }, [refreshActives]);
+
+  useEffect(() => {
+    const t = setInterval(() => {
+      refreshActives();
+    }, 4000);
+    return () => clearInterval(t);
   }, [refreshActives]);
 
   useEffect(() => {
@@ -275,6 +319,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     const id = decoderId || `decoder-${Date.now()}`;
     try {
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
+      await refreshActives();
       setOpenCreate(false);
       setDecoderId('');
     } catch (_) {
@@ -353,6 +398,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
         {activeIds.length === 0 && (
           <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from Decoder tab.</p>
         )}
+        {error && (
+          <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 mt-4">
           {activeIds.map((id) => (
@@ -361,7 +409,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               id={id}
               meta={decoderMeta[id]}
               result={resultsById[id]}
-              onStop={() => stop(id)}
+              onStop={async () => {
+                await stop(id);
+                await refreshActives();
+              }}
               nowMs={nowMs}
               engineerMode={engineerMode}
             />

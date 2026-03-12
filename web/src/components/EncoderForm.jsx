@@ -4,6 +4,7 @@ import { Settings2, Server, ShieldCheck, Play, Radio, Activity, Plus, Trash2, Tv
 import { startStream } from '../api';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
+import { C } from './BroadcastUI';
 
 const DEFAULTS = {
   id: '', inputMode: 'rtp', inputHost: '', inputPort: '6501', input: '', inputLocalAddr: '',
@@ -104,7 +105,7 @@ export default function EncoderForm({ onStarted }) {
   };
 
   return (
-    <div className="mb-12 font-sans">
+    <div style={{ marginBottom: 48, fontFamily: "'Courier New',monospace", color: C.text }}>
       {!open && (
         <motion.button
           whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(34,211,238,0.2)' }}

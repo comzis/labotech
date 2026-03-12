@@ -1,11 +1,17 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { Network, Settings2, Share2 } from 'lucide-react';
 import { getMulticastConfig, getForwarders, startForwarder, stopForwarder } from '../api';
-import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Network, Settings2, Globe, Share2 } from 'lucide-react';
-import BentoCard, { containerVariants } from './ui/BentoCard';
-import { Field } from './ui/MatrixField';
+import {
+  C,
+  PanelBox,
+  SectionHead,
+  Field,
+  Input,
+  Select,
+  Badge,
+  Dot,
+} from './BroadcastUI';
 
 const DEFAULTS = {
   id: '',
@@ -43,13 +49,15 @@ export default function MulticastPanel({ lastMessage }) {
     }));
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   useEffect(() => {
     if (lastMessage?.type === 'multicast_stopped') load();
   }, [lastMessage]);
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+  const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -76,161 +84,260 @@ export default function MulticastPanel({ lastMessage }) {
   };
 
   const handleStop = async (id) => {
-    await stopForwarder(id);
-    load();
+    try {
+      setError(null);
+      await stopForwarder(id);
+      load();
+    } catch (err) {
+      setError(err.message || 'Failed to stop forwarder');
+    }
   };
 
   return (
-    <div className="space-y-8 font-sans">
-      {/* Header */}
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <Network className="w-6 h-6 text-neon-green" strokeWidth={1.5} />
-            Forwarder Workflow
-          </h1>
-          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Network Distribution & Group Forwarding</p>
+    <div style={{ fontFamily: "'Courier New',monospace", color: C.text }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+          borderBottom: `1px solid ${C.border}`,
+          paddingBottom: 6,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Network size={16} color={C.ok} />
+          <div>
+            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em' }}>Forwarder Workflow</div>
+            <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              Network Distribution & Group Forwarding
+            </div>
+          </div>
         </div>
+
         <button
-          onClick={() => setOpen(o => !o)}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all ${open
-            ? 'bg-gray-800 text-gray-400 hover:text-white border border-white/10'
-            : 'bg-gradient-to-r from-neon-green/25 to-green-600/25 border border-neon-green/35 text-green-100 shadow-lg shadow-neon-green/15 hover:shadow-neon-green/30'
-            }`}
+          onClick={() => setOpen((o) => !o)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            border: `1px solid ${open ? C.border : C.ok}`,
+            background: open ? C.panel : `${C.ok}14`,
+            color: open ? C.muted : C.ok,
+            borderRadius: 2,
+            padding: '6px 10px',
+            fontSize: 10,
+            fontWeight: 700,
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}
         >
-          {open ? 'Cancel' : <><Share2 className="w-4 h-4" /> Deploy Forwarder</>}
+          {!open ? <Share2 size={12} /> : null}
+          {open ? 'Cancel' : 'Deploy Forwarder'}
         </button>
       </div>
 
-      {/* Config Overview Bento Card */}
       {config && (
-        <BentoCard icon={Settings2} title="Interface Configuration" accentColor="green">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+        <PanelBox style={{ marginBottom: 8 }}>
+          <SectionHead
+            icon={<Settings2 size={12} />}
+            title="Interface Configuration"
+            right={<Badge label={`${config.nic || 'nic'} up`} color={C.ok} small />}
+          />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, padding: '8px 10px' }}>
             {[
               ['NIC', config.nic],
               ['Subnet', config.subnet],
               ['Default IP', config.address],
               ['TTL', config.ttl],
             ].map(([k, v]) => (
-              <div key={k}>
-                <div className="text-[10px] text-gray-500 uppercase tracking-widest mb-1.5 font-bold">{k}</div>
-                <div className="font-mono text-neon-green/90 text-sm">{v}</div>
+              <div key={k} style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.input, padding: '6px 8px' }}>
+                <div style={{ fontSize: 8, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em' }}>{k}</div>
+                <div style={{ fontSize: 10, color: C.ok, marginTop: 2 }}>{v || '-'}</div>
               </div>
             ))}
           </div>
-        </BentoCard>
+        </PanelBox>
       )}
 
-      {/* Deploy Form */}
-      <AnimatePresence>
-        {open && (
-          <motion.form
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: 'auto' }}
-            exit={{ opacity: 0, height: 0 }}
-            onSubmit={handleSubmit}
-            className="relative"
-          >
-            <motion.div variants={containerVariants} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              <BentoCard icon={Globe} title="Source Configuration" accentColor="green">
-                <div className="space-y-4">
-                  <Field label="Forwarder ID *" value={form.id} onChange={v => set('id', v)} required color="green" />
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider pl-1">Source Protocol</label>
-                      <select
-                        value={form.sourceMode}
-                        onChange={e => set('sourceMode', e.target.value)}
-                        className="mt-1 w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-xs text-gray-200"
-                      >
-                        <option value="rtp">RTP</option>
-                        <option value="srt">SRT</option>
-                        <option value="udp">UDP (Legacy)</option>
-                      </select>
-                    </div>
-                    <div className="col-span-2">
-                      <Field label="Source Host / IP *" value={form.sourceHost} onChange={v => set('sourceHost', v)} required color="green" placeholder="239.100.25.10" />
-                    </div>
-                  </div>
-                  <Field label="Source Port *" value={form.sourcePort} onChange={v => set('sourcePort', v)} type="number" required color="green" placeholder="5000" />
-                  <div className="text-[10px] text-gray-500 font-mono bg-black/20 border border-white/5 rounded px-2 py-1.5">
-                    {buildSourceUrl(form) || 'Source URL preview'}
-                  </div>
-                </div>
-              </BentoCard>
+      {open && (
+        <form onSubmit={handleSubmit}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 8, alignItems: 'start', marginBottom: 8 }}>
+            <PanelBox>
+              <SectionHead title="Source Configuration" />
+              <div style={{ padding: '8px 10px', display: 'grid', gap: 8 }}>
+                <Field label="Forwarder ID" required>
+                  <Input value={form.id} onChange={(e) => set('id', e.target.value)} placeholder="fwd-main-a" mono />
+                </Field>
 
-              <BentoCard icon={Share2} title="Destination Configuration" accentColor="green">
-                <div className="space-y-4">
-                  <Field label="Dest IP *" value={form.destIp} onChange={v => set('destIp', v)} required color="green" placeholder="239.100.25.29" />
-                  <Field label="Dest Port" value={form.destPort} onChange={v => set('destPort', v)} type="number" color="green" />
-                  <div className="text-[10px] text-gray-500">
-                    Allowed destination is restricted to <span className="font-mono text-neon-green">{config?.address || '239.100.25.29'}</span>.
-                  </div>
-                  <label className="flex items-center gap-2 text-xs text-amber-300">
-                    <input
-                      type="checkbox"
-                      checked={form.engineerApproved}
-                      onChange={(e) => set('engineerApproved', e.target.checked)}
-                      className="accent-amber-400"
+                <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr 110px', gap: 8 }}>
+                  <Field label="Protocol">
+                    <Select
+                      value={form.sourceMode}
+                      onChange={(e) => set('sourceMode', e.target.value)}
+                      options={[
+                        { value: 'rtp', label: 'RTP' },
+                        { value: 'srt', label: 'SRT' },
+                        { value: 'udp', label: 'UDP (Legacy)' },
+                      ]}
                     />
-                    Engineer approval confirmed for forwarding start
-                  </label>
+                  </Field>
+                  <Field label="Source Host / IP" required>
+                    <Input value={form.sourceHost} onChange={(e) => set('sourceHost', e.target.value)} placeholder="239.100.25.10" mono />
+                  </Field>
+                  <Field label="Source Port" required>
+                    <Input value={form.sourcePort} onChange={(e) => set('sourcePort', e.target.value)} placeholder="5000" mono />
+                  </Field>
                 </div>
-              </BentoCard>
 
-              <div className="flex items-end justify-end">
-                <motion.button
-                  whileHover={{ scale: 1.05, boxShadow: '0 0 25px rgba(34,197,94,0.4)' }}
-                  whileTap={{ scale: 0.95 }}
-                  type="submit"
-                  disabled={loading || !form.engineerApproved}
-                  className="bg-gradient-to-r from-neon-green to-green-600 text-white font-bold px-10 py-3 rounded-xl shadow-lg transition-all disabled:opacity-50"
-                >
-                  {loading ? 'Initializing Forwarder...' : 'INITIATE FORWARDER'}
-                </motion.button>
+                <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.input, padding: '5px 8px', fontSize: 9, color: C.muted }}>
+                  {buildSourceUrl(form) || 'Source URL preview'}
+                </div>
               </div>
-            </motion.div>
-            {error && (
-              <p className="mt-4 text-red-400 text-sm bg-red-900/20 border border-red-500/30 p-3 rounded-xl">{error}</p>
-            )}
-          </motion.form>
-        )}
-      </AnimatePresence>
+            </PanelBox>
 
-      {/* Active Forwarders */}
-      <section>
-        <h2 className="text-sm text-gray-400 mb-4 uppercase tracking-widest font-bold opacity-80">
-          Running Forwarders ({forwarders.length})
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {forwarders.map(f => (
-            <motion.div
-              key={f.id}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-4 space-y-3 relative overflow-hidden group"
-            >
-              <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-              <div className="flex items-center justify-between relative z-10">
-                <div className="flex items-center gap-2">
-                  <StatusDot status={f.isRunning ? 'live' : 'stopped'} pulse />
-                  <span className="font-mono text-sm font-semibold text-gray-200">{f.id}</span>
+            <PanelBox>
+              <SectionHead title="Destination Configuration" />
+              <div style={{ padding: '8px 10px', display: 'grid', gap: 8 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 8 }}>
+                  <Field label="Destination IP" required>
+                    <Input value={form.destIp} onChange={(e) => set('destIp', e.target.value)} placeholder="239.100.25.29" mono />
+                  </Field>
+                  <Field label="Destination Port">
+                    <Input value={form.destPort} onChange={(e) => set('destPort', e.target.value)} placeholder="1234" mono />
+                  </Field>
                 </div>
+
+                <div style={{ fontSize: 9, color: C.warn }}>
+                  Allowed destination is restricted to <span style={{ color: C.text }}>{config?.address || '239.100.25.29'}</span>.
+                </div>
+
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    border: `1px solid ${form.engineerApproved ? C.ok : C.border}`,
+                    background: form.engineerApproved ? `${C.ok}10` : C.input,
+                    borderRadius: 2,
+                    padding: '6px 8px',
+                    fontSize: 10,
+                    color: form.engineerApproved ? C.ok : C.muted,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={form.engineerApproved}
+                    onChange={(e) => set('engineerApproved', e.target.checked)}
+                    style={{ accentColor: C.ok }}
+                  />
+                  Engineer approval confirmed for forwarding start
+                </label>
+              </div>
+            </PanelBox>
+
+            <div style={{ paddingTop: 24 }}>
+              <button
+                type="submit"
+                disabled={loading || !form.engineerApproved}
+                style={{
+                  border: `1px solid ${loading || !form.engineerApproved ? C.border : C.ok}`,
+                  background: loading || !form.engineerApproved ? C.panel : `${C.ok}18`,
+                  color: loading || !form.engineerApproved ? C.muted : C.ok,
+                  borderRadius: 2,
+                  padding: '10px 12px',
+                  fontSize: 10,
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  cursor: loading || !form.engineerApproved ? 'not-allowed' : 'pointer',
+                  minWidth: 170,
+                }}
+              >
+                {loading ? 'Initializing...' : 'Initiate Forwarder'}
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      {error && (
+        <div
+          style={{
+            marginBottom: 8,
+            border: `1px solid ${C.err}`,
+            background: `${C.err}14`,
+            borderRadius: 2,
+            padding: '6px 8px',
+            fontSize: 10,
+            color: C.err,
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <PanelBox>
+        <SectionHead
+          title="Running Forwarders"
+          right={<Badge label={`${forwarders.length} active`} color={forwarders.length > 0 ? C.ok : C.muted} small />}
+        />
+
+        {forwarders.length === 0 ? (
+          <div style={{ padding: '12px 10px', color: C.muted, fontSize: 10 }}>
+            No active forwarders - configure and deploy one.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, padding: '8px 10px' }}>
+            {forwarders.map((f) => (
+              <div
+                key={f.id}
+                style={{
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 2,
+                  background: C.input,
+                  padding: '8px 9px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Dot color={f.isRunning ? C.ok : C.muted} size={7} />
+                    <span style={{ fontSize: 11, color: C.text }}>{f.id}</span>
+                    <Badge label={f.isRunning ? 'running' : 'stopped'} color={f.isRunning ? C.ok : C.muted} small />
+                  </div>
+                  {f.isRunning && (
+                    <button
+                      onClick={() => handleStop(f.id)}
+                      style={{
+                        border: `1px solid ${C.err}`,
+                        background: `${C.err}16`,
+                        color: C.err,
+                        borderRadius: 2,
+                        padding: '3px 7px',
+                        fontSize: 9,
+                        textTransform: 'uppercase',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Stop
+                    </button>
+                  )}
+                </div>
+
+                <div style={{ fontSize: 9, color: C.muted, marginBottom: 6 }}>
+                  {f.sourceUrl} → {f.destIp}:{f.destPort}
+                </div>
+
                 {f.isRunning && (
-                  <button
-                    onClick={() => handleStop(f.id)}
-                    className="text-[10px] font-bold uppercase tracking-tighter bg-red-900/40 hover:bg-red-800/60 text-red-300 px-2 py-1 rounded-md border border-red-500/20 transition-colors"
-                  >
-                    Stop
-                  </button>
+                  <div>
+                    <MetricsTile id={f.id} stats={f.lastStats} lastMessage={lastMessage} />
+                  </div>
                 )}
               </div>
-              <div className="text-xs text-gray-500 relative z-10 font-mono">{f.sourceUrl} → {f.destIp}:{f.destPort}</div>
-              {f.isRunning && <div className="relative z-10 pt-2"><MetricsTile id={f.id} stats={f.lastStats} lastMessage={lastMessage} /></div>}
-            </motion.div>
-          ))}
-        </div>
-      </section>
+            ))}
+          </div>
+        )}
+      </PanelBox>
     </div>
   );
 }
