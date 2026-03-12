@@ -5,9 +5,8 @@ const { spawn } = require('child_process');
 
 const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
-const DEFAULT_ALLOWED_IP = process.env.NODE_ENV === 'test'
-  ? null
-  : (process.env.FORWARD_MULTICAST_IP || null);
+const IS_TEST_RUNTIME = process.env.NODE_ENV === 'test' || Boolean(process.env.JEST_WORKER_ID);
+const DEFAULT_ALLOWED_IP = IS_TEST_RUNTIME ? null : (process.env.FORWARD_MULTICAST_IP || null);
 const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
 
 function isValidIpv4(ip) {
