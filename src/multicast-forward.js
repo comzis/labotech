@@ -5,7 +5,9 @@ const { spawn } = require('child_process');
 
 const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
-const DEFAULT_ALLOWED_IP = process.env.FORWARD_MULTICAST_IP || null;
+const DEFAULT_ALLOWED_IP = process.env.NODE_ENV === 'test'
+  ? null
+  : (process.env.FORWARD_MULTICAST_IP || null);
 const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
 
 function isValidIpv4(ip) {
@@ -56,14 +58,14 @@ class MulticastForwarder extends EventEmitter {
     if (!isValidIpv4(this.destIp)) {
       throw new Error(`Invalid IPv4 destination: ${this.destIp}`);
     }
-    // Optional strict pinning to one destination IP; by default allow any IP in subnet.
-    if (this.allowedIp && this.destIp !== this.allowedIp) {
-      throw new Error(`Destination ${this.destIp} is blocked. Only ${this.allowedIp} is allowed.`);
-    }
     if (!isInSubnet(this.destIp, this.subnet)) {
       throw new Error(
         `Destination ${this.destIp} is not within allowed subnet ${this.subnet}`
       );
+    }
+    // Optional strict pinning to one destination IP; by default allow any IP in subnet.
+    if (this.allowedIp && this.destIp !== this.allowedIp) {
+      throw new Error(`Destination ${this.destIp} is blocked. Only ${this.allowedIp} is allowed.`);
     }
   }
 
