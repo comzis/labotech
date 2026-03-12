@@ -69,6 +69,23 @@ function toLogEntry(msg) {
   const when = Number.isFinite(parsedWhen) ? parsedWhen : Date.now();
   const id = msg.id || 'system';
   const severity = classifySeverity(msg);
+  const derivedPid = msg.pid ?? (
+    typeof msg.pidHex === 'string' && /^0x[0-9a-f]+$/i.test(msg.pidHex)
+      ? parseInt(msg.pidHex, 16)
+      : null
+  );
+  const evidence = {
+    pid: Number.isFinite(derivedPid) ? derivedPid : null,
+    pidHex: msg.pidHex || (Number.isFinite(derivedPid) ? `0x${derivedPid.toString(16).toUpperCase().padStart(4, '0')}` : null),
+    checkId: msg.checkId || null,
+    label: msg.label || null,
+    priority: msg.priority || null,
+    incidentId: msg.incidentId || null,
+    hitCount: Number.isFinite(Number(msg.hitCount)) ? Number(msg.hitCount) : null,
+    dvb: msg.dvb || null,
+    siCompliance: msg?.dvb?.si?.compliance || msg.siCompliance || null,
+    siIntervalsSec: msg?.dvb?.si?.intervalsSec || msg.siIntervalsSec || null,
+  };
   let status = 'active';
   let title = msg.type;
   let details = msg.message || '';
@@ -89,6 +106,34 @@ function toLogEntry(msg) {
     status = 'alarm';
     title = `ETR ${(msg.priority || 'p3').toUpperCase()} - ${msg.label || 'Alarm'}`;
     details = msg.message || '';
+    if (Number.isFinite(evidence.pid)) {
+      details = `${details}${details ? ' · ' : ''}PID ${evidence.pid}`;
+    }
+  } else if (msg.type === 'etr290_status') {
+    status = 'alarm';
+    title = 'ETR status update';
+    const active = Object.entries(msg.status || {}).filter(([, v]) => v === 'error').map(([k]) => k);
+    details = active.length > 0 ? `Active checks: ${active.join(', ')}` : 'No active ETR errors';
+  } else if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
+    status = 'alarm';
+    title = `ETR incident ${msg.type.endsWith('started') ? 'started' : 'updated'} - ${msg.label || msg.checkId || 'check'}`;
+    details = msg.lastMessage || msg.message || '';
+    if (Number.isFinite(evidence.pid)) {
+      details = `${details}${details ? ' · ' : ''}PID ${evidence.pid}`;
+    }
+  } else if (msg.type === 'etr290_incident_cleared') {
+    status = 'info';
+    title = `ETR incident cleared - ${msg.label || msg.checkId || 'check'}`;
+    details = msg.lastMessage || msg.message || '';
+  } else if (msg.type === 'analyse_result') {
+    status = 'info';
+    title = 'TS analysis result';
+    const dvb = msg.dvb || {};
+    const bitrate = Number.isFinite(Number(dvb.bitrateBps)) ? `${(Number(dvb.bitrateBps) / 1e6).toFixed(2)} Mbps` : null;
+    const pidCount = Number.isFinite(Number(dvb.pidCount)) ? `${dvb.pidCount} PID` : null;
+    const serviceCount = Number.isFinite(Number(dvb.serviceCount)) ? `${dvb.serviceCount} svc` : null;
+    const parts = [bitrate, pidCount, serviceCount].filter(Boolean);
+    details = parts.length > 0 ? parts.join(' · ') : (msg.message || 'Analysis sample');
   } else if (msg.type === 'switched') {
     status = 'failover';
     title = 'Failover switch';
@@ -108,6 +153,7 @@ function toLogEntry(msg) {
     status,
     title,
     details,
+    evidence,
   };
 }
 

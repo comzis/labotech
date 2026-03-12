@@ -121,6 +121,19 @@ function extractPidRows(selectedResult) {
     .slice(0, 20);
 }
 
+function renderPidRef(pid, pidHex) {
+  const hasDec = Number.isFinite(Number(pid));
+  const dec = hasDec ? Number(pid) : null;
+  const hex = pidHex || (hasDec ? `0x${Number(pid).toString(16).toUpperCase().padStart(4, "0")}` : null);
+  if (dec == null && !hex) return <span style={{ color: C.muted }}>-</span>;
+  return (
+    <span style={{ display: "inline-flex", alignItems: "baseline", gap: 6 }}>
+      {dec != null ? <span style={{ color: C.accent, fontFamily: "'Courier New',monospace", fontSize: 10 }}>{dec}</span> : null}
+      {hex ? <span style={{ color: C.muted, fontFamily: "'Courier New',monospace", fontSize: 9 }}>{hex}</span> : null}
+    </span>
+  );
+}
+
 function StatBox({ label, value, color = C.text }) {
   return (
     <div
@@ -413,7 +426,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         <Badge label="RUNNING" color={C.ok} filled />
       </div>
 
-      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "360px 1fr 320px", gap: 10 }}>
+      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "460px 1fr 320px", gap: 10 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <PanelBox>
             <SectionHead icon="⚙" title="Decoder Provisioning" />
@@ -440,7 +453,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </div>
 
               {decoderRows.map((row) => (
-                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1fr 112px 1fr 86px", gap: 8, alignItems: "end" }}>
+                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.2fr 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
                     <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono />
                   </Field>
@@ -723,7 +736,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   ) : (
                     pids.map((p, idx) => (
                       <div key={`${p.pid || idx}-${idx}`} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
-                        <span style={{ fontFamily: "'Courier New',monospace", color: C.accent, fontSize: 10 }}>{p.pidHex || p.pid || "-"}</span>
+                        {renderPidRef(p.pid, p.pidHex)}
                         <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
                         <span style={{ color: C.text, fontSize: 10 }}>{p.codec}</span>
                       </div>

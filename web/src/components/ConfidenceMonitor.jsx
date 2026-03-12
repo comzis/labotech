@@ -162,7 +162,9 @@ function ThumbnailCard({ stream: s, tick, liveBitrate }) {
           {/* SID + Video PID */}
           {dvb && (
             <div className="text-[9px] text-gray-500 font-mono">
-              SID {dvb.serviceId} • VPID {formatPidHex(dvb.videoPid)}
+              SID {dvb.serviceId} • VPID
+              <span className="text-gray-300 ml-1">{dvb.videoPid ?? '-'}</span>
+              {dvb.videoPid != null ? <span className="text-gray-500 ml-1">{formatPidHex(dvb.videoPid)}</span> : null}
             </div>
           )}
         </div>

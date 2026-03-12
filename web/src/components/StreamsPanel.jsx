@@ -17,7 +17,14 @@ const MODE_STYLE = {
   rtp: 'bg-violet-900/60 text-violet-300 border-violet-700/40',
 };
 const formatPidHex = (pid) => (pid == null ? 'N/A' : `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
-const formatPidDecHex = (pid) => (pid == null ? 'N/A' : `${pid} (${formatPidHex(pid)})`);
+const PidRef = ({ pid }) => (
+  pid == null ? <span style={{ color: C.muted }}>N/A</span> : (
+    <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
+      <span style={{ color: C.text }}>{pid}</span>
+      <span style={{ color: C.muted }}>{formatPidHex(pid)}</span>
+    </span>
+  )
+);
 
 export default function StreamsPanel({ lastMessage }) {
   const { streams, transcoders, loading, error, refresh } = useStreams();
@@ -166,7 +173,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <span>→ {s.host}:{s.port}</span>
                   {dvb && (
                     <span className="text-gray-700">
-                      SID {dvb.serviceId} · V:{formatPidDecHex(dvb.videoPid)} · PMT:{formatPidDecHex(dvb.pmtPid)}
+                      SID {dvb.serviceId} · V:<PidRef pid={dvb.videoPid} /> · PMT:<PidRef pid={dvb.pmtPid} />
                     </span>
                   )}
                 </div>
@@ -188,7 +195,7 @@ export default function StreamsPanel({ lastMessage }) {
                   <div className="flex flex-wrap gap-1">
                     {s.audioPairs.map((p, i) => (
                       <span key={i} className="text-[10px] font-mono bg-gray-800 text-gray-400 px-1.5 py-0.5 rounded border border-gray-700">
-                        A{i} {p.codec} {formatPidDecHex(p.pid)}
+                        A{i} {p.codec} <PidRef pid={p.pid} />
                         {p.language ? ` [${p.language}]` : ''}
                       </span>
                     ))}
