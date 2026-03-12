@@ -571,7 +571,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         <Badge label="RUNNING" color={C.ok} filled />
       </div>
 
-      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "560px 1fr 320px", gap: 10 }}>
+      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "720px 1fr", gap: 10 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <PanelBox>
             <SectionHead icon="⚙" title="Decoder Provisioning" />
@@ -600,7 +600,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
-                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono />
+                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono style={{ color: C.muted }} />
                   </Field>
                   <Field label="Port">
                     <Input
@@ -608,11 +608,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       onChange={(e) => updateRow(row.key, { port: e.target.value })}
                       placeholder={RECOMMENDED_DECODER_PORT}
                       mono
-                      style={{ color: row.port === RECOMMENDED_DECODER_PORT ? C.muted : C.text }}
+                      style={{ color: C.muted }}
                     />
                   </Field>
                   <Field label="Decoder ID (optional)">
-                    <Input value={row.decoderId} onChange={(e) => updateRow(row.key, { decoderId: e.target.value })} placeholder="decoder-a" mono />
+                    <Input value={row.decoderId} onChange={(e) => updateRow(row.key, { decoderId: e.target.value })} placeholder="decoder-a" mono style={{ color: C.muted }} />
                   </Field>
                   <button
                     onClick={() => startSingleDecoderRow(row.key)}
@@ -1093,69 +1093,211 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             ))}
           </div>
 
-          {subTab === "quality" && (
-            <>
-              <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "1fr 180px" : "1fr", gap: 8, alignItems: "start" }}>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
-                    <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
-                    <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
-                    <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
-                    <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
-                  </div>
-                  {/* IAT / Network inline metrics */}
-                  {selectedResult?.dvb?.arrival && (() => {
-                    const arr = selectedResult.dvb.arrival;
-                    const iat = arr.iatMs || {};
-                    return (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
-                        <StatBox label="IAT avg" value={iat.avg != null ? `${Number(iat.avg).toFixed(2)} ms` : "-"} color={Number(iat.avg) > 50 ? C.warn : C.ok} />
-                        <StatBox label="IAT p95" value={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} color={Number(iat.p95) > 150 ? C.err : C.ok} />
-                        <StatBox label="Net Jitter" value={arr.jitterMs != null ? `${Number(arr.jitterMs).toFixed(2)} ms` : "-"} color={Number(arr.jitterMs) > 5 ? C.warn : C.ok} />
-                        <StatBox label="Pkt Loss %" value={arr.packetLossPct != null ? `${Number(arr.packetLossPct).toFixed(3)}` : "-"} color={Number(arr.packetLossPct) > 0.01 ? C.err : C.ok} />
-                      </div>
-                    );
-                  })()}
-                </div>
-                {/* Live thumbnail */}
-                {selectedResult?.thumbnailUrl && (
-                  <div style={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ fontSize: 8, color: C.muted, padding: "4px 6px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                      Live Frame
-                    </div>
-                    <img
-                      src={selectedResult.thumbnailUrl}
-                      alt="Stream frame"
-                      style={{ width: "100%", display: "block" }}
-                      onError={(e) => { e.target.parentElement.style.display = "none"; }}
-                    />
-                    {selectedResult?.dvb?.services?.[0]?.serviceName && (
-                      <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
-                        {selectedResult.dvb.services[0].serviceName}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
+          {subTab === "quality" && (() => {
+            // Extract video and audio streams from programs
+            const allStreams = [
+              ...((selectedResult?.programs || []).flatMap((p) => p.streams || [])),
+              ...(selectedResult?.orphanStreams || []),
+            ];
+            const videoStream = allStreams.find((s) => s.codecType === "video");
+            const audioStreams = allStreams.filter((s) => s.codecType === "audio");
+            const firstAudio = audioStreams[0] || null;
 
-              <PanelBox>
-                <SectionHead icon="📋" title="PID Table" />
-                <div style={{ padding: "8px 12px", maxHeight: 260, overflowY: "auto" }}>
-                  {pids.length === 0 ? (
-                    <div style={{ color: C.muted, fontSize: 10 }}>No PID information available yet.</div>
-                  ) : (
-                    pids.map((p, idx) => (
-                      <div key={`${p.pid || idx}-${idx}`} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
-                        {renderPidRef(p.pid, p.pidHex)}
-                        <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
-                        <span style={{ color: C.text, fontSize: 10 }}>{p.codec}</span>
-                      </div>
-                    ))
+            // Chroma subsampling label from pixFmt
+            const chromaLabel = (pixFmt) => {
+              if (!pixFmt) return "-";
+              const f = String(pixFmt).toLowerCase();
+              if (/444/.test(f)) return "4:4:4";
+              if (/422/.test(f)) return "4:2:2";
+              if (/420/.test(f)) return "4:2:0";
+              if (/400/.test(f)) return "4:0:0";
+              return pixFmt;
+            };
+
+            const scanLabel = (fieldOrder) => {
+              if (!fieldOrder || fieldOrder === "progressive") return "Progressive";
+              if (/interlac/i.test(fieldOrder)) return "Interlaced";
+              if (/top/i.test(fieldOrder)) return "TFF";
+              if (/bottom/i.test(fieldOrder)) return "BFF";
+              return fieldOrder;
+            };
+
+            const bpsFmt = (bps) => {
+              const n = Number(bps);
+              if (!n) return "-";
+              return n >= 1e6 ? `${(n / 1e6).toFixed(2)} Mbps` : `${(n / 1e3).toFixed(1)} kbps`;
+            };
+
+            const svc = selectedResult?.dvb?.services?.[0];
+            const totalBitrate = selectedResult?.dvb?.bitrateBps || selectedResult?.dvb?.measuredBitrateBps;
+
+            return (
+              <>
+                {/* ── Decoder Health strip ─────────────────────────────── */}
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
+                  <StatBox label="Selected" value={selectedId || "-"} color={selectedId ? C.cyan : C.muted} />
+                  <StatBox label="State" value={selectedId ? "RUNNING" : "IDLE"} color={selectedId ? C.ok : C.muted} />
+                  <StatBox label="ETR Monitor" value={selectedEtrStatus ? "ATTACHED" : "OFF"} color={selectedEtrStatus ? C.ok : C.muted} />
+                  <StatBox label="ST 2022-7" value={use20227 ? "ON" : "OFF"} color={use20227 ? C.s22 : C.muted} />
+                  <StatBox label="Monitored" value={String(activeIds.length)} color={activeIds.length ? C.ok : C.muted} />
+                </div>
+
+                {/* ── Top row: ETR counters + thumbnail ───────────────── */}
+                <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "1fr 200px" : "1fr", gap: 8, alignItems: "start" }}>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                      <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
+                      <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
+                      <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
+                      <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
+                    </div>
+                    {/* IAT / Network */}
+                    {selectedResult?.dvb?.arrival && (() => {
+                      const arr = selectedResult.dvb.arrival;
+                      const iat = arr.iatMs || {};
+                      return (
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                          <StatBox label="IAT avg" value={iat.avg != null ? `${Number(iat.avg).toFixed(2)} ms` : "-"} color={Number(iat.avg) > 50 ? C.warn : C.ok} />
+                          <StatBox label="IAT p95" value={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} color={Number(iat.p95) > 150 ? C.err : C.ok} />
+                          <StatBox label="Net Jitter" value={arr.jitterMs != null ? `${Number(arr.jitterMs).toFixed(2)} ms` : "-"} color={Number(arr.jitterMs) > 5 ? C.warn : C.ok} />
+                          <StatBox label="Pkt Loss %" value={arr.packetLossPct != null ? `${Number(arr.packetLossPct).toFixed(3)}%` : "-"} color={Number(arr.packetLossPct) > 0.01 ? C.err : C.ok} />
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {/* Live thumbnail */}
+                  {selectedResult?.thumbnailUrl && (
+                    <div style={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ fontSize: 8, color: C.muted, padding: "4px 6px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>Live Frame</div>
+                      <img src={selectedResult.thumbnailUrl} alt="Stream frame" style={{ width: "100%", display: "block" }} onError={(e) => { e.target.parentElement.style.display = "none"; }} />
+                      {svc?.serviceName && (
+                        <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          {svc.serviceName}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-              </PanelBox>
-            </>
-          )}
+
+                {/* ── Stream Profile ───────────────────────────────────── */}
+                <PanelBox>
+                  <SectionHead icon="📡" title="Stream Profile" />
+                  <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                    {/* Service / Transport */}
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                      <StatBox label="Service Name" value={svc?.serviceName || "-"} color={svc?.serviceName ? C.cyan : C.muted} />
+                      <StatBox label="Provider" value={svc?.serviceProvider || "-"} color={C.text} />
+                      <StatBox label="Total Bitrate" value={bpsFmt(totalBitrate)} color={totalBitrate ? C.ok : C.muted} />
+                      <StatBox label="Services" value={String(selectedResult?.dvb?.serviceCount ?? selectedResult?.programs?.length ?? "-")} color={C.text} />
+                    </div>
+
+                    {/* Video profile */}
+                    {videoStream && (
+                      <div>
+                        <div style={{ fontSize: 8, color: C.purple, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Video</div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
+                          <StatBox label="Codec" value={videoStream.codecName || "-"} color={C.purple} />
+                          <StatBox
+                            label="Resolution"
+                            value={videoStream.width && videoStream.height ? `${videoStream.width}×${videoStream.height}` : "-"}
+                            color={C.text}
+                          />
+                          <StatBox label="Frame Rate" value={videoStream.fps ? `${Number(videoStream.fps).toFixed(2)} fps` : "-"} color={C.text} />
+                          <StatBox label="Scan" value={scanLabel(videoStream.fieldOrder)} color={C.text} />
+                          <StatBox label="Chroma" value={chromaLabel(videoStream.pixFmt)} color={C.text} />
+                          <StatBox label="Bitrate" value={bpsFmt(videoStream.bitrate)} color={C.text} />
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Audio profile(s) */}
+                    {audioStreams.length > 0 && (
+                      <div>
+                        <div style={{ fontSize: 8, color: C.info, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+                          Audio ({audioStreams.length} track{audioStreams.length !== 1 ? "s" : ""})
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          {audioStreams.slice(0, 4).map((s, i) => (
+                            <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
+                              <StatBox label={`Track ${i + 1} Codec`} value={s.codecName || "-"} color={C.info} />
+                              <StatBox label="Channels" value={s.channels ? `${s.channels}ch` : "-"} color={C.text} />
+                              <StatBox label="Layout" value={s.channelLayout || (s.channels === 2 ? "stereo" : s.channels === 1 ? "mono" : "-")} color={C.text} />
+                              <StatBox label="Sample Rate" value={s.sampleRate ? `${(Number(s.sampleRate) / 1000).toFixed(1)} kHz` : "-"} color={C.text} />
+                              <StatBox label="Bitrate" value={bpsFmt(s.bitrate)} color={C.text} />
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {!selectedResult && (
+                      <div style={{ color: C.muted, fontSize: 10 }}>No stream data yet. Start a decoder to see profile.</div>
+                    )}
+                  </div>
+                </PanelBox>
+
+                {/* ── PID Table ────────────────────────────────────────── */}
+                <PanelBox>
+                  <SectionHead icon="📋" title="PID Table" />
+                  <div style={{ padding: "8px 12px", maxHeight: 200, overflowY: "auto" }}>
+                    {pids.length === 0 ? (
+                      <div style={{ color: C.muted, fontSize: 10 }}>No PID information available yet.</div>
+                    ) : (
+                      pids.map((p, idx) => (
+                        <div key={`${p.pid || idx}-${idx}`} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr 90px", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
+                          {renderPidRef(p.pid, p.pidHex)}
+                          <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                          <span style={{ color: C.text, fontSize: 10 }}>{p.codec}</span>
+                          <span style={{ color: C.muted, fontSize: 9, textAlign: "right", fontFamily: "'Courier New',monospace" }}>{bpsFmt(p.bitrate)}</span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </PanelBox>
+
+                {/* ── Active Decoders ──────────────────────────────────── */}
+                <PanelBox>
+                  <SectionHead icon="📋" title="Active Decoders" right={<Badge label={`${activeIds.length} running`} color={activeIds.length ? C.ok : C.muted} small />} />
+                  <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+                    {activeIds.length === 0 ? (
+                      <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
+                    ) : (
+                      activeIds.map((id) => (
+                        <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
+                          <button
+                            onClick={() => setSelectedId(id)}
+                            style={{
+                              textAlign: "left", borderRadius: 2,
+                              border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
+                              background: selectedId === id ? `${C.cyan}12` : "transparent",
+                              color: selectedId === id ? C.cyan : C.text,
+                              padding: "5px 8px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                            }}
+                          >
+                            {id}
+                          </button>
+                          <button
+                            onClick={async () => {
+                              try { await stop(id); } catch (_) {}
+                              try { await refreshActives(); } catch (_) {}
+                            }}
+                            style={{
+                              borderRadius: 2, border: `1px solid ${C.err}`, color: C.err,
+                              background: "transparent", fontSize: 9, fontWeight: 700,
+                              fontFamily: "'Courier New',monospace",
+                            }}
+                          >
+                            STOP
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </PanelBox>
+              </>
+            );
+          })()}
 
           {subTab === "rtp" && (
             <PanelBox>
@@ -1203,75 +1345,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           )}
         </div>
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          <PanelBox>
-            <SectionHead icon="❤" title="Decoder Health" />
-            <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 2 }}>
-              {[
-                { l: "Selected", v: selectedId || "-", c: selectedId ? C.cyan : C.muted },
-                { l: "State", v: selectedId ? "RUNNING" : "IDLE", c: selectedId ? C.ok : C.muted },
-                { l: "ETR Monitor", v: selectedEtrStatus ? "ATTACHED" : "OFF", c: selectedEtrStatus ? C.ok : C.muted },
-                { l: "ST 2022-7", v: use20227 ? "ENABLED" : "OFF", c: use20227 ? C.s22 : C.muted },
-                { l: "Monitored IDs", v: String(activeIds.length), c: C.text },
-              ].map((s, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}>
-                  <span style={{ fontSize: 9, color: C.muted, textTransform: "uppercase", letterSpacing: "0.07em" }}>{s.l}</span>
-                  <span style={{ fontFamily: "'Courier New',monospace", fontSize: 10, fontWeight: 700, color: s.c }}>{s.v}</span>
-                </div>
-              ))}
-            </div>
-          </PanelBox>
-
-          <PanelBox>
-            <SectionHead icon="📋" title="Active Decoders" />
-            <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-              {activeIds.length === 0 ? (
-                <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
-              ) : (
-                activeIds.map((id) => (
-                  <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
-                    <button
-                      onClick={() => setSelectedId(id)}
-                      style={{
-                        textAlign: "left",
-                        borderRadius: 2,
-                        border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
-                        background: selectedId === id ? `${C.cyan}12` : "transparent",
-                        color: selectedId === id ? C.cyan : C.text,
-                        padding: "5px 8px",
-                        fontFamily: "'Courier New',monospace",
-                        fontSize: 10,
-                      }}
-                    >
-                      {id}
-                    </button>
-                    <button
-                      onClick={async () => {
-                        try {
-                          await stop(id);
-                        } catch (_) {}
-                        try {
-                          await refreshActives();
-                        } catch (_) {}
-                      }}
-                      style={{
-                        borderRadius: 2,
-                        border: `1px solid ${C.err}`,
-                        color: C.err,
-                        background: "transparent",
-                        fontSize: 9,
-                        fontWeight: 700,
-                        fontFamily: "'Courier New',monospace",
-                      }}
-                    >
-                      STOP
-                    </button>
-                  </div>
-                ))
-              )}
-            </div>
-          </PanelBox>
-        </div>
       </div>
     </div>
   );
