@@ -4,6 +4,7 @@ import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
+const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 
 function countPids(result) {
   if (!result) return 0;
@@ -256,6 +257,42 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [engineerMode, setEngineerMode] = useState(true);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(MULTIVIEW_STATE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
+      if (parsed?.mode) setMode(parsed.mode);
+      if (parsed?.host != null) setHost(String(parsed.host));
+      if (parsed?.port != null) setPort(String(parsed.port));
+      if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
+      if (parsed?.interval != null) setInterval(String(parsed.interval));
+      if (parsed?.latency != null) setLatency(String(parsed.latency));
+      if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
+      if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        MULTIVIEW_STATE_KEY,
+        JSON.stringify({
+          openCreate,
+          mode,
+          host,
+          port,
+          decoderId,
+          interval,
+          latency,
+          passphrase,
+          engineerMode,
+        })
+      );
+    } catch (_) {}
+  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode]);
+
+  useEffect(() => {
     refreshActives();
   }, [refreshActives]);
 
@@ -372,7 +409,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               id={id}
               meta={decoderMeta[id]}
               result={resultsById[id]}
-              onStop={() => stop(id)}
+              onStop={async () => {
+                await stop(id);
+                await refreshActives();
+              }}
               nowMs={nowMs}
               engineerMode={engineerMode}
             />
