@@ -33,6 +33,41 @@ function audioPercent(meanDb) {
   return Math.round(((v + 60) / 60) * 100);
 }
 
+function audioColor(levelPct) {
+  if (levelPct > 75) return '#ff2233';
+  if (levelPct > 45) return '#ffaa00';
+  return '#00dd55';
+}
+
+function collectAudioStreams(result) {
+  const fromPrograms = (result?.programs || [])
+    .flatMap((p) => (p.streams || []))
+    .filter((s) => s.codecType === 'audio');
+  const orphan = (result?.orphanStreams || []).filter((s) => s.codecType === 'audio');
+  return [...fromPrograms, ...orphan];
+}
+
+function buildAudioPairRows(result, displayMeanDb) {
+  const pairLevels = Array.isArray(result?.audioLevels?.pairs) ? result.audioLevels.pairs : [];
+  if (pairLevels.length > 0) {
+    return pairLevels.map((p, idx) => ({
+      key: p.pid || p.id || idx,
+      label: p.label || `Pair ${idx + 1}`,
+      pid: p.pid || null,
+      meanDb: Number.isFinite(Number(p.meanDb)) ? Number(p.meanDb) : null,
+    }));
+  }
+
+  const streams = collectAudioStreams(result);
+  // No per-pair telemetry yet: only show live meter if there is a single audio pair.
+  return streams.slice(0, 8).map((s, idx) => ({
+    key: `${s.pid || idx}`,
+    label: `Pair ${idx + 1}`,
+    pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+    meanDb: streams.length === 1 ? displayMeanDb : null,
+  }));
+}
+
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
   if (mode === 'udp') return `udp://${host}:${port}`;
@@ -84,6 +119,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const levelPct = audioPercent(displayMeanDb);
   const showAudioFill = displayMeanDb != null;
   const audioFillPct = showAudioFill ? Math.max(levelPct, 2) : 12;
+  const audioPairRows = buildAudioPairRows(result, displayMeanDb);
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -213,11 +249,11 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
         </div>
 
-        {/* Audio bar */}
+        {/* Audio meters */}
         <div>
           <div className="flex items-center justify-between text-[10px] mb-1">
-            <span className="engraved uppercase tracking-widest">Audio</span>
-            <span className="font-mono" style={{ color: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55' }}>
+            <span className="engraved uppercase tracking-widest">Audio Aggregate</span>
+            <span className="font-mono" style={{ color: audioColor(levelPct) }}>
               {displayMeanDb != null ? `${displayMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
@@ -227,11 +263,45 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
               style={{
                 width: `${audioFillPct}%`,
                 background: showAudioFill
-                  ? (levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55')
+                  ? audioColor(levelPct)
                   : '#3e506a',
-                boxShadow: showAudioFill && levelPct > 5 ? `0 0 5px ${levelPct > 75 ? '#ff223388' : levelPct > 45 ? '#ffaa0088' : '#00dd5588'}` : 'none',
+                boxShadow: showAudioFill && levelPct > 5 ? `0 0 5px ${audioColor(levelPct)}88` : 'none',
               }}
             />
+          </div>
+
+          <div className="mt-1.5 space-y-1">
+            <div className="flex items-center justify-between text-[9px]">
+              <span className="engraved uppercase tracking-widest">Audio Pairs</span>
+              <span className="font-mono text-gray-500">{audioPairRows.length}</span>
+            </div>
+            {audioPairRows.length === 0 ? (
+              <div className="text-[9px] text-gray-500 font-mono">No audio pairs detected.</div>
+            ) : audioPairRows.map((row) => {
+              const pct = audioPercent(row.meanDb);
+              const active = row.meanDb != null;
+              const fill = active ? Math.max(pct, 2) : 12;
+              return (
+                <div key={row.key} className="grid grid-cols-[70px_1fr_56px] items-center gap-1.5">
+                  <span className="text-[9px] font-mono text-gray-400 truncate">
+                    {row.label}{row.pid != null ? ` (${row.pid})` : ''}
+                  </span>
+                  <div style={{ height: '4px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'hidden' }}>
+                    <div
+                      className="h-full transition-all duration-300"
+                      style={{
+                        width: `${fill}%`,
+                        background: active ? audioColor(pct) : '#3e506a',
+                        boxShadow: active && pct > 5 ? `0 0 4px ${audioColor(pct)}88` : 'none',
+                      }}
+                    />
+                  </div>
+                  <span className="text-[9px] font-mono text-right" style={{ color: active ? audioColor(pct) : '#6b7280' }}>
+                    {active ? `${row.meanDb.toFixed(1)} dB` : 'n/a'}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
