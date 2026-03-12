@@ -258,7 +258,7 @@ export default function App() {
               </div>
             </div>
             <div
-              className="hidden 2xl:flex flex-col px-2 py-0.5 rounded-sm font-mono"
+              className="flex flex-col px-2 py-0.5 rounded-sm font-mono"
               style={{
                 background: '#0a0a0a',
                 border: '1px solid #1f1f1f',

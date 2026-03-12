@@ -9,7 +9,10 @@ alwaysApply: true
 - Use `child_process.spawn` or `execFile` for process calls; avoid shell string interpolation with untrusted input.
 - Keep API binding aligned with project contract (`API_HOST` management NIC and expected `API_PORT`).
 - Validate multicast destinations against `239.100.25.0/26` before starting any forward/route action.
+- Treat `FORWARD_MULTICAST_IP` as optional strict pinning; default behavior remains subnet-validated forwarding.
 - Preserve event model for runtime classes: emit `started`, `stopped`, `error`, `stats`.
 - Prefer minimal, safe changes over broad refactors unless requested.
 - Do not introduce database/ORM state; runtime state stays in in-memory maps.
 - For multi-stage operations, use fail-safe behavior (validate first, rollback started stages on partial failure).
+- Keep analyzer observability fields stable: `dvb.health`, timestamp discontinuity counters, and CC error counters.
+- Optional Dolby E integration must stay adapter-based, non-fatal when disabled/unavailable, and invoked via `spawn`/`execFile`.
