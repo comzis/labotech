@@ -45,6 +45,7 @@ export default function TSAnalyser({ lastMessage }) {
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [resultLocal, setResultLocal] = useState(null);
+  const [probeHistory, setProbeHistory] = useState([]);
 
   const { loading, error, probe, onWsResult } = useTSAnalysis();
 
@@ -57,11 +58,36 @@ export default function TSAnalyser({ lastMessage }) {
   const handleProbe = async (e) => {
     e.preventDefault();
     if (!builtUrl) return;
+    const startedAt = Date.now();
     try {
       const r = await probe(builtUrl);
       setResultLocal(r);
+      setProbeHistory((prev) => ([
+        {
+          at: startedAt,
+          mode: probeMode,
+          url: builtUrl,
+          status: 'ok',
+          pidCount: r?.dvb?.pidCount ?? countPids(r),
+          serviceCount: r?.dvb?.serviceCount ?? (r?.programs?.length || 0),
+          health: r?.dvb?.health?.score ?? null,
+        },
+        ...prev,
+      ]).slice(0, 30));
     } catch (_) {
       setResultLocal(null);
+      setProbeHistory((prev) => ([
+        {
+          at: startedAt,
+          mode: probeMode,
+          url: builtUrl,
+          status: 'error',
+          pidCount: null,
+          serviceCount: null,
+          health: null,
+        },
+        ...prev,
+      ]).slice(0, 30));
     }
   };
 
@@ -77,7 +103,7 @@ export default function TSAnalyser({ lastMessage }) {
       </div>
 
       {/* Control Bento Card */}
-      <BentoCard icon={Activity} title="Single Decoder Probe">
+      <BentoCard icon={Activity} title="Probe Provisioning (Compact)">
         <form onSubmit={handleProbe} className="space-y-4">
 
             {/* Protocol selector */}
@@ -89,12 +115,12 @@ export default function TSAnalyser({ lastMessage }) {
                     key={m.value}
                     type="button"
                     onClick={() => setProbeMode(m.value)}
-                    className={`px-3 py-2.5 rounded-xl border text-center transition-all ${probeMode === m.value
-                      ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white ring-1 ring-neon-cyan/50'
-                      : 'bg-black/30 border-white/10 text-gray-500 hover:border-white/20 hover:bg-black/40'
+                    className={`px-2 py-1.5 rounded-lg border text-center transition-all ${probeMode === m.value
+                      ? 'bg-neon-cyan/15 border-neon-cyan/40 text-white'
+                      : 'bg-black/20 border-white/10 text-gray-500 hover:border-white/20'
                     }`}
                   >
-                    <div className="text-xs font-bold">{m.label}</div>
+                    <div className="text-[11px] font-semibold">{m.label}</div>
                     <div className="text-[9px] opacity-60 mt-0.5 uppercase tracking-tighter">{m.desc}</div>
                   </button>
                 ))}
@@ -131,17 +157,59 @@ export default function TSAnalyser({ lastMessage }) {
               </div>
             )}
 
-          <div className="flex gap-4 items-center">
+          <div className="flex gap-2 items-center">
             <button
               type="submit"
               disabled={loading || !builtUrl}
-              className="bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/30 px-6 py-2.5 rounded-xl font-bold text-sm transition-all disabled:opacity-50"
+              className="bg-neon-cyan/15 hover:bg-neon-cyan/25 text-neon-cyan border border-neon-cyan/30 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all disabled:opacity-50"
             >
-              {loading ? 'Probing…' : 'Probe Decoder'}
+              {loading ? 'Probing…' : 'Provision Probe'}
+            </button>
+            <button
+              type="button"
+              onClick={() => setProbeHistory([])}
+              className="px-3 py-1.5 rounded-lg border border-white/15 text-gray-400 hover:text-gray-300 text-xs"
+            >
+              Clear Log
             </button>
           </div>
           {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
         </form>
+      </BentoCard>
+
+      <BentoCard icon={ShieldAlert} title="Provisioned Probe Log">
+        {probeHistory.length === 0 ? (
+          <div className="text-xs text-gray-500">No probe runs yet.</div>
+        ) : (
+          <div className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/20">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-gray-500 border-b border-white/10">
+                  <th className="text-left py-2 px-2">Time</th>
+                  <th className="text-left py-2 px-2">Mode</th>
+                  <th className="text-left py-2 px-2">Target</th>
+                  <th className="text-left py-2 px-2">Status</th>
+                  <th className="text-left py-2 px-2">Services</th>
+                  <th className="text-left py-2 px-2">PIDs</th>
+                  <th className="text-left py-2 px-2">Health</th>
+                </tr>
+              </thead>
+              <tbody>
+                {probeHistory.map((row, idx) => (
+                  <tr key={`${row.at}-${idx}`} className="border-b border-white/5">
+                    <td className="py-1.5 px-2 text-gray-400">{new Date(row.at).toLocaleTimeString()}</td>
+                    <td className="py-1.5 px-2 text-gray-300 uppercase">{row.mode}</td>
+                    <td className="py-1.5 px-2 text-gray-400 truncate max-w-[260px]">{row.url}</td>
+                    <td className={`py-1.5 px-2 ${row.status === 'ok' ? 'text-green-300' : 'text-red-300'}`}>{row.status}</td>
+                    <td className="py-1.5 px-2 text-gray-300">{row.serviceCount ?? '-'}</td>
+                    <td className="py-1.5 px-2 text-gray-300">{row.pidCount ?? '-'}</td>
+                    <td className="py-1.5 px-2 text-gray-300">{row.health != null ? `${row.health}/100` : '-'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </BentoCard>
 
       {/* Comprehensive ETR290 visibility inside TS Analyser */}

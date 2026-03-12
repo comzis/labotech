@@ -8,6 +8,9 @@ const WINDOW_OPTIONS = [
   { value: 5 * 60 * 1000, label: '5m' },
   { value: 15 * 60 * 1000, label: '15m' },
   { value: 60 * 60 * 1000, label: '1h' },
+  { value: 6 * 60 * 60 * 1000, label: '6h' },
+  { value: 12 * 60 * 60 * 1000, label: '12h' },
+  { value: 24 * 60 * 60 * 1000, label: '24h' },
 ];
 
 const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
@@ -37,6 +40,83 @@ const LEGEND_TYPE_ITEMS = [
   { key: 'runtime', label: 'runtime', category: 'runtime_error', severity: 'critical' },
   { key: 'analyse', label: 'analyse', category: 'analyse_result', severity: 'ok' },
 ];
+const ETR_CHECK_TERMS = {
+  ts_sync: 'TS sync loss',
+  sync_byte: 'Sync byte error',
+  pat_error: 'PAT error',
+  cc_error: 'Continuity count error',
+  pmt_error: 'PMT error',
+  pid_error: 'PID error',
+  transport_error: 'Transport error indicator',
+  crc_error: 'CRC error',
+  pcr_disc: 'PCR discontinuity',
+  pcr_acc: 'PCR accuracy error',
+  pcr_rep: 'PCR repetition error',
+  pts_error: 'PTS error',
+  cat_error: 'CAT error',
+};
+
+function toDateTimeLocalValue(ts) {
+  if (!Number.isFinite(ts)) return '';
+  const d = new Date(ts);
+  const pad = (v) => String(v).padStart(2, '0');
+  const yyyy = d.getFullYear();
+  const mm = pad(d.getMonth() + 1);
+  const dd = pad(d.getDate());
+  const hh = pad(d.getHours());
+  const mi = pad(d.getMinutes());
+  return `${yyyy}-${mm}-${dd}T${hh}:${mi}`;
+}
+
+function parseDateTimeLocalValue(v) {
+  if (!v) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
+function normalizeEtrKey(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function etrPriorityLabel(priority) {
+  if (priority === 'p1') return 'Priority 1 (P1)';
+  if (priority === 'p2') return 'Priority 2 (P2)';
+  return 'Priority 3 (P3)';
+}
+
+function etrSeverityFromPriority(priority) {
+  if (priority === 'p1') return 'critical';
+  if (priority === 'p2') return 'warning';
+  return 'info';
+}
+
+function inferPriorityFromCheck(checkKey) {
+  if (P1_KEYS.includes(checkKey)) return 'p1';
+  if (P2_KEYS.includes(checkKey)) return 'p2';
+  return 'p3';
+}
+
+function etrCheckLabel(checkKey, fallback) {
+  if (checkKey && ETR_CHECK_TERMS[checkKey]) return ETR_CHECK_TERMS[checkKey];
+  return fallback || 'ETR check';
+}
+
+function buildEtrMeta(msg) {
+  const normalizedCheck = normalizeEtrKey(msg.checkId || msg.key || msg.label || '');
+  const priority = String(msg.priority || inferPriorityFromCheck(normalizedCheck || '')).toLowerCase();
+  const checkLabel = etrCheckLabel(normalizedCheck, msg.label || msg.checkId || msg.key || 'ETR check');
+  return {
+    priority,
+    priorityLabel: etrPriorityLabel(priority),
+    severity: etrSeverityFromPriority(priority),
+    checkKey: normalizedCheck || null,
+    checkLabel,
+  };
+}
 
 function isExpectedNoSignalError(message) {
   const m = String(message || '').toLowerCase();
@@ -69,15 +149,24 @@ function toEvent(msg) {
   if (!Number.isFinite(ts)) return null;
   if (msg.type === 'etr290_alarm') {
     const laneId = normalizeLaneId(msg.id || 'etr');
+    const etr = buildEtrMeta(msg);
     return {
       key: `${ts}-${msg.id || 'unknown'}-${msg.label || 'alarm'}`,
       ts,
       id: laneId,
       rawId: msg.id || 'etr',
       category: 'etr290_alarm',
-      severity: msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info',
-      title: `${(msg.priority || 'p3').toUpperCase()} ${msg.label || 'Alarm'}`,
+      severity: etr.severity,
+      title: `ETR 290 ${etr.priorityLabel} alarm: ${etr.checkLabel}`,
       description: msg.message || '',
+      evidence: {
+        etr: {
+          priority: etr.priority,
+          priorityLabel: etr.priorityLabel,
+          checkKey: etr.checkKey,
+          checkLabel: etr.checkLabel,
+        },
+      },
     };
   }
   if (msg.type === 'etr290_status') {
@@ -85,6 +174,16 @@ function toEvent(msg) {
     const status = msg.status || {};
     const hasP1 = P1_KEYS.some((k) => status[k] === 'error');
     const hasP2 = P2_KEYS.some((k) => status[k] === 'error');
+    const statusPriority = hasP1 ? 'p1' : hasP2 ? 'p2' : 'p3';
+    const activeChecks = Object.keys(status)
+      .filter((k) => status[k] === 'error')
+      .map((k) => {
+        const checkKey = normalizeEtrKey(k);
+        return {
+          checkKey,
+          checkLabel: etrCheckLabel(checkKey, k),
+        };
+      });
     return {
       key: `${ts}-${msg.id || 'unknown'}-status`,
       ts,
@@ -92,26 +191,39 @@ function toEvent(msg) {
       rawId: msg.id || 'etr',
       category: 'etr290_status',
       severity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
-      title: hasP1 ? 'ETR Status (P1)' : hasP2 ? 'ETR Status (P2)' : 'ETR Status (OK)',
-      description: hasP1 ? 'Priority 1 errors detected' : hasP2 ? 'Priority 2 errors detected' : 'No active ETR errors',
+      title: hasP1 ? 'ETR 290 status: Priority 1 active' : hasP2 ? 'ETR 290 status: Priority 2 active' : 'ETR 290 status: nominal',
+      description: activeChecks.length > 0
+        ? `Active checks: ${activeChecks.map((c) => c.checkLabel).join(', ')}`
+        : 'No active ETR 290 errors',
       evidence: {
         runtime: msg.runtime || null,
+        etr: {
+          priority: statusPriority,
+          priorityLabel: etrPriorityLabel(statusPriority),
+          activeChecks,
+        },
       },
     };
   }
   if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
     const laneId = normalizeLaneId(msg.id || 'etr');
-    const sev = msg.priority === 'p1' ? 'critical' : msg.priority === 'p2' ? 'warning' : 'info';
+    const etr = buildEtrMeta(msg);
     return {
       key: `${ts}-${laneId}-${msg.incidentId || msg.checkId}-${msg.type}`,
       ts,
       id: laneId,
       rawId: msg.id || 'etr',
       category: 'etr290_incident',
-      severity: sev,
-      title: `Incident ${msg.type.endsWith('started') ? 'started' : 'updated'}: ${msg.label || msg.checkId || 'ETR check'}`,
+      severity: etr.severity,
+      title: `ETR 290 incident ${msg.type.endsWith('started') ? 'started' : 'updated'}: ${etr.checkLabel}`,
       description: msg.lastMessage || msg.message || '',
       evidence: {
+        etr: {
+          priority: etr.priority,
+          priorityLabel: etr.priorityLabel,
+          checkKey: etr.checkKey,
+          checkLabel: etr.checkLabel,
+        },
         incidentId: msg.incidentId || null,
         checkId: msg.checkId || null,
         hitCount: msg.hitCount || 0,
@@ -122,6 +234,7 @@ function toEvent(msg) {
   }
   if (msg.type === 'etr290_incident_cleared') {
     const laneId = normalizeLaneId(msg.id || 'etr');
+    const etr = buildEtrMeta(msg);
     return {
       key: `${ts}-${laneId}-${msg.incidentId || msg.checkId}-cleared`,
       ts,
@@ -129,9 +242,15 @@ function toEvent(msg) {
       rawId: msg.id || 'etr',
       category: 'etr290_incident_cleared',
       severity: 'ok',
-      title: `Incident cleared: ${msg.label || msg.checkId || 'ETR check'}`,
+      title: `ETR 290 incident cleared: ${etr.checkLabel}`,
       description: msg.lastMessage || '',
       evidence: {
+        etr: {
+          priority: etr.priority,
+          priorityLabel: etr.priorityLabel,
+          checkKey: etr.checkKey,
+          checkLabel: etr.checkLabel,
+        },
         incidentId: msg.incidentId || null,
         checkId: msg.checkId || null,
         durationMs: msg.durationMs || null,
@@ -210,23 +329,25 @@ function toEvent(msg) {
 }
 
 function colorForSeverity(severity) {
-  if (severity === 'critical') return '#ff2233';
-  if (severity === 'warning') return '#ffaa00';
+  if (severity === 'critical') return '#ff6b6b';
+  if (severity === 'warning') return '#ffe680';
   if (severity === 'ok') return '#00dd55';
   return '#00ddff';
 }
 
 function laneColorForEvent(event) {
   if (!event) return '#ffffff26';
-  if (event.severity === 'critical') return '#ff2233aa';
-  if (event.severity === 'warning') return '#ffaa00aa';
+  if (event.category === 'etr290_alarm') return '#ffb266aa';
+  if (event.category === 'etr290_incident' || event.category === 'etr290_incident_cleared') return '#b784ffaa';
+  if (event.severity === 'critical') return '#ff6b6baa';
+  if (event.severity === 'warning') return '#ffe680aa';
   if (event.severity === 'ok') return '#00dd5566';
   return '#66ccff66';
 }
 
 function colorForLaneSeverity(severity) {
-  if (severity === 'critical') return '#ff2233';
-  if (severity === 'warning') return '#ffaa00';
+  if (severity === 'critical') return '#ff6b6b';
+  if (severity === 'warning') return '#ffe680';
   if (severity === 'ok') return '#00dd55';
   return '#66ccff';
 }
@@ -286,7 +407,9 @@ function buildEventBlocks(events, timeStart, windowMs) {
 
 function getEventVisualStyle(category, severity) {
   const style = EVENT_STYLE_BY_CATEGORY[category] || { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' };
-  const color = colorForSeverity(severity);
+  let color = colorForSeverity(severity);
+  if (category === 'etr290_alarm') color = '#ffb266';
+  if (category === 'etr290_incident' || category === 'etr290_incident_cleared') color = '#b784ff';
   return {
     color,
     bg: `${color}${style.alpha}`,
@@ -311,6 +434,18 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [mouseLaneId, setMouseLaneId] = useState(null);
   const [freezeCursor, setFreezeCursor] = useState(false);
   const [scaleMode, setScaleMode] = useState('normalized');
+  const [rangeMode, setRangeMode] = useState('relative'); // relative | custom
+  const [customStartInput, setCustomStartInput] = useState('');
+  const [customEndInput, setCustomEndInput] = useState('');
+  const [customRange, setCustomRange] = useState(null); // { startMs, endMs }
+  const [rangeError, setRangeError] = useState('');
+
+  useEffect(() => {
+    const end = Date.now();
+    const start = end - WINDOW_OPTIONS[1].value;
+    setCustomStartInput(toDateTimeLocalValue(start));
+    setCustomEndInput(toDateTimeLocalValue(end));
+  }, []);
 
   const mergeTimelineEvents = (prev, incoming) => {
     const byKey = new Map(prev.map((e) => [e.key, e]));
@@ -363,20 +498,21 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return () => clearInterval(t);
   }, []);
 
-  const timeEnd = nowMs;
-  const timeStart = timeEnd - windowMs;
+  const timeEnd = rangeMode === 'custom' && customRange ? customRange.endMs : nowMs;
+  const timeStart = rangeMode === 'custom' && customRange ? customRange.startMs : (timeEnd - windowMs);
+  const effectiveWindowMs = Math.max(1, timeEnd - timeStart);
   const visibleEvents = useMemo(
     () => events.filter((e) => e.ts >= timeStart && e.ts <= timeEnd),
     [events, timeStart, timeEnd]
   );
 
   const timelineEvents = useMemo(() => {
-    if (windowMs <= 0) return [];
+    if (effectiveWindowMs <= 0) return [];
     return visibleEvents.map((e) => ({
       ...e,
-      xPct: Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100)),
+      xPct: Math.min(100, Math.max(0, ((e.ts - timeStart) / effectiveWindowMs) * 100)),
     }));
-  }, [visibleEvents, timeStart, windowMs]);
+  }, [visibleEvents, timeStart, effectiveWindowMs]);
 
   const laneIds = useMemo(() => {
     const ids = Array.from(new Set(timelineEvents.map((e) => e.id)));
@@ -393,7 +529,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return m;
   }, [timelineEvents, laneIds]);
 
-  const pointerUtc = mouseX == null ? null : (timeStart + (windowMs * mouseX) / 100);
+  const pointerUtc = mouseX == null ? null : (timeStart + (effectiveWindowMs * mouseX) / 100);
 
   const lanePointerStatus = useMemo(() => {
     if (mouseX == null || laneIds.length === 0) return [];
@@ -480,18 +616,18 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const laneLineById = useMemo(() => {
     const out = {};
     for (const id of laneIds) {
-      out[id] = buildLaneGradient(laneMap[id] || [], timeStart, windowMs);
+      out[id] = buildLaneGradient(laneMap[id] || [], timeStart, effectiveWindowMs);
     }
     return out;
-  }, [laneIds, laneMap, timeStart, windowMs]);
+  }, [laneIds, laneMap, timeStart, effectiveWindowMs]);
 
   const laneBlocksById = useMemo(() => {
     const out = {};
     for (const id of laneIds) {
-      out[id] = buildEventBlocks(laneMap[id] || [], timeStart, windowMs);
+      out[id] = buildEventBlocks(laneMap[id] || [], timeStart, effectiveWindowMs);
     }
     return out;
-  }, [laneIds, laneMap, timeStart, windowMs]);
+  }, [laneIds, laneMap, timeStart, effectiveWindowMs]);
 
   const popupPos = useMemo(() => {
     if (mouseX == null || mouseY == null) return null;
@@ -503,18 +639,49 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     };
   }, [mouseX, mouseY]);
 
+  const applyCustomRange = () => {
+    const startMs = parseDateTimeLocalValue(customStartInput);
+    const endMs = parseDateTimeLocalValue(customEndInput);
+    if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+      setRangeError('Enter both start and end date/time.');
+      return;
+    }
+    if (endMs <= startMs) {
+      setRangeError('End must be later than start.');
+      return;
+    }
+    setCustomRange({ startMs, endMs });
+    setRangeError('');
+    setRangeMode('custom');
+  };
+
+  const setRelativeWindow = (ms) => {
+    setWindowMs(ms);
+    setRangeMode('relative');
+    setRangeError('');
+  };
+
+  const resetToLiveWindow = () => {
+    const end = Date.now();
+    const start = end - windowMs;
+    setCustomStartInput(toDateTimeLocalValue(start));
+    setCustomEndInput(toDateTimeLocalValue(end));
+    setRangeMode('relative');
+    setRangeError('');
+  };
+
   return (
     <div className="space-y-6 font-sans">
       <BentoCard icon={Activity} title="Stream View">
         <div className="flex items-center justify-between gap-2 mb-2">
-          <div className="text-[11px] text-gray-400">Live horizontal UTC timeline by monitor/analyser lane</div>
+          <div className="text-[11px] text-gray-400">Horizontal UTC timeline by monitor/analyser lane</div>
           <div className="flex items-center gap-2 flex-wrap justify-end">
             {WINDOW_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
-                onClick={() => setWindowMs(opt.value)}
+                onClick={() => setRelativeWindow(opt.value)}
                 className={`text-[11px] px-2 py-0.5 rounded border ${
-                  windowMs === opt.value
+                  rangeMode === 'relative' && windowMs === opt.value
                     ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
                     : 'border-white/10 text-gray-400 bg-black/20'
                 }`}
@@ -542,16 +709,54 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             >
               {freezeCursor ? 'Cursor Frozen' : 'Freeze Cursor'}
             </button>
+            <button
+              onClick={resetToLiveWindow}
+              className={`text-[11px] px-2 py-0.5 rounded border ${
+                rangeMode === 'relative'
+                  ? 'border-green-500/50 text-green-300 bg-green-900/20'
+                  : 'border-white/10 text-gray-400 bg-black/20'
+              }`}
+            >
+              Live
+            </button>
           </div>
+        </div>
+        <div className="mb-2 flex items-center gap-2 flex-wrap text-[10px]">
+          <span className="text-gray-500 uppercase tracking-wider">custom range</span>
+          <input
+            type="datetime-local"
+            value={customStartInput}
+            onChange={(e) => setCustomStartInput(e.target.value)}
+            className="px-2 py-1 rounded border border-white/15 bg-black/40 text-gray-300"
+          />
+          <span className="text-gray-500">to</span>
+          <input
+            type="datetime-local"
+            value={customEndInput}
+            onChange={(e) => setCustomEndInput(e.target.value)}
+            className="px-2 py-1 rounded border border-white/15 bg-black/40 text-gray-300"
+          />
+          <button
+            onClick={applyCustomRange}
+            className={`text-[11px] px-2 py-1 rounded border ${
+              rangeMode === 'custom'
+                ? 'border-purple-400/60 text-purple-200 bg-purple-900/25'
+                : 'border-white/15 text-gray-300 bg-black/30'
+            }`}
+          >
+            Apply
+          </button>
+          {rangeError && <span className="text-red-300">{rangeError}</span>}
         </div>
         <div className="mb-1.5 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono">
           <span className="inline-flex items-center gap-1">
-            <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
+            <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#ffb266' }} />
             alarm
           </span>
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-green-500" /> nominal</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-amber-500" /> major</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-red-500" /> critical</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ffe680' }} /> warning</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ff6b6b' }} /> critical</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#b784ff' }} /> incident</span>
         </div>
         <div className="mb-2 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono flex-wrap">
           <span className="text-gray-600 uppercase tracking-wider">type</span>
@@ -722,6 +927,22 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             <div className="font-mono text-gray-300">{selectedEvent ? selectedEvent.title : 'Move mouse over a lane'}</div>
             <div className="text-gray-500 mt-0.5">{selectedEvent ? selectedEvent.description : '-'}</div>
             <div className="text-gray-500 mt-0.5">{selectedEvent ? toUtc(selectedEvent.ts) : '-'}</div>
+            {selectedEvent?.evidence?.etr?.priorityLabel && (
+              <div className="text-gray-500 mt-0.5">
+                DVB ETR 290: {selectedEvent.evidence.etr.priorityLabel}
+              </div>
+            )}
+            {selectedEvent?.evidence?.etr?.checkLabel && (
+              <div className="text-gray-500 mt-0.5">
+                Check: {selectedEvent.evidence.etr.checkLabel}
+                {selectedEvent.evidence.etr.checkKey ? ` (${selectedEvent.evidence.etr.checkKey})` : ''}
+              </div>
+            )}
+            {Array.isArray(selectedEvent?.evidence?.etr?.activeChecks) && selectedEvent.evidence.etr.activeChecks.length > 0 && (
+              <div className="text-gray-500 mt-0.5">
+                Active checks: {selectedEvent.evidence.etr.activeChecks.map((c) => c.checkLabel).join(', ')}
+              </div>
+            )}
             {selectedEvent?.evidence?.bitrateSource && (
               <div className="text-gray-500 mt-0.5">Bitrate source: {selectedEvent.evidence.bitrateSource}</div>
             )}

@@ -510,7 +510,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
   return (
     <div className="space-y-6 font-sans">
-      <BentoCard icon={Radio} title="Decoder Workflow">
+      <BentoCard icon={Radio} title="Decoder Provisioning (Compact)">
         <div className="grid grid-cols-3 gap-2">
           {PROBE_MODES.map(v => (
             <button
@@ -556,10 +556,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           ))}
           <button
             onClick={addDecoderRow}
-            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neon-cyan/40 bg-neon-cyan/10 text-neon-cyan text-xs font-semibold"
+            className="inline-flex items-center gap-2 px-2.5 py-1 rounded-lg border border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan text-[11px] font-semibold"
           >
             <Plus className="w-3.5 h-3.5" />
-            Add decoder row
+            Add row
           </button>
         </div>
 
@@ -606,22 +606,57 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           </div>
         </div>
 
-        <div className="mt-3 flex gap-3">
+        <div className="mt-3 flex gap-2">
           <button
             onClick={startDecoder}
             disabled={validRowPlans.length === 0}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-neon-purple to-purple-600 text-white text-sm font-bold disabled:opacity-50"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-neon-cyan/35 bg-neon-cyan/10 text-neon-cyan text-xs font-semibold disabled:opacity-50"
           >
             <Plus className="w-4 h-4" />
-            Provision {validRowPlans.length > 1 ? `${validRowPlans.length} Decoders` : 'Decoder'}
+            Provision {validRowPlans.length > 1 ? `${validRowPlans.length}` : ''} Probe{validRowPlans.length > 1 ? 's' : ''}
           </button>
           <button
             onClick={stopDecoder}
             disabled={!selectedId && !etr.activeId}
-            className="px-4 py-2 rounded-xl bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 text-sm font-bold disabled:opacity-50"
+            className="px-3 py-1.5 rounded-lg bg-red-900/30 hover:bg-red-800/50 text-red-300 border border-red-500/25 text-xs font-semibold disabled:opacity-50"
           >
-            Stop Decoder
+            Stop
           </button>
+        </div>
+
+        <div className="mt-4">
+          <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Provision Targets</div>
+          <div className="max-h-44 overflow-auto rounded-lg border border-white/10 bg-black/20">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-gray-500 border-b border-white/10">
+                  <th className="text-left py-2 px-2">Row</th>
+                  <th className="text-left py-2 px-2">Decoder ID</th>
+                  <th className="text-left py-2 px-2">Mode</th>
+                  <th className="text-left py-2 px-2">Target URL</th>
+                  <th className="text-left py-2 px-2">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rowPlans.map((row) => {
+                  const rowId = row.decoderId?.trim() || `auto-${row.rowIndex}`;
+                  const isReady = Boolean(row.url);
+                  const isActive = activeIds.includes(rowId);
+                  return (
+                    <tr key={`plan-${row.key}`} className="border-b border-white/5">
+                      <td className="py-1.5 px-2 text-gray-400">{row.rowIndex}</td>
+                      <td className="py-1.5 px-2 text-gray-300">{rowId}</td>
+                      <td className="py-1.5 px-2 text-gray-300 uppercase">{mode}</td>
+                      <td className="py-1.5 px-2 text-gray-400 truncate max-w-[280px]">{row.url || '-'}</td>
+                      <td className={`py-1.5 px-2 ${isActive ? 'text-neon-cyan' : isReady ? 'text-green-300' : 'text-gray-500'}`}>
+                        {isActive ? 'active' : isReady ? 'ready' : 'incomplete'}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
 
         {activeIds.length > 0 && (
