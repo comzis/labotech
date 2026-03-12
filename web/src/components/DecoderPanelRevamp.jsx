@@ -758,133 +758,159 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               )}
 
               <PanelBox style={{ borderColor: C.borderHi }}>
-                <SectionHead icon="🧪" title="ETR 290 Tuning" right={<Badge label="LIVE CONFIG" color={C.warn} small />} />
-                <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
-                  {/* Per-priority enable/disable */}
-                  <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
-                    <span style={{ fontSize: 9, color: C.muted, marginRight: 2 }}>Monitor priorities:</span>
-                    {[
-                      { label: "P1 Critical", enabled: etrP1Enabled, set: setEtrP1Enabled, color: C.err },
-                      { label: "P2 Quality",  enabled: etrP2Enabled, set: setEtrP2Enabled, color: C.warn },
-                      { label: "P3 Info",     enabled: etrP3Enabled, set: setEtrP3Enabled, color: C.info },
-                    ].map(({ label, enabled, set, color }) => (
-                      <button key={label} onClick={() => set((v) => !v)} style={{
-                        padding: "2px 8px", fontSize: 9, fontWeight: 700,
-                        border: `1px solid ${enabled ? color : C.border}`,
-                        color: enabled ? color : C.muted,
-                        background: enabled ? `${color}18` : "transparent",
-                        borderRadius: 2, cursor: "pointer",
-                        display: "flex", alignItems: "center", gap: 4,
-                      }}>
-                        <span style={{ width: 6, height: 6, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block" }} />
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <div style={{ fontSize: 9, color: C.muted }}>
-                      Recommended baseline is preloaded for broadcast ingest (PCR/CC strict, SI timing tuned).
-                    </div>
-                    <button
-                      onClick={() => {
-                        setThresholds(ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: String(RECOMMENDED_THRESHOLDS[c.id] || 1) }), {}));
-                        setEtrActionNote({ type: "info", text: "Recommended DVB/ETR baseline values restored." });
-                      }}
-                      style={{
-                        justifySelf: "end",
-                        border: `1px solid ${C.border}`,
-                        background: "transparent",
-                        color: C.muted,
-                        borderRadius: 2,
-                        padding: "4px 8px",
-                        fontSize: 9,
-                        cursor: "pointer",
-                      }}
-                    >
-                      Restore recommended values
+                <SectionHead icon="📡" title="ETR 290 Alarm Configuration"
+                  right={selectedEtrExists
+                    ? <Badge label={`LIVE · ${selectedId}`} color={C.ok} small />
+                    : <Badge label="NOT RUNNING" color={C.muted} small />}
+                />
+                <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+                  {/* ── Decoder selector + ETR controls ────────────────── */}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6, alignItems: "center" }}>
+                    <Field label="Monitor decoder">
+                      <select
+                        value={selectedId}
+                        onChange={(e) => setSelectedId(e.target.value)}
+                        style={{ width: "100%", height: 30, background: C.panel, color: selectedId ? C.text : C.muted, border: `1px solid ${C.border}`, borderRadius: 2, fontSize: 10, padding: "0 6px" }}
+                      >
+                        <option value="">— select decoder —</option>
+                        {activeIds.map((id) => <option key={id} value={id}>{id}</option>)}
+                      </select>
+                    </Field>
+                    <button onClick={startEtrForSelected} disabled={!selectedId || !selectedDecoderUrl || busy}
+                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedId && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
+                        border: `1px solid ${selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
+                        color: selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.muted,
+                        background: selectedEtrExists ? `${C.ok}10` : "transparent" }}>
+                      {busy ? "…" : selectedEtrExists ? "● RUNNING" : "▶ Enable ETR"}
+                    </button>
+                    <button onClick={stopEtrForSelected} disabled={!selectedEtrExists || busy}
+                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedEtrExists && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
+                        border: `1px solid ${selectedEtrExists && !busy ? C.err : C.border}`,
+                        color: selectedEtrExists && !busy ? C.err : C.muted, background: "transparent" }}>
+                      ■ Stop
                     </button>
                   </div>
 
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: enableEtrOnProvision ? C.ok : C.muted, fontSize: 10 }}>
-                    <input type="checkbox" checked={enableEtrOnProvision} onChange={(e) => setEnableEtrOnProvision(e.target.checked)} style={{ accentColor: C.ok }} />
-                    Auto-enable ETR when starting decoder
-                  </label>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <StatBox label="Selected decoder" value={selectedId || "-"} color={selectedId ? C.cyan : C.muted} />
-                    <StatBox label="ETR state" value={selectedEtrExists ? "RUNNING" : "STOPPED"} color={selectedEtrExists ? C.ok : C.muted} />
+                  {/* ── Alert priority toggles ──────────────────────────── */}
+                  <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 3, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Alert priorities — click to enable / disable</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                      {[
+                        { label: "P1 Critical", desc: "Service failure", enabled: etrP1Enabled, set: setEtrP1Enabled, color: C.err },
+                        { label: "P2 Quality",  desc: "Impairment",      enabled: etrP2Enabled, set: setEtrP2Enabled, color: C.warn },
+                        { label: "P3 Info",     desc: "SI / metadata",   enabled: etrP3Enabled, set: setEtrP3Enabled, color: C.info },
+                      ].map(({ label, desc, enabled, set, color }) => (
+                        <button key={label} onClick={() => set((v) => !v)} style={{
+                          padding: "6px 8px", borderRadius: 2, cursor: "pointer", textAlign: "left",
+                          border: `2px solid ${enabled ? color : C.border}`,
+                          background: enabled ? `${color}14` : "transparent",
+                        }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block", boxShadow: enabled ? `0 0 5px ${color}` : "none" }} />
+                            <span style={{ fontSize: 10, fontWeight: 700, color: enabled ? color : C.muted }}>{label}</span>
+                          </div>
+                          <div style={{ fontSize: 9, color: enabled ? C.muted : C.dim }}>{enabled ? desc : "DISABLED"}</div>
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <Field label="Saved profile">
-                      <Select
-                        value={selectedProfileName}
-                        onChange={(e) => applyProfileToForm(e.target.value)}
-                        options={[{ value: "", label: "Manual config" }, ...(etr.profiles || []).map((p) => ({ value: p.name, label: p.name }))]}
-                      />
-                    </Field>
-                    <Field label="Apply to running">
-                      <button
-                        onClick={applyConfigToRunning}
-                        disabled={!selectedId || !selectedEtrExists}
-                        style={{
-                          border: `1px solid ${selectedId && selectedEtrExists ? C.cyan : C.border}`,
-                          background: selectedId && selectedEtrExists ? `${C.cyan}12` : "transparent",
-                          color: selectedId && selectedEtrExists ? C.cyan : C.muted,
-                          borderRadius: 2,
-                          padding: "6px 8px",
-                          fontSize: 10,
-                          fontWeight: 700,
-                        }}
-                      >
-                        Apply ETR config
-                      </button>
-                    </Field>
-                  </div>
+                  {/* ── Per-check threshold table ─────────────────────── */}
+                  {[
+                    { p: 1, label: "Priority 1 — Service not receivable (critical alarms)", color: C.err, enabled: etrP1Enabled, keys: ['ts_sync','sync_byte','pat_error','cc_error','pmt_error','pid_error'] },
+                    { p: 2, label: "Priority 2 — Quality impairment", color: C.warn, enabled: etrP2Enabled, keys: ['transport_error','crc_error','pcr_disc','pcr_acc','pcr_rep','pts_error','cat_error'] },
+                    { p: 3, label: "Priority 3 — Informational (SI/metadata)", color: C.info, enabled: etrP3Enabled, keys: ['nit_error','sdt_error','eit_error','rst_error','tdt_error','empty_buf'] },
+                  ].map(({ p, label, color, enabled, keys }) => (
+                    <div key={p} style={{ opacity: enabled ? 1 : 0.4 }}>
+                      <div style={{ fontSize: 8, color: enabled ? color : C.muted, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+                        {label}{!enabled ? " — DISABLED" : ""}
+                      </div>
+                      {/* header row */}
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 48px 56px 48px", gap: 4, padding: "2px 6px", marginBottom: 2 }}>
+                        <span style={{ fontSize: 8, color: C.dim }}>Check</span>
+                        <span style={{ fontSize: 8, color: C.dim, textAlign: "right" }}>Hits</span>
+                        <span style={{ fontSize: 8, color: C.dim, textAlign: "center" }}>Alarm after</span>
+                        <span style={{ fontSize: 8, color: C.dim, textAlign: "center" }}>Status</span>
+                      </div>
+                      {ETR_CHECK_FIELDS.filter((c) => keys.includes(c.id)).map((c) => {
+                        const liveCount = selectedEtrStatus?.counts?.[c.id] ?? 0;
+                        const liveStatus = selectedEtrStatus?.status?.[c.id];
+                        const isFailing = liveStatus === 'error';
+                        const rowColor = isFailing ? color : enabled ? C.text : C.muted;
+                        return (
+                          <div key={c.id} style={{
+                            display: "grid", gridTemplateColumns: "1fr 48px 56px 48px", gap: 4,
+                            padding: "4px 6px", marginBottom: 2, borderRadius: 2,
+                            background: isFailing ? `${color}0d` : C.dim,
+                            border: `1px solid ${isFailing ? color : C.border}`,
+                            alignItems: "center",
+                          }}>
+                            <span style={{ fontSize: 9, color: rowColor, fontWeight: isFailing ? 700 : 400 }}>{c.label}</span>
+                            <span style={{ fontSize: 9, color: liveCount > 0 ? color : C.muted, fontFamily: "'Courier New',monospace", textAlign: "right", fontWeight: liveCount > 0 ? 700 : 400 }}>
+                              {liveCount > 0 ? liveCount : "—"}
+                            </span>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 3 }}>
+                              <Input
+                                value={thresholds[c.id] ?? String(RECOMMENDED_THRESHOLDS[c.id] || 1)}
+                                onChange={(e) => setThresholds((prev) => ({ ...prev, [c.id]: e.target.value }))}
+                                mono disabled={!enabled}
+                                style={{ width: "100%", textAlign: "center", color: Number(thresholds[c.id]) !== Number(RECOMMENDED_THRESHOLDS[c.id] || 1) ? color : C.muted }}
+                              />
+                            </div>
+                            <div style={{ textAlign: "center" }}>
+                              {!enabled
+                                ? <span style={{ fontSize: 8, color: C.dim }}>off</span>
+                                : isFailing
+                                  ? <span style={{ fontSize: 8, color, fontWeight: 700 }}>FAIL</span>
+                                  : <span style={{ fontSize: 8, color: C.ok }}>PASS</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
 
-                  {/* Service filter — restrict ETR to specific services */}
+                  {/* ── Apply config CTA ────────────────────────────────── */}
+                  <button
+                    onClick={applyConfigToRunning}
+                    disabled={!selectedId || !selectedEtrExists || busy}
+                    style={{
+                      width: "100%", padding: "8px", borderRadius: 2, fontSize: 11, fontWeight: 700, cursor: "pointer",
+                      border: `1px solid ${selectedId && selectedEtrExists && !busy ? C.cyan : C.border}`,
+                      color: selectedId && selectedEtrExists && !busy ? C.bg : C.muted,
+                      background: selectedId && selectedEtrExists && !busy ? C.cyan : "transparent",
+                      boxShadow: selectedId && selectedEtrExists && !busy ? `0 0 10px ${C.cyan}44` : "none",
+                      opacity: busy ? 0.5 : 1,
+                    }}
+                  >
+                    {busy ? "APPLYING…" : "↻  APPLY CONFIG TO RUNNING MONITOR"}
+                  </button>
+
+                  {etrActionNote && (
+                    <div style={{ fontSize: 10, padding: "4px 8px", borderRadius: 2, background: C.dim,
+                      color: etrActionNote.type === "err" ? C.err : etrActionNote.type === "warn" ? C.warn : etrActionNote.type === "ok" ? C.ok : C.cyan }}>
+                      {etrActionNote.text}
+                    </div>
+                  )}
+
+                  {/* ── Service filter ──────────────────────────────────── */}
                   {(selectedResult?.dvb?.services || []).length > 0 && (
                     <div>
-                      <div style={{ fontSize: 9, color: C.muted, marginBottom: 4 }}>
-                        Service Filter (unchecked = monitor all services)
-                      </div>
+                      <div style={{ fontSize: 9, color: C.muted, marginBottom: 4 }}>Service filter — leave all unchecked to monitor everything</div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
                         {(selectedResult.dvb.services || []).map((svc) => {
                           const checked = selectedServiceIds.includes(svc.serviceId);
                           return (
-                            <label
-                              key={svc.serviceId}
-                              style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 4,
-                                fontSize: 9,
-                                color: checked ? C.cyan : C.muted,
-                                background: checked ? `${C.cyan}12` : C.dim,
-                                border: `1px solid ${checked ? C.cyan : C.border}`,
-                                borderRadius: 2,
-                                padding: "3px 6px",
-                                cursor: "pointer",
-                              }}
-                            >
-                              <input
-                                type="checkbox"
-                                checked={checked}
-                                onChange={(e) =>
-                                  setSelectedServiceIds((prev) =>
-                                    e.target.checked
-                                      ? [...prev, svc.serviceId]
-                                      : prev.filter((id) => id !== svc.serviceId)
-                                  )
-                                }
-                                style={{ accentColor: C.cyan }}
-                              />
+                            <label key={svc.serviceId} style={{
+                              display: "flex", alignItems: "center", gap: 4, fontSize: 9, cursor: "pointer",
+                              color: checked ? C.cyan : C.muted, background: checked ? `${C.cyan}12` : C.dim,
+                              border: `1px solid ${checked ? C.cyan : C.border}`, borderRadius: 2, padding: "3px 8px",
+                            }}>
+                              <input type="checkbox" checked={checked}
+                                onChange={(e) => setSelectedServiceIds((prev) => e.target.checked ? [...prev, svc.serviceId] : prev.filter((id) => id !== svc.serviceId))}
+                                style={{ accentColor: C.cyan }} />
                               {svc.serviceName || `SID ${svc.serviceId}`}
-                              {(servicePidsByServiceId[svc.serviceId] || []).length > 0 && (
-                                <span style={{ color: C.muted }}>
-                                  ({(servicePidsByServiceId[svc.serviceId] || []).length} PIDs)
-                                </span>
-                              )}
                             </label>
                           );
                         })}
@@ -892,168 +918,53 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     </div>
                   )}
 
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                    <Field label="Input PIDs (auto-derived)">
-                      <Input
-                        value={
-                          selectedServiceIds.length > 0
-                            ? [...new Set(selectedServiceIds.flatMap((sid) => servicePidsByServiceId[sid] || []))].join(", ") || "No PIDs for selection"
-                            : autoIncludePidsText
-                        }
-                        onChange={() => {}}
-                        readOnly
-                        placeholder="Awaiting TS input..."
-                        mono
-                        style={{ color: C.muted }}
-                      />
-                    </Field>
-                    <Field label="Excluded PIDs (comma-separated)">
-                      <Input
-                        value={excludePidsText}
-                        onChange={(e) => setExcludePidsText(e.target.value)}
-                        placeholder="e.g. 8191, 0x1FFF"
-                        mono
-                      />
-                    </Field>
-                  </div>
-
-                  {/* Active ETR thresholds on running monitor */}
-                  {selectedEtrStatus?.config?.thresholds && (
-                    <div style={{ fontSize: 9, color: C.muted, background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "4px 6px" }}>
-                      <span style={{ color: C.head }}>Active on monitor: </span>
-                      {Object.entries(selectedEtrStatus.config.thresholds)
-                        .filter(([, v]) => Number(v) !== 1)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join("  ·  ") || "all thresholds = 1 (default)"}
-                    </div>
-                  )}
-
-                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: allowUnknownPid ? C.ok : C.warn, fontSize: 10 }}>
-                    <input type="checkbox" checked={allowUnknownPid} onChange={(e) => setAllowUnknownPid(e.target.checked)} style={{ accentColor: C.ok }} />
-                    Allow alarms without PID evidence
-                  </label>
-                  <div style={{ fontSize: 9, color: C.muted }}>
-                    ETR tuning changes alarm trigger thresholds only; measured TS/PID values remain untouched.
-                  </div>
-
-                  {[
-                    { p: 1, label: "P1 — Critical (Service not receivable)", color: C.err, enabled: etrP1Enabled, keys: ['ts_sync','sync_byte','pat_error','cc_error','pmt_error','pid_error'] },
-                    { p: 2, label: "P2 — Quality impairment", color: C.warn, enabled: etrP2Enabled, keys: ['transport_error','crc_error','pcr_disc','pcr_acc','pcr_rep','pts_error','cat_error'] },
-                    { p: 3, label: "P3 — Informational", color: C.info, enabled: etrP3Enabled, keys: ['nit_error','sdt_error','eit_error','rst_error','tdt_error','empty_buf'] },
-                  ].map(({ p, label, color, enabled, keys }) => (
-                    <div key={p}>
-                      <div style={{ fontSize: 8, color: enabled ? color : C.muted, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4, opacity: enabled ? 1 : 0.5 }}>
-                        {label}{!enabled ? " — DISABLED" : ""}
+                  {/* ── Advanced: PID scope + profile ───────────────────── */}
+                  <details>
+                    <summary style={{ fontSize: 9, color: C.muted, cursor: "pointer", userSelect: "none", padding: "2px 0" }}>Advanced — PID scope &amp; profiles</summary>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <Field label="Monitored PIDs (auto)">
+                          <Input value={selectedServiceIds.length > 0
+                            ? [...new Set(selectedServiceIds.flatMap((sid) => servicePidsByServiceId[sid] || []))].join(", ") || "none"
+                            : autoIncludePidsText} onChange={() => {}} readOnly mono style={{ color: C.muted }} />
+                        </Field>
+                        <Field label="Excluded PIDs">
+                          <Input value={excludePidsText} onChange={(e) => setExcludePidsText(e.target.value)} placeholder="e.g. 8191, 0x1FFF" mono />
+                        </Field>
                       </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 4, opacity: enabled ? 1 : 0.35 }}>
-                        {ETR_CHECK_FIELDS.filter((c) => keys.includes(c.id)).map((c) => (
-                          <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 52px", gap: 4, alignItems: "center", background: C.dim, border: `1px solid ${enabled ? C.border : C.dim}`, borderRadius: 2, padding: "3px 6px" }}>
-                            <span style={{ fontSize: 8, color: C.muted }}>{c.label}</span>
-                            <Input
-                              value={thresholds[c.id] ?? String(RECOMMENDED_THRESHOLDS[c.id] || 1)}
-                              onChange={(e) => setThresholds((prev) => ({ ...prev, [c.id]: e.target.value }))}
-                              mono
-                              disabled={!enabled}
-                              style={{ color: Number(thresholds[c.id]) === Number(RECOMMENDED_THRESHOLDS[c.id] || 1) ? C.muted : color }}
-                            />
-                          </div>
-                        ))}
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, color: allowUnknownPid ? C.ok : C.warn, fontSize: 10 }}>
+                        <input type="checkbox" checked={allowUnknownPid} onChange={(e) => setAllowUnknownPid(e.target.checked)} style={{ accentColor: C.ok }} />
+                        Allow alarms without PID evidence
+                      </label>
+                      <label style={{ display: "flex", alignItems: "center", gap: 6, color: enableEtrOnProvision ? C.ok : C.muted, fontSize: 10 }}>
+                        <input type="checkbox" checked={enableEtrOnProvision} onChange={(e) => setEnableEtrOnProvision(e.target.checked)} style={{ accentColor: C.ok }} />
+                        Auto-enable ETR when starting a decoder
+                      </label>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        <Field label="Load profile">
+                          <Select value={selectedProfileName} onChange={(e) => applyProfileToForm(e.target.value)}
+                            options={[{ value: "", label: "Manual config" }, ...(etr.profiles || []).map((p) => ({ value: p.name, label: p.name }))]} />
+                        </Field>
+                        <button onClick={() => { setThresholds(ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: String(RECOMMENDED_THRESHOLDS[c.id] || 1) }), {})); setEtrActionNote({ type: "info", text: "Recommended values restored." }); }}
+                          style={{ height: 30, marginTop: 16, border: `1px solid ${C.border}`, background: "transparent", color: C.muted, borderRadius: 2, fontSize: 9, cursor: "pointer" }}>
+                          Reset to recommended
+                        </button>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                        <Field label="Profile name">
+                          <Input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="sports-live" />
+                        </Field>
+                        <button onClick={saveCurrentProfile} disabled={!profileName.trim()}
+                          style={{ height: 30, marginTop: 16, border: `1px solid ${profileName.trim() ? C.ok : C.border}`, color: profileName.trim() ? C.ok : C.muted, background: "transparent", borderRadius: 2, fontSize: 9, cursor: "pointer", fontWeight: 700 }}>
+                          Save profile
+                        </button>
+                        <button onClick={deleteCurrentProfile} disabled={!selectedProfileName}
+                          style={{ height: 30, marginTop: 16, border: `1px solid ${selectedProfileName ? C.err : C.border}`, color: selectedProfileName ? C.err : C.muted, background: "transparent", borderRadius: 2, fontSize: 9, cursor: "pointer" }}>
+                          Delete profile
+                        </button>
                       </div>
                     </div>
-                  ))}
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <Field label="Profile name">
-                      <Input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="sports-low-latency" />
-                    </Field>
-                    <Field label="Profile description">
-                      <Input
-                        value={profileDescription}
-                        onChange={(e) => setProfileDescription(e.target.value)}
-                        placeholder="P1 strict, only PCR/video PIDs"
-                        style={{ color: profileDescription === "Broadcast baseline profile" ? C.muted : C.text }}
-                      />
-                    </Field>
-                  </div>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      onClick={startEtrForSelected}
-                      disabled={!selectedId || !selectedDecoderUrl || busy}
-                      style={{
-                        flex: 1,
-                        borderRadius: 2,
-                        border: `1px solid ${selectedId && selectedDecoderUrl && !busy ? C.info : C.border}`,
-                        color: selectedId && selectedDecoderUrl && !busy ? C.info : C.muted,
-                        background: selectedEtrExists ? `${C.info}10` : "transparent",
-                        padding: "5px 8px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        cursor: selectedId && selectedDecoderUrl && !busy ? "pointer" : "not-allowed",
-                        opacity: busy ? 0.5 : 1,
-                      }}
-                    >
-                      {busy ? "WORKING…" : selectedEtrExists ? "Enable ETR (Apply)" : "Enable ETR"}
-                    </button>
-                    <button
-                      onClick={stopEtrForSelected}
-                      disabled={!selectedId || busy}
-                      style={{
-                        flex: 1,
-                        borderRadius: 2,
-                        border: `1px solid ${selectedId && !busy ? C.err : C.border}`,
-                        color: selectedId && !busy ? C.err : C.muted,
-                        background: "transparent",
-                        padding: "5px 8px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                        cursor: selectedId && !busy ? "pointer" : "not-allowed",
-                        opacity: busy ? 0.5 : 1,
-                      }}
-                    >
-                      {busy ? "WORKING…" : "Stop ETR"}
-                    </button>
-                  </div>
-
-                  {etrActionNote && (
-                    <div style={{ fontSize: 10, color: etrActionNote.type === "err" ? C.err : etrActionNote.type === "warn" ? C.warn : etrActionNote.type === "ok" ? C.ok : C.cyan }}>
-                      {etrActionNote.text}
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <button
-                      onClick={saveCurrentProfile}
-                      disabled={!profileName.trim()}
-                      style={{
-                        flex: 1,
-                        borderRadius: 2,
-                        border: `1px solid ${profileName.trim() ? C.ok : C.border}`,
-                        color: profileName.trim() ? C.ok : C.muted,
-                        background: "transparent",
-                        padding: "5px 8px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      Save profile
-                    </button>
-                    <button
-                      onClick={deleteCurrentProfile}
-                      disabled={!selectedProfileName}
-                      style={{
-                        flex: 1,
-                        borderRadius: 2,
-                        border: `1px solid ${selectedProfileName ? C.err : C.border}`,
-                        color: selectedProfileName ? C.err : C.muted,
-                        background: "transparent",
-                        padding: "5px 8px",
-                        fontSize: 10,
-                        fontWeight: 700,
-                      }}
-                    >
-                      Delete profile
-                    </button>
-                  </div>
+                  </details>
                 </div>
               </PanelBox>
 

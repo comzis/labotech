@@ -297,16 +297,17 @@ class TSAnalyser extends EventEmitter {
 
   _probeAudioLevels() {
     return new Promise((resolve) => {
-      // astats with reset=1 gives per-channel RMS and peak — the broadcast standard
-      // for stereo metering (L/R separation). volumedetect only gives aggregate.
+      // astats WITHOUT metadata=1 prints a channel summary to stderr on exit.
+      // metadata=1 stores stats as frame AVDictionary entries which are never
+      // printed to stderr with -f null, so the old approach always returned null.
       const args = [
         '-hide_banner',
         '-nostats',
         '-loglevel', 'info',
-        '-t', '1.5',
+        '-t', '2.0',
         '-i', this._withLiveInputHints(this.url),
         '-vn',
-        '-af', 'astats=metadata=1:reset=1',
+        '-af', 'astats=reset=1',
         '-f', 'null',
         '-',
       ];
@@ -315,7 +316,7 @@ class TSAnalyser extends EventEmitter {
       let stderr = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 4000);
+      }, 6000);
 
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('error', () => {
@@ -324,45 +325,58 @@ class TSAnalyser extends EventEmitter {
       });
       proc.on('exit', () => {
         clearTimeout(timeout);
-        // Parse per-channel astats output:
-        // "[Parsed_astats_0 @ ...] ch0 Peak_level: -3.2"
-        // "[Parsed_astats_0 @ ...] ch0 RMS_level: -18.4"
+        // astats summary format (FFmpeg 4.x–7.x):
+        //   "[Parsed_astats_0 @ 0x...] Channel: 1"
+        //   "[Parsed_astats_0 @ 0x...]   Peak level dB: -20.00"
+        //   "[Parsed_astats_0 @ 0x...]   RMS level dB: -26.00"
+        //   "[Parsed_astats_0 @ 0x...] Overall:"
         const channelPeak = {};
         const channelRms = {};
+        let currentCh = null;
         for (const line of stderr.split('\n')) {
-          const peakM = line.match(/ch(\d+)\s+Peak_level:\s*(-?[\d.]+|inf|-inf)/i);
+          // "Channel: N" — 1-indexed, convert to 0-indexed
+          const chM = line.match(/Channel:\s*(\d+)/i);
+          if (chM) { currentCh = parseInt(chM[1], 10) - 1; continue; }
+          // "Overall:" resets channel tracking
+          if (/Overall:/i.test(line)) { currentCh = null; continue; }
+          if (currentCh == null) continue;
+          const peakM = line.match(/Peak level dB:\s*(-?[\d.]+|inf|-inf)/i);
           if (peakM) {
-            const ch = parseInt(peakM[1], 10);
-            const val = parseFloat(peakM[2]);
-            if (Number.isFinite(val)) channelPeak[ch] = val;
+            const val = parseFloat(peakM[1]);
+            if (Number.isFinite(val)) channelPeak[currentCh] = val;
           }
-          const rmsM = line.match(/ch(\d+)\s+RMS_level:\s*(-?[\d.]+|inf|-inf)/i);
+          const rmsM = line.match(/RMS level dB:\s*(-?[\d.]+|inf|-inf)/i);
           if (rmsM) {
-            const ch = parseInt(rmsM[1], 10);
-            const val = parseFloat(rmsM[2]);
-            if (Number.isFinite(val)) channelRms[ch] = val;
+            const val = parseFloat(rmsM[1]);
+            if (Number.isFinite(val)) channelRms[currentCh] = val;
           }
         }
-        const channels = [...new Set([...Object.keys(channelPeak), ...Object.keys(channelRms)])].map(Number).sort((a, b) => a - b);
+        const channels = [...new Set([...Object.keys(channelPeak), ...Object.keys(channelRms)])]
+          .map(Number).sort((a, b) => a - b);
         if (channels.length === 0) {
-          // Fallback: try volumedetect summary lines (older ffmpeg or mono stream)
+          // Fallback: volumedetect aggregate (older FFmpeg or streams without astats support)
           const mean = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/i);
-          const max = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
+          const max  = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
           if (!mean && !max) return resolve(null);
-          const meanDb = mean ? parseFloat(mean[1]) : null;
-          return resolve({ meanDb, maxDb: max ? parseFloat(max[1]) : null, channels: [] });
+          return resolve({
+            meanDb: mean ? parseFloat(mean[1]) : null,
+            maxDb:  max  ? parseFloat(max[1])  : null,
+            channels: [],
+          });
         }
         const channelData = channels.map((ch) => ({
           ch,
           label: ch === 0 ? 'L' : ch === 1 ? 'R' : `Ch${ch + 1}`,
           peakDb: channelPeak[ch] ?? null,
-          rmsDb: channelRms[ch] ?? null,
+          rmsDb:  channelRms[ch]  ?? null,
         }));
-        const allRms = channelData.map((c) => c.rmsDb).filter((v) => v != null && Number.isFinite(v));
+        const allRms  = channelData.map((c) => c.rmsDb).filter((v) => v != null && Number.isFinite(v));
         const allPeak = channelData.map((c) => c.peakDb).filter((v) => v != null && Number.isFinite(v));
-        const meanDb = allRms.length > 0 ? allRms.reduce((s, v) => s + v, 0) / allRms.length : null;
-        const maxDb = allPeak.length > 0 ? Math.max(...allPeak) : null;
-        resolve({ meanDb, maxDb, channels: channelData });
+        resolve({
+          meanDb:   allRms.length  > 0 ? allRms.reduce((s, v) => s + v, 0) / allRms.length : null,
+          maxDb:    allPeak.length > 0 ? Math.max(...allPeak) : null,
+          channels: channelData,
+        });
       });
     });
   }
