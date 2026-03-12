@@ -246,21 +246,53 @@ function Stat({ label, value, alert = false }) {
   );
 }
 
-function EtrPriorityBlock({ title, checks, status, counts }) {
+function normalizeCheckKey(raw) {
+  return String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function alarmTypeLabel(alarm) {
+  if (!alarm) return '-';
+  if (alarm.type) return String(alarm.type);
+  if (alarm.message) return 'alarm';
+  return 'event';
+}
+
+function EtrPriorityBlock({ title, checks, status, counts, recentAlarms }) {
   const hasError = checks.some((c) => status?.[c.id] === 'error');
+  const totalErrors = checks.reduce((acc, c) => acc + Number(counts?.[c.id] || 0), 0);
   return (
     <div className={`rounded-xl border p-3 ${hasError ? 'bg-red-900/20 border-red-500/30' : 'bg-black/20 border-white/10'}`}>
       <div className="flex items-center justify-between mb-2">
         <div className="text-xs uppercase tracking-wider text-gray-400">{title}</div>
-        <StatusDot status={hasError ? 'error' : 'live'} pulse={hasError} />
+        <div className="flex items-center gap-2">
+          <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded border ${hasError ? 'text-red-300 border-red-500/30 bg-red-950/40' : 'text-gray-300 border-white/15 bg-black/30'}`}>
+            errors {totalErrors}
+          </span>
+          <StatusDot status={hasError ? 'error' : 'live'} pulse={hasError} />
+        </div>
       </div>
       <div className="space-y-1">
         {checks.map((check) => {
           const isError = status?.[check.id] === 'error';
+          const latest = (recentAlarms || [])
+            .filter((a) => normalizeCheckKey(a?.checkId || a?.label) === check.id)
+            .sort((a, b) => new Date(b?.time || 0).getTime() - new Date(a?.time || 0).getTime())[0] || null;
+          const hover = latest
+            ? `Latest ${alarmTypeLabel(latest)} @ ${formatUtc(latest.time)}\n${latest.message || latest.label || '-'}`
+            : `No recent event for ${check.label}`;
           return (
             <div key={check.id} className={`flex items-center justify-between text-xs px-2 py-1 rounded ${isError ? 'bg-red-950/40 text-red-300' : 'bg-black/30 text-gray-400'}`}>
               <span>{check.label}</span>
-              <span className="font-mono">{counts?.[check.id] || 0}</span>
+              <span className="inline-flex items-center gap-1" title={hover}>
+                <span className="font-mono underline decoration-dotted cursor-help">{counts?.[check.id] || 0}</span>
+                <span className="inline-flex items-center justify-center w-3.5 h-3.5 rounded-full border border-white/20 text-[9px] leading-none text-gray-400 cursor-help">
+                  i
+                </span>
+              </span>
             </div>
           );
         })}
@@ -865,9 +897,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             </div>
 
             <div className="mt-3 grid grid-cols-1 lg:grid-cols-3 gap-3">
-              <EtrPriorityBlock title="Priority 1" checks={ETR_CHECKS.p1} status={etrState} counts={etrCounts} />
-              <EtrPriorityBlock title="Priority 2" checks={ETR_CHECKS.p2} status={etrState} counts={etrCounts} />
-              <EtrPriorityBlock title="Priority 3" checks={ETR_CHECKS.p3} status={etrState} counts={etrCounts} />
+              <EtrPriorityBlock title="Priority 1" checks={ETR_CHECKS.p1} status={etrState} counts={etrCounts} recentAlarms={selectedEtrStatus?.recentAlarms || []} />
+              <EtrPriorityBlock title="Priority 2" checks={ETR_CHECKS.p2} status={etrState} counts={etrCounts} recentAlarms={selectedEtrStatus?.recentAlarms || []} />
+              <EtrPriorityBlock title="Priority 3" checks={ETR_CHECKS.p3} status={etrState} counts={etrCounts} recentAlarms={selectedEtrStatus?.recentAlarms || []} />
             </div>
 
             <div className="mt-3">

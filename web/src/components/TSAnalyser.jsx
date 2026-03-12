@@ -51,13 +51,127 @@ function toneClass(state) {
   return 'text-gray-400';
 }
 
+function collectPidRows(result) {
+  if (!result) return [];
+  const rows = [];
+  (result.programs || []).forEach((p) => {
+    (p.streams || []).forEach((s) => {
+      rows.push({
+        pid: s.pid ?? null,
+        pidHex: s.pidHex || (s.pid != null ? `0x${Number(s.pid).toString(16).toUpperCase().padStart(4, '0')}` : null),
+        codecType: s.codecType || 'unknown',
+        codecName: s.codecName || '-',
+        streamType: s.streamType || '-',
+        programId: p.programId,
+      });
+    });
+  });
+  (result.orphanStreams || []).forEach((s) => {
+    rows.push({
+      pid: s.pid ?? null,
+      pidHex: s.pidHex || (s.pid != null ? `0x${Number(s.pid).toString(16).toUpperCase().padStart(4, '0')}` : null),
+      codecType: s.codecType || 'unknown',
+      codecName: s.codecName || '-',
+      streamType: s.streamType || '-',
+      programId: 'orphan',
+    });
+  });
+  return rows
+    .filter((r) => r.pid != null)
+    .sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
+}
+
+function buildDual20227Assessment(legA, legB) {
+  if (!legA || !legB) {
+    return {
+      state: 'insufficient_data',
+      reason: 'Both RTP legs are required for 2022-7 consolidation check',
+      checked: false,
+      mapping: { totalPids: 0, matchedPids: 0, missingOnA: 0, missingOnB: 0, codecMismatch: 0 },
+      timing: { iatAvgA: null, iatAvgB: null, iatOffsetMs: null, bitrateA: null, bitrateB: null, bitrateOffsetPct: null },
+      pidRows: [],
+    };
+  }
+
+  const pidsA = collectPidRows(legA);
+  const pidsB = collectPidRows(legB);
+  const byA = new Map(pidsA.map((r) => [r.pid, r]));
+  const byB = new Map(pidsB.map((r) => [r.pid, r]));
+  const allPids = Array.from(new Set([...byA.keys(), ...byB.keys()])).sort((a, b) => a - b);
+  const pidRows = allPids.map((pid) => {
+    const a = byA.get(pid) || null;
+    const b = byB.get(pid) || null;
+    const codecMatch = (a && b) ? `${a.codecType}:${a.codecName}` === `${b.codecType}:${b.codecName}` : null;
+    return {
+      pid,
+      pidHex: a?.pidHex || b?.pidHex || `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`,
+      aCodec: a ? `${a.codecType}/${a.codecName}` : '-',
+      bCodec: b ? `${b.codecType}/${b.codecName}` : '-',
+      aProgram: a?.programId ?? '-',
+      bProgram: b?.programId ?? '-',
+      presentA: Boolean(a),
+      presentB: Boolean(b),
+      codecMatch,
+    };
+  });
+
+  const mapping = {
+    totalPids: pidRows.length,
+    matchedPids: pidRows.filter((r) => r.presentA && r.presentB).length,
+    missingOnA: pidRows.filter((r) => !r.presentA && r.presentB).length,
+    missingOnB: pidRows.filter((r) => r.presentA && !r.presentB).length,
+    codecMismatch: pidRows.filter((r) => r.presentA && r.presentB && r.codecMatch === false).length,
+  };
+
+  const iatAvgA = Number(legA?.dvb?.arrival?.iatMs?.avg);
+  const iatAvgB = Number(legB?.dvb?.arrival?.iatMs?.avg);
+  const iatOffsetMs = Number.isFinite(iatAvgA) && Number.isFinite(iatAvgB) ? Number(Math.abs(iatAvgA - iatAvgB).toFixed(3)) : null;
+  const bitrateA = Number(legA?.dvb?.bitrateBps || 0);
+  const bitrateB = Number(legB?.dvb?.bitrateBps || 0);
+  const bitrateOffsetPct = bitrateA > 0 && bitrateB > 0
+    ? Number((Math.abs(bitrateA - bitrateB) / Math.max(bitrateA, bitrateB) * 100).toFixed(3))
+    : null;
+  const timing = { iatAvgA, iatAvgB, iatOffsetMs, bitrateA: bitrateA || null, bitrateB: bitrateB || null, bitrateOffsetPct };
+
+  const sA = legA?.dvb?.smpte20227?.state || null;
+  const sB = legB?.dvb?.smpte20227?.state || null;
+  let state = 'insufficient_data';
+  let reason = 'Insufficient evidence for consolidated 2022-7 decision';
+  if (sA === 'non_compliant' || sB === 'non_compliant') {
+    state = 'non_compliant';
+    reason = 'At least one leg fails 2022-7 sequence/loss criteria';
+  } else if (sA === 'compliant' && sB === 'compliant') {
+    if (mapping.missingOnA === 0 && mapping.missingOnB === 0 && mapping.codecMismatch === 0) {
+      state = 'compliant';
+      reason = 'Both legs compliant with aligned PID mapping';
+    } else {
+      state = 'non_compliant';
+      reason = 'Leg mapping mismatch detected between A/B';
+    }
+  }
+
+  return {
+    state,
+    reason,
+    checked: true,
+    mapping,
+    timing,
+    pidRows,
+  };
+}
+
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
+  const [dualLeg, setDualLeg] = useState(false);
+  const [hostB, setHostB] = useState('');
+  const [portB, setPortB] = useState('');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [resultLocal, setResultLocal] = useState(null);
+  const [resultLegB, setResultLegB] = useState(null);
+  const [dualConsolidation, setDualConsolidation] = useState(null);
   const [probeHistory, setProbeHistory] = useState([]);
   const [alarmLog, setAlarmLog] = useState([]);
 
@@ -93,28 +207,39 @@ export default function TSAnalyser({ lastMessage }) {
   }, [lastMessage]);
 
   const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
+  const builtUrlB = buildProbeUrl({ mode: probeMode, host: hostB, port: portB, latency, passphrase });
 
   const handleProbe = async (e) => {
     e.preventDefault();
     if (!builtUrl) return;
+    if (dualLeg && !builtUrlB) return;
     const startedAt = Date.now();
     try {
       const r = await probe(builtUrl);
+      let rB = null;
+      if (dualLeg) {
+        rB = await probe(builtUrlB);
+      }
       setResultLocal(r);
+      setResultLegB(rB);
+      setDualConsolidation(dualLeg ? buildDual20227Assessment(r, rB) : null);
       setProbeHistory((prev) => ([
         {
           at: startedAt,
           mode: probeMode,
-          url: builtUrl,
+          url: dualLeg ? `${builtUrl} | ${builtUrlB}` : builtUrl,
           status: 'ok',
           pidCount: r?.dvb?.pidCount ?? countPids(r),
           serviceCount: r?.dvb?.serviceCount ?? (r?.programs?.length || 0),
           health: r?.dvb?.health?.score ?? null,
+          dualState: dualLeg ? (buildDual20227Assessment(r, rB)?.state || null) : null,
         },
         ...prev,
       ]).slice(0, 30));
     } catch (_) {
       setResultLocal(null);
+      setResultLegB(null);
+      setDualConsolidation(null);
       setProbeHistory((prev) => ([
         {
           at: startedAt,
@@ -179,6 +304,31 @@ export default function TSAnalyser({ lastMessage }) {
               </div>
               <Field label="Port *" value={port} onChange={setPort} type="number" placeholder="5000" required />
             </div>
+            <div className="grid grid-cols-1 gap-2">
+              <label className="flex items-center gap-2 text-xs text-gray-300">
+                <input
+                  type="checkbox"
+                  checked={dualLeg}
+                  onChange={(e) => setDualLeg(e.target.checked)}
+                  className="accent-cyan-400"
+                />
+                Enable SMPTE ST 2022-7 dual-leg consolidation check (A + B IP)
+              </label>
+            </div>
+            {dualLeg && (
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <Field
+                    label={probeMode === 'udp' || probeMode === 'rtp' ? 'Leg B Multicast / Unicast IP *' : 'Leg B Host *'}
+                    value={hostB}
+                    onChange={setHostB}
+                    placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.30' : '10.67.18.30'}
+                    required
+                  />
+                </div>
+                <Field label="Leg B Port *" value={portB} onChange={setPortB} type="number" placeholder="5000" required />
+              </div>
+            )}
 
             {/* SRT-only options */}
             {probeMode === 'srt' && (
@@ -195,14 +345,20 @@ export default function TSAnalyser({ lastMessage }) {
                 <span className="text-neon-cyan/70 truncate">{builtUrl}</span>
               </div>
             )}
+            {dualLeg && builtUrlB && (
+              <div className="flex items-center gap-2 text-[11px] font-mono text-gray-500 bg-black/30 px-3 py-2 rounded-lg border border-white/5">
+                <span className="text-gray-600 shrink-0">URL B:</span>
+                <span className="text-cyan-300/80 truncate">{builtUrlB}</span>
+              </div>
+            )}
 
           <div className="flex gap-2 items-center">
             <button
               type="submit"
-              disabled={loading || !builtUrl}
+              disabled={loading || !builtUrl || (dualLeg && !builtUrlB)}
               className="bg-neon-cyan/15 hover:bg-neon-cyan/25 text-neon-cyan border border-neon-cyan/30 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all disabled:opacity-50"
             >
-              {loading ? 'Probing…' : 'Provision Probe'}
+              {loading ? 'Probing…' : (dualLeg ? 'Probe A+B Consolidation' : 'Provision Probe')}
             </button>
             <button
               type="button"
@@ -231,6 +387,7 @@ export default function TSAnalyser({ lastMessage }) {
                   <th className="text-left py-2 px-2">Services</th>
                   <th className="text-left py-2 px-2">PIDs</th>
                   <th className="text-left py-2 px-2">Health</th>
+                  <th className="text-left py-2 px-2">2022-7</th>
                 </tr>
               </thead>
               <tbody>
@@ -243,6 +400,7 @@ export default function TSAnalyser({ lastMessage }) {
                     <td className="py-1.5 px-2 text-gray-300">{row.serviceCount ?? '-'}</td>
                     <td className="py-1.5 px-2 text-gray-300">{row.pidCount ?? '-'}</td>
                     <td className="py-1.5 px-2 text-gray-300">{row.health != null ? `${row.health}/100` : '-'}</td>
+                    <td className={`py-1.5 px-2 ${toneClass(row.dualState || '-')}`}>{row.dualState || '-'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -250,6 +408,54 @@ export default function TSAnalyser({ lastMessage }) {
           </div>
         )}
       </BentoCard>
+
+      {dualLeg && dualConsolidation && (
+        <BentoCard icon={ShieldAlert} title="SMPTE ST 2022-7 Consolidation (A/B)">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs mb-3">
+            <Stat label="State" value={dualConsolidation.state} />
+            <Stat label="PID Matched" value={`${dualConsolidation.mapping.matchedPids}/${dualConsolidation.mapping.totalPids}`} />
+            <Stat label="IAT Offset" value={dualConsolidation.timing.iatOffsetMs != null ? `${dualConsolidation.timing.iatOffsetMs} ms` : '-'} />
+            <Stat label="Bitrate Offset" value={dualConsolidation.timing.bitrateOffsetPct != null ? `${dualConsolidation.timing.bitrateOffsetPct}%` : '-'} />
+            <Stat label="Codec Mismatch" value={String(dualConsolidation.mapping.codecMismatch)} />
+          </div>
+          <div className="text-xs text-gray-400 mb-2">Assessment: {dualConsolidation.reason}</div>
+          <div className="max-h-56 overflow-auto rounded-lg border border-white/10 bg-black/20">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-gray-500 border-b border-white/10">
+                  <th className="text-left py-1.5 px-2">PID</th>
+                  <th className="text-left py-1.5 px-2">PID Hex</th>
+                  <th className="text-left py-1.5 px-2">Leg A Codec</th>
+                  <th className="text-left py-1.5 px-2">Leg B Codec</th>
+                  <th className="text-left py-1.5 px-2">A Program</th>
+                  <th className="text-left py-1.5 px-2">B Program</th>
+                  <th className="text-left py-1.5 px-2">Match</th>
+                </tr>
+              </thead>
+              <tbody>
+                {dualConsolidation.pidRows.map((r) => (
+                  <tr key={`pid-${r.pid}`} className="border-b border-white/5">
+                    <td className="py-1.5 px-2 text-gray-300">{r.pid}</td>
+                    <td className="py-1.5 px-2 text-gray-400">{r.pidHex}</td>
+                    <td className={`py-1.5 px-2 ${r.presentA ? 'text-gray-300' : 'text-red-300'}`}>{r.aCodec}</td>
+                    <td className={`py-1.5 px-2 ${r.presentB ? 'text-gray-300' : 'text-red-300'}`}>{r.bCodec}</td>
+                    <td className="py-1.5 px-2 text-gray-400">{r.aProgram}</td>
+                    <td className="py-1.5 px-2 text-gray-400">{r.bProgram}</td>
+                    <td className={`py-1.5 px-2 ${r.codecMatch === false || !r.presentA || !r.presentB ? 'text-red-300' : 'text-green-300'}`}>
+                      {r.presentA && r.presentB ? (r.codecMatch ? 'OK' : 'Mismatch') : 'Missing'}
+                    </td>
+                  </tr>
+                ))}
+                {dualConsolidation.pidRows.length === 0 && (
+                  <tr>
+                    <td colSpan={7} className="py-2 px-2 text-gray-500">No PID rows available to compare.</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </BentoCard>
+      )}
 
       {/* Structure Matrix */}
       {resultLocal && (

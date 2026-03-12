@@ -550,21 +550,19 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   }, [mouseX, laneIds, laneMap]);
 
   const selectedLaneId = mouseLaneId || lanePointerStatus.find((row) => row.event)?.id || null;
-  const selectedLaneEvent = selectedLaneId
-    ? lanePointerStatus.find((row) => row.id === selectedLaneId)?.event || null
-    : null;
-
-  const selectedEvent = selectedLaneEvent;
-
-  const lanePointerErrors = useMemo(() => {
+  const pointerMatchWindowMs = useMemo(
+    () => Math.max(250, Math.min(1500, Math.round(effectiveWindowMs * 0.002))),
+    [effectiveWindowMs]
+  );
+  const selectedLaneExactEvents = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
-    const halfWindowMs = 30 * 1000; // show nearby context around pointer
     return (laneMap[selectedLaneId] || [])
-      .filter((e) => e.severity === 'warning' || e.severity === 'critical')
-      .filter((e) => Math.abs(e.ts - pointerUtc) <= halfWindowMs)
+      .filter((e) => Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs)
       .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
       .slice(0, 5);
-  }, [selectedLaneId, pointerUtc, laneMap]);
+  }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs]);
+  const selectedLaneEvent = selectedLaneExactEvents[0] || null;
+  const selectedEvent = selectedLaneEvent;
 
   const forensicByLane = useMemo(() => {
     const byLane = {};
@@ -896,14 +894,25 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 {selectedLaneEvent ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}` : 'No event at pointer'}
               </div>
               <div className="mt-2 border-t border-white/10 pt-2">
-                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Nearby Alerts (±30s)</div>
-                {lanePointerErrors.length === 0 ? (
-                  <div className="text-gray-500">No warning/critical events near pointer time.</div>
+                <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
+                  Events At Pointer (±{pointerMatchWindowMs}ms)
+                </div>
+                {selectedLaneExactEvents.length === 0 ? (
+                  <div className="text-gray-500">No event exactly at selected pointer time.</div>
                 ) : (
                   <div className="space-y-1.5 max-h-36 overflow-auto">
-                    {lanePointerErrors.map((e) => (
-                      <div key={e.key} className="rounded border border-red-500/25 bg-red-900/15 px-2 py-1">
-                        <div className="text-red-300 font-mono">{e.title}</div>
+                    {selectedLaneExactEvents.map((e) => (
+                      <div
+                        key={e.key}
+                        className={`rounded border px-2 py-1 ${
+                          e.severity === 'critical'
+                            ? 'border-red-500/25 bg-red-900/15'
+                            : e.severity === 'warning'
+                              ? 'border-amber-500/25 bg-amber-900/15'
+                              : 'border-white/15 bg-black/30'
+                        }`}
+                      >
+                        <div className={`${e.severity === 'critical' ? 'text-red-300' : e.severity === 'warning' ? 'text-amber-300' : 'text-gray-300'} font-mono`}>{e.title}</div>
                         <div className="text-gray-400">{toUtc(e.ts)}</div>
                         <div className="text-gray-500 truncate">{e.description || '-'}</div>
                       </div>
