@@ -13,6 +13,8 @@ Apply this skill for changes related to:
 - Decoder/analysis dashboards and quality alarms
 - FFmpeg muxing, timing, PCR, continuity counters
 - Operator-facing workflow labels and guardrails
+- TS analyser health scoring and transport-integrity evidence (`dvb.health`, timestamp/CC counters)
+- Stream timeline rendering and operator incident triage ergonomics
 
 ## Core Rules
 
@@ -22,6 +24,7 @@ Apply this skill for changes related to:
 2. Enforce ETR 290 operator safety:
    - Surface P1/P2/P3 state clearly.
    - Always include continuity counter errors and PCR-related errors in quality views.
+   - Keep timestamp-discontinuity and continuity-counter counters operator-visible in analyser evidence.
 3. Prefer RTP/SRT-first UX:
    - Keep host and port in separate fields.
    - Keep protocol explicit; avoid ambiguous single URL-only forms for provisioning.
@@ -30,12 +33,20 @@ Apply this skill for changes related to:
    - Respect active forwarder limits and duplicate destination protections.
 5. Keep telemetry operational:
    - CPU and memory status must remain visible and threshold-colored in runtime header states.
+6. Preserve analyser truth model:
+   - Keep `dvb.health` scoring reasons actionable and traceable to measured evidence.
+   - Keep bitrate source confidence and probe diagnostics exposed for operator trust.
+7. Protect timeline interpretability:
+   - Prefer duration blocks over sparse event dots for incident persistence readability.
+   - Keep pointer popups dynamic so they avoid obscuring the inspected lane.
 
 ## Implementation Checklist
 
 - [ ] Does the change preserve DVB SI/service mapping in API responses or UI cards?
 - [ ] Are ETR 290 critical alarms visible without deep navigation?
 - [ ] Are packet-quality indicators visible (`packet loss`, `jitter`, `PCR`, `CC`)?
+- [ ] Are timestamp discontinuity and CC counters visible in TS analysis/forensics views?
+- [ ] Does Stream View preserve duration-block semantics and low-occlusion popup behavior?
 - [ ] Is decoder provisioning clean (separate protocol/host/port, no clutter)?
 - [ ] Is multiview membership explicit (user-selected)?
 - [ ] Are risky network defaults avoided (no implicit flood behavior)?
