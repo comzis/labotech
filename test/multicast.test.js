@@ -35,6 +35,8 @@ describe('MulticastForwarder', () => {
     destPort: 1234,
     nic: 'eno2',
     subnet: '239.100.25.0/26',
+    allowedIp: null,
+    requireExplicitDest: false,
   };
 
   test('creates forwarder', () => {
@@ -63,6 +65,27 @@ describe('MulticastForwarder', () => {
   test('validateDestination passes for valid address', () => {
     const f = new MulticastForwarder(baseOpts);
     expect(() => f.validateDestination()).not.toThrow();
+  });
+
+  test('validateDestination enforces strict allowedIp when configured', () => {
+    const strict = new MulticastForwarder({ ...baseOpts, allowedIp: '239.100.25.29' });
+    expect(() => strict.validateDestination()).toThrow(/Only 239\.100\.25\.29 is allowed/);
+
+    const strictAllowed = new MulticastForwarder({ ...baseOpts, destIp: '239.100.25.29', allowedIp: '239.100.25.29' });
+    expect(() => strictAllowed.validateDestination()).not.toThrow();
+  });
+
+  test('validateDestination can require explicit allowedIp to prevent flooding', () => {
+    const guarded = new MulticastForwarder({ ...baseOpts, allowedIp: null, requireExplicitDest: true });
+    expect(() => guarded.validateDestination()).toThrow(/refusing to forward/i);
+
+    const guardedAllowed = new MulticastForwarder({
+      ...baseOpts,
+      destIp: '239.100.25.29',
+      allowedIp: '239.100.25.29',
+      requireExplicitDest: true,
+    });
+    expect(() => guardedAllowed.validateDestination()).not.toThrow();
   });
 
   test('validateNic rejects unsafe interface names', () => {

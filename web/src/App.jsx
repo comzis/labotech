@@ -13,14 +13,15 @@ import APIPanel from './components/APIPanel';
 import EventLogPanel from './components/EventLogPanel';
 import useWebSocket from './hooks/useWebSocket';
 import { clearEvents, getEvents, getHealth } from './api';
+import { ServiceStatusBadge } from './components/BroadcastUI';
 
 // Per-tab LED colours (Evertz-style coloured buttons)
 const TABS = [
+  { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
   { id: 'streams',    label: 'Runtime',     icon: Activity,    led: '#00dd55' },
   { id: 'transcode',  label: 'Transcoder',  icon: Radio,       led: '#ffaa00' },
   { id: 'multicast',  label: 'Forwarding',  icon: Network,     led: '#2299ff' },
   { id: 'decoder',    label: 'Decoder',     icon: Cpu,         led: '#00ddff' },
-  { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
   { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
   { id: 'streamView', label: 'Live View',   icon: LineChart,   led: '#66ccff' },
   { id: 'alarms',     label: 'Alarm Log',   icon: ShieldCheck, led: '#ff5577' },
@@ -121,7 +122,7 @@ function LcdValue({ label, value, color }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState('streams');
+  const [tab, setTab] = useState('analyse');
   const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
@@ -234,10 +235,10 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-4 xl:px-6 h-[60px] flex items-center gap-3 xl:gap-4">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[66px] flex items-center gap-2 xl:gap-3">
 
           {/* Logo / product ID */}
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
             {/* Rack "power" LED */}
             <div
               className="w-3 h-3 rounded-full animate-led-pulse"
@@ -246,27 +247,19 @@ export default function App() {
                 boxShadow: '0 0 6px rgba(0,221,85,0.8), 0 0 14px rgba(0,221,85,0.4)',
               }}
             />
-            <div>
+            <div className="flex flex-col">
               <div
                 className="text-[13px] font-black uppercase tracking-[0.3em] leading-none"
                 style={{ color: '#e0e0e0', textShadow: '0 0 12px rgba(255,255,255,0.08)' }}
               >
                 LABOTECH
               </div>
-              <div className="text-[8px] uppercase tracking-[0.35em] engraved leading-none mt-0.5">
-                Broadcast Engine · HPE DL360
+              <div className="text-[8px] uppercase tracking-[0.28em] engraved leading-none mt-0.5">
+                Broadcast Engine
               </div>
-            </div>
-            <div
-              className="hidden 2xl:flex flex-col px-2 py-0.5 rounded-sm font-mono"
-              style={{
-                background: '#0a0a0a',
-                border: '1px solid #1f1f1f',
-                boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.65)',
-              }}
-            >
-              <span className="text-[8px] uppercase tracking-widest text-amber-300">Powered by Docker</span>
-              <span className="text-[8px] text-gray-500">Prod: docker compose up -d</span>
+              <div className="text-[8px] leading-none mt-1 text-gray-500">
+                HPE DL360 · Powered by Docker
+              </div>
             </div>
           </div>
 
@@ -274,7 +267,7 @@ export default function App() {
           <div style={{ width: '1px', height: '28px', background: 'linear-gradient(180deg, transparent, #333, transparent)' }} />
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
-          <nav className="flex items-center gap-1.5 xl:gap-2 flex-1 overflow-x-auto">
+          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-center">
             {TABS.map(t => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -282,7 +275,7 @@ export default function App() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className="flex flex-col items-center gap-1 px-2.5 xl:px-3 py-1.5 rounded-sm transition-all duration-100 shrink-0 relative"
+                  className="flex flex-col items-center gap-0.5 px-2 xl:px-2.5 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
                   style={isActive ? {
                     background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
                     border: `1px solid ${t.led}44`,
@@ -305,12 +298,12 @@ export default function App() {
                     }}
                   />
                   <Icon
-                    className="w-3.5 h-3.5"
+                    className="w-3 h-3"
                     strokeWidth={isActive ? 2 : 1.5}
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   />
                   <span
-                    className="text-[9px] font-bold uppercase tracking-[0.12em] leading-none whitespace-nowrap"
+                    className="text-[8px] font-bold uppercase tracking-[0.1em] leading-none whitespace-nowrap"
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   >
                     {t.label}
@@ -383,12 +376,7 @@ export default function App() {
                 boxShadow: '0 0 5px #ff2233',
               }}
             />
-            <span
-              className="text-[9px] font-bold uppercase tracking-widest"
-              style={{ color: connected ? '#00dd55' : '#ff2233' }}
-            >
-              {connected ? 'ONLINE' : 'OFFLINE'}
-            </span>
+            <ServiceStatusBadge connected={connected} />
           </div>
         </div>
 

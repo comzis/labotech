@@ -21,6 +21,18 @@ class IATSniffer extends EventEmitter {
     this._lostPackets = 0;
     this._totalPackets = 0;
     this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
+    this._lastPacketMeta = {
+      sourceIp: null,
+      destIp: null,
+      ttl: null,
+      tos: null,
+      dscp: null,
+      vlanId: null,
+    };
     this.lastError = null;
   }
 
@@ -70,6 +82,18 @@ class IATSniffer extends EventEmitter {
     this._lostPackets = 0;
     this._totalPackets = 0;
     this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
+    this._lastPacketMeta = {
+      sourceIp: null,
+      destIp: null,
+      ttl: null,
+      tos: null,
+      dscp: null,
+      vlanId: null,
+    };
 
     this._spawnCapture(target);
     this._metricsTimer = setInterval(() => {
@@ -121,6 +145,16 @@ class IATSniffer extends EventEmitter {
       packetLossPct: lossPct,
       sampleCount: iats.length,
       captureMethod: this.captureMethod,
+      rtpDrops: this._lostPackets,
+      rtpOutOfOrder: this._seqReorderedEvents,
+      network: { ...this._lastPacketMeta },
+      rtpSequence: {
+        observed: this._seqObserved,
+        lastSeq: this._prevSeq,
+        gapEvents: this._seqGapEvents,
+        duplicateEvents: this._seqDuplicateEvents,
+        reorderedEvents: this._seqReorderedEvents,
+      },
     };
   }
 
@@ -144,6 +178,12 @@ class IATSniffer extends EventEmitter {
         '-T', 'fields',
         '-e', 'frame.time_epoch',
         '-e', 'rtp.seq',
+        '-e', 'ip.src',
+        '-e', 'ip.dst',
+        '-e', 'ip.ttl',
+        '-e', 'ip.dsfield',
+        '-e', 'ip.dsfield.dscp',
+        '-e', 'vlan.id',
         '-l',
       ];
       parser = (line) => this._parseTsharkLine(line);
@@ -201,7 +241,20 @@ class IATSniffer extends EventEmitter {
     const parts = line.split('\t');
     const epoch = parseFloat(parts[0]);
     const seq = parts[1] != null && parts[1] !== '' ? parseInt(parts[1], 10) : null;
+    const sourceIp = parts[2] || null;
+    const destIp = parts[3] || null;
+    const ttl = parts[4] != null && parts[4] !== '' ? parseInt(parts[4], 10) : null;
+    const tos = parts[5] || null;
+    const dscp = parts[6] != null && parts[6] !== '' ? parseInt(parts[6], 10) : null;
+    const vlanId = parts[7] != null && parts[7] !== '' ? parseInt(parts[7], 10) : null;
     if (!Number.isFinite(epoch) || epoch <= 0) return;
+
+    if (sourceIp) this._lastPacketMeta.sourceIp = sourceIp;
+    if (destIp) this._lastPacketMeta.destIp = destIp;
+    if (Number.isFinite(ttl)) this._lastPacketMeta.ttl = ttl;
+    if (tos) this._lastPacketMeta.tos = tos;
+    if (Number.isFinite(dscp)) this._lastPacketMeta.dscp = dscp;
+    if (Number.isFinite(vlanId)) this._lastPacketMeta.vlanId = vlanId;
 
     this._totalPackets += 1;
     if (this._prevTs != null) {
@@ -217,10 +270,22 @@ class IATSniffer extends EventEmitter {
     this._prevTs = epoch;
 
     if (Number.isFinite(seq) && this._prevSeq != null) {
-      const gap = (seq - this._prevSeq + 65536) % 65536;
-      if (gap > 1 && gap < 1000) this._lostPackets += gap - 1;
+      const delta = (seq - this._prevSeq + 65536) % 65536;
+      if (delta === 0) {
+        this._seqDuplicateEvents += 1;
+      } else if (delta === 1) {
+        // in-order packet
+      } else if (delta > 1 && delta < 32768) {
+        this._seqGapEvents += 1;
+        this._lostPackets += delta - 1;
+      } else {
+        this._seqReorderedEvents += 1;
+      }
     }
-    if (Number.isFinite(seq)) this._prevSeq = seq;
+    if (Number.isFinite(seq)) {
+      this._seqObserved = true;
+      this._prevSeq = seq;
+    }
   }
 
   _parseTcpdumpLine(line) {
