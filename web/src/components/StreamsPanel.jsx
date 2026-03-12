@@ -53,7 +53,7 @@ export default function StreamsPanel({ lastMessage }) {
   };
 
   return (
-    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
+    <div className="broadcast-legacy" style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
       <EncoderForm onStarted={refresh} />
 
       <section>

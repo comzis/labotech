@@ -670,7 +670,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   };
 
   return (
-    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
+    <div className="broadcast-legacy" style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16 }}>
       <BentoCard icon={Activity} title="Stream View">
         <div className="flex items-center justify-between gap-2 mb-2">
           <div className="text-[11px] text-gray-400">Horizontal UTC timeline by monitor/analyser lane</div>

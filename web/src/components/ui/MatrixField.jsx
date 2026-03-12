@@ -1,47 +1,57 @@
 import React from 'react';
 
-// ── Shared input style ─────────────────────────────────────────────────────────
-const BASE_INPUT =
-  'w-full bg-black/60 border border-rack-rail rounded-sm px-3 py-2 text-sm text-gray-200 font-mono ' +
-  'focus:outline-none transition-all duration-150 placeholder:text-gray-700 ' +
-  'shadow-[inset_0_2px_4px_rgba(0,0,0,0.6)]';
-
-const FOCUS_COLORS = {
-  cyan:   'focus:border-led-cyan/50   focus:shadow-[inset_0_2px_4px_rgba(0,0,0,0.6),0_0_0_1px_rgba(0,221,255,0.15)]',
-  green:  'focus:border-led-green/50  focus:shadow-[inset_0_2px_4px_rgba(0,0,0,0.6),0_0_0_1px_rgba(0,221,85,0.15)]',
-  purple: 'focus:border-led-purple/50 focus:shadow-[inset_0_2px_4px_rgba(0,0,0,0.6),0_0_0_1px_rgba(204,68,255,0.15)]',
-  amber:  'focus:border-led-amber/50  focus:shadow-[inset_0_2px_4px_rgba(0,0,0,0.6),0_0_0_1px_rgba(255,170,0,0.15)]',
+const C = {
+  border: '#161d2b',
+  borderFocus: '#2d5fff',
+  panel: '#080b10',
+  text: '#c4d0e8',
+  muted: '#3e506a',
+  head: '#6b82aa',
+  cyan: '#00e5ff',
+  green: '#00e676',
+  purple: '#9d6fff',
+  amber: '#ffab00',
 };
 
 const VALUE_COLORS = {
-  cyan:   'text-led-cyan/90',
-  green:  'text-led-green/90',
-  purple: 'text-led-purple/90',
-  amber:  'text-led-amber/90',
+  cyan: C.cyan,
+  green: C.green,
+  purple: C.purple,
+  amber: C.amber,
 };
 
-function EngravedLabel({ children }) {
+function EngravedLabel({ children, required }) {
   return (
-    <label className="text-[10px] font-bold uppercase tracking-[0.2em] pl-0.5 engraved font-mono">
-      {children}
+    <label style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: C.head, paddingLeft: 2 }}>
+      {children}{required ? <span style={{ color: '#ff3d57', marginLeft: 2 }}>*</span> : null}
     </label>
   );
 }
 
 // ── Field ──────────────────────────────────────────────────────────────────────
-export function Field({ label, value, onChange, color = 'cyan', ...props }) {
-  const focus = FOCUS_COLORS[color] || FOCUS_COLORS.cyan;
-  const valColor = VALUE_COLORS[color] || VALUE_COLORS.cyan;
+export function Field({ label, value, onChange, color = 'cyan', required, ...props }) {
+  const valColor = VALUE_COLORS[color] || C.cyan;
   return (
-    <div className="flex flex-col gap-1">
-      <EngravedLabel>{label}</EngravedLabel>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <EngravedLabel required={required}>{label}</EngravedLabel>
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
         {...props}
-        className={`${BASE_INPUT} ${focus} ${valColor} ${
-          props.type === 'number' || props.className?.includes('font-mono') ? 'font-mono' : ''
-        }`}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          background: C.panel,
+          border: `1px solid ${C.border}`,
+          borderRadius: 2,
+          padding: '6px 8px',
+          fontSize: 11,
+          color: valColor,
+          fontFamily: "'Courier New',monospace",
+          outline: 'none',
+        }}
+        onFocus={(e) => { e.target.style.borderColor = C.borderFocus; }}
+        onBlur={(e) => { e.target.style.borderColor = C.border; }}
       />
     </div>
   );
@@ -49,36 +59,43 @@ export function Field({ label, value, onChange, color = 'cyan', ...props }) {
 
 // ── SelectField ────────────────────────────────────────────────────────────────
 export function SelectField({ label, options, value, onChange, color = 'cyan', ...props }) {
-  const focus = FOCUS_COLORS[color] || FOCUS_COLORS.cyan;
+  const valColor = VALUE_COLORS[color] || C.cyan;
   return (
-    <div className="flex flex-col gap-1">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <EngravedLabel>{label}</EngravedLabel>
-      <div className="relative">
-        <select
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          {...props}
-          className={`${BASE_INPUT} ${focus} appearance-none cursor-pointer pr-8`}
-          style={{
-            backgroundImage: `url('data:image/svg+xml;utf8,<svg fill="%23555555" height="20" viewBox="0 0 24 24" width="20" xmlns="http://www.w3.org/2000/svg"><path d="M7 10l5 5 5-5z"/><path d="M0 0h24v24H0z" fill="none"/></svg>')`,
-            backgroundRepeat: 'no-repeat',
-            backgroundPosition: 'right 8px center',
-          }}
-        >
-          {options.map((o) => {
-            const isObj = typeof o === 'object';
-            return (
-              <option
-                key={isObj ? o.value : o}
-                value={isObj ? o.value : o}
-                className="bg-rack-panel text-gray-200"
-              >
-                {isObj ? o.label : o}
-              </option>
-            );
-          })}
-        </select>
-      </div>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        {...props}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          background: C.panel,
+          border: `1px solid ${C.border}`,
+          borderRadius: 2,
+          padding: '6px 8px',
+          fontSize: 11,
+          color: valColor,
+          fontFamily: "'Courier New',monospace",
+          outline: 'none',
+          appearance: 'none',
+          backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%233e506a'/%3E%3C/svg%3E")`,
+          backgroundRepeat: 'no-repeat',
+          backgroundPosition: 'calc(100% - 8px) center',
+          paddingRight: 24,
+        }}
+        onFocus={(e) => { e.target.style.borderColor = C.borderFocus; }}
+        onBlur={(e) => { e.target.style.borderColor = C.border; }}
+      >
+        {options.map((o) => {
+          const isObj = typeof o === 'object';
+          return (
+            <option key={isObj ? o.value : o} value={isObj ? o.value : o}>
+              {isObj ? o.label : o}
+            </option>
+          );
+        })}
+      </select>
     </div>
   );
 }
@@ -86,7 +103,7 @@ export function SelectField({ label, options, value, onChange, color = 'cyan', .
 // ── PidField ───────────────────────────────────────────────────────────────────
 export function PidField({ label, value, onChange }) {
   return (
-    <div className="flex flex-col gap-1">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
       <EngravedLabel>{label}</EngravedLabel>
       <input
         type="number"
@@ -94,7 +111,20 @@ export function PidField({ label, value, onChange }) {
         onChange={(e) => onChange(e.target.value)}
         min="1"
         max="65535"
-        className={`${BASE_INPUT} ${FOCUS_COLORS.purple} text-led-purple/90 font-mono`}
+        style={{
+          width: '100%',
+          boxSizing: 'border-box',
+          background: C.panel,
+          border: `1px solid ${C.border}`,
+          borderRadius: 2,
+          padding: '6px 8px',
+          fontSize: 11,
+          color: C.purple,
+          fontFamily: "'Courier New',monospace",
+          outline: 'none',
+        }}
+        onFocus={(e) => { e.target.style.borderColor = C.borderFocus; }}
+        onBlur={(e) => { e.target.style.borderColor = C.border; }}
       />
     </div>
   );

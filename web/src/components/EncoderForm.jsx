@@ -105,7 +105,7 @@ export default function EncoderForm({ onStarted }) {
   };
 
   return (
-    <div style={{ marginBottom: 48, fontFamily: "'Courier New',monospace", color: C.text }}>
+    <div className="broadcast-legacy" style={{ marginBottom: 48, fontFamily: "'Courier New',monospace", color: C.text }}>
       {!open && (
         <motion.button
           whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(34,211,238,0.2)' }}

@@ -11,46 +11,30 @@ export const containerVariants = {
   show:   { opacity: 1, transition: { staggerChildren: 0.08 } },
 };
 
-// LED colour map: accent prop → colour value
-const LED_COLORS = {
-  cyan:   '#00ddff',
-  green:  '#00dd55',
-  purple: '#cc44ff',
-  red:    '#ff2233',
-  amber:  '#ffaa00',
-  blue:   '#2299ff',
-  teal:   '#00ddaa',
+const C = {
+  panel: '#0d1118',
+  panelAlt: '#0f1420',
+  border: '#161d2b',
+  borderHi: '#243045',
+  text: '#c4d0e8',
+  muted: '#3e506a',
+  head: '#6b82aa',
+  cyan: '#00e5ff',
+  ok: '#00e676',
+  warn: '#ffab00',
+  err: '#ff3d57',
+  accent: '#2d5fff',
 };
 
-function ScrewHole() {
-  return (
-    <div
-      className="w-3 h-3 rounded-full shrink-0"
-      style={{
-        background: 'radial-gradient(circle at 38% 32%, #3a3a3a, #0a0a0a)',
-        boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.95), 0 0.5px 0 rgba(255,255,255,0.04)',
-      }}
-    >
-      {/* Phillips cross mark */}
-      <svg viewBox="0 0 12 12" className="w-full h-full opacity-20">
-        <line x1="6" y1="2" x2="6" y2="10" stroke="#888" strokeWidth="1" />
-        <line x1="2" y1="6" x2="10" y2="6" stroke="#888" strokeWidth="1" />
-      </svg>
-    </div>
-  );
-}
-
-function RackLED({ color = '#00dd55', pulse = false }) {
-  return (
-    <div
-      className={`w-2.5 h-2.5 rounded-full shrink-0 ${pulse ? 'animate-led-pulse' : ''}`}
-      style={{
-        background: `radial-gradient(circle at 38% 32%, #ffffff55, ${color}cc, ${color})`,
-        boxShadow: `0 0 5px ${color}cc, 0 0 10px ${color}55`,
-      }}
-    />
-  );
-}
+const LED_COLORS = {
+  cyan: C.cyan,
+  green: C.ok,
+  purple: '#9d6fff',
+  red: C.err,
+  amber: C.warn,
+  blue: C.accent,
+  teal: '#00ddaa',
+};
 
 export default function BentoCard({
   title,
@@ -65,53 +49,64 @@ export default function BentoCard({
   return (
     <motion.div
       variants={itemVariants}
-      className={`rack-unit overflow-hidden ${className}`}
+      className={className}
       style={{
-        background: '#141414',
-        border: '1px solid #252525',
-        boxShadow: '0 4px 20px rgba(0,0,0,0.7), inset 0 1px 0 rgba(255,255,255,0.025)',
+        background: C.panel,
+        border: `1px solid ${C.border}`,
+        borderRadius: 3,
+        overflow: 'hidden',
+        boxShadow: '0 4px 18px rgba(0,0,0,0.35)',
       }}
     >
-      {/* ── Bezel / front-panel header ───────────────────────────────────── */}
       <div
-        className="flex items-center gap-2.5 px-3 py-2"
         style={{
-          background: 'linear-gradient(180deg, #282828 0%, #1e1e1e 55%, #181818 100%)',
-          borderBottom: '1px solid #0d0d0d',
-          boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06)',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '7px 10px',
+          background: C.panelAlt,
+          borderBottom: `1px solid ${C.borderHi}`,
         }}
       >
-        <ScrewHole />
-
         {Icon && (
           <Icon
-            className="w-3.5 h-3.5 shrink-0"
             strokeWidth={1.5}
-            style={{ color: ledColor, opacity: 0.7 }}
+            style={{ width: 13, height: 13, color: ledColor, opacity: 0.9, flexShrink: 0 }}
           />
         )}
 
         <span
-          className="flex-1 min-w-0 truncate text-[10px] font-bold uppercase tracking-[0.22em] font-mono"
-          style={{ color: '#888', textShadow: '0 1px 0 rgba(0,0,0,0.8)' }}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 9,
+            fontWeight: 800,
+            letterSpacing: '0.15em',
+            color: C.head,
+            textTransform: 'uppercase',
+            fontFamily: "'Courier New',monospace",
+            whiteSpace: 'nowrap',
+            textOverflow: 'ellipsis',
+            overflow: 'hidden',
+          }}
         >
           {title}
         </span>
 
-        {/* Status LED */}
-        <RackLED color={ledColor} pulse={ledPulse} />
-
-        <ScrewHole />
+        <span
+          className={ledPulse ? 'animate-led-pulse' : ''}
+          style={{
+            width: 8,
+            height: 8,
+            borderRadius: '50%',
+            background: ledColor,
+            boxShadow: `0 0 6px ${ledColor}aa`,
+            flexShrink: 0,
+          }}
+        />
       </div>
 
-      {/* ── Panel face (content) ─────────────────────────────────────────── */}
-      <div
-        className="p-5"
-        style={{
-          background: '#141414',
-          boxShadow: 'inset 0 2px 6px rgba(0,0,0,0.45)',
-        }}
-      >
+      <div style={{ padding: '10px 12px', background: C.panel, color: C.text }}>
         {children}
       </div>
     </motion.div>

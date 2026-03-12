@@ -250,7 +250,7 @@ export default function TranscodePanel({ lastMessage }) {
   };
 
   return (
-    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 24 }}>
+    <div className="broadcast-legacy" style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 24 }}>
       {/* Start form Toggle */}
       <div className="flex justify-between items-center">
         <div>
