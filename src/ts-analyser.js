@@ -32,6 +32,14 @@ const HEALTH_THRESHOLDS = {
   dolbyEMissingPenalty: _envNumber('TS_HEALTH_DOLBYE_MISSING_PENALTY', 10),
   dolbyEDecodeFailurePenalty: _envNumber('TS_HEALTH_DOLBYE_DECODE_FAIL_PENALTY', 18),
 };
+const SMPTE_2022_7_THRESHOLDS = {
+  minSamples: _envNumber('TS_20227_MIN_SAMPLES', 50),
+  maxLossPct: _envNumber('TS_20227_MAX_LOSS_PCT', 0.0),
+  maxGapEvents: _envNumber('TS_20227_MAX_GAP_EVENTS', 0),
+  maxDuplicateEvents: _envNumber('TS_20227_MAX_DUPLICATE_EVENTS', 0),
+  maxReorderedEvents: _envNumber('TS_20227_MAX_REORDER_EVENTS', 0),
+  requireNicCapture: String(process.env.TS_20227_REQUIRE_NIC_CAPTURE || 'true').toLowerCase() !== 'false',
+};
 function _getNicName() {
   if (_multicastConfig) return _multicastConfig.nic || 'eno2';
   try {
@@ -115,6 +123,7 @@ class TSAnalyser extends EventEmitter {
             ? this._iatSniffer.getMetrics()
             : null;
           result = this._applyTSDuckData(result, tsduckProbe?.data || null, nicMetrics);
+          result.dvb.smpte20227 = this._buildSmpte20227Assessment(result);
           result.dvb.probeDiagnostics = {
             ...(result.dvb.probeDiagnostics || {}),
             tsduck: {
@@ -787,6 +796,7 @@ class TSAnalyser extends EventEmitter {
         packetLossPct: nicMetrics.packetLossPct,
         captureMethod: nicMetrics.captureMethod,
         sampleCount: nicMetrics.sampleCount,
+        rtpSequence: nicMetrics.rtpSequence || null,
       };
     } else if (tsduckData && tsduckData.arrivalMetrics) {
       next.dvb.arrival = {
@@ -1214,6 +1224,83 @@ class TSAnalyser extends EventEmitter {
     }
   }
 
+  _buildSmpte20227Assessment(result) {
+    const arrival = result?.dvb?.arrival || null;
+    const seq = arrival?.rtpSequence || null;
+    const packetLossPct = Number(arrival?.packetLossPct);
+    const sampleCount = Number(arrival?.sampleCount || 0);
+    const captureMethod = String(arrival?.captureMethod || '').toLowerCase();
+    const isRtpInput = this._isRtpUrl(this.url);
+
+    const assessment = {
+      standard: 'SMPTE ST 2022-7',
+      checked: false,
+      compliant: null,
+      state: isRtpInput ? 'insufficient_data' : 'not_applicable',
+      reason: isRtpInput ? 'RTP sequence evidence unavailable' : 'Input is not RTP',
+      metrics: {
+        sampleCount: Number.isFinite(sampleCount) ? sampleCount : 0,
+        packetLossPct: Number.isFinite(packetLossPct) ? packetLossPct : null,
+        seqObserved: Boolean(seq?.observed),
+        gapEvents: Number(seq?.gapEvents || 0),
+        duplicateEvents: Number(seq?.duplicateEvents || 0),
+        reorderedEvents: Number(seq?.reorderedEvents || 0),
+        lastSeq: Number.isFinite(Number(seq?.lastSeq)) ? Number(seq.lastSeq) : null,
+        captureMethod: arrival?.captureMethod || null,
+      },
+      thresholds: {
+        minSamples: SMPTE_2022_7_THRESHOLDS.minSamples,
+        maxLossPct: SMPTE_2022_7_THRESHOLDS.maxLossPct,
+        maxGapEvents: SMPTE_2022_7_THRESHOLDS.maxGapEvents,
+        maxDuplicateEvents: SMPTE_2022_7_THRESHOLDS.maxDuplicateEvents,
+        maxReorderedEvents: SMPTE_2022_7_THRESHOLDS.maxReorderedEvents,
+        requireNicCapture: SMPTE_2022_7_THRESHOLDS.requireNicCapture,
+      },
+    };
+
+    if (!isRtpInput) return assessment;
+    if (!seq || !seq.observed) return assessment;
+    if (SMPTE_2022_7_THRESHOLDS.requireNicCapture && captureMethod !== 'tshark') {
+      return {
+        ...assessment,
+        checked: true,
+        compliant: null,
+        state: 'insufficient_data',
+        reason: 'NIC RTP-sequence capture not available (tshark required)',
+      };
+    }
+    if (!Number.isFinite(sampleCount) || sampleCount < SMPTE_2022_7_THRESHOLDS.minSamples) {
+      return {
+        ...assessment,
+        checked: true,
+        compliant: null,
+        state: 'insufficient_data',
+        reason: `Insufficient RTP sample window (${sampleCount || 0} < ${SMPTE_2022_7_THRESHOLDS.minSamples})`,
+      };
+    }
+
+    const loss = Number.isFinite(packetLossPct) ? packetLossPct : 0;
+    const gapEvents = Number(seq.gapEvents || 0);
+    const duplicateEvents = Number(seq.duplicateEvents || 0);
+    const reorderedEvents = Number(seq.reorderedEvents || 0);
+    const compliant = (
+      loss <= SMPTE_2022_7_THRESHOLDS.maxLossPct &&
+      gapEvents <= SMPTE_2022_7_THRESHOLDS.maxGapEvents &&
+      duplicateEvents <= SMPTE_2022_7_THRESHOLDS.maxDuplicateEvents &&
+      reorderedEvents <= SMPTE_2022_7_THRESHOLDS.maxReorderedEvents
+    );
+
+    return {
+      ...assessment,
+      checked: true,
+      compliant,
+      state: compliant ? 'compliant' : 'non_compliant',
+      reason: compliant
+        ? 'RTP sequence continuity and loss are within 2022-7 consolidation thresholds'
+        : 'RTP sequence/loss exceed 2022-7 consolidation thresholds',
+    };
+  }
+
   _attachHealthAssessment(result) {
     if (!result || !result.dvb) return result;
     const assessment = this._buildHealthAssessment(result);
@@ -1322,6 +1409,13 @@ class TSAnalyser extends EventEmitter {
       pushPenalty(10, `CC errors ${ccCount} exceed warning threshold`);
     }
 
+    const smpte20227 = dvb.smpte20227 || null;
+    if (smpte20227?.checked === true && smpte20227?.state === 'non_compliant') {
+      pushPenalty(18, `SMPTE ST 2022-7 non-compliant: ${smpte20227.reason || 'RTP sequence/loss out of bounds'}`);
+    } else if (smpte20227?.state === 'insufficient_data') {
+      pushPenalty(4, `SMPTE ST 2022-7 not fully verified: ${smpte20227.reason || 'insufficient RTP sequence evidence'}`);
+    }
+
     const dolbyE = dvb.dolbyE || null;
     const dolbyEnabled = DolbyEAdapter.isEnabled();
     const dolbyDetected = Boolean(dolbyE?.detected);
@@ -1357,6 +1451,11 @@ class TSAnalyser extends EventEmitter {
       bitrateSource: source || null,
       timestampDiscontinuityCount: Number.isFinite(tsDiscCount) ? tsDiscCount : 0,
       continuityCounterErrorCount: Number.isFinite(ccCount) ? ccCount : 0,
+      smpte20227: {
+        checked: Boolean(smpte20227?.checked),
+        compliant: smpte20227?.compliant == null ? null : Boolean(smpte20227.compliant),
+        state: smpte20227?.state || null,
+      },
       dolbyE: {
         enabled: dolbyEnabled,
         requiredWhenDetected: dolbyRequiredWhenDetected,

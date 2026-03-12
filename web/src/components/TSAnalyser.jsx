@@ -38,6 +38,19 @@ function countPids(result) {
   return programCount + ((result.orphanStreams || []).length);
 }
 
+function toMbps(bps) {
+  const n = Number(bps || 0);
+  return Number.isFinite(n) && n > 0 ? `${(n / 1e6).toFixed(3)} Mbps` : '-';
+}
+
+function toneClass(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'critical' || s === 'non_compliant' || s === 'false') return 'text-red-300';
+  if (s === 'warning' || s === 'insufficient_data') return 'text-amber-300';
+  if (s === 'ok' || s === 'compliant' || s === 'true') return 'text-green-300';
+  return 'text-gray-400';
+}
+
 export default function TSAnalyser({ lastMessage }) {
   const [probeMode, setProbeMode] = useState('rtp');
   const [host, setHost] = useState('');
@@ -46,12 +59,38 @@ export default function TSAnalyser({ lastMessage }) {
   const [passphrase, setPassphrase] = useState('');
   const [resultLocal, setResultLocal] = useState(null);
   const [probeHistory, setProbeHistory] = useState([]);
+  const [alarmLog, setAlarmLog] = useState([]);
 
   const { loading, error, probe, onWsResult } = useTSAnalysis();
 
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
   }, [lastMessage, onWsResult]);
+
+  useEffect(() => {
+    if (!lastMessage) return;
+    const isAlarm =
+      lastMessage.type === 'etr290_alarm' ||
+      lastMessage.type === 'etr290_incident_started' ||
+      lastMessage.type === 'etr290_incident_updated' ||
+      lastMessage.type === 'error' ||
+      lastMessage.type === 'switched';
+    if (!isAlarm) return;
+    const ts = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
+    const priority = lastMessage.priority || (lastMessage.type === 'error' ? 'p1' : 'p2');
+    const description = lastMessage.message || lastMessage.lastMessage || '-';
+    const check = lastMessage.label || lastMessage.checkId || lastMessage.type;
+    setAlarmLog((prev) => ([
+      {
+        key: `${ts}-${lastMessage.type}-${lastMessage.id || 'system'}-${check}`,
+        ts,
+        priority,
+        check,
+        description,
+      },
+      ...prev,
+    ]).slice(0, 60));
+  }, [lastMessage]);
 
   const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
 
@@ -92,19 +131,19 @@ export default function TSAnalyser({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-8 font-sans">
+    <div className="space-y-4 font-sans">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-          <Search className="w-6 h-6 text-neon-cyan" strokeWidth={1.5} />
-          Analysis Matrix
+        <h1 className="text-xl font-bold text-white tracking-tight flex items-center gap-2">
+          <Search className="w-5 h-5 text-neon-cyan" strokeWidth={1.5} />
+          TS Analysis
         </h1>
-        <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Deep Packet Inspection & Service Validation</p>
+        <p className="text-[11px] text-gray-500 mt-1 uppercase tracking-wider font-medium opacity-80">Compact professional TS probe and DVB evidence</p>
       </div>
 
       {/* Control Bento Card */}
       <BentoCard icon={Activity} title="Probe Provisioning (Compact)">
-        <form onSubmit={handleProbe} className="space-y-4">
+        <form onSubmit={handleProbe} className="space-y-3">
 
             {/* Protocol selector */}
             <div>
@@ -128,7 +167,7 @@ export default function TSAnalyser({ lastMessage }) {
             </div>
 
             {/* Host + Port */}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-3">
               <div className="col-span-2">
                 <Field
                   label={probeMode === 'udp' || probeMode === 'rtp' ? 'Multicast / Unicast IP *' : 'Host *'}
@@ -143,7 +182,7 @@ export default function TSAnalyser({ lastMessage }) {
 
             {/* SRT-only options */}
             {probeMode === 'srt' && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-3">
                 <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
                 <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="Optional" />
               </div>
@@ -181,7 +220,7 @@ export default function TSAnalyser({ lastMessage }) {
         {probeHistory.length === 0 ? (
           <div className="text-xs text-gray-500">No probe runs yet.</div>
         ) : (
-          <div className="max-h-48 overflow-auto rounded-lg border border-white/10 bg-black/20">
+          <div className="max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/20">
             <table className="w-full text-xs font-mono">
               <thead>
                 <tr className="text-gray-500 border-b border-white/10">
@@ -212,16 +251,88 @@ export default function TSAnalyser({ lastMessage }) {
         )}
       </BentoCard>
 
-      {/* Comprehensive ETR290 visibility inside TS Analyser */}
-      <ETR290Panel lastMessage={lastMessage} />
-
       {/* Structure Matrix */}
       {resultLocal && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="space-y-6"
+          className="space-y-4"
         >
+            <BentoCard icon={ShieldAlert} title="Broadcast Operations Matrix">
+              <div className="grid grid-cols-2 md:grid-cols-6 gap-2 text-xs mb-3">
+                <Stat label="Net Bitrate" value={toMbps(resultLocal?.dvb?.bitrateBps)} />
+                <Stat label="Curr Bitrate" value={toMbps(resultLocal?.dvb?.measuredBitrateBps || resultLocal?.dvb?.bitrateBps)} />
+                <Stat label="Services" value={String(resultLocal?.dvb?.serviceCount ?? resultLocal?.programs?.length ?? 0)} />
+                <Stat label="PIDs" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
+                <Stat label="CC Errors" value={String(resultLocal?.dvb?.continuityCounterErrors?.count ?? 0)} />
+                <Stat label="TS Discont" value={String(resultLocal?.dvb?.timestampDiscontinuity?.count ?? 0)} />
+              </div>
+
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">Joined Multicasts / Services</div>
+              <div className="max-h-44 overflow-auto rounded-lg border border-white/10 bg-black/20">
+                <table className="w-full text-[11px] font-mono">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-white/10">
+                      <th className="text-left py-1.5 px-2">Name</th>
+                      <th className="text-left py-1.5 px-2">SID</th>
+                      <th className="text-left py-1.5 px-2">PMT</th>
+                      <th className="text-left py-1.5 px-2">PCR</th>
+                      <th className="text-left py-1.5 px-2">Health</th>
+                      <th className="text-left py-1.5 px-2">2022-7</th>
+                      <th className="text-left py-1.5 px-2">Bitrate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(resultLocal?.dvb?.services || []).map((s, idx) => (
+                      <tr key={`${s.serviceId}-${idx}`} className="border-b border-white/5">
+                        <td className="py-1.5 px-2 text-gray-300">{s.serviceName || `service-${s.serviceId || idx + 1}`}</td>
+                        <td className="py-1.5 px-2 text-gray-300">{s.serviceId ?? '-'}</td>
+                        <td className="py-1.5 px-2 text-gray-400">{s.pmtPid ?? '-'}</td>
+                        <td className="py-1.5 px-2 text-gray-400">{s.pcrPid ?? '-'}</td>
+                        <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.health?.severity)}`}>{resultLocal?.dvb?.health?.severity || '-'}</td>
+                        <td className={`py-1.5 px-2 ${toneClass(resultLocal?.dvb?.smpte20227?.state)}`}>{resultLocal?.dvb?.smpte20227?.state || '-'}</td>
+                        <td className="py-1.5 px-2 text-gray-300">{toMbps(resultLocal?.dvb?.bitrateBps)}</td>
+                      </tr>
+                    ))}
+                    {(resultLocal?.dvb?.services || []).length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="py-2 px-2 text-gray-500">No service rows available for current probe.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="text-[10px] uppercase tracking-wider text-gray-500 mt-3 mb-1">VBC Alarms</div>
+              <div className="max-h-36 overflow-auto rounded-lg border border-white/10 bg-black/20">
+                <table className="w-full text-[11px] font-mono">
+                  <thead>
+                    <tr className="text-gray-500 border-b border-white/10">
+                      <th className="text-left py-1.5 px-2">Time</th>
+                      <th className="text-left py-1.5 px-2">Priority</th>
+                      <th className="text-left py-1.5 px-2">Check</th>
+                      <th className="text-left py-1.5 px-2">Description</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {alarmLog.map((a) => (
+                      <tr key={a.key} className="border-b border-white/5">
+                        <td className="py-1.5 px-2 text-gray-400">{new Date(a.ts).toLocaleTimeString()}</td>
+                        <td className={`py-1.5 px-2 ${toneClass(a.priority === 'p1' ? 'critical' : a.priority === 'p2' ? 'warning' : 'ok')}`}>{String(a.priority || '-').toUpperCase()}</td>
+                        <td className="py-1.5 px-2 text-gray-300">{a.check}</td>
+                        <td className="py-1.5 px-2 text-gray-400 truncate max-w-[440px]">{a.description}</td>
+                      </tr>
+                    ))}
+                    {alarmLog.length === 0 && (
+                      <tr>
+                        <td colSpan={4} className="py-2 px-2 text-gray-500">No active alarms logged in this session.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </BentoCard>
+
             <div className="flex items-center justify-between">
               <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">
                 Packet Structure
@@ -232,65 +343,74 @@ export default function TSAnalyser({ lastMessage }) {
             </div>
 
             <BentoCard icon={ShieldAlert} title="DVB Professional Summary">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
                 <Stat label="Standard" value={resultLocal?.dvb?.standard || 'MPEG-TS / DVB-SI'} />
                 <Stat label="Service Count" value={String(resultLocal?.dvb?.serviceCount ?? (resultLocal.programs?.length || 0))} />
                 <Stat label="PID Count" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
                 <Stat label="Aggregate Bitrate" value={`${((resultLocal?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
                 <Stat label="TS ID" value={String(resultLocal?.dvb?.transportStreamId ?? '-')} />
                 <Stat label="ONID" value={String(resultLocal?.dvb?.originalNetworkId ?? '-')} />
                 <Stat label="Bitrate Source" value={resultLocal?.dvb?.bitrateSource || '-'} />
                 <Stat label="Jitter" value={resultLocal?.dvb?.arrival?.jitterMs != null ? `${resultLocal.dvb.arrival.jitterMs} ms` : '-'} />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
+                <Stat label="SMPTE 2022-7" value={resultLocal?.dvb?.smpte20227?.state ? String(resultLocal.dvb.smpte20227.state).replace('_', ' ') : '-'} />
+                <Stat label="2022-7 Checked" value={String(Boolean(resultLocal?.dvb?.smpte20227?.checked))} />
+                <Stat label="RTP Seq Gaps" value={String(resultLocal?.dvb?.smpte20227?.metrics?.gapEvents ?? 0)} />
+                <Stat label="RTP Reorder" value={String(resultLocal?.dvb?.smpte20227?.metrics?.reorderedEvents ?? 0)} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
                 <Stat label="Health Score" value={resultLocal?.dvb?.health?.score != null ? `${resultLocal.dvb.health.score}/100` : '-'} />
                 <Stat label="Health State" value={String(resultLocal?.dvb?.health?.severity || '-').toUpperCase()} />
                 <Stat label="Source Confidence" value={resultLocal?.dvb?.health?.sourceConfidence != null ? String(resultLocal.dvb.health.sourceConfidence) : '-'} />
                 <Stat label="TS Discontinuities" value={String(resultLocal?.dvb?.timestampDiscontinuity?.count ?? 0)} />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
                 <Stat label="CC Errors" value={String(resultLocal?.dvb?.continuityCounterErrors?.count ?? 0)} />
                 <Stat label="CC PID-scoped" value={String(resultLocal?.dvb?.continuityCounterErrors?.pidScopedCount ?? 0)} />
                 <Stat label="CC Generic" value={String(resultLocal?.dvb?.continuityCounterErrors?.genericCount ?? 0)} />
                 <Stat label="CC Last Message" value={(resultLocal?.dvb?.continuityCounterErrors?.lastMessages || []).slice(-1)[0] || '-'} />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
                 <Stat label="Dolby E Detected" value={String(Boolean(resultLocal?.dvb?.dolbyE?.detected))} />
                 <Stat label="Dolby E Decoded" value={String(Boolean(resultLocal?.dvb?.dolbyE?.decoded))} />
                 <Stat label="Dolby E Frames" value={resultLocal?.dvb?.dolbyE?.frameCount != null ? String(resultLocal.dvb.dolbyE.frameCount) : '-'} />
                 <Stat label="Dolby E Error" value={resultLocal?.dvb?.dolbyE?.error || '-'} />
               </div>
-              <div className="grid grid-cols-1 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-1 gap-2 text-xs mt-2">
                 <Stat label="Health Notes" value={(resultLocal?.dvb?.health?.reasons || []).slice(0, 1)[0] || '-'} />
               </div>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs mt-3">
+              <div className="grid grid-cols-1 gap-2 text-xs mt-2">
+                <Stat label="2022-7 Notes" value={resultLocal?.dvb?.smpte20227?.reason || '-'} />
+              </div>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-2">
                 <Stat label="SI NIT" value={resultLocal?.dvb?.si?.compliance?.nit === undefined ? '-' : String(resultLocal.dvb.si.compliance.nit)} />
                 <Stat label="SI SDT" value={resultLocal?.dvb?.si?.compliance?.sdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.sdt)} />
                 <Stat label="SI EIT p/f" value={resultLocal?.dvb?.si?.compliance?.eitPf === undefined ? '-' : String(resultLocal.dvb.si.compliance.eitPf)} />
                 <Stat label="SI TDT" value={resultLocal?.dvb?.si?.compliance?.tdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.tdt)} />
               </div>
               {(resultLocal?.dvb?.services?.length || 0) > 0 && (
-                <div className="mt-4 overflow-x-auto">
+                <div className="mt-3 overflow-x-auto">
                   <table className="w-full text-xs font-mono">
                     <thead>
                       <tr className="text-gray-500 border-b border-white/10">
-                        <th className="text-left py-2">SID</th>
-                        <th className="text-left py-2">Service</th>
-                        <th className="text-left py-2">Provider</th>
-                        <th className="text-left py-2">PMT PID</th>
-                        <th className="text-left py-2">PCR PID</th>
+                        <th className="text-left py-1.5">SID</th>
+                        <th className="text-left py-1.5">Service</th>
+                        <th className="text-left py-1.5">Provider</th>
+                        <th className="text-left py-1.5">PMT PID</th>
+                        <th className="text-left py-1.5">PCR PID</th>
                       </tr>
                     </thead>
                     <tbody>
                       {resultLocal.dvb.services.map((s, i) => (
                         <tr key={`${s.serviceId}-${i}`} className="border-b border-white/5">
-                          <td className="py-2 text-gray-300">{s.serviceId}</td>
-                          <td className="py-2 text-gray-300">{s.serviceName || '-'}</td>
-                          <td className="py-2 text-gray-400">{s.serviceProvider || '-'}</td>
-                          <td className="py-2"><PidBadge pid={s.pmtPid} pidHex={s.pmtPidHex} /></td>
-                          <td className="py-2"><PidBadge pid={s.pcrPid} pidHex={s.pcrPidHex} /></td>
+                          <td className="py-1.5 text-gray-300">{s.serviceId}</td>
+                          <td className="py-1.5 text-gray-300">{s.serviceName || '-'}</td>
+                          <td className="py-1.5 text-gray-400">{s.serviceProvider || '-'}</td>
+                          <td className="py-1.5"><PidBadge pid={s.pmtPid} pidHex={s.pmtPidHex} /></td>
+                          <td className="py-1.5"><PidBadge pid={s.pcrPid} pidHex={s.pcrPidHex} /></td>
                         </tr>
                       ))}
                     </tbody>
@@ -299,7 +419,7 @@ export default function TSAnalyser({ lastMessage }) {
               )}
             </BentoCard>
 
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-3">
               {resultLocal.programs?.map(prog => (
                 <ProgramBlock key={prog.programId} prog={prog} />
               ))}
@@ -316,15 +436,18 @@ export default function TSAnalyser({ lastMessage }) {
             </div>
         </motion.div>
       )}
+
+      {/* Keep full ETR visibility, but place after TS analysis sections */}
+      <ETR290Panel lastMessage={lastMessage} />
     </div>
   );
 }
 
 function ProgramBlock({ prog }) {
   return (
-    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-2xl p-5 relative overflow-hidden group">
+    <div className="bg-midnight-glass border border-white/5 backdrop-blur-xl rounded-xl p-3 relative overflow-hidden group">
       <div className="absolute inset-0 bg-gradient-to-br from-white/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
-      <div className="flex items-center justify-between mb-4 relative z-10">
+      <div className="flex items-center justify-between mb-2 relative z-10">
         <div className="flex items-center gap-3">
           <span className="text-[11px] font-bold text-white uppercase tracking-wider">
             Program {prog.programId}
@@ -351,7 +474,7 @@ function StreamRow({ stream: s }) {
   }[s.codecType] || 'text-gray-400';
 
   return (
-    <div className="flex items-center gap-3 text-xs py-1 border-b border-gray-800 last:border-0">
+    <div className="flex items-center gap-2 text-xs py-0.5 border-b border-gray-800 last:border-0">
       <PidBadge pid={s.pid} pidHex={s.pidHex} />
       <span className={`w-12 font-semibold ${typeColor}`}>{s.codecType}</span>
       <span className="text-gray-300 w-16">{s.codecName}</span>
@@ -367,9 +490,9 @@ function StreamRow({ stream: s }) {
 
 function Stat({ label, value }) {
   return (
-    <div className="bg-black/20 border border-white/10 rounded-lg px-3 py-2">
+    <div className="bg-black/20 border border-white/10 rounded-lg px-2.5 py-1.5">
       <div className="text-[10px] uppercase tracking-wider text-gray-500">{label}</div>
-      <div className="text-gray-200 font-mono mt-1">{value}</div>
+      <div className="text-gray-200 font-mono mt-0.5">{value}</div>
     </div>
   );
 }
