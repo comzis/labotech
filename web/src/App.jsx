@@ -13,6 +13,7 @@ import APIPanel from './components/APIPanel';
 import EventLogPanel from './components/EventLogPanel';
 import useWebSocket from './hooks/useWebSocket';
 import { clearEvents, getEvents, getHealth } from './api';
+import { ServiceStatusBadge } from './components/BroadcastUI';
 
 // Per-tab LED colours (Evertz-style coloured buttons)
 const TABS = [
@@ -375,12 +376,7 @@ export default function App() {
                 boxShadow: '0 0 5px #ff2233',
               }}
             />
-            <span
-              className="text-[9px] font-bold uppercase tracking-widest"
-              style={{ color: connected ? '#00dd55' : '#ff2233' }}
-            >
-              {connected ? 'ONLINE' : 'OFFLINE'}
-            </span>
+            <ServiceStatusBadge connected={connected} />
           </div>
         </div>
 

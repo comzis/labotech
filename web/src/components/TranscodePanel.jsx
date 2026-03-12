@@ -7,6 +7,7 @@ import { Field } from './ui/MatrixField';
 import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopTranscoder, probeUrl } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
+import { C } from './BroadcastUI';
 
 const DEFAULTS = {
   id: '',
@@ -249,7 +250,7 @@ export default function TranscodePanel({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-8 font-sans">
+    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 24 }}>
       {/* Start form Toggle */}
       <div className="flex justify-between items-center">
         <div>
