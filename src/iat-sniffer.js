@@ -21,6 +21,10 @@ class IATSniffer extends EventEmitter {
     this._lostPackets = 0;
     this._totalPackets = 0;
     this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
     this.lastError = null;
   }
 
@@ -70,6 +74,10 @@ class IATSniffer extends EventEmitter {
     this._lostPackets = 0;
     this._totalPackets = 0;
     this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
 
     this._spawnCapture(target);
     this._metricsTimer = setInterval(() => {
@@ -121,6 +129,13 @@ class IATSniffer extends EventEmitter {
       packetLossPct: lossPct,
       sampleCount: iats.length,
       captureMethod: this.captureMethod,
+      rtpSequence: {
+        observed: this._seqObserved,
+        lastSeq: this._prevSeq,
+        gapEvents: this._seqGapEvents,
+        duplicateEvents: this._seqDuplicateEvents,
+        reorderedEvents: this._seqReorderedEvents,
+      },
     };
   }
 
@@ -217,10 +232,22 @@ class IATSniffer extends EventEmitter {
     this._prevTs = epoch;
 
     if (Number.isFinite(seq) && this._prevSeq != null) {
-      const gap = (seq - this._prevSeq + 65536) % 65536;
-      if (gap > 1 && gap < 1000) this._lostPackets += gap - 1;
+      const delta = (seq - this._prevSeq + 65536) % 65536;
+      if (delta === 0) {
+        this._seqDuplicateEvents += 1;
+      } else if (delta === 1) {
+        // in-order packet
+      } else if (delta > 1 && delta < 32768) {
+        this._seqGapEvents += 1;
+        this._lostPackets += delta - 1;
+      } else {
+        this._seqReorderedEvents += 1;
+      }
     }
-    if (Number.isFinite(seq)) this._prevSeq = seq;
+    if (Number.isFinite(seq)) {
+      this._seqObserved = true;
+      this._prevSeq = seq;
+    }
   }
 
   _parseTcpdumpLine(line) {

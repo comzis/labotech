@@ -250,6 +250,11 @@ describe('TSAnalyser', () => {
     afterEach(() => {
       jest.restoreAllMocks();
       delete process.env.DOLBYE_REQUIRED_WHEN_DETECTED;
+      delete process.env.TS_20227_MIN_SAMPLES;
+      delete process.env.TS_20227_MAX_LOSS_PCT;
+      delete process.env.TS_20227_MAX_GAP_EVENTS;
+      delete process.env.TS_20227_MAX_DUPLICATE_EVENTS;
+      delete process.env.TS_20227_MAX_REORDER_EVENTS;
     });
 
     test('classifies nominal stream as ok with high score', () => {
@@ -362,6 +367,73 @@ describe('TSAnalyser', () => {
       expect(health.reasons.some((r) => /Dolby E detected but decode failed/i.test(r))).toBe(true);
       expect(health.dolbyE.detected).toBe(true);
       expect(health.dolbyE.decoded).toBe(false);
+    });
+
+    test('marks 2022-7 compliant when RTP sequence is continuous', () => {
+      const base = analyser.parseStructure({
+        programs: [{ program_id: 1, streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100' }] }],
+        streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100' }],
+      });
+      analyser.url = 'rtp://239.100.25.29:5000';
+      const result = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          arrival: {
+            iatMs: { min: 0.8, max: 2.1, avg: 1.3, p95: 1.9 },
+            jitterMs: 0.3,
+            packetLossPct: 0,
+            sampleCount: 120,
+            captureMethod: 'tshark',
+            rtpSequence: {
+              observed: true,
+              gapEvents: 0,
+              duplicateEvents: 0,
+              reorderedEvents: 0,
+              lastSeq: 1024,
+            },
+          },
+        },
+      };
+      const s = analyser._buildSmpte20227Assessment(result);
+      expect(s.checked).toBe(true);
+      expect(s.compliant).toBe(true);
+      expect(s.state).toBe('compliant');
+    });
+
+    test('penalizes health when 2022-7 is non-compliant', () => {
+      const base = analyser.parseStructure({
+        programs: [{ program_id: 1, streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100' }] }],
+        streams: [{ index: 0, codec_type: 'video', codec_name: 'h264', id: '0x0100' }],
+      });
+      const result = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 8000000,
+          bitrateSource: 'measured',
+          timestampDiscontinuity: { count: 0 },
+          continuityCounterErrors: { count: 0 },
+          arrival: {
+            iatMs: { min: 1, max: 12, avg: 4, p95: 8 },
+            jitterMs: 1.2,
+            packetLossPct: 0,
+            sampleCount: 90,
+            captureMethod: 'tshark',
+            rtpSequence: { observed: true, gapEvents: 3, duplicateEvents: 0, reorderedEvents: 0, lastSeq: 4096 },
+          },
+          smpte20227: {
+            checked: true,
+            compliant: false,
+            state: 'non_compliant',
+            reason: 'RTP sequence/loss exceed 2022-7 consolidation thresholds',
+          },
+        },
+        audioLevels: { meanDb: -18, maxDb: -3 },
+      };
+      const health = analyser._buildHealthAssessment(result);
+      expect(health.reasons.some((r) => /SMPTE ST 2022-7 non-compliant/i.test(r))).toBe(true);
+      expect(health.smpte20227.state).toBe('non_compliant');
     });
   });
 
