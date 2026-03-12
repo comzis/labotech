@@ -81,7 +81,9 @@ export default function useTSAnalysis() {
   const onWsResult = useCallback((msg) => {
     if (msg.type === 'analyse_result' && msg.id) {
       setResultsById(prev => ({ ...prev, [msg.id]: msg }));
-      setResult(msg);
+      // Do NOT call setResult(msg) here — that global state is only for one-shot
+      // probe() calls. Unconditionally updating it from any WS message causes
+      // cross-contamination when multiple decoders are active simultaneously.
       setActiveIds(ids => (ids.includes(msg.id) ? ids : [...ids, msg.id]));
       setDecoderMeta(prev => ({ ...prev, [msg.id]: { ...(prev[msg.id] || {}), id: msg.id, url: msg.url, isRunning: true } }));
     }

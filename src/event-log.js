@@ -137,8 +137,35 @@ function clear() {
   }
 }
 
+// Hydrate in-memory ring from persisted JSONL files on startup so timeline
+// survives server restarts. Read files from oldest to newest so the ring
+// ends up holding the most-recent RING_SIZE entries.
+function hydrateRingFromDisk() {
+  try {
+    const files = listRotatedEventFiles().sort(); // lexicographic == chronological for YYYY-MM-DD names
+    for (const filePath of files) {
+      try {
+        const raw = fs.readFileSync(filePath, 'utf8');
+        for (const line of raw.split('\n')) {
+          const trimmed = line.trim();
+          if (!trimmed) continue;
+          try {
+            const entry = JSON.parse(trimmed);
+            if (entry && typeof entry === 'object') {
+              ring.push(entry);
+            }
+          } catch (_) { /* skip malformed lines */ }
+        }
+      } catch (_) { /* skip unreadable files */ }
+    }
+    // Trim ring to max size keeping the most recent entries.
+    if (ring.length > RING_SIZE) ring.splice(0, ring.length - RING_SIZE);
+  } catch (_) { /* hydration is best-effort */ }
+}
+
 // Initialize rotation/retention cleanup once on module load.
 cleanupOldFiles();
+hydrateRingFromDisk();
 startCleanupTimer();
 
 module.exports = {
