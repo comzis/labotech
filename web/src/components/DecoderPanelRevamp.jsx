@@ -1,17 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
-import {
-  Badge,
-  C,
-  Dot,
-  Field,
-  Input,
-  NavTab,
-  PanelBox,
-  SectionHead,
-  Select,
-} from "./BroadcastUI";
+import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
 
 const PROBE_MODES = [
   { value: "rtp", label: "RTP" },
@@ -48,18 +38,6 @@ const ETR_CHECK_FIELDS = [
   { id: "rst_error", label: "RST Error" },
   { id: "tdt_error", label: "TDT Error" },
   { id: "empty_buf", label: "Empty Buffer" },
-];
-
-const TABS = [
-  { id: "analyser", label: "TS Analyser", icon: "📡" },
-  { id: "runtime", label: "Runtime", icon: "⚡" },
-  { id: "transcoder", label: "Transcoder", icon: "🔄" },
-  { id: "forwarding", label: "Forwarding", icon: "➡️" },
-  { id: "decoder", label: "Decoder", icon: "📺" },
-  { id: "multiview", label: "Multiview", icon: "⊞" },
-  { id: "live", label: "Live View", icon: "🔴" },
-  { id: "alarms", label: "Alarm Log", icon: "🔔" },
-  { id: "api", label: "API", icon: "⚙️" },
 ];
 
 function newDecoderRow(seed = Date.now()) {
@@ -169,7 +147,6 @@ function StatBox({ label, value, color = C.text }) {
 }
 
 export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
-  const [activeTab, setActiveTab] = useState("decoder");
   const [mode, setMode] = useState("rtp");
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
   const [latency, setLatency] = useState("2000");
@@ -191,6 +168,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [includePidsText, setIncludePidsText] = useState("");
   const [excludePidsText, setExcludePidsText] = useState("");
   const [allowUnknownPid, setAllowUnknownPid] = useState(true);
+  const [enableEtrOnProvision, setEnableEtrOnProvision] = useState(false);
   const [thresholds, setThresholds] = useState(() =>
     ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: "1" }), {})
   );
@@ -315,6 +293,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     const runStamp = Date.now();
     const started = [];
     const failed = [];
+    const etrStarted = [];
+    const etrFailed = [];
     for (let i = 0; i < validRowPlans.length; i += 1) {
       const row = validRowPlans[i];
       const id = row.decoderId?.trim() || `decoder-${runStamp}-${i + 1}`;
@@ -328,13 +308,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           await probe(row.url);
         }
         started.push(id);
-        try {
-          await etr.start(`etr-${id}`, row.url, captureNic || undefined, {
-            profileName: selectedProfileName || undefined,
-            config: etrConfig,
-          });
-        } catch (etrErr) {
-          failed.push({ id, message: `ETR attach warning: ${etrErr?.message || "failed"}` });
+        if (enableEtrOnProvision) {
+          try {
+            await etr.start(`etr-${id}`, row.url, captureNic || undefined, {
+              profileName: selectedProfileName || undefined,
+              config: etrConfig,
+            });
+            etrStarted.push(id);
+          } catch (etrErr) {
+            etrFailed.push({ id, message: `ETR attach warning: ${etrErr?.message || "failed"}` });
+          }
         }
       } catch (err) {
         failed.push({ id, message: err?.message || "Provision failed" });
@@ -345,24 +328,35 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       await refreshActives();
       await etr.refreshActives();
     } catch (_) {}
-    setProvisionSummary({ started, failed, at: Date.now() });
+    setProvisionSummary({ started, failed: [...failed, ...etrFailed], etrStarted, at: Date.now() });
   };
 
   const stopDecoder = async () => {
-    if (selectedId) {
-      try {
-        await stop(selectedId);
-      } catch (_) {}
-      try {
-        await etr.stop(`etr-${selectedId}`);
-      } catch (_) {}
-      return;
-    }
-    if (etr.activeId) {
-      try {
-        await etr.stop(etr.activeId);
-      } catch (_) {}
-    }
+    if (!selectedId) return;
+    try {
+      await stop(selectedId);
+    } catch (_) {}
+    try {
+      await refreshActives();
+    } catch (_) {}
+  };
+
+  const startEtrForSelected = async () => {
+    if (!selectedId) return;
+    const r = resultsById[selectedId] || selectedResult;
+    const url = r?.url;
+    if (!url) return;
+    await etr.start(`etr-${selectedId}`, url, captureNic || undefined, {
+      profileName: selectedProfileName || undefined,
+      config: etrConfig,
+    });
+    await etr.refreshActives();
+  };
+
+  const stopEtrForSelected = async () => {
+    if (!selectedId) return;
+    await etr.stop(`etr-${selectedId}`);
+    await etr.refreshActives();
   };
 
   const applyProfileToForm = (name) => {
@@ -402,31 +396,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
   return (
     <div style={{ fontFamily: "'Segoe UI',sans-serif", background: C.bg, color: C.text, minHeight: "100vh" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          background: C.surface,
-          borderBottom: `1px solid ${C.borderHi}`,
-          padding: "0 14px",
-          height: 52,
-        }}
-      >
-        <div style={{ display: "flex", flexDirection: "column", minWidth: 140 }}>
-          <span style={{ fontSize: 12, fontWeight: 800, color: C.ok, letterSpacing: "0.15em" }}>LABOTECH</span>
-          <span style={{ fontSize: 8, color: C.muted, letterSpacing: "0.1em" }}>BROADCAST ENGINE</span>
-          <span style={{ fontSize: 7, color: C.dim }}>HPE DL360 · Docker</span>
-        </div>
-        <div style={{ display: "flex", gap: 2 }}>
-          {TABS.map((t) => (
-            <NavTab key={t.id} label={t.label} icon={t.icon} active={activeTab === t.id} onClick={() => setActiveTab(t.id)} />
-          ))}
+      <div style={{ padding: "8px 10px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+          <Dot c={C.cyan} />
+          <span style={{ fontSize: 10, color: C.head, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Decoder Operations</span>
         </div>
         <Badge label="RUNNING" color={C.ok} filled />
       </div>
 
-      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "460px 1fr 320px", gap: 10 }}>
+      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "560px 1fr 320px", gap: 10 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <PanelBox>
             <SectionHead icon="⚙" title="Decoder Provisioning" />
@@ -480,21 +458,54 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </div>
               ))}
 
-              <button
-                onClick={addDecoderRow}
-                style={{
-                  borderRadius: 2,
-                  border: `1px solid ${C.cyan}`,
-                  color: C.cyan,
-                  background: `${C.cyan}10`,
-                  padding: "5px 8px",
-                  fontSize: 10,
-                  fontWeight: 700,
-                  width: "fit-content",
-                }}
-              >
-                + Add row
-              </button>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
+                <button
+                  onClick={addDecoderRow}
+                  style={{
+                    borderRadius: 2,
+                    border: `1px solid ${C.cyan}`,
+                    color: C.cyan,
+                    background: `${C.cyan}10`,
+                    padding: "6px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                  }}
+                >
+                  + Add row
+                </button>
+                <button
+                  onClick={startDecoder}
+                  disabled={!validRowPlans.length}
+                  style={{
+                    borderRadius: 2,
+                    border: `1px solid ${validRowPlans.length ? C.info : C.border}`,
+                    color: validRowPlans.length ? C.info : C.muted,
+                    background: validRowPlans.length ? `${C.info}14` : "transparent",
+                    padding: "6px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: validRowPlans.length ? "pointer" : "not-allowed",
+                  }}
+                >
+                  ▶ START DECODER
+                </button>
+                <button
+                  onClick={stopDecoder}
+                  disabled={!selectedId}
+                  style={{
+                    borderRadius: 2,
+                    border: `1px solid ${selectedId ? C.err : C.border}`,
+                    color: selectedId ? C.err : C.muted,
+                    background: "transparent",
+                    padding: "6px 8px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    cursor: selectedId ? "pointer" : "not-allowed",
+                  }}
+                >
+                  ■ STOP DECODER
+                </button>
+              </div>
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Capture NIC (optional)">
@@ -547,6 +558,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               <PanelBox style={{ borderColor: C.borderHi }}>
                 <SectionHead icon="🧪" title="ETR 290 Tuning" right={<Badge label="LIVE CONFIG" color={C.warn} small />} />
                 <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6, color: enableEtrOnProvision ? C.ok : C.muted, fontSize: 10 }}>
+                    <input type="checkbox" checked={enableEtrOnProvision} onChange={(e) => setEnableEtrOnProvision(e.target.checked)} style={{ accentColor: C.ok }} />
+                    Auto-enable ETR when starting decoder
+                  </label>
+
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <Field label="Saved profile">
                       <Select
@@ -611,6 +627,43 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button
+                      onClick={startEtrForSelected}
+                      disabled={!selectedId}
+                      style={{
+                        flex: 1,
+                        borderRadius: 2,
+                        border: `1px solid ${selectedId ? C.info : C.border}`,
+                        color: selectedId ? C.info : C.muted,
+                        background: "transparent",
+                        padding: "5px 8px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        cursor: selectedId ? "pointer" : "not-allowed",
+                      }}
+                    >
+                      Enable ETR
+                    </button>
+                    <button
+                      onClick={stopEtrForSelected}
+                      disabled={!selectedId}
+                      style={{
+                        flex: 1,
+                        borderRadius: 2,
+                        border: `1px solid ${selectedId ? C.err : C.border}`,
+                        color: selectedId ? C.err : C.muted,
+                        background: "transparent",
+                        padding: "5px 8px",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        cursor: selectedId ? "pointer" : "not-allowed",
+                      }}
+                    >
+                      Stop ETR
+                    </button>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <button
                       onClick={saveCurrentProfile}
                       disabled={!profileName.trim()}
                       style={{
@@ -646,44 +699,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </div>
               </PanelBox>
 
-              <div style={{ display: "flex", gap: 6 }}>
-                <button
-                  onClick={startDecoder}
-                  disabled={!validRowPlans.length}
-                  style={{
-                    flex: 1,
-                    borderRadius: 2,
-                    border: `1px solid ${C.info}`,
-                    color: C.info,
-                    background: `${C.info}14`,
-                    padding: "6px 0",
-                    fontSize: 10,
-                    fontWeight: 700,
-                  }}
-                >
-                  ▶ PROVISION PROBE
-                </button>
-                <button
-                  onClick={stopDecoder}
-                  style={{
-                    flex: 1,
-                    borderRadius: 2,
-                    border: `1px solid ${C.err}`,
-                    color: C.err,
-                    background: "transparent",
-                    padding: "6px 0",
-                    fontSize: 10,
-                    fontWeight: 700,
-                  }}
-                >
-                  ■ STOP
-                </button>
-              </div>
-
               {provisionSummary && (
                 <div style={{ fontSize: 10, color: C.muted }}>
                   Started: <span style={{ color: C.ok }}>{provisionSummary.started.length}</span> · Failed:{" "}
                   <span style={{ color: C.err }}>{provisionSummary.failed.length}</span>
+                  {provisionSummary.etrStarted?.length ? (
+                    <>
+                      {" "}· ETR: <span style={{ color: C.info }}>{provisionSummary.etrStarted.length}</span>
+                    </>
+                  ) : null}
                 </div>
               )}
               {error && <div style={{ fontSize: 10, color: C.err }}>Decoder analyser error: {error}</div>}
@@ -819,22 +843,44 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
               ) : (
                 activeIds.map((id) => (
-                  <button
-                    key={id}
-                    onClick={() => setSelectedId(id)}
-                    style={{
-                      textAlign: "left",
-                      borderRadius: 2,
-                      border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
-                      background: selectedId === id ? `${C.cyan}12` : "transparent",
-                      color: selectedId === id ? C.cyan : C.text,
-                      padding: "5px 8px",
-                      fontFamily: "'Courier New',monospace",
-                      fontSize: 10,
-                    }}
-                  >
-                    {id}
-                  </button>
+                  <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
+                    <button
+                      onClick={() => setSelectedId(id)}
+                      style={{
+                        textAlign: "left",
+                        borderRadius: 2,
+                        border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
+                        background: selectedId === id ? `${C.cyan}12` : "transparent",
+                        color: selectedId === id ? C.cyan : C.text,
+                        padding: "5px 8px",
+                        fontFamily: "'Courier New',monospace",
+                        fontSize: 10,
+                      }}
+                    >
+                      {id}
+                    </button>
+                    <button
+                      onClick={async () => {
+                        try {
+                          await stop(id);
+                        } catch (_) {}
+                        try {
+                          await refreshActives();
+                        } catch (_) {}
+                      }}
+                      style={{
+                        borderRadius: 2,
+                        border: `1px solid ${C.err}`,
+                        color: C.err,
+                        background: "transparent",
+                        fontSize: 9,
+                        fontWeight: 700,
+                        fontFamily: "'Courier New',monospace",
+                      }}
+                    >
+                      STOP
+                    </button>
+                  </div>
                 ))
               )}
             </div>
