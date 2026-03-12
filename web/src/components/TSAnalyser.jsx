@@ -13,6 +13,8 @@ const PROBE_MODES = [
 ];
 const ETR_P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
 const ETR_P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
+const STORAGE_KEY = 'labotech:ts-analyser:state:v1';
+const ACTIVE_ID_KEY = 'labotech:ts-analyser:active-id:v1';
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
   if (mode === 'udp') return `udp://${host}:${port}`;
@@ -260,8 +262,66 @@ export default function TSAnalyser({ lastMessage }) {
     activeChecks: [],
     lastEventTs: null,
   });
+  const [persistentMonitorId, setPersistentMonitorId] = useState(() => {
+    try { return localStorage.getItem(ACTIVE_ID_KEY) || ''; } catch (_) { return ''; }
+  });
 
-  const { loading, error, probe, onWsResult } = useTSAnalysis();
+  const {
+    loading,
+    error,
+    probe,
+    onWsResult,
+    activeIds,
+    resultsById,
+    refreshActives,
+    startContinuous,
+    stop,
+  } = useTSAnalysis();
+
+  useEffect(() => {
+    refreshActives();
+  }, [refreshActives]);
+
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed?.resultLocal) setResultLocal(parsed.resultLocal);
+      if (parsed?.resultLegB) setResultLegB(parsed.resultLegB);
+      if (parsed?.dualConsolidation) setDualConsolidation(parsed.dualConsolidation);
+      if (Array.isArray(parsed?.probeHistory)) setProbeHistory(parsed.probeHistory.slice(0, 30));
+      if (Array.isArray(parsed?.alarmLog)) setAlarmLog(parsed.alarmLog.slice(0, 60));
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          resultLocal,
+          resultLegB,
+          dualConsolidation,
+          probeHistory: probeHistory.slice(0, 30),
+          alarmLog: alarmLog.slice(0, 60),
+        })
+      );
+    } catch (_) {}
+  }, [resultLocal, resultLegB, dualConsolidation, probeHistory, alarmLog]);
+
+  useEffect(() => {
+    try {
+      if (persistentMonitorId) localStorage.setItem(ACTIVE_ID_KEY, persistentMonitorId);
+      else localStorage.removeItem(ACTIVE_ID_KEY);
+    } catch (_) {}
+  }, [persistentMonitorId]);
+
+  useEffect(() => {
+    if (!persistentMonitorId) return;
+    const persisted = resultsById[persistentMonitorId];
+    if (persisted) setResultLocal(persisted);
+  }, [resultsById, persistentMonitorId]);
 
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
@@ -352,6 +412,12 @@ export default function TSAnalyser({ lastMessage }) {
         },
         ...prev,
       ]).slice(0, 30));
+      if (!dualLeg) {
+        const id = persistentMonitorId || `analyser-${Date.now()}`;
+        await startContinuous(id, builtUrl, 5000);
+        setPersistentMonitorId(id);
+        try { await refreshActives(); } catch (_) {}
+      }
     } catch (_) {
       setResultLocal(null);
       setResultLegB(null);
@@ -370,6 +436,15 @@ export default function TSAnalyser({ lastMessage }) {
         ...prev,
       ]).slice(0, 30));
     }
+  };
+
+  const handleStopPersistent = async () => {
+    if (!persistentMonitorId) return;
+    try {
+      await stop(persistentMonitorId);
+    } catch (_) {}
+    setPersistentMonitorId('');
+    try { await refreshActives(); } catch (_) {}
   };
 
   return (
@@ -476,7 +551,15 @@ export default function TSAnalyser({ lastMessage }) {
               disabled={loading || !builtUrl || (dualLeg && !builtUrlB)}
               className="bg-neon-cyan/15 hover:bg-neon-cyan/25 text-neon-cyan border border-neon-cyan/30 px-3 py-1.5 rounded-lg font-semibold text-xs transition-all disabled:opacity-50"
             >
-              {loading ? 'Probing…' : (dualLeg ? 'Probe A+B Consolidation' : 'Provision Probe')}
+              {loading ? 'Probing…' : (dualLeg ? 'Probe A+B Consolidation' : 'Start Persistent Probe')}
+            </button>
+            <button
+              type="button"
+              onClick={handleStopPersistent}
+              disabled={!persistentMonitorId}
+              className="px-3 py-1.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-900/20 text-xs disabled:opacity-40"
+            >
+              Stop Probe
             </button>
             <button
               type="button"
@@ -485,6 +568,9 @@ export default function TSAnalyser({ lastMessage }) {
             >
               Clear Log
             </button>
+            <span className={`text-[10px] font-mono ${persistentMonitorId ? 'text-green-300' : 'text-gray-500'}`}>
+              {persistentMonitorId ? `running: ${persistentMonitorId}` : 'no persistent probe'}
+            </span>
           </div>
           {error && <p className="text-red-400 text-sm font-medium">{error}</p>}
         </form>
