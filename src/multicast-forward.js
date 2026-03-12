@@ -39,7 +39,8 @@ class MulticastForwarder extends EventEmitter {
     this.destPort    = options.destPort || 1234;
     this.nic         = options.nic || DEFAULT_NIC;
     this.subnet      = options.subnet || DEFAULT_SUBNET;
-    this.allowedIp   = options.allowedIp != null ? options.allowedIp : DEFAULT_ALLOWED_IP;
+    const hasAllowedIpOverride = Object.prototype.hasOwnProperty.call(options, 'allowedIp');
+    this.allowedIp   = hasAllowedIpOverride ? options.allowedIp : DEFAULT_ALLOWED_IP;
     this.requireExplicitDest = options.requireExplicitDest != null
       ? Boolean(options.requireExplicitDest)
       : DEFAULT_REQUIRE_EXPLICIT_DEST;

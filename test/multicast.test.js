@@ -35,6 +35,8 @@ describe('MulticastForwarder', () => {
     destPort: 1234,
     nic: 'eno2',
     subnet: '239.100.25.0/26',
+    allowedIp: null,
+    requireExplicitDest: false,
   };
 
   test('creates forwarder', () => {
