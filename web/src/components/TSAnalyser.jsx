@@ -1,320 +1,238 @@
-import React, { useState, useEffect } from 'react';
-import useTSAnalysis from '../hooks/useTSAnalysis';
-import PidBadge from './PidBadge';
-import { motion } from 'framer-motion';
-import { Search, Activity, ShieldAlert } from 'lucide-react';
-import { PanelBox, SectionHead, Field as UIField, Input, C } from './BroadcastUI';
+import { useEffect, useMemo, useState } from "react";
+import useTSAnalysis from "../hooks/useTSAnalysis";
+import useETR290 from "../hooks/useETR290";
 
-const PROBE_MODES = [
-  { value: 'rtp', label: 'RTP',  desc: 'RTP/MPEG-TS' },
-  { value: 'srt', label: 'SRT',  desc: 'Haivision SRT' },
-  { value: 'udp', label: 'UDP',  desc: 'Legacy Multicast/Unicast' },
+const C = {
+  bg: "#07090d",
+  panel: "#0d1017",
+  panelB: "#0b0e14",
+  border: "#1a2030",
+  borderHi: "#253044",
+  text: "#c8d4e8",
+  muted: "#3e4f6e",
+  dim: "#2a3650",
+  ok: "#00e676",
+  warn: "#ffab00",
+  err: "#ff3d57",
+  info: "#29b6f6",
+  cyan: "#00e5ff",
+  accent: "#3d6bff",
+  blue: "#2979ff",
+  red: "#f50057",
+  purple: "#aa00ff",
+  gold: "#ffd740",
+  head: "#6a7fa8",
+};
+
+const TABS = ["ETR 290", "ST 2022-7", "DVB Tables", "PIDs", "Programs", "Event Log"];
+const STORAGE_KEY = "labotech:ts-analyser:v2";
+
+const ETR_CHECK_DEFS = [
+  { p: 1, id: "1.1", label: "TS sync loss", key: "ts_sync" },
+  { p: 1, id: "1.2", label: "Sync byte error", key: "sync_byte" },
+  { p: 1, id: "1.3", label: "PAT error", key: "pat_error" },
+  { p: 1, id: "1.4", label: "Continuity count error", key: "cc_error" },
+  { p: 1, id: "1.5", label: "PMT error", key: "pmt_error" },
+  { p: 1, id: "1.6", label: "PID error", key: "pid_error" },
+  { p: 2, id: "2.1", label: "Transport error", key: "transport_error" },
+  { p: 2, id: "2.2", label: "CRC error", key: "crc_error" },
+  { p: 2, id: "2.3", label: "PCR discontinuity", key: "pcr_disc" },
+  { p: 2, id: "2.4", label: "PCR accuracy", key: "pcr_acc" },
+  { p: 2, id: "2.5", label: "PTS error", key: "pts_error" },
+  { p: 2, id: "2.6", label: "CAT error", key: "cat_error" },
+  { p: 3, id: "3.1", label: "NIT actual error", key: null },
+  { p: 3, id: "3.2", label: "NIT other error", key: null },
+  { p: 3, id: "3.3", label: "SI repetition rate", key: "si_rep" },
+  { p: 3, id: "3.4", label: "Unreferenced PID", key: null },
+  { p: 3, id: "3.5", label: "SDT actual error", key: null },
+  { p: 3, id: "3.6", label: "EIT actual error", key: null },
+  { p: 3, id: "3.7", label: "RST error", key: null },
+  { p: 3, id: "3.8", label: "TDT error", key: null },
 ];
-const ETR_P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
-const ETR_P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
-const STORAGE_KEY = 'labotech:ts-analyser:state:v1';
-const ACTIVE_ID_KEY = 'labotech:ts-analyser:active-id:v1';
-function buildProbeUrl({ mode, host, port, latency, passphrase }) {
-  if (!host || !port) return '';
-  if (mode === 'udp') return `udp://${host}:${port}`;
-  if (mode === 'rtp') return `rtp://${host}:${port}`;
-  // SRT
-  let url = `srt://${host}:${port}`;
-  const params = [];
-  if (latency)    params.push(`latency=${latency}`);
-  if (passphrase) params.push(`passphrase=${passphrase}`);
-  if (params.length) url += `?${params.join('&')}`;
-  return url;
+
+const Dot = ({ c, size = 7 }) => (
+  <span
+    style={{
+      display: "inline-block",
+      width: size,
+      height: size,
+      borderRadius: "50%",
+      background: c,
+      boxShadow: `0 0 5px ${c}99`,
+      flexShrink: 0,
+    }}
+  />
+);
+
+const Badge = ({ label, color = C.ok, small }) => (
+  <span
+    style={{
+      fontSize: small ? 8 : 9,
+      fontWeight: 700,
+      letterSpacing: "0.08em",
+      color,
+      border: `1px solid ${color}66`,
+      borderRadius: 2,
+      padding: small ? "0px 4px" : "1px 5px",
+      background: `${color}12`,
+      textTransform: "uppercase",
+      whiteSpace: "nowrap",
+    }}
+  >
+    {label}
+  </span>
+);
+
+const Mono = ({ v, c = C.cyan, size = 11 }) => (
+  <span style={{ fontFamily: "'Courier New',monospace", color: c, fontSize: size }}>{v}</span>
+);
+
+const TH = ({ children, right }) => (
+  <th
+    style={{
+      fontSize: 8,
+      fontWeight: 700,
+      letterSpacing: "0.1em",
+      color: C.muted,
+      textAlign: right ? "right" : "left",
+      padding: "0 4px 4px",
+      borderBottom: `1px solid ${C.borderHi}`,
+      whiteSpace: "nowrap",
+    }}
+  >
+    {children}
+  </th>
+);
+
+const TD = ({ children, right, mono, color, small }) => (
+  <td
+    style={{
+      fontSize: small ? 9 : 10,
+      color: color || C.text,
+      padding: "2px 4px",
+      borderBottom: `1px solid ${C.border}`,
+      fontFamily: mono ? "'Courier New',monospace" : "inherit",
+      textAlign: right ? "right" : "left",
+      whiteSpace: "nowrap",
+    }}
+  >
+    {children}
+  </td>
+);
+
+const Panel = ({ children, style, title, status, right }) => (
+  <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden", ...style }}>
+    {title && (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "5px 8px",
+          borderBottom: `1px solid ${C.borderHi}`,
+          background: C.panelB,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+          <span style={{ fontSize: 9, fontWeight: 800, letterSpacing: "0.14em", color: C.head, textTransform: "uppercase" }}>{title}</span>
+          {status && <Badge label={status} color={status === "OK" ? C.ok : status === "WARN" ? C.warn : C.err} small />}
+        </div>
+        {right && <span style={{ fontSize: 9, color: C.muted }}>{right}</span>}
+      </div>
+    )}
+    <div style={{ padding: "6px 8px" }}>{children}</div>
+  </div>
+);
+
+const KV = ({ k, v, vc }) => (
+  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}>
+    <span style={{ fontSize: 9, color: C.muted }}>{k}</span>
+    <Mono v={v} c={vc || C.text} size={10} />
+  </div>
+);
+
+function parseTargetFromUrl(url) {
+  if (!url) return { host: "-", port: "-", protocol: "-" };
+  try {
+    const u = new URL(url);
+    return { host: u.hostname || "-", port: u.port || "-", protocol: (u.protocol || "").replace(":", "").toUpperCase() || "-" };
+  } catch (_) {
+    return { host: "-", port: "-", protocol: "-" };
+  }
 }
 
-function formatFps(raw) {
-  if (!raw || typeof raw !== 'string' || !raw.includes('/')) return raw || null;
-  const [n, d] = raw.split('/').map(Number);
-  if (!d) return raw;
-  return (n / d).toFixed(3).replace(/\.?0+$/, '');
+function buildProbeUrl({ mode, host, port, latency, passphrase }) {
+  if (!host || !port) return "";
+  if (mode === "udp") return `udp://${host}:${port}`;
+  if (mode === "rtp") return `rtp://${host}:${port}`;
+  let url = `srt://${host}:${port}`;
+  const params = [];
+  if (latency) params.push(`latency=${latency}`);
+  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (params.length) url += `?${params.join("&")}`;
+  return url;
 }
 
 function countPids(result) {
   if (!result) return 0;
-  const programCount = (result.programs || []).reduce((acc, p) => acc + ((p.streams || []).length), 0);
-  return programCount + ((result.orphanStreams || []).length);
+  const fromPrograms = (result.programs || []).reduce((acc, p) => acc + ((p.streams || []).length), 0);
+  return fromPrograms + ((result.orphanStreams || []).length);
 }
 
-function toMbps(bps) {
+function toMbpsNumber(bps) {
   const n = Number(bps || 0);
-  return Number.isFinite(n) && n > 0 ? `${(n / 1e6).toFixed(3)} Mbps` : '-';
+  return Number.isFinite(n) && n > 0 ? Number((n / 1e6).toFixed(3)) : 0;
 }
 
-function toneColor(state) {
-  const s = String(state || '').toLowerCase();
-  if (s === 'critical' || s === 'non_compliant' || s === 'false') return C.err;
-  if (s === 'warning' || s === 'insufficient_data') return C.warn;
-  if (s === 'ok' || s === 'compliant' || s === 'true') return C.ok;
-  return C.muted;
-}
-
-
-function BentoCard({ icon: Icon, title, children }) {
-  return (
-    <PanelBox>
-      <SectionHead icon={Icon ? <Icon size={12} style={{ color: C.cyan }} /> : null} title={title} />
-      <div style={{ display: 'grid', gap: 8, padding: '8px 10px' }}>{children}</div>
-    </PanelBox>
-  );
-}
-
-function Field({ label, value, onChange, placeholder, required, type = 'text' }) {
-  return (
-    <UIField label={label} required={required}>
-      <Input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        type={type}
-        mono
-      />
-    </UIField>
-  );
-}
-
-function parseTargetFromUrl(url) {
-  if (!url) return { host: null, port: null };
-  try {
-    const u = new URL(url);
-    return { host: u.hostname || null, port: u.port || null };
-  } catch (_) {
-    const m = String(url).match(/^[a-z]+:\/\/([^/:?#]+):(\d+)/i);
-    if (!m) return { host: null, port: null };
-    return { host: m[1], port: m[2] };
-  }
-}
-
-function inferFecMode(url) {
-  const s = String(url || '').toLowerCase();
-  if (!s) return '-';
-  if (s.includes('fec=')) {
-    const m = s.match(/[?&]fec=([^&]+)/);
-    return m ? decodeURIComponent(m[1]) : 'enabled';
-  }
-  if (s.includes('rtp://')) return 'none';
-  return '-';
-}
-
-function collectPidRows(result) {
-  if (!result) return [];
-  const rows = [];
-  (result.programs || []).forEach((p) => {
-    (p.streams || []).forEach((s) => {
-      rows.push({
-        pid: s.pid ?? null,
-        pidHex: s.pidHex || (s.pid != null ? `0x${Number(s.pid).toString(16).toUpperCase().padStart(4, '0')}` : null),
-        codecType: s.codecType || 'unknown',
-        codecName: s.codecName || '-',
-        streamType: s.streamType || '-',
-        programId: p.programId,
-      });
-    });
-  });
-  (result.orphanStreams || []).forEach((s) => {
-    rows.push({
-      pid: s.pid ?? null,
-      pidHex: s.pidHex || (s.pid != null ? `0x${Number(s.pid).toString(16).toUpperCase().padStart(4, '0')}` : null),
-      codecType: s.codecType || 'unknown',
-      codecName: s.codecName || '-',
-      streamType: s.streamType || '-',
-      programId: 'orphan',
-    });
-  });
-  return rows
-    .filter((r) => r.pid != null)
-    .sort((a, b) => (a.pid ?? 99999) - (b.pid ?? 99999));
-}
-
-function buildDual20227Assessment(legA, legB) {
-  if (!legA || !legB) {
-    return {
-      state: 'insufficient_data',
-      reason: 'Both RTP legs are required for 2022-7 consolidation check',
-      checked: false,
-      mapping: { totalPids: 0, matchedPids: 0, missingOnA: 0, missingOnB: 0, codecMismatch: 0 },
-      timing: { iatAvgA: null, iatAvgB: null, iatOffsetMs: null, bitrateA: null, bitrateB: null, bitrateOffsetPct: null },
-      pidRows: [],
-    };
-  }
-
-  const pidsA = collectPidRows(legA);
-  const pidsB = collectPidRows(legB);
-  const byA = new Map(pidsA.map((r) => [r.pid, r]));
-  const byB = new Map(pidsB.map((r) => [r.pid, r]));
-  const allPids = Array.from(new Set([...byA.keys(), ...byB.keys()])).sort((a, b) => a - b);
-  const pidRows = allPids.map((pid) => {
-    const a = byA.get(pid) || null;
-    const b = byB.get(pid) || null;
-    const codecMatch = (a && b) ? `${a.codecType}:${a.codecName}` === `${b.codecType}:${b.codecName}` : null;
-    return {
-      pid,
-      pidHex: a?.pidHex || b?.pidHex || `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`,
-      aCodec: a ? `${a.codecType}/${a.codecName}` : '-',
-      bCodec: b ? `${b.codecType}/${b.codecName}` : '-',
-      aProgram: a?.programId ?? '-',
-      bProgram: b?.programId ?? '-',
-      presentA: Boolean(a),
-      presentB: Boolean(b),
-      codecMatch,
-    };
-  });
-
-  const mapping = {
-    totalPids: pidRows.length,
-    matchedPids: pidRows.filter((r) => r.presentA && r.presentB).length,
-    missingOnA: pidRows.filter((r) => !r.presentA && r.presentB).length,
-    missingOnB: pidRows.filter((r) => r.presentA && !r.presentB).length,
-    codecMismatch: pidRows.filter((r) => r.presentA && r.presentB && r.codecMatch === false).length,
-  };
-
-  const iatAvgA = Number(legA?.dvb?.arrival?.iatMs?.avg);
-  const iatAvgB = Number(legB?.dvb?.arrival?.iatMs?.avg);
-  const iatOffsetMs = Number.isFinite(iatAvgA) && Number.isFinite(iatAvgB) ? Number(Math.abs(iatAvgA - iatAvgB).toFixed(3)) : null;
-  const bitrateA = Number(legA?.dvb?.bitrateBps || 0);
-  const bitrateB = Number(legB?.dvb?.bitrateBps || 0);
-  const bitrateOffsetPct = bitrateA > 0 && bitrateB > 0
-    ? Number((Math.abs(bitrateA - bitrateB) / Math.max(bitrateA, bitrateB) * 100).toFixed(3))
-    : null;
-  const timing = { iatAvgA, iatAvgB, iatOffsetMs, bitrateA: bitrateA || null, bitrateB: bitrateB || null, bitrateOffsetPct };
-
-  const sA = legA?.dvb?.smpte20227?.state || null;
-  const sB = legB?.dvb?.smpte20227?.state || null;
-  let state = 'insufficient_data';
-  let reason = 'Insufficient evidence for consolidated 2022-7 decision';
-  if (sA === 'non_compliant' || sB === 'non_compliant') {
-    state = 'non_compliant';
-    reason = 'At least one leg fails 2022-7 sequence/loss criteria';
-  } else if (sA === 'compliant' && sB === 'compliant') {
-    if (mapping.missingOnA === 0 && mapping.missingOnB === 0 && mapping.codecMismatch === 0) {
-      state = 'compliant';
-      reason = 'Both legs compliant with aligned PID mapping';
-    } else {
-      state = 'non_compliant';
-      reason = 'Leg mapping mismatch detected between A/B';
-    }
-  }
-
-  return {
-    state,
-    reason,
-    checked: true,
-    mapping,
-    timing,
-    pidRows,
-  };
-}
-
-function buildDvbPidInventory(result) {
-  if (!result) return [];
-  const byPid = new Map();
-  const upsert = (pid, patch = {}) => {
-    if (pid == null || !Number.isFinite(Number(pid))) return;
-    const key = Number(pid);
-    const prev = byPid.get(key) || {
-      pid: key,
-      pidHex: `0x${key.toString(16).toUpperCase().padStart(4, '0')}`,
-      roles: new Set(),
-      serviceRefs: new Set(),
-      codecName: '-',
-      streamType: '-',
-    };
-    if (patch.role) prev.roles.add(patch.role);
-    if (patch.serviceRef) prev.serviceRefs.add(String(patch.serviceRef));
-    if (patch.codecName && prev.codecName === '-') prev.codecName = patch.codecName;
-    if (patch.streamType && prev.streamType === '-') prev.streamType = patch.streamType;
-    byPid.set(key, prev);
-  };
-
-  // PAT is mandatory in compliant MPEG-TS.
-  upsert(0, { role: 'PAT', serviceRef: 'global' });
-
-  (result?.dvb?.services || []).forEach((s) => {
-    upsert(Number(s.pmtPid), { role: 'PMT', serviceRef: s.serviceId ?? s.serviceName ?? 'service' });
-    upsert(Number(s.pcrPid), { role: 'PCR', serviceRef: s.serviceId ?? s.serviceName ?? 'service' });
-  });
-
-  (result.programs || []).forEach((p) => {
-    (p.streams || []).forEach((st) => {
-      upsert(Number(st.pid), {
-        role: `ES-${String(st.codecType || 'data').toUpperCase()}`,
-        serviceRef: p.programId,
-        codecName: st.codecName || '-',
-        streamType: st.streamType || '-',
-      });
-    });
-  });
-  (result.orphanStreams || []).forEach((st) => {
-    upsert(Number(st.pid), {
-      role: `ES-${String(st.codecType || 'data').toUpperCase()}`,
-      serviceRef: 'orphan',
-      codecName: st.codecName || '-',
-      streamType: st.streamType || '-',
-    });
-  });
-
-  return Array.from(byPid.values())
-    .map((r) => ({
-      ...r,
-      roles: Array.from(r.roles).join(', '),
-      serviceRefs: Array.from(r.serviceRefs).join(', '),
-    }))
-    .sort((a, b) => a.pid - b.pid);
+function toHexPid(pid) {
+  if (!Number.isFinite(Number(pid))) return "-";
+  return `0x${Number(pid).toString(16).toUpperCase().padStart(4, "0")}`;
 }
 
 export default function TSAnalyser({ lastMessage }) {
-  const [probeMode, setProbeMode] = useState('rtp');
-  const [host, setHost] = useState('');
-  const [port, setPort] = useState('');
+  const [tab, setTab] = useState("ETR 290");
+  const [expanded, setExpanded] = useState({});
+  const [mode, setMode] = useState("rtp");
+  const [host, setHost] = useState("");
+  const [port, setPort] = useState("");
+  const [hostB, setHostB] = useState("");
+  const [portB, setPortB] = useState("");
   const [dualLeg, setDualLeg] = useState(false);
-  const [hostB, setHostB] = useState('');
-  const [portB, setPortB] = useState('');
-  const [latency, setLatency] = useState('2000');
-  const [passphrase, setPassphrase] = useState('');
-  const [resultLocal, setResultLocal] = useState(null);
-  const [resultLegB, setResultLegB] = useState(null);
-  const [dualConsolidation, setDualConsolidation] = useState(null);
-  const [probeHistory, setProbeHistory] = useState([]);
-  const [alarmLog, setAlarmLog] = useState([]);
-  const [etrView, setEtrView] = useState({
-    severity: 'unknown',
-    activeChecks: [],
-    lastEventTs: null,
-  });
-  const [persistentMonitorId, setPersistentMonitorId] = useState(() => {
-    try { return localStorage.getItem(ACTIVE_ID_KEY) || ''; } catch (_) { return ''; }
-  });
+  const [latency, setLatency] = useState("2000");
+  const [passphrase, setPassphrase] = useState("");
+  const [activeId, setActiveId] = useState("");
+  const [activeIdB, setActiveIdB] = useState("");
+  const [eventRows, setEventRows] = useState([]);
 
   const {
+    result,
     loading,
     error,
-    probe,
-    onWsResult,
     activeIds,
     resultsById,
+    probe,
+    onWsResult,
     refreshActives,
     startContinuous,
     stop,
   } = useTSAnalysis();
-
-  useEffect(() => {
-    refreshActives();
-  }, [refreshActives]);
+  const etr = useETR290();
 
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
-      if (parsed?.resultLocal) setResultLocal(parsed.resultLocal);
-      if (parsed?.resultLegB) setResultLegB(parsed.resultLegB);
-      if (parsed?.dualConsolidation) setDualConsolidation(parsed.dualConsolidation);
-      if (Array.isArray(parsed?.probeHistory)) setProbeHistory(parsed.probeHistory.slice(0, 30));
-      if (Array.isArray(parsed?.alarmLog)) setAlarmLog(parsed.alarmLog.slice(0, 60));
+      if (parsed?.mode) setMode(parsed.mode);
+      if (parsed?.host != null) setHost(parsed.host);
+      if (parsed?.port != null) setPort(parsed.port);
+      if (parsed?.hostB != null) setHostB(parsed.hostB);
+      if (parsed?.portB != null) setPortB(parsed.portB);
+      if (typeof parsed?.dualLeg === "boolean") setDualLeg(parsed.dualLeg);
+      if (parsed?.latency != null) setLatency(parsed.latency);
+      if (parsed?.passphrase != null) setPassphrase(parsed.passphrase);
+      if (parsed?.activeId) setActiveId(parsed.activeId);
+      if (parsed?.activeIdB) setActiveIdB(parsed.activeIdB);
     } catch (_) {}
   }, []);
 
@@ -322,733 +240,433 @@ export default function TSAnalyser({ lastMessage }) {
     try {
       sessionStorage.setItem(
         STORAGE_KEY,
-        JSON.stringify({
-          resultLocal,
-          resultLegB,
-          dualConsolidation,
-          probeHistory: probeHistory.slice(0, 30),
-          alarmLog: alarmLog.slice(0, 60),
-        })
+        JSON.stringify({ mode, host, port, hostB, portB, dualLeg, latency, passphrase, activeId, activeIdB })
       );
     } catch (_) {}
-  }, [resultLocal, resultLegB, dualConsolidation, probeHistory, alarmLog]);
+  }, [mode, host, port, hostB, portB, dualLeg, latency, passphrase, activeId, activeIdB]);
 
   useEffect(() => {
-    try {
-      if (persistentMonitorId) localStorage.setItem(ACTIVE_ID_KEY, persistentMonitorId);
-      else localStorage.removeItem(ACTIVE_ID_KEY);
-    } catch (_) {}
-  }, [persistentMonitorId]);
-
-  useEffect(() => {
-    if (!persistentMonitorId) return;
-    const persisted = resultsById[persistentMonitorId];
-    if (persisted) setResultLocal(persisted);
-  }, [resultsById, persistentMonitorId]);
-
-  useEffect(() => {
-    if (lastMessage) onWsResult(lastMessage);
-  }, [lastMessage, onWsResult]);
+    refreshActives();
+    etr.refreshActives();
+    etr.loadProfiles();
+  }, [refreshActives, etr.refreshActives, etr.loadProfiles]);
 
   useEffect(() => {
     if (!lastMessage) return;
-    const isAlarm =
-      lastMessage.type === 'etr290_alarm' ||
-      lastMessage.type === 'etr290_incident_started' ||
-      lastMessage.type === 'etr290_incident_updated' ||
-      lastMessage.type === 'error' ||
-      lastMessage.type === 'switched';
-    if (!isAlarm) return;
-    const ts = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
-    const priority = lastMessage.priority || (lastMessage.type === 'error' ? 'p1' : 'p2');
-    const description = lastMessage.message || lastMessage.lastMessage || '-';
-    const check = lastMessage.label || lastMessage.checkId || lastMessage.type;
-    setAlarmLog((prev) => ([
-      {
-        key: `${ts}-${lastMessage.type}-${lastMessage.id || 'system'}-${check}`,
-        ts,
-        priority,
-        check,
-        description,
-      },
-      ...prev,
-    ]).slice(0, 60));
-  }, [lastMessage]);
-
-  useEffect(() => {
-    if (!lastMessage) return;
-    const ts = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
-    if (lastMessage.type === 'etr290_status') {
-      const status = lastMessage.status || {};
-      const activeChecks = Object.keys(status).filter((k) => status[k] === 'error');
-      const hasP1 = ETR_P1_KEYS.some((k) => status[k] === 'error');
-      const hasP2 = ETR_P2_KEYS.some((k) => status[k] === 'error');
-      setEtrView({
-        severity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
-        activeChecks,
-        lastEventTs: ts,
-      });
-      return;
-    }
-    if (lastMessage.type === 'etr290_alarm') {
-      setEtrView((prev) => ({
+    onWsResult(lastMessage);
+    etr.onWsMessage(lastMessage);
+    const t = lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now();
+    if (["etr290_alarm", "etr290_status", "error", "switched"].includes(lastMessage.type)) {
+      const sev = lastMessage.priority === "p1" ? "ERROR" : lastMessage.priority === "p2" ? "WARN" : "INFO";
+      setEventRows((prev) => ([
+        {
+          key: `${t}-${lastMessage.type}-${lastMessage.id || "global"}`,
+          t,
+          sev,
+          src: lastMessage.id || "system",
+          msg: lastMessage.message || lastMessage.label || lastMessage.type,
+        },
         ...prev,
-        severity: lastMessage.priority === 'p1' ? 'critical' : 'warning',
-        lastEventTs: ts,
-      }));
+      ]).slice(0, 60));
     }
-  }, [lastMessage]);
+  }, [lastMessage, onWsResult, etr.onWsMessage]);
 
-  const builtUrl = buildProbeUrl({ mode: probeMode, host, port, latency, passphrase });
-  const builtUrlB = buildProbeUrl({ mode: probeMode, host: hostB, port: portB, latency, passphrase });
-  const successfulBitrates = probeHistory
-    .filter((r) => r.status === 'ok' && Number.isFinite(r.bitrateMbps))
-    .map((r) => r.bitrateMbps);
-  const minBitrateMbps = successfulBitrates.length ? Math.min(...successfulBitrates) : null;
-  const maxBitrateMbps = successfulBitrates.length ? Math.max(...successfulBitrates) : null;
+  const activeResult = useMemo(() => {
+    if (activeId && resultsById[activeId]) return resultsById[activeId];
+    if (result) return result;
+    if (activeIds.length > 0 && resultsById[activeIds[0]]) return resultsById[activeIds[0]];
+    return null;
+  }, [activeId, activeIds, result, resultsById]);
+
+  const activeResultB = useMemo(() => {
+    if (!activeIdB) return null;
+    return resultsById[activeIdB] || null;
+  }, [activeIdB, resultsById]);
+
+  const activeUrl = activeResult?.url || buildProbeUrl({ mode, host, port, latency, passphrase });
+  const target = parseTargetFromUrl(activeUrl);
+  const bps = toMbpsNumber(activeResult?.dvb?.bitrateBps || activeResult?.dvb?.measuredBitrateBps);
+  const packets = Number(activeResult?.dvb?.packets || activeResult?.packetCount || 0);
+  const ccErrors = Number(activeResult?.dvb?.continuityCounterErrors?.count || 0);
+  const pcrJitter = activeResult?.dvb?.pcr?.jitterMs;
+  const nullPct = activeResult?.dvb?.nullPackets?.percent;
+  const servicesCount = Number(activeResult?.dvb?.serviceCount ?? activeResult?.programs?.length ?? 0);
+  const pidsCount = Number(activeResult?.dvb?.pidCount ?? countPids(activeResult));
+  const score = activeResult?.dvb?.health?.score;
+
+  const etrStatus = useMemo(() => {
+    const byMain = activeId ? (etr.statusById[`etr-${activeId}`] || etr.statusById[activeId]) : null;
+    return byMain || etr.status || null;
+  }, [activeId, etr.status, etr.statusById]);
+
+  const etrChecks = useMemo(() => {
+    const statusMap = etrStatus?.status || {};
+    const alarms = etrStatus?.recentAlarms || [];
+    return ETR_CHECK_DEFS.map((d) => {
+      const count = alarms.filter((a) => String(a.checkId || "") === d.id || String(a.label || "").toLowerCase().includes(d.label.toLowerCase())).length;
+      const keyState = d.key ? statusMap[d.key] : undefined;
+      const ok = keyState != null ? keyState !== "error" : count === 0;
+      return { ...d, count, ok };
+    });
+  }, [etrStatus]);
+
+  const p1fail = etrChecks.filter((r) => r.p === 1 && !r.ok).length;
+  const p2fail = etrChecks.filter((r) => r.p === 2 && !r.ok).length;
+  const p3fail = etrChecks.filter((r) => r.p === 3 && !r.ok).length;
+
+  const pidRows = useMemo(() => {
+    const rows = [];
+    (activeResult?.programs || []).forEach((p) => {
+      (p.streams || []).forEach((s) => {
+        rows.push({
+          pid: toHexPid(s.pid),
+          type: (s.codecType || "data").toUpperCase(),
+          label: s.codecName || s.streamType || "-",
+          bps: s.bitrateBps ? `${(Number(s.bitrateBps) / 1000).toFixed(1)} kbps` : "-",
+          cc: 0,
+          ok: true,
+        });
+      });
+    });
+    if (rows.length === 0) return [];
+    return rows;
+  }, [activeResult]);
+
+  const programs = useMemo(() => {
+    return (activeResult?.programs || []).map((p) => ({
+      num: toHexPid(p.programId),
+      name: p.serviceName || `Service ${p.programId}`,
+      provider: p.providerName || "-",
+      running: 4,
+      scrambled: Boolean(p.scrambled),
+      eit: true,
+      streams: (p.streams || []).map((s) => ({
+        pid: toHexPid(s.pid),
+        type: (s.codecType || "data").toUpperCase(),
+        codec: s.codecName || "-",
+        kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
+      })),
+    }));
+  }, [activeResult]);
+
+  const dvbTables = useMemo(() => {
+    const services = activeResult?.dvb?.services || [];
+    return [
+      {
+        pid: "0x0000",
+        table: "PAT",
+        name: "Program Association Table",
+        ver: activeResult?.dvb?.patVersion ?? "-",
+        interval_ms: "-",
+        last_ms: "-",
+        ok: services.length > 0,
+        tsid: activeResult?.dvb?.tsid || "-",
+        desc: "Program map and PMT routing for current transport stream.",
+        entries: services.map((s) => ({ num: toHexPid(s.serviceId), pid: toHexPid(s.pmtPid), label: s.serviceName || "-" })),
+      },
+      {
+        pid: "0x0011",
+        table: "SDT",
+        name: "Service Description Table",
+        ver: "-",
+        interval_ms: "-",
+        last_ms: "-",
+        ok: services.length > 0,
+        tsid: activeResult?.dvb?.tsid || "-",
+        desc: "Service names/provider and running status from parsed service list.",
+        entries: services.map((s) => ({ num: toHexPid(s.serviceId), pid: "run:4", label: `${s.serviceName || "-"} / ${s.providerName || "-"}` })),
+      },
+      {
+        pid: "0x00PM",
+        table: "PMT",
+        name: "Program Map Tables",
+        ver: "-",
+        interval_ms: "-",
+        last_ms: "-",
+        ok: programs.length > 0,
+        tsid: "-",
+        desc: "Elementary stream inventory grouped by program.",
+        entries: programs.map((p) => ({ num: p.num, pid: `${p.streams.length} ES`, label: p.name })),
+      },
+    ];
+  }, [activeResult, programs]);
+
+  const st20227Rows = useMemo(() => {
+    const a = activeResult;
+    const b = activeResultB;
+    const rows = [];
+    if (a) {
+      rows.push({
+        leg: "A",
+        name: "Primary leg",
+        color: C.blue,
+        net: `${toMbpsNumber(a?.dvb?.bitrateBps)} Mbps`,
+        pids: Number(a?.dvb?.pidCount ?? countPids(a)),
+        svcs: Number(a?.dvb?.serviceCount ?? a?.programs?.length ?? 0),
+        src: parseTargetFromUrl(a?.url).host,
+        dst: parseTargetFromUrl(a?.url).host + ":" + parseTargetFromUrl(a?.url).port,
+        iat: a?.dvb?.arrival?.iatMs?.avg != null ? `${a.dvb.arrival.iatMs.avg} ms` : "-",
+        ok: String(a?.dvb?.smpte20227?.state || "").toLowerCase() !== "non_compliant",
+      });
+    }
+    if (b) {
+      rows.push({
+        leg: "B",
+        name: "Secondary leg",
+        color: C.red,
+        net: `${toMbpsNumber(b?.dvb?.bitrateBps)} Mbps`,
+        pids: Number(b?.dvb?.pidCount ?? countPids(b)),
+        svcs: Number(b?.dvb?.serviceCount ?? b?.programs?.length ?? 0),
+        src: parseTargetFromUrl(b?.url).host,
+        dst: parseTargetFromUrl(b?.url).host + ":" + parseTargetFromUrl(b?.url).port,
+        iat: b?.dvb?.arrival?.iatMs?.avg != null ? `${b.dvb.arrival.iatMs.avg} ms` : "-",
+        ok: String(b?.dvb?.smpte20227?.state || "").toLowerCase() !== "non_compliant",
+      });
+    }
+    if (a && b) {
+      rows.push({
+        leg: "2022-7",
+        name: "Merged stream",
+        color: C.gold,
+        net: `${toMbpsNumber(a?.dvb?.bitrateBps)} Mbps`,
+        pids: "-",
+        svcs: "-",
+        src: "-",
+        dst: "-",
+        iat: "-",
+        ok: rows.every((r) => r.ok),
+      });
+    }
+    return rows;
+  }, [activeResult, activeResultB]);
 
   const handleProbe = async (e) => {
     e.preventDefault();
-    if (!builtUrl) return;
-    if (dualLeg && !builtUrlB) return;
-    const startedAt = Date.now();
+    const urlA = buildProbeUrl({ mode, host, port, latency, passphrase });
+    if (!urlA) return;
     try {
-      const r = await probe(builtUrl);
-      let rB = null;
+      await probe(urlA);
+      const idA = activeId || `analyser-${Date.now()}`;
+      await startContinuous(idA, urlA, 5000);
+      setActiveId(idA);
+      await etr.start(`etr-${idA}`, urlA);
       if (dualLeg) {
-        rB = await probe(builtUrlB);
+        const urlB = buildProbeUrl({ mode, host: hostB, port: portB, latency, passphrase });
+        if (urlB) {
+          await probe(urlB);
+          const idB = activeIdB || `analyser-b-${Date.now()}`;
+          await startContinuous(idB, urlB, 5000);
+          setActiveIdB(idB);
+        }
       }
-      setResultLocal(r);
-      setResultLegB(rB);
-      setDualConsolidation(dualLeg ? buildDual20227Assessment(r, rB) : null);
-      setProbeHistory((prev) => ([
-        {
-          at: startedAt,
-          mode: probeMode,
-          url: dualLeg ? `${builtUrl} | ${builtUrlB}` : builtUrl,
-          status: 'ok',
-          pidCount: r?.dvb?.pidCount ?? countPids(r),
-          serviceCount: r?.dvb?.serviceCount ?? (r?.programs?.length || 0),
-          health: r?.dvb?.health?.score ?? null,
-          bitrateMbps: Number(r?.dvb?.bitrateBps) > 0 ? Number((r.dvb.bitrateBps / 1e6).toFixed(3)) : null,
-          dualState: dualLeg ? (buildDual20227Assessment(r, rB)?.state || null) : null,
-        },
-        ...prev,
-      ]).slice(0, 30));
-      if (!dualLeg) {
-        const id = persistentMonitorId || `analyser-${Date.now()}`;
-        await startContinuous(id, builtUrl, 5000);
-        setPersistentMonitorId(id);
-        try { await refreshActives(); } catch (_) {}
-      }
-    } catch (_) {
-      setResultLocal(null);
-      setResultLegB(null);
-      setDualConsolidation(null);
-      setProbeHistory((prev) => ([
-        {
-          at: startedAt,
-          mode: probeMode,
-          url: builtUrl,
-          status: 'error',
-          pidCount: null,
-          serviceCount: null,
-          health: null,
-          bitrateMbps: null,
-        },
-        ...prev,
-      ]).slice(0, 30));
+      await refreshActives();
+      await etr.refreshActives();
+    } catch (_) {}
+  };
+
+  const handleStop = async () => {
+    if (activeId) {
+      await stop(activeId);
+      try { await etr.stop(`etr-${activeId}`); } catch (_) {}
+      setActiveId("");
+    }
+    if (activeIdB) {
+      await stop(activeIdB);
+      setActiveIdB("");
     }
   };
 
-  const handleStopPersistent = async () => {
-    if (!persistentMonitorId) return;
-    try {
-      await stop(persistentMonitorId);
-    } catch (_) {}
-    setPersistentMonitorId('');
-    try { await refreshActives(); } catch (_) {}
-  };
+  const ts = new Date().toTimeString().slice(0, 8);
 
   return (
-    <div style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 16  }}>
-      {/* Header */}
-      <div>
-        <h1 style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 20, fontWeight: 700, letterSpacing: '0.01em', color: C.text  }}>
-          <Search style={{ width: 20, height: 20, color: C.cyan  }} strokeWidth={1.5} />
-          TS Analysis
-        </h1>
-        <p style={{ fontSize: 11, color: C.muted, marginTop: 4, textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 500, opacity: 0.8  }}>Compact professional TS probe and DVB evidence</p>
-      </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 12  }}>
-        {/* Left: compact input/probe */}
-        <div style={{ gridColumn: '1 / span 1'  }}>
-          <BentoCard icon={Activity} title="Probe Input">
-            <form onSubmit={handleProbe} style={{ display: 'grid', gap: 12  }}>
-
-            {/* Protocol selector */}
-            <div>
-              <label style={{ fontSize: 9, fontWeight: 600, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', paddingLeft: 4, marginBottom: 4, display: 'block'  }}>Protocol</label>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6  }}>
-                {PROBE_MODES.map(m => (
-                  <button
-                    key={m.value}
-                    type="button"
-                    onClick={() => setProbeMode(m.value)}
-                    style={{ padding: '4px 8px', borderRadius: 3, border: `1px solid ${probeMode === m.value ? C.cyan : C.border}`, textAlign: 'center', fontSize: 9, color: probeMode === m.value ? C.text : C.muted, background: probeMode === m.value ? 'rgba(0,229,255,0.12)' : C.dim, minWidth: 56 }}
-                  >
-                    <div style={{ fontWeight: 600  }}>{m.label}</div>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Host + Port */}
-            <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8  }}>
-              <div style={{ gridColumn: '1 / span 1'  }}>
-                <Field
-                  label={probeMode === 'udp' || probeMode === 'rtp' ? 'Multicast / Unicast IP *' : 'Host *'}
-                  value={host}
-                  onChange={setHost}
-                  placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.29' : '10.67.18.29'}
-                  required
-                />
-              </div>
-              <Field label="Port *" value={port} onChange={setPort} type="number" placeholder="5000" required />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8  }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: C.text  }}>
-                <input
-                  type="checkbox"
-                  checked={dualLeg}
-                  onChange={(e) => setDualLeg(e.target.checked)}
-                  style={{ accentColor: C.cyan  }}
-                />
-                Enable SMPTE ST 2022-7 dual-leg consolidation check (A + B IP)
-              </label>
-            </div>
-            {dualLeg && (
-              <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 8  }}>
-                <div style={{ gridColumn: '1 / span 1'  }}>
-                  <Field
-                    label={probeMode === 'udp' || probeMode === 'rtp' ? 'Leg B Multicast / Unicast IP *' : 'Leg B Host *'}
-                    value={hostB}
-                    onChange={setHostB}
-                    placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.30' : '10.67.18.30'}
-                    required
-                  />
-                </div>
-                <Field label="Leg B Port *" value={portB} onChange={setPortB} type="number" placeholder="5000" required />
-              </div>
-            )}
-
-            {/* SRT-only options */}
-            {probeMode === 'srt' && (
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8  }}>
-                <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
-                <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="Optional" />
-              </div>
-            )}
-
-            {/* Built URL preview */}
-            {builtUrl && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: "'Courier New',monospace", color: C.muted, background: C.dim, padding: '8px 12px', borderRadius: 3, border: `1px solid ${C.border}` }}>
-                <span style={{ color: C.head, flexShrink: 0  }}>URL:</span>
-                <span style={{ color: C.cyan, opacity: 0.7, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'  }}>{builtUrl}</span>
-              </div>
-            )}
-            {dualLeg && builtUrlB && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: "'Courier New',monospace", color: C.muted, background: C.dim, padding: '8px 12px', borderRadius: 3, border: `1px solid ${C.border}` }}>
-                <span style={{ color: C.head, flexShrink: 0  }}>URL B:</span>
-                <span style={{ color: C.cyan, opacity: 0.8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'  }}>{builtUrlB}</span>
-              </div>
-            )}
-
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap'  }}>
-            <button
-              type="submit"
-              disabled={loading || !builtUrl || (dualLeg && !builtUrlB)}
-              style={{ background: 'rgba(0,229,255,0.15)', color: C.cyan, border: `1px solid ${C.cyan}`, padding: '6px 12px', borderRadius: 3, fontWeight: 600, fontSize: 12 }}
-            >
-              {loading ? 'Probing…' : (dualLeg ? 'Probe A+B Consolidation' : 'Start Persistent Probe')}
-            </button>
-            <button
-              type="button"
-              onClick={handleStopPersistent}
-              disabled={!persistentMonitorId}
-              style={{ padding: '6px 12px', borderRadius: 3, border: `1px solid ${C.err}`, color: C.err, background: 'transparent', fontSize: 12 }}
-            >
-              Stop Probe
-            </button>
-            <button
-              type="button"
-              onClick={() => setProbeHistory([])}
-              style={{ padding: '6px 12px', borderRadius: 3, border: `1px solid ${C.border}`, color: C.muted, background: 'transparent', fontSize: 12 }}
-            >
-              Clear Log
-            </button>
-            <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: persistentMonitorId ? C.ok : C.muted }}>
-              {persistentMonitorId ? `running: ${persistentMonitorId}` : 'no persistent probe'}
+    <div style={{ fontFamily: "'Courier New',monospace", background: C.bg, color: C.text, minHeight: "100vh", padding: 8, boxSizing: "border-box", fontSize: 11 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", borderBottom: `1px solid ${C.borderHi}`, marginBottom: 8, paddingBottom: 5 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span style={{ fontSize: 14, fontWeight: 800, letterSpacing: "0.1em", color: C.cyan }}>ETR ANALYSIS</span>
+          <Badge label={activeResult ? "LIVE" : "IDLE"} color={activeResult ? C.ok : C.warn} />
+          <Badge label={target.protocol || "TS/IP"} color={C.accent} />
+          <Badge label={dualLeg ? "ST 2022-7" : "SINGLE LEG"} color={dualLeg ? C.gold : C.muted} />
+          <span style={{ color: C.muted, fontSize: 9 }}>{target.host} : {target.port} · {servicesCount} services</span>
+        </div>
+        <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+          {[["P1", p1fail === 0 ? C.ok : C.err], ["P2", p2fail === 0 ? C.ok : C.warn], ["P3", p3fail === 0 ? C.ok : C.warn], ["PCR", pcrJitter != null ? C.ok : C.warn], ["2022-7", dualLeg ? C.ok : C.muted]].map(([l, c]) => (
+            <span key={l} style={{ display: "flex", alignItems: "center", gap: 3, fontSize: 9 }}>
+              <Dot c={c} />
+              <span style={{ color: C.muted }}>{l}</span>
             </span>
-          </div>
-          {error && <p style={{ color: C.err, fontSize: 14, fontWeight: 500  }}>{error}</p>}
-        </form>
-      </BentoCard>
-        </div>
-
-        {/* Right: compact ETR view */}
-        <div style={{ gridColumn: '2 / span 1'  }}>
-          <BentoCard icon={ShieldAlert} title="ETR View">
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,minmax(0,1fr))', gap: 8, fontSize: 12, marginBottom: 8  }}>
-              <Stat label="State" value={etrView.severity} />
-              <Stat label="Last ETR" value={etrView.lastEventTs ? new Date(etrView.lastEventTs).toLocaleTimeString() : '-'} />
-            </div>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head, marginBottom: 4  }}>Active Checks</div>
-            <div style={{ border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3, padding: '6px 8px', fontSize: 12, color: C.text, fontFamily: "'Courier New',monospace", minHeight: 34 }}>
-              {etrView.activeChecks.length > 0 ? etrView.activeChecks.join(', ') : 'No active ETR checks'}
-            </div>
-            <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head, marginTop: 8, marginBottom: 4  }}>Recent ETR Alarms</div>
-            <div style={{ maxHeight: 160, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-              <table style={{ width: '100%', fontSize: 11, fontFamily: "'Courier New',monospace"  }}>
-                <thead>
-                  <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                    <th style={{ textAlign: 'left', padding: '4px 8px'  }}>Time</th>
-                    <th style={{ textAlign: 'left', padding: '4px 8px'  }}>Pri</th>
-                    <th style={{ textAlign: 'left', padding: '4px 8px'  }}>Check</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {alarmLog.slice(0, 12).map((a) => (
-                    <tr key={a.key} style={{ borderBottom: `1px solid ${C.border}` }}>
-                      <td style={{ padding: '4px 8px', color: C.muted  }}>{new Date(a.ts).toLocaleTimeString()}</td>
-                      <td style={{ padding: '4px 8px', color: toneColor(a.priority === 'p1' ? 'critical' : a.priority === 'p2' ? 'warning' : 'ok') }}>{String(a.priority || '-').toUpperCase()}</td>
-                      <td style={{ padding: '4px 8px', color: C.text, maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'  }}>{a.check}</td>
-                    </tr>
-                  ))}
-                  {alarmLog.length === 0 && (
-                    <tr><td colSpan={3} style={{ padding: '8px 8px', color: C.muted  }}>No ETR alarms in session.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </BentoCard>
+          ))}
+          <Mono v={ts} c={C.warn} size={10} />
         </div>
       </div>
 
-      <BentoCard icon={ShieldAlert} title="Probe Log">
-        {probeHistory.length === 0 ? (
-          <div style={{ fontSize: 12, color: C.muted  }}>No probe runs yet.</div>
-        ) : (
-          <div style={{ maxHeight: 160, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-            <table style={{ width: '100%', fontSize: 12, fontFamily: "'Courier New',monospace"  }}>
-              <thead>
-                <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Time</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Mode</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Target</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Status</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Services</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>PIDs</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>Health</th>
-                  <th style={{ textAlign: 'left', padding: '8px 8px'  }}>2022-7</th>
-                </tr>
-              </thead>
-              <tbody>
-                {probeHistory.map((row, idx) => (
-                  <tr key={`${row.at}-${idx}`} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: '6px 8px', color: C.muted  }}>{new Date(row.at).toLocaleTimeString()}</td>
-                    <td style={{ padding: '6px 8px', color: C.text, textTransform: 'uppercase'  }}>{row.mode}</td>
-                    <td style={{ padding: '6px 8px', color: C.muted, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'  }}>{row.url}</td>
-                    <td style={{ padding: '6px 8px', color: row.status === 'ok' ? C.ok : C.err }}>{row.status}</td>
-                    <td style={{ padding: '6px 8px', color: C.text  }}>{row.serviceCount ?? '-'}</td>
-                    <td style={{ padding: '6px 8px', color: C.text  }}>{row.pidCount ?? '-'}</td>
-                    <td style={{ padding: '6px 8px', color: C.text  }}>{row.health != null ? `${row.health}/100` : '-'}</td>
-                    <td style={{ padding: '6px 8px', color: toneColor(row.dualState || '-') }}>{row.dualState || '-'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </BentoCard>
+      <form onSubmit={handleProbe} style={{ display: "grid", gridTemplateColumns: dualLeg ? "96px 1fr 90px 1fr 90px 80px 100px auto" : "96px 1fr 90px 80px 100px auto", gap: 6, marginBottom: 8 }}>
+        <select value={mode} onChange={(e) => setMode(e.target.value)} style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28 }}>
+          <option value="rtp">RTP</option>
+          <option value="udp">UDP</option>
+          <option value="srt">SRT</option>
+        </select>
+        <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="Host/IP A" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />
+        <input value={port} onChange={(e) => setPort(e.target.value)} placeholder="Port A" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />
+        {dualLeg && <input value={hostB} onChange={(e) => setHostB(e.target.value)} placeholder="Host/IP B" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />}
+        {dualLeg && <input value={portB} onChange={(e) => setPortB(e.target.value)} placeholder="Port B" style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }} />}
+        <button type="button" onClick={() => setDualLeg((v) => !v)} style={{ height: 28, borderRadius: 3, border: `1px solid ${dualLeg ? C.gold : C.border}`, color: dualLeg ? C.gold : C.muted, background: "transparent" }}>{dualLeg ? "A+B" : "Single"}</button>
+        <button type="submit" disabled={loading} style={{ height: 28, borderRadius: 3, border: `1px solid ${C.cyan}`, color: C.cyan, background: `${C.cyan}14` }}>{loading ? "Probing..." : "Start Probe"}</button>
+        <button type="button" onClick={handleStop} style={{ height: 28, borderRadius: 3, border: `1px solid ${C.err}`, color: C.err, background: "transparent" }}>Stop</button>
+      </form>
 
-      {dualLeg && dualConsolidation && (
-        <BentoCard icon={ShieldAlert} title="SMPTE ST 2022-7 Consolidation (A/B)">
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,minmax(0,1fr))', gap: 8, fontSize: 12, marginBottom: 12  }}>
-            <Stat label="State" value={dualConsolidation.state} />
-            <Stat label="PID Matched" value={`${dualConsolidation.mapping.matchedPids}/${dualConsolidation.mapping.totalPids}`} />
-            <Stat label="IAT Offset" value={dualConsolidation.timing.iatOffsetMs != null ? `${dualConsolidation.timing.iatOffsetMs} ms` : '-'} />
-            <Stat label="Bitrate Offset" value={dualConsolidation.timing.bitrateOffsetPct != null ? `${dualConsolidation.timing.bitrateOffsetPct}%` : '-'} />
-            <Stat label="Codec Mismatch" value={String(dualConsolidation.mapping.codecMismatch)} />
+      {error && <div style={{ color: C.err, marginBottom: 8 }}>{error}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", gap: 5, marginBottom: 8 }}>
+        {[{ l: "BITRATE", v: `${bps.toFixed(3)} Mbps`, c: C.cyan }, { l: "PACKETS", v: packets.toLocaleString(), c: C.text }, { l: "CC ERRORS", v: String(ccErrors), c: ccErrors > 0 ? C.err : C.ok }, { l: "PCR JITTER", v: pcrJitter != null ? `${pcrJitter} ms` : "-", c: pcrJitter != null ? C.ok : C.muted }, { l: "NULL PKT", v: nullPct != null ? `${nullPct} %` : "-", c: C.text }, { l: "SERVICES", v: String(servicesCount), c: C.ok }, { l: "PIDs", v: String(pidsCount), c: C.text }, { l: "SCORE", v: score != null ? `${score} %` : "-", c: score != null && score >= 90 ? C.ok : C.warn }].map((s) => (
+          <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
+            <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
+            <div style={{ fontSize: 12, color: s.c, fontWeight: 700 }}>{s.v}</div>
           </div>
-          <div style={{ fontSize: 12, color: C.muted, marginBottom: 8  }}>Assessment: {dualConsolidation.reason}</div>
-          <div style={{ maxHeight: 224, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-            <table style={{ width: '100%', fontSize: 12, fontFamily: "'Courier New',monospace"  }}>
-              <thead>
-                <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PID</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PID Hex</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Leg A Codec</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Leg B Codec</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>A Program</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>B Program</th>
-                  <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Match</th>
-                </tr>
-              </thead>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${C.borderHi}`, marginBottom: 8 }}>
+        {TABS.map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.borderHi : "transparent", border: "none", borderBottom: tab === t ? `2px solid ${C.cyan}` : "2px solid transparent", color: tab === t ? C.cyan : C.muted, fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", padding: "5px 10px", cursor: "pointer", textTransform: "uppercase" }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      {tab === "ETR 290" && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 260px", gap: 6 }}>
+          <Panel title="ETR 290 Priority Checks" right="ETSI TR 101 290">
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><TH>ID</TH><TH>Priority</TH><TH>Description</TH><TH right>Count</TH><TH>Status</TH></tr></thead>
               <tbody>
-                {dualConsolidation.pidRows.map((r) => (
-                  <tr key={`pid-${r.pid}`} style={{ borderBottom: `1px solid ${C.border}` }}>
-                    <td style={{ padding: '6px 8px', color: C.text  }}>{r.pid}</td>
-                    <td style={{ padding: '6px 8px', color: C.muted  }}>{r.pidHex}</td>
-                    <td style={{ padding: '6px 8px', color: r.presentA ? C.text : C.err }}>{r.aCodec}</td>
-                    <td style={{ padding: '6px 8px', color: r.presentB ? C.text : C.err }}>{r.bCodec}</td>
-                    <td style={{ padding: '6px 8px', color: C.muted  }}>{r.aProgram}</td>
-                    <td style={{ padding: '6px 8px', color: C.muted  }}>{r.bProgram}</td>
-                    <td style={{ padding: '6px 8px', color: (r.codecMatch === false || !r.presentA || !r.presentB) ? C.err : C.ok }}>
-                      {r.presentA && r.presentB ? (r.codecMatch ? 'OK' : 'Mismatch') : 'Missing'}
-                    </td>
-                  </tr>
+                {[1, 2, 3].map((p) => (
+                  etrChecks.filter((r) => r.p === p).length ? (
+                    [
+                      <tr key={`hdr-${p}`}>
+                        <td colSpan={5} style={{ background: C.panelB, padding: "3px 4px", fontSize: 8, fontWeight: 800, color: C.head, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                          Priority {p}
+                        </td>
+                      </tr>,
+                      ...etrChecks.filter((r) => r.p === p).map((r) => (
+                        <tr key={r.id} style={{ background: !r.ok ? "rgba(255,61,87,0.05)" : "transparent" }}>
+                          <TD mono small>{r.id}</TD><TD><span style={{ color: p === 1 ? C.err : p === 2 ? C.warn : C.info, fontSize: 9 }}>P{p}</span></TD><TD>{r.label}</TD><TD right mono><span style={{ color: r.count > 0 ? C.err : C.muted }}>{r.count}</span></TD><TD><Badge label={r.ok ? "PASS" : "FAIL"} color={r.ok ? C.ok : C.err} small /></TD>
+                        </tr>
+                      )),
+                    ]
+                  ) : null
                 ))}
-                {dualConsolidation.pidRows.length === 0 && (
-                  <tr>
-                    <td colSpan={7} style={{ padding: '8px 8px', color: C.muted  }}>No PID rows available to compare.</td>
-                  </tr>
-                )}
               </tbody>
             </table>
+          </Panel>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <Panel title="PCR / Timing"><KV k="PCR PID" v={activeResult?.dvb?.pcr?.pidHex || "-"} vc={C.accent} /><KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} /><KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={C.ok} /><KV k="CC Errors" v={String(ccErrors)} vc={ccErrors > 0 ? C.err : C.ok} /></Panel>
+            <Panel title="Stream Info" status={activeResult ? "OK" : "WARN"}><KV k="Source" v={target.host} /><KV k="Protocol" v={target.protocol} vc={C.accent} /><KV k="Port" v={target.port} /><KV k="SMPTE 2022-7" v={dualLeg ? "Enabled" : "Disabled"} vc={dualLeg ? C.gold : C.muted} /></Panel>
           </div>
-        </BentoCard>
+        </div>
       )}
 
-      {/* Structure Matrix */}
-      {resultLocal && (
-        <motion.div
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          style={{ display: 'grid', gap: 16  }}
-        >
-            <BentoCard icon={ShieldAlert} title="Broadcast Operations Matrix">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6,minmax(0,1fr))', gap: 8, fontSize: 12, marginBottom: 12  }}>
-                <Stat label="Net Bitrate" value={toMbps(resultLocal?.dvb?.bitrateBps)} />
-                <Stat label="Curr Bitrate" value={toMbps(resultLocal?.dvb?.measuredBitrateBps || resultLocal?.dvb?.bitrateBps)} />
-                <Stat label="Services" value={String(resultLocal?.dvb?.serviceCount ?? resultLocal?.programs?.length ?? 0)} />
-                <Stat label="PIDs" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
-                <Stat label="CC Errors" value={String(resultLocal?.dvb?.continuityCounterErrors?.count ?? 0)} />
-                <Stat label="TS Discont" value={String(resultLocal?.dvb?.timestampDiscontinuity?.count ?? 0)} />
-              </div>
+      {tab === "ST 2022-7" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <Panel title="Joined Multicasts" right={`${st20227Rows.length} entries`}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><TH>Leg</TH><TH>Name</TH><TH>Net bitrate</TH><TH right>PIDs</TH><TH right>Svcs</TH><TH>Source</TH><TH>Destination</TH><TH>IAT avg</TH><TH>Status</TH></tr></thead>
+              <tbody>
+                {st20227Rows.map((s, i) => (
+                  <tr key={`${s.leg}-${i}`} style={{ borderLeft: `3px solid ${s.color}`, background: `${s.color}10` }}>
+                    <TD><span style={{ display: "flex", alignItems: "center", gap: 4 }}><Dot c={s.color} /><span style={{ color: s.color }}>{s.leg}</span></span></TD>
+                    <TD>{s.name}</TD><TD mono>{s.net}</TD><TD right mono>{s.pids}</TD><TD right mono>{s.svcs}</TD><TD mono>{s.src}</TD><TD mono>{s.dst}</TD><TD mono>{s.iat}</TD><TD><Badge label={s.ok ? "OK" : "FAIL"} color={s.ok ? C.ok : C.err} small /></TD>
+                  </tr>
+                ))}
+                {st20227Rows.length === 0 && <tr><TD colSpan={9}>No A/B leg data yet. Start probe in dual-leg mode.</TD></tr>}
+              </tbody>
+            </table>
+          </Panel>
+        </div>
+      )}
 
-              <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head, marginBottom: 4  }}>Joined Multicasts / Services</div>
-              <div style={{ maxHeight: 176, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-                <table style={{ width: '100%', fontSize: 11, fontFamily: "'Courier New',monospace"  }}>
-                  <thead>
-                    <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Thumb</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Name</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Service ID</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Mapping</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PMT</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PAT</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PCR</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>CC Errs</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Curr Bitrate</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Min Bitrate</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Max Bitrate</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Src Address</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Dest Address</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>TOS</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>TTL</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>VLAN ID</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>IAT Avg</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>IAT Min</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>IAT Max</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>RTP Drops</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>RTP OOO</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>FEC Mode</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Health</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>2022-7</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {(resultLocal?.dvb?.services || []).map((s, idx) => {
-                      const target = parseTargetFromUrl(resultLocal?.url);
-                      const program = (resultLocal?.programs || []).find((p) => Number(p.programId) === Number(s.serviceId));
-                      const mapping = program ? `program-${program.programId}` : (s.serviceId != null ? `service-${s.serviceId}` : '-');
-                      return (
-                        <tr key={`${s.serviceId}-${idx}`} style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <td style={{ padding: '6px 8px'  }}>
-                            {resultLocal?.thumbnailUrl ? (
-                              <img
-                                src={resultLocal.thumbnailUrl}
-                                alt="thumb"
-                                style={{ width: 40, height: 24, objectFit: 'cover', borderRadius: 3, border: `1px solid ${C.border}` }}
-                              />
-                            ) : (
-                              <span style={{ color: C.muted  }}>-</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{s.serviceName || `service-${s.serviceId || idx + 1}`}</td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{s.serviceId ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{mapping}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{s.pmtPid ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>0</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{s.pcrPid ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{resultLocal?.dvb?.continuityCounterErrors?.count ?? 0}</td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{toMbps(resultLocal?.dvb?.bitrateBps)}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{minBitrateMbps != null ? `${minBitrateMbps.toFixed(3)} Mbps` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{maxBitrateMbps != null ? `${maxBitrateMbps.toFixed(3)} Mbps` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.network?.sourceIp || '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>
-                            {resultLocal?.dvb?.arrival?.network?.destIp || (target.host && target.port ? `${target.host}:${target.port}` : '-')}
-                          </td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.network?.tos || '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.network?.ttl ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.network?.vlanId ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.iatMs?.avg != null ? `${resultLocal.dvb.arrival.iatMs.avg} ms` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.iatMs?.min != null ? `${resultLocal.dvb.arrival.iatMs.min} ms` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{resultLocal?.dvb?.arrival?.iatMs?.max != null ? `${resultLocal.dvb.arrival.iatMs.max} ms` : '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{resultLocal?.dvb?.arrival?.rtpDrops ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.text  }}>{resultLocal?.dvb?.arrival?.rtpOutOfOrder ?? '-'}</td>
-                          <td style={{ padding: '6px 8px', color: C.muted  }}>{inferFecMode(resultLocal?.url)}</td>
-                          <td style={{ padding: '6px 8px', color: toneColor(resultLocal?.dvb?.health?.severity) }}>{resultLocal?.dvb?.health?.severity || '-'}</td>
-                          <td style={{ padding: '6px 8px', color: toneColor(resultLocal?.dvb?.smpte20227?.state) }}>{resultLocal?.dvb?.smpte20227?.state || '-'}</td>
-                        </tr>
-                      );
-                    })}
-                    {(resultLocal?.dvb?.services || []).length === 0 && (
-                      <tr>
-                        <td colSpan={24} style={{ padding: '8px 8px', color: C.muted  }}>No service rows available for current probe.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
+      {tab === "DVB Tables" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          {dvbTables.map((t) => {
+            const open = Boolean(expanded[t.table]);
+            return (
+              <div key={t.table} style={{ background: C.panel, border: `1px solid ${open ? C.borderHi : C.border}`, borderRadius: 3, overflow: "hidden" }}>
+                <div onClick={() => setExpanded((e) => ({ ...e, [t.table]: !e[t.table] }))} style={{ display: "grid", gridTemplateColumns: "22px 60px 1fr 80px 90px 90px 80px 60px", gap: 8, padding: "5px 8px", cursor: "pointer", alignItems: "center", background: open ? C.panelB : C.panel }}>
+                  <span style={{ fontSize: 9, color: C.muted }}>{open ? "v" : ">"}</span>
+                  <span style={{ fontSize: 10, color: C.accent }}>{t.pid}</span>
+                  <div><span style={{ fontSize: 10, fontWeight: 700, color: t.ok ? C.cyan : C.err, marginRight: 8 }}>{t.table}</span><span style={{ fontSize: 9, color: C.muted }}>{t.name}</span></div>
+                  <span style={{ fontSize: 9, color: C.muted }}>ver {t.ver}</span>
+                  <span style={{ fontSize: 9, color: C.muted }}>int {t.interval_ms}</span>
+                  <span style={{ fontSize: 9, color: C.muted }}>last {t.last_ms}</span>
+                  <Badge label={t.ok ? "PRESENT" : "ABSENT"} color={t.ok ? C.ok : C.err} small />
+                  <span style={{ fontSize: 8, color: C.muted }}>{t.tsid !== "-" ? `TSID ${t.tsid}` : ""}</span>
+                </div>
+                {open && (
+                  <div style={{ borderTop: `1px solid ${C.borderHi}`, padding: "8px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div><div style={{ fontSize: 8, color: C.muted, marginBottom: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>Description</div><div style={{ fontSize: 10, color: C.text, lineHeight: 1.5 }}>{t.desc}</div></div>
+                    <div><div style={{ fontSize: 8, color: C.muted, marginBottom: 4, letterSpacing: "0.1em", textTransform: "uppercase" }}>Entries</div>{t.entries.length === 0 ? <span style={{ fontSize: 9, color: C.muted }}>No entries parsed</span> : t.entries.map((e, j) => <div key={`${t.table}-${j}`} style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}><Mono v={e.num} c={C.accent} size={9} /><Mono v={e.pid} c={C.muted} size={9} /><span style={{ fontSize: 9, color: C.text }}>{e.label}</span></div>)}</div>
+                  </div>
+                )}
               </div>
+            );
+          })}
+        </div>
+      )}
 
-              <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head, marginTop: 12, marginBottom: 4  }}>VBC Alarms</div>
-              <div style={{ maxHeight: 144, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-                <table style={{ width: '100%', fontSize: 11, fontFamily: "'Courier New',monospace"  }}>
-                  <thead>
-                    <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Time</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Priority</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Check</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Description</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {alarmLog.map((a) => (
-                      <tr key={a.key} style={{ borderBottom: `1px solid ${C.border}` }}>
-                        <td style={{ padding: '6px 8px', color: C.muted  }}>{new Date(a.ts).toLocaleTimeString()}</td>
-                        <td style={{ padding: '6px 8px', color: toneColor(a.priority === 'p1' ? 'critical' : a.priority === 'p2' ? 'warning' : 'ok') }}>{String(a.priority || '-').toUpperCase()}</td>
-                        <td style={{ padding: '6px 8px', color: C.text  }}>{a.check}</td>
-                        <td style={{ padding: '6px 8px', color: C.muted, maxWidth: 440, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'  }}>{a.description}</td>
-                      </tr>
-                    ))}
-                    {alarmLog.length === 0 && (
-                      <tr>
-                        <td colSpan={4} style={{ padding: '8px 8px', color: C.muted  }}>No active alarms logged in this session.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </BentoCard>
+      {tab === "PIDs" && (
+        <Panel title="PID Table" right={`${pidRows.length} PIDs`}>
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><TH>PID</TH><TH>Type</TH><TH>Description</TH><TH right>Bitrate</TH><TH right>CC Errs</TH><TH>Status</TH></tr></thead>
+            <tbody>
+              {pidRows.map((p, i) => (
+                <tr key={`pid-${i}`}>
+                  <TD mono><Mono v={p.pid} c={C.accent} size={10} /></TD><TD><Badge label={p.type} color={p.type === "VIDEO" ? C.purple : p.type === "AUDIO" ? C.info : C.head} small /></TD><TD>{p.label}</TD><TD right mono><Mono v={p.bps} c={C.cyan} size={10} /></TD><TD right mono><span style={{ color: p.cc > 0 ? C.err : C.muted }}>{p.cc}</span></TD><TD><Badge label={p.ok ? "OK" : "ERR"} color={p.ok ? C.ok : C.err} small /></TD>
+                </tr>
+              ))}
+              {pidRows.length === 0 && <tr><TD colSpan={6}>No PID inventory yet.</TD></tr>}
+            </tbody>
+          </table>
+        </Panel>
+      )}
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between'  }}>
-              <h2 style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.3em', fontWeight: 700  }}>
-                Packet Structure
-              </h2>
-              <div style={{ fontSize: 9, color: C.head, fontFamily: "'Courier New',monospace"  }}>
-                PID count: {countPids(resultLocal)}
-              </div>
-            </div>
-
-            <BentoCard icon={ShieldAlert} title="DVB Professional Summary">
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12  }}>
-                <Stat label="Standard" value={resultLocal?.dvb?.standard || 'MPEG-TS / DVB-SI'} />
-                <Stat label="Service Count" value={String(resultLocal?.dvb?.serviceCount ?? (resultLocal.programs?.length || 0))} />
-                <Stat label="PID Count" value={String(resultLocal?.dvb?.pidCount ?? countPids(resultLocal))} />
-                <Stat label="Aggregate Bitrate" value={`${((resultLocal?.dvb?.bitrateBps || 0) / 1e6).toFixed(2)} Mbps`} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="TS ID" value={String(resultLocal?.dvb?.transportStreamId ?? '-')} />
-                <Stat label="ONID" value={String(resultLocal?.dvb?.originalNetworkId ?? '-')} />
-                <Stat label="Bitrate Source" value={resultLocal?.dvb?.bitrateSource || '-'} />
-                <Stat label="Jitter" value={resultLocal?.dvb?.arrival?.jitterMs != null ? `${resultLocal.dvb.arrival.jitterMs} ms` : '-'} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="SMPTE 2022-7" value={resultLocal?.dvb?.smpte20227?.state ? String(resultLocal.dvb.smpte20227.state).replace('_', ' ') : '-'} />
-                <Stat label="2022-7 Checked" value={String(Boolean(resultLocal?.dvb?.smpte20227?.checked))} />
-                <Stat label="RTP Seq Gaps" value={String(resultLocal?.dvb?.smpte20227?.metrics?.gapEvents ?? 0)} />
-                <Stat label="RTP Reorder" value={String(resultLocal?.dvb?.smpte20227?.metrics?.reorderedEvents ?? 0)} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="Health Score" value={resultLocal?.dvb?.health?.score != null ? `${resultLocal.dvb.health.score}/100` : '-'} />
-                <Stat label="Health State" value={String(resultLocal?.dvb?.health?.severity || '-').toUpperCase()} />
-                <Stat label="Source Confidence" value={resultLocal?.dvb?.health?.sourceConfidence != null ? String(resultLocal.dvb.health.sourceConfidence) : '-'} />
-                <Stat label="TS Discontinuities" value={String(resultLocal?.dvb?.timestampDiscontinuity?.count ?? 0)} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="CC Errors" value={String(resultLocal?.dvb?.continuityCounterErrors?.count ?? 0)} />
-                <Stat label="CC PID-scoped" value={String(resultLocal?.dvb?.continuityCounterErrors?.pidScopedCount ?? 0)} />
-                <Stat label="CC Generic" value={String(resultLocal?.dvb?.continuityCounterErrors?.genericCount ?? 0)} />
-                <Stat label="CC Last Message" value={(resultLocal?.dvb?.continuityCounterErrors?.lastMessages || []).slice(-1)[0] || '-'} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="Dolby E Detected" value={String(Boolean(resultLocal?.dvb?.dolbyE?.detected))} />
-                <Stat label="Dolby E Decoded" value={String(Boolean(resultLocal?.dvb?.dolbyE?.decoded))} />
-                <Stat label="Dolby E Frames" value={resultLocal?.dvb?.dolbyE?.frameCount != null ? String(resultLocal.dvb.dolbyE.frameCount) : '-'} />
-                <Stat label="Dolby E Error" value={resultLocal?.dvb?.dolbyE?.error || '-'} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="Health Notes" value={(resultLocal?.dvb?.health?.reasons || []).slice(0, 1)[0] || '-'} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="2022-7 Notes" value={resultLocal?.dvb?.smpte20227?.reason || '-'} />
-              </div>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,minmax(0,1fr))', gap: 8, fontSize: 12, marginTop: 8  }}>
-                <Stat label="SI NIT" value={resultLocal?.dvb?.si?.compliance?.nit === undefined ? '-' : String(resultLocal.dvb.si.compliance.nit)} />
-                <Stat label="SI SDT" value={resultLocal?.dvb?.si?.compliance?.sdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.sdt)} />
-                <Stat label="SI EIT p/f" value={resultLocal?.dvb?.si?.compliance?.eitPf === undefined ? '-' : String(resultLocal.dvb.si.compliance.eitPf)} />
-                <Stat label="SI TDT" value={resultLocal?.dvb?.si?.compliance?.tdt === undefined ? '-' : String(resultLocal.dvb.si.compliance.tdt)} />
-              </div>
-              {(resultLocal?.dvb?.services?.length || 0) > 0 && (
-                <div style={{ marginTop: 12, overflowX: 'auto'  }}>
-                  <table style={{ width: '100%', fontSize: 12, fontFamily: "'Courier New',monospace"  }}>
-                    <thead>
-                      <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                        <th style={{ textAlign: 'left', padding: '6px 0'  }}>SID</th>
-                        <th style={{ textAlign: 'left', padding: '6px 0'  }}>Service</th>
-                        <th style={{ textAlign: 'left', padding: '6px 0'  }}>Provider</th>
-                        <th style={{ textAlign: 'left', padding: '6px 0'  }}>PMT PID</th>
-                        <th style={{ textAlign: 'left', padding: '6px 0'  }}>PCR PID</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {resultLocal.dvb.services.map((s, i) => (
-                        <tr key={`${s.serviceId}-${i}`} style={{ borderBottom: `1px solid ${C.border}` }}>
-                          <td style={{ padding: '6px 0', color: C.text  }}>{s.serviceId}</td>
-                          <td style={{ padding: '6px 0', color: C.text  }}>{s.serviceName || '-'}</td>
-                          <td style={{ padding: '6px 0', color: C.muted  }}>{s.serviceProvider || '-'}</td>
-                          <td style={{ padding: '6px 0' }}><PidBadge pid={s.pmtPid} pidHex={s.pmtPidHex} /></td>
-                          <td style={{ padding: '6px 0' }}><PidBadge pid={s.pcrPid} pidHex={s.pcrPidHex} /></td>
-                        </tr>
-                      ))}
-                    </tbody>
+      {tab === "Programs" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          {programs.map((p) => (
+            <Panel key={p.num} title={`${p.name} · ${p.num}`} status={p.scrambled ? "SCRAMBLED" : "FTA"} right={p.provider}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 12 }}>
+                <div><KV k="Program Num" v={p.num} vc={C.accent} /><KV k="Service Name" v={p.name} vc={C.cyan} /><KV k="Provider" v={p.provider} /><KV k="Running" v={p.running === 4 ? "Running" : "Not running"} vc={C.ok} /><KV k="Scrambled" v={p.scrambled ? "YES" : "NO"} vc={p.scrambled ? C.err : C.ok} /></div>
+                <div>
+                  <div style={{ fontSize: 8, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Elementary Streams</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead><tr><TH>PID</TH><TH>Stream Type</TH><TH>Codec</TH><TH right>Bitrate</TH></tr></thead>
+                    <tbody>{p.streams.map((s, j) => <tr key={`${p.num}-${j}`}><TD mono><Mono v={s.pid} c={C.accent} size={10} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
                   </table>
                 </div>
-              )}
-            </BentoCard>
-
-            <BentoCard icon={ShieldAlert} title="Full DVB PID Table">
-              <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head, marginBottom: 4  }}>
-                Explicit PID inventory (PAT/PMT/PCR + elementary streams)
               </div>
-              <div style={{ maxHeight: 288, overflow: 'auto', border: `1px solid ${C.border}`, background: C.dim, borderRadius: 3 }}>
-                <table style={{ width: '100%', fontSize: 12, fontFamily: "'Courier New',monospace"  }}>
-                  <thead>
-                    <tr style={{ color: C.head, borderBottom: `1px solid ${C.border}` }}>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PID</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>PID Hex</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Roles</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Service / Program</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Codec</th>
-                      <th style={{ textAlign: 'left', padding: '6px 8px'  }}>Stream Type</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {buildDvbPidInventory(resultLocal).map((row) => (
-                      <tr key={`full-pid-${row.pid}`} style={{ borderBottom: `1px solid ${C.border}` }}>
-                        <td style={{ padding: '6px 8px', color: C.text  }}>{row.pid}</td>
-                        <td style={{ padding: '6px 8px'  }}><PidBadge pid={row.pid} pidHex={row.pidHex} /></td>
-                        <td style={{ padding: '6px 8px', color: C.text  }}>{row.roles}</td>
-                        <td style={{ padding: '6px 8px', color: C.muted  }}>{row.serviceRefs || '-'}</td>
-                        <td style={{ padding: '6px 8px', color: C.text  }}>{row.codecName || '-'}</td>
-                        <td style={{ padding: '6px 8px', color: C.muted  }}>{row.streamType || '-'}</td>
-                      </tr>
-                    ))}
-                    {buildDvbPidInventory(resultLocal).length === 0 && (
-                      <tr>
-                        <td colSpan={6} style={{ padding: '8px 8px', color: C.muted  }}>No PID inventory available from this probe.</td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </BentoCard>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12  }}>
-              {resultLocal.programs?.map(prog => (
-                <ProgramBlock key={prog.programId} prog={prog} />
-              ))}
-
-              {resultLocal.orphanStreams?.length > 0 && (
-                <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: 20, position: 'relative', overflow: 'hidden' }}>
-                  <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.05), transparent)', opacity: 0, pointerEvents: 'none'  }} />
-                  <h3 style={{ fontSize: 11, fontWeight: 700, color: C.head, textTransform: 'uppercase', letterSpacing: '0.12em', marginBottom: 16  }}>Orphan Matrix</h3>
-                  <div style={{ display: 'grid', gap: 4, position: 'relative', zIndex: 10  }}>
-                    {resultLocal.orphanStreams.map(s => <StreamRow key={s.index} stream={s} />)}
-                  </div>
-                </div>
-              )}
-            </div>
-        </motion.div>
+            </Panel>
+          ))}
+          {programs.length === 0 && <Panel title="Programs"><span style={{ color: C.muted }}>No program map parsed yet.</span></Panel>}
+        </div>
       )}
 
-    </div>
-  );
-}
+      {tab === "Event Log" && (
+        <Panel title="Event Log" right="live">
+          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <thead><tr><TH>Time</TH><TH>Severity</TH><TH>Source</TH><TH>Event</TH></tr></thead>
+            <tbody>
+              {eventRows.map((e) => {
+                const c = e.sev === "ERROR" ? C.err : e.sev === "WARN" ? C.warn : C.info;
+                return <tr key={e.key}><TD mono><Mono v={new Date(e.t).toLocaleTimeString()} c={C.muted} size={9} /></TD><TD><Badge label={e.sev} color={c} small /></TD><TD><span style={{ fontSize: 9, color: C.muted }}>{e.src}</span></TD><TD><span style={{ fontSize: 10, color: C.text }}>{e.msg}</span></TD></tr>;
+              })}
+              {eventRows.length === 0 && <tr><TD colSpan={4}>No events yet.</TD></tr>}
+            </tbody>
+          </table>
+        </Panel>
+      )}
 
-function ProgramBlock({ prog }) {
-  return (
-    <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: 12, position: 'relative', overflow: 'hidden' }}>
-      <div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(135deg, rgba(255,255,255,0.05), transparent)', opacity: 0, pointerEvents: 'none'  }} />
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, position: 'relative', zIndex: 10  }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12  }}>
-          <span style={{ fontSize: 11, fontWeight: 700, color: C.text, textTransform: 'uppercase', letterSpacing: '0.1em'  }}>
-            Program {prog.programId}
-            {prog.name && <span style={{ marginLeft: 8, color: C.muted, opacity: 0.7  }}>— {prog.name}</span>}
-          </span>
-        </div>
-        <div style={{ display: 'flex', gap: 12, fontSize: 9, fontFamily: "'Courier New',monospace", color: C.head  }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6  }}>PMT <PidBadge pid={prog.pmtPid} pidHex={prog.pmtPidHex} /></span>
-          <span style={{ display: 'flex', alignItems: 'center', gap: 6  }}>PCR <PidBadge pid={prog.pcrPid} pidHex={prog.pcrPidHex} /></span>
-        </div>
+      <div style={{ marginTop: 8, borderTop: `1px solid ${C.border}`, paddingTop: 5, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        <span style={{ fontSize: 9, color: C.muted }}>LABOTECH ETR · SMPTE ST 2022-7 · ETSI TR 101 290 · DVB SI/PSI</span>
+        <Mono v={`upd ${ts} · pkts ${packets.toLocaleString()}`} c={C.dim} size={9} />
       </div>
-      <div style={{ display: 'grid', gap: 4, position: 'relative', zIndex: 10  }}>
-        {prog.streams?.map(s => <StreamRow key={s.index} stream={s} />)}
-      </div>
-    </div>
-  );
-}
-
-function StreamRow({ stream: s }) {
-  const typeColor = {
-    video: C.accent,
-    audio: C.ok,
-    data: C.warn,
-  }[s.codecType] || C.muted;
-
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, padding: '2px 0', borderBottom: `1px solid ${C.border}` }}>
-      <PidBadge pid={s.pid} pidHex={s.pidHex} />
-      <span style={{ width: 48, fontWeight: 600, color: typeColor }}>{s.codecType}</span>
-      <span style={{ color: C.text, width: 64  }}>{s.codecName}</span>
-      {s.width && <span style={{ color: C.muted  }}>{s.width}×{s.height}</span>}
-      {s.fps && <span style={{ color: C.muted  }}>{formatFps(s.fps)} fps</span>}
-      {s.sampleRate && <span style={{ color: C.muted  }}>{s.sampleRate}Hz {s.channels}ch</span>}
-      {s.bitrate && <span style={{ color: C.muted  }}>{(s.bitrate / 1000000).toFixed(2)} Mbps</span>}
-      {s.streamType && <span style={{ color: C.head  }}>{s.streamType}</span>}
-      {s.language && <span style={{ color: C.head  }}>[{s.language}]</span>}
-    </div>
-  );
-}
-
-function Stat({ label, value }) {
-  return (
-    <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: '4px 8px' }}>
-      <div style={{ fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', color: C.head }}>{label}</div>
-      <div style={{ fontFamily: "'Courier New',monospace", color: C.text, marginTop: 2 }}>{value}</div>
     </div>
   );
 }

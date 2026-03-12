@@ -413,11 +413,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         <Badge label="RUNNING" color={C.ok} filled />
       </div>
 
-      <div style={{ padding: 8, display: "grid", gridTemplateColumns: "300px 1fr 280px", gap: 8 }}>
+      <div style={{ padding: 10, display: "grid", gridTemplateColumns: "360px 1fr 320px", gap: 10 }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <PanelBox>
-            <SectionHead icon="⚙" title="Decoder Provisioning (Compact)" />
-            <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <SectionHead icon="⚙" title="Decoder Provisioning" />
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 12 }}>
               <div style={{ display: "flex", gap: 4 }}>
                 {PROBE_MODES.map((v) => (
                   <button
@@ -440,7 +440,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </div>
 
               {decoderRows.map((row) => (
-                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1fr 100px 1fr 80px", gap: 6, alignItems: "end" }}>
+                <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1fr 112px 1fr 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
                     <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono />
                   </Field>
@@ -454,7 +454,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     onClick={() => removeDecoderRow(row.key)}
                     disabled={decoderRows.length <= 1}
                     style={{
-                      height: 32,
+                      height: 34,
                       borderRadius: 2,
                       border: `1px solid ${C.err}`,
                       color: C.err,
@@ -483,7 +483,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 + Add row
               </button>
 
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Capture NIC (optional)">
                   <Input value={captureNic} onChange={(e) => setCaptureNic(e.target.value)} placeholder="eno2" mono />
                 </Field>
@@ -497,7 +497,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </div>
 
               {mode === "srt" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                   <Field label="Latency (ms)">
                     <Input value={latency} onChange={(e) => setLatency(e.target.value)} mono />
                   </Field>
@@ -518,7 +518,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </label>
 
               {use20227 && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 1fr", gap: 8 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 1fr", gap: 10 }}>
                   <Field label="Leg B Host / IP">
                     <Input value={legBHost} onChange={(e) => setLegBHost(e.target.value)} placeholder="239.100.25.30" mono />
                   </Field>
@@ -533,7 +533,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
               <PanelBox style={{ borderColor: C.borderHi }}>
                 <SectionHead icon="🧪" title="ETR 290 Tuning" right={<Badge label="LIVE CONFIG" color={C.warn} small />} />
-                <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 9 }}>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     <Field label="Saved profile">
                       <Select
@@ -575,9 +575,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     Allow alarms without PID evidence
                   </label>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 4 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 6 }}>
                     {ETR_CHECK_FIELDS.map((c) => (
-                      <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 54px", gap: 4, alignItems: "center", background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "3px 5px" }}>
+                      <div key={c.id} style={{ display: "grid", gridTemplateColumns: "1fr 60px", gap: 5, alignItems: "center", background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "4px 6px" }}>
                         <span style={{ fontSize: 9, color: C.muted }}>{c.label}</span>
                         <Input
                           value={thresholds[c.id]}
@@ -588,7 +588,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     ))}
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                     <Field label="Profile name">
                       <Input value={profileName} onChange={(e) => setProfileName(e.target.value)} placeholder="sports-low-latency" />
                     </Field>

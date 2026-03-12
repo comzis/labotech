@@ -82,6 +82,8 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
   const [displayMeanDb, setDisplayMeanDb] = useState(null);
   const [audioSeenAt, setAudioSeenAt] = useState(0);
   const levelPct = audioPercent(displayMeanDb);
+  const showAudioFill = displayMeanDb != null;
+  const audioFillPct = showAudioFill ? Math.max(levelPct, 2) : 12;
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -223,9 +225,11 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
             <div
               className="h-full transition-all duration-300"
               style={{
-                width: `${levelPct}%`,
-                background: levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55',
-                boxShadow: levelPct > 5 ? `0 0 5px ${levelPct > 75 ? '#ff223388' : levelPct > 45 ? '#ffaa0088' : '#00dd5588'}` : 'none',
+                width: `${audioFillPct}%`,
+                background: showAudioFill
+                  ? (levelPct > 75 ? '#ff2233' : levelPct > 45 ? '#ffaa00' : '#00dd55')
+                  : '#3e506a',
+                boxShadow: showAudioFill && levelPct > 5 ? `0 0 5px ${levelPct > 75 ? '#ff223388' : levelPct > 45 ? '#ffaa0088' : '#00dd5588'}` : 'none',
               }}
             />
           </div>
