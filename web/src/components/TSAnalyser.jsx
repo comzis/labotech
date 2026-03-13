@@ -25,7 +25,7 @@ const C = {
   head: "#6a7fa8",
 };
 
-const TABS = ["ETR 290", "ST 2022-7", "DVB Tables", "PIDs", "Programs", "Event Log"];
+const TABS = ["ETR 290", "ST 2022-7", "Arrival Quality", "DVB Tables", "PIDs", "Programs", "Event Log"];
 const STORAGE_KEY = "labotech:ts-analyser:v2";
 
 const ETR_CHECK_DEFS = [
@@ -203,6 +203,21 @@ function fmtNumber(value, digits = 2) {
   return n != null ? n.toFixed(digits) : null;
 }
 
+function arrivalHealth(row) {
+  if (!row || !row.hasMetrics) return { label: "NO DATA", color: C.muted };
+  const critical =
+    (row.iatP95 != null && row.iatP95 >= 150) ||
+    (row.jitter != null && row.jitter >= 15) ||
+    (row.lossPct != null && row.lossPct >= 1.0);
+  if (critical) return { label: "FAIL", color: C.err };
+  const warning =
+    (row.iatP95 != null && row.iatP95 >= 50) ||
+    (row.jitter != null && row.jitter >= 5) ||
+    (row.lossPct != null && row.lossPct >= 0.1);
+  if (warning) return { label: "WARN", color: C.warn };
+  return { label: "PASS", color: C.ok };
+}
+
 function stableText(v) {
   return String(v || "").toLowerCase();
 }
@@ -361,6 +376,12 @@ export default function TSAnalyser({ lastMessage }) {
   const packets = Number(activeResult?.dvb?.packets || activeResult?.packetCount || 0);
   const ccErrors = Number(activeResult?.dvb?.continuityCounterErrors?.count || 0);
   const pcrJitter = activeResult?.dvb?.pcr?.jitterMs;
+  const pcrPidLike =
+    activeResult?.dvb?.pcr?.pid ??
+    activeResult?.dvb?.pcr?.pidHex ??
+    activeResult?.dvb?.services?.[0]?.pcrPid ??
+    activeResult?.programs?.[0]?.pcrPid ??
+    null;
   const nullPct = activeResult?.dvb?.nullPackets?.percent;
   const servicesCount = Number(activeResult?.dvb?.serviceCount ?? activeResult?.programs?.length ?? 0);
   const pidsCount = Number(activeResult?.dvb?.pidCount ?? countPids(activeResult));
@@ -542,6 +563,62 @@ export default function TSAnalyser({ lastMessage }) {
     }
     return rows;
   }, [activeResult, activeResultB]);
+
+  const arrivalRows = useMemo(() => {
+    return monitoredIds
+      .map((id) => {
+        const r = resultsById[id];
+        const arrival = r?.dvb?.arrival || null;
+        const diag = r?.dvb?.probeDiagnostics?.iatSniffer || null;
+        const iat = arrival?.iatMs || {};
+        const captureMethod = String(arrival?.captureMethod || diag?.captureMethod || "unavailable").toLowerCase();
+        const iatAvg = toFiniteNumber(iat.avg);
+        const iatP95 = toFiniteNumber(iat.p95);
+        const jitter = toFiniteNumber(arrival?.jitterMs);
+        const lossPct = toFiniteNumber(arrival?.packetLossPct);
+        const sampleCount = Number(arrival?.sampleCount ?? diag?.sampleCount ?? 0) || 0;
+        const hasMetrics = iatAvg != null || iatP95 != null || jitter != null || lossPct != null;
+        return {
+          id,
+          captureMethod,
+          sampleCount,
+          iatAvg,
+          iatP95,
+          jitter,
+          lossPct,
+          hasMetrics,
+          error: diag?.error || null,
+          health: arrivalHealth({ iatP95, jitter, lossPct, hasMetrics }),
+        };
+      })
+      .sort((a, b) => a.id.localeCompare(b.id));
+  }, [monitoredIds, resultsById]);
+
+  const arrivalKpis = useMemo(() => {
+    const withMetrics = arrivalRows.filter((r) => r.hasMetrics);
+    const avg = (list, key) => {
+      const vals = list.map((r) => r[key]).filter((v) => v != null);
+      if (!vals.length) return null;
+      return vals.reduce((s, v) => s + v, 0) / vals.length;
+    };
+    const nicCount = arrivalRows.filter((r) => r.captureMethod === "tshark" || r.captureMethod === "tcpdump").length;
+    const unavailableCount = arrivalRows.filter((r) => r.captureMethod === "unavailable").length;
+    const failCount = arrivalRows.filter((r) => r.health.label === "FAIL").length;
+    const warnCount = arrivalRows.filter((r) => r.health.label === "WARN").length;
+    const passCount = arrivalRows.filter((r) => r.health.label === "PASS").length;
+    return {
+      monitored: arrivalRows.length,
+      withMetrics: withMetrics.length,
+      iatP95Avg: avg(withMetrics, "iatP95"),
+      jitterAvg: avg(withMetrics, "jitter"),
+      lossAvg: avg(withMetrics, "lossPct"),
+      nicCount,
+      unavailableCount,
+      failCount,
+      warnCount,
+      passCount,
+    };
+  }, [arrivalRows]);
 
   const makeMonitorId = (base = "analyser") => {
     const clean = String(base || "")
@@ -813,7 +890,7 @@ export default function TSAnalyser({ lastMessage }) {
             <Panel title="PCR / Timing">
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0", borderBottom: `1px solid ${C.border}` }}>
                 <span style={{ fontSize: 9, color: C.muted }}>PCR PID</span>
-                <PidRef pidLike={activeResult?.dvb?.pcr?.pid ?? activeResult?.dvb?.pcr?.pidHex} color={C.accent} />
+                <PidRef pidLike={pcrPidLike} color={C.accent} />
               </div>
               <KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} />
               <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={pcrJitter != null && pcrJitter > 5 ? C.warn : C.ok} />
@@ -887,6 +964,55 @@ export default function TSAnalyser({ lastMessage }) {
                   </tr>
                 ))}
                 {st20227Rows.length === 0 && <tr><TD colSpan={9}>No A/B leg data yet. Start probe in dual-leg mode.</TD></tr>}
+              </tbody>
+            </table>
+          </Panel>
+        </div>
+      )}
+
+      {tab === "Arrival Quality" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", gap: 5 }}>
+            {[
+              { l: "MONITORED", v: String(arrivalKpis.monitored), c: C.text },
+              { l: "WITH METRICS", v: String(arrivalKpis.withMetrics), c: arrivalKpis.withMetrics > 0 ? C.ok : C.warn },
+              { l: "IAT P95 AVG", v: arrivalKpis.iatP95Avg != null ? `${arrivalKpis.iatP95Avg.toFixed(2)} ms` : "-", c: arrivalKpis.iatP95Avg != null && arrivalKpis.iatP95Avg >= 50 ? C.warn : C.ok },
+              { l: "JITTER AVG", v: arrivalKpis.jitterAvg != null ? `${arrivalKpis.jitterAvg.toFixed(2)} ms` : "-", c: arrivalKpis.jitterAvg != null && arrivalKpis.jitterAvg >= 5 ? C.warn : C.ok },
+              { l: "LOSS AVG", v: arrivalKpis.lossAvg != null ? `${arrivalKpis.lossAvg.toFixed(3)} %` : "-", c: arrivalKpis.lossAvg != null && arrivalKpis.lossAvg >= 0.1 ? C.warn : C.ok },
+              { l: "NIC CAPTURE", v: String(arrivalKpis.nicCount), c: arrivalKpis.nicCount > 0 ? C.cyan : C.muted },
+              { l: "UNAVAILABLE", v: String(arrivalKpis.unavailableCount), c: arrivalKpis.unavailableCount > 0 ? C.warn : C.ok },
+              { l: "HEALTH", v: `${arrivalKpis.passCount}/${arrivalKpis.warnCount}/${arrivalKpis.failCount}`, c: arrivalKpis.failCount > 0 ? C.err : arrivalKpis.warnCount > 0 ? C.warn : C.ok },
+            ].map((s) => (
+              <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
+                <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
+                <div style={{ fontSize: 12, color: s.c, fontWeight: 700 }}>{s.v}</div>
+              </div>
+            ))}
+          </div>
+          <Panel title="Per-Lane Arrival Telemetry" right={`${arrivalRows.length} lanes`}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr><TH>Lane</TH><TH>Capture</TH><TH right>Samples</TH><TH right>IAT avg</TH><TH right>IAT p95</TH><TH right>Jitter</TH><TH right>Loss</TH><TH>Status</TH><TH>Diagnostics</TH></tr></thead>
+              <tbody>
+                {arrivalRows.map((r) => (
+                  <tr key={`arrival-${r.id}`} style={{ background: r.health.label === "FAIL" ? `${C.err}12` : r.health.label === "WARN" ? `${C.warn}12` : "transparent" }}>
+                    <TD mono>{r.id}</TD>
+                    <TD>
+                      <Badge
+                        label={r.captureMethod === "tshark" || r.captureMethod === "tcpdump" ? `NIC-${r.captureMethod}` : r.captureMethod === "tsduck" ? "ANALYSER" : "UNAVAILABLE"}
+                        color={r.captureMethod === "tshark" || r.captureMethod === "tcpdump" ? C.cyan : r.captureMethod === "tsduck" ? C.warn : C.muted}
+                        small
+                      />
+                    </TD>
+                    <TD right mono>{r.sampleCount}</TD>
+                    <TD right mono>{r.iatAvg != null ? `${r.iatAvg.toFixed(2)} ms` : "-"}</TD>
+                    <TD right mono>{r.iatP95 != null ? `${r.iatP95.toFixed(2)} ms` : "-"}</TD>
+                    <TD right mono>{r.jitter != null ? `${r.jitter.toFixed(2)} ms` : "-"}</TD>
+                    <TD right mono>{r.lossPct != null ? `${r.lossPct.toFixed(3)} %` : "-"}</TD>
+                    <TD><Badge label={r.health.label} color={r.health.color} small /></TD>
+                    <TD><span style={{ fontSize: 9, color: C.muted }}>{r.error ? r.error : "-"}</span></TD>
+                  </tr>
+                ))}
+                {arrivalRows.length === 0 && <tr><TD colSpan={9}>No active arrival telemetry lanes yet.</TD></tr>}
               </tbody>
             </table>
           </Panel>
