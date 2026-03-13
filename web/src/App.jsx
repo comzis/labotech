@@ -17,15 +17,7 @@ import { ServiceStatusBadge } from './components/BroadcastUI';
 
 // Per-tab LED colours (Evertz-style coloured buttons)
 const TABS = [
-  { id: 'analyse',    label: 'TS Analyser', icon: Search,      led: '#cc44ff' },
-  { id: 'streams',    label: 'Runtime',     icon: Activity,    led: '#00dd55' },
-  { id: 'transcode',  label: 'Transcoder',  icon: Radio,       led: '#ffaa00' },
-  { id: 'multicast',  label: 'Forwarding',  icon: Network,     led: '#2299ff' },
-  { id: 'decoder',    label: 'Decoder',     icon: Cpu,         led: '#00ddff' },
-  { id: 'decoders',   label: 'Multiview',   icon: Monitor,     led: '#00ddaa' },
-  { id: 'streamView', label: 'Live View',   icon: LineChart,   led: '#66ccff' },
-  { id: 'alarms',     label: 'Alarm Log',   icon: ShieldCheck, led: '#ff5577' },
-  { id: 'api',        label: 'API',         icon: Terminal,    led: '#aaaaaa' },
+  { id: 'streams', label: 'SRT Encapsulator', icon: Activity, led: '#00dd55' },
 ];
 
 function cpuColor(pct) {
@@ -58,7 +50,7 @@ const LOGIN_PROFILES = {
   admin: { password: 'labotech', role: ROLES.BES },
   evc: { password: 'evcpass', role: ROLES.OPS },
 };
-const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
+const OPS_HIDDEN_TABS = new Set();
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
@@ -417,7 +409,7 @@ function LcdValue({ label, value, color }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState('analyse');
+  const [tab, setTab] = useState('streams');
   const [authUser, setAuthUser] = useState(null);
   const [role, setRole] = useState(null);
   const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
@@ -473,7 +465,7 @@ export default function App() {
 
   useEffect(() => {
     if (!visibleTabs.some((t) => t.id === tab)) {
-      setTab(visibleTabs[0]?.id || 'analyse');
+      setTab(visibleTabs[0]?.id || 'streams');
     }
   }, [visibleTabs, tab]);
 

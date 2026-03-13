@@ -5,6 +5,11 @@ const { spawn } = require('child_process');
 const path = require('path');
 const { THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 const { normalizeVideoCodec, normalizeAudioCodec, normalizeVideoProfile } = require('./codec-support');
+const {
+  buildHaivisionCallerUrl,
+  parseHaivisionStatsLine,
+  classifyHaivisionLink,
+} = require('./haivision-srt');
 
 // ─── Bitrate normalisation ───────────────────────────────────────────────────
 // Accepts plain numbers and appends the correct unit so FFmpeg never sees
@@ -120,6 +125,7 @@ class SRTEncoder extends EventEmitter {
     this.isRunning = false;
     this.lastStats = null;   // FFmpeg encode metrics
     this.srtStats = null;   // Haivision libsrt connection stats
+    this.srtLink = { status: 'unknown', reason: 'not started', updatedAt: null };
     this.startTime = null;
     this.inputBitrate = null;
     this.inputBitrateSource = null;
@@ -184,14 +190,15 @@ class SRTEncoder extends EventEmitter {
 
   // ─── SRT caller URL with Haivision stats parameters ────────────────────────
   buildSRTUrl() {
-    // Host is sanitized in constructor; always build canonical SRT URL here.
-    // stats=1 + statsintvl=1 tells libsrt to emit periodic [srt-stats] lines.
-    let url = `srt://${this.host}:${this.port}?mode=caller&latency=${this.latency}&stats=1&statsintvl=1`;
-
-    if (this.passphrase) url += `&passphrase=${encodeURIComponent(this.passphrase)}&pbkeylen=${this.pbkeylen}`;
-    if (this.streamId) url += `&streamid=${encodeURIComponent(this.streamId)}`;
-    if (this.adapter) url += `&adapter=${encodeURIComponent(this.adapter)}`;
-    return url;
+    return buildHaivisionCallerUrl({
+      host: this.host,
+      port: this.port,
+      latency: this.latency,
+      passphrase: this.passphrase,
+      pbkeylen: this.pbkeylen,
+      streamId: this.streamId,
+      adapter: this.adapter,
+    });
   }
 
   // ─── Full FFmpeg argument chain ─────────────────────────────────────────────
@@ -417,6 +424,7 @@ class SRTEncoder extends EventEmitter {
     this.isRunning = true;
     this.startTime = Date.now();
     this._stderrBuffer = [];
+    this.srtLink = { status: 'starting', reason: 'awaiting first haivision sample', updatedAt: new Date().toISOString() };
 
     this.process.stderr.on('data', (data) => {
       data.toString().split('\n').forEach(line => {
@@ -428,6 +436,7 @@ class SRTEncoder extends EventEmitter {
 
     this.process.on('exit', (code, signal) => {
       this.isRunning = false;
+      this.srtLink = { status: 'stopped', reason: 'process exited', updatedAt: new Date().toISOString() };
       if (typeof this._stopInputBitrateWatcher === 'function') {
         this._stopInputBitrateWatcher();
       }
@@ -668,44 +677,25 @@ class SRTEncoder extends EventEmitter {
     // ── 2. Haivision libsrt statistics ──────────────────────────────────────
     // Format (emitted by libsrt when stats=1 is set):
     // [srt-stats] rate=12.34Mbps bw=50.00Mbps rtt=42.1ms total=1234pkts retrans=0pkts loss=0pkts nak=0pkts
-    if (line.includes('srt-stats')) {
-      const mRate = line.match(/rate=([\d.]+)Mbps/i);
-      const mBw = line.match(/bw=([\d.]+)Mbps/i);
-      const mRtt = line.match(/rtt=([\d.]+)ms/i);
-      const mTotal = line.match(/total=(\d+)/i);
-      const mRetrans = line.match(/retrans=(\d+)/i);
-      const mLoss = line.match(/loss=(\d+)/i);
-      const mNak = line.match(/nak=(\d+)/i);   // NAK counter
-
-      const srt = {};
-      if (mRate) srt.rateMbps = parseFloat(mRate[1]);
-      if (mBw) srt.bwMbps = parseFloat(mBw[1]);
-      if (mRtt) srt.rttMs = parseFloat(mRtt[1]);
-      if (mTotal) srt.pktTotal = parseInt(mTotal[1]);
-      if (mRetrans) srt.pktRetrans = parseInt(mRetrans[1]);
-      if (mLoss) srt.pktLoss = parseInt(mLoss[1]);
-      if (mNak) srt.pktNak = parseInt(mNak[1]);  // Negative Acknowledgements
-
-      // Derived loss %
-      if (srt.pktTotal > 0 && srt.pktLoss !== undefined) {
-        srt.lossPercent = parseFloat(
-          ((srt.pktLoss / srt.pktTotal) * 100).toFixed(2)
-        );
-      }
-
-      if (Object.keys(srt).length > 0) {
-        this.srtStats = srt;
-        this.emit('srtStats', srt);
-        // srt-stats rateMbps is the OUTPUT SRT send rate.
-        // Only use it as an input-bitrate proxy when no direct measurement is available.
-        if (srt.rateMbps && srt.rateMbps > 0) {
-          const kbps = Math.round(srt.rateMbps * 1000);
-          const noDirectMeasure = !this.inputBitrateSource || this.inputBitrateSource === 'srt-stats';
-          if (noDirectMeasure && kbps !== this.inputBitrate) {
-            this.inputBitrate = kbps;
-            this.inputBitrateSource = 'srt-stats';
-            this.emit('stats', { inputBitrate: this.inputBitrate });
-          }
+    const srt = parseHaivisionStatsLine(line);
+    if (srt) {
+      this.srtStats = srt;
+      const link = classifyHaivisionLink(srt);
+      this.srtLink = {
+        status: link.status,
+        reason: link.reason,
+        updatedAt: new Date().toISOString(),
+      };
+      this.emit('srtStats', { ...srt, link: this.srtLink });
+      // srt-stats rateMbps is the OUTPUT SRT send rate.
+      // Only use it as an input-bitrate proxy when no direct measurement is available.
+      if (srt.rateMbps && srt.rateMbps > 0) {
+        const kbps = Math.round(srt.rateMbps * 1000);
+        const noDirectMeasure = !this.inputBitrateSource || this.inputBitrateSource === 'srt-stats';
+        if (noDirectMeasure && kbps !== this.inputBitrate) {
+          this.inputBitrate = kbps;
+          this.inputBitrateSource = 'srt-stats';
+          this.emit('stats', { inputBitrate: this.inputBitrate });
         }
       }
     }
@@ -728,6 +718,7 @@ class SRTEncoder extends EventEmitter {
       inputBitrateWatchAttempts: this._inputBitrateWatchAttempts || 0,
       inputStreams: this.inputStreams || null,
       srtStats: this.srtStats,
+      srtLink: this.srtLink,
       encodeProfile: {
         videoCodec: this.videoCodec,
         videoBitrate: this.videoBitrate,

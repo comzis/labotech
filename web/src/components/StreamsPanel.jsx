@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
-import { stopStream, stopTranscoder } from '../api';
+import { stopStream } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
@@ -46,18 +46,15 @@ const PidRef = ({ pid }) => (
 );
 
 export default function StreamsPanel({ lastMessage }) {
-  const { streams, transcoders, loading, error, refresh } = useStreams();
+  const { streams, loading, error, refresh } = useStreams();
 
   useEffect(() => {
-    if (lastMessage?.type === 'stopped' || lastMessage?.type === 'transcode_stopped') {
-      refresh();
-    }
+    if (lastMessage?.type === 'stopped') refresh();
   }, [lastMessage, refresh]);
 
-  const handleStop = async (id, isTranscoder) => {
+  const handleStop = async (id) => {
     try {
-      if (isTranscoder) await stopTranscoder(id);
-      else await stopStream(id);
+      await stopStream(id);
     } catch (err) {
       if (!err.message.includes('404') && !err.message.toLowerCase().includes('not found')) {
         toast.error(`Failed to stop ${id}: ${err.message}`);
@@ -66,16 +63,19 @@ export default function StreamsPanel({ lastMessage }) {
     refresh();
   };
 
-  const all = [
-    ...streams.map(s => ({ ...s, _type: 'encoder' })),
-    ...transcoders.map(t => ({ ...t, _type: 'transcoder' })),
-  ];
-
-  const running = all.filter(s => s.isRunning);
-  const stopped = all.filter(s => !s.isRunning);
+  const running = streams.filter((s) => s.isRunning);
+  const stopped = streams.filter((s) => !s.isRunning);
 
   const clearStopped = async () => {
-    await Promise.all(stopped.map(s => handleStop(s.id, s._type === 'transcoder')));
+    await Promise.all(stopped.map((s) => handleStop(s.id)));
+  };
+
+  const linkTone = (s) => {
+    const status = s?.srtLink?.status;
+    if (status === 'healthy') return 'text-green-300 border-green-700/40 bg-green-900/40';
+    if (status === 'degraded') return 'text-yellow-300 border-yellow-700/40 bg-yellow-900/40';
+    if (status === 'critical') return 'text-red-300 border-red-700/40 bg-red-900/40';
+    return 'text-gray-400 border-gray-700/40 bg-gray-900/40';
   };
 
   return (
@@ -96,9 +96,9 @@ export default function StreamsPanel({ lastMessage }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Activity size={16} color={C.ok} />
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em' }}>Runtime Operations</div>
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em' }}>SRT Encapsulator Operations</div>
               <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Process Monitoring & Service Health
+                Haivision SRT Link Health and Throughput
               </div>
             </div>
           </div>
@@ -122,7 +122,7 @@ export default function StreamsPanel({ lastMessage }) {
             </button>
           ) : (
             <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-              Running {running.length} / Total {all.length}
+              Running {running.length} / Total {streams.length}
             </div>
           )}
         </div>
@@ -130,12 +130,12 @@ export default function StreamsPanel({ lastMessage }) {
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
         {error && <p className="text-red-400  text-sm">{error}</p>}
 
-        {!loading && all.length === 0 && (
-          <p className="text-gray-600 text-sm">No active streams.</p>
+        {!loading && streams.length === 0 && (
+          <p className="text-gray-600 text-sm">No active encapsulation channels.</p>
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-          {all.map(s => {
+          {streams.map(s => {
             const mode = s.outputMode || 'srt';
             const dvb = s.dvb;
             return (
@@ -168,21 +168,19 @@ export default function StreamsPanel({ lastMessage }) {
                     <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${MODE_STYLE[mode] || MODE_STYLE.srt}`}>
                       {mode}
                     </span>
-                    {s._type === 'transcoder' && (
-                      <span className="text-[10px] bg-purple-900 text-purple-300 px-1.5 py-0.5 rounded border border-purple-700/40">
-                        {s.presetName || 'transcode'}
-                      </span>
-                    )}
+                    <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${linkTone(s)}`}>
+                      Link {s?.srtLink?.status || 'unknown'}
+                    </span>
                     {s.isRunning ? (
                       <button
-                        onClick={() => handleStop(s.id, s._type === 'transcoder')}
+                        onClick={() => handleStop(s.id)}
                         className="text-xs bg-red-900 hover:bg-red-800 text-red-300 px-2 py-1 rounded transition-colors"
                       >
-                        Stop Process
+                        Stop Channel
                       </button>
                     ) : (
                       <button
-                        onClick={() => handleStop(s.id, s._type === 'transcoder')}
+                        onClick={() => handleStop(s.id)}
                         className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded transition-colors"
                       >
                         Delete
@@ -238,6 +236,16 @@ export default function StreamsPanel({ lastMessage }) {
                     ? formatMbps(s.lastStats?.bitrate)
                     : s.isRunning ? 'pending' : '-'}
                 </div>
+                {s.srtStats && (
+                  <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
+                    <div className="rounded border border-cyan-700/30 bg-cyan-950/20 px-2 py-1 text-cyan-300">
+                      RTT {Number.isFinite(Number(s.srtStats.rttMs)) ? `${s.srtStats.rttMs}ms` : '-'} · Loss {Number.isFinite(Number(s.srtStats.lossPercent)) ? `${s.srtStats.lossPercent}%` : '-'}
+                    </div>
+                    <div className="rounded border border-blue-700/30 bg-blue-950/20 px-2 py-1 text-blue-300">
+                      Rate {Number.isFinite(Number(s.srtStats.rateMbps)) ? `${s.srtStats.rateMbps}Mbps` : '-'} · BW {Number.isFinite(Number(s.srtStats.bwMbps)) ? `${s.srtStats.bwMbps}Mbps` : '-'}
+                    </div>
+                  </div>
+                )}
 
                 {/* Audio pairs summary */}
                 {s.audioPairs?.length > 0 && (
@@ -251,7 +259,7 @@ export default function StreamsPanel({ lastMessage }) {
                   </div>
                 )}
 
-                {/* Encoding profile */}
+                {/* Encapsulation profile */}
                 {s.encodeProfile && (
                   <div className="flex flex-wrap gap-1">
                     <span className="text-[10px] font-mono bg-purple-900/40 text-purple-300 px-1.5 py-0.5 rounded border border-purple-700/40">

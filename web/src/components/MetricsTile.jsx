@@ -186,6 +186,22 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
               <Metric label="BW Avail"  value={srtStats.bwMbps   != null ? `${srtStats.bwMbps}Mbps`    : '—'} color="text-sky-300"                 />
               <Metric label="Send Rate" value={srtStats.rateMbps != null ? `${srtStats.rateMbps}Mbps`  : '—'} color="text-indigo-300"              />
             </div>
+            {srtStats.link?.status && (
+              <div className="text-[10px] uppercase tracking-wide text-gray-500">
+                Link status:
+                <span className={
+                  srtStats.link.status === 'healthy'
+                    ? ' text-green-400'
+                    : srtStats.link.status === 'degraded'
+                      ? ' text-yellow-400'
+                      : srtStats.link.status === 'critical'
+                        ? ' text-red-400'
+                        : ' text-gray-400'
+                }>
+                  {` ${srtStats.link.status}`}
+                </span>
+              </div>
+            )}
             <div className="grid grid-cols-4 gap-2 text-xs">
               <Metric label="Total"   value={srtStats.pktTotal   ?? '—'} color="text-gray-400"   />
               <Metric label="Retrans" value={srtStats.pktRetrans ?? '—'} color="text-orange-400" />
