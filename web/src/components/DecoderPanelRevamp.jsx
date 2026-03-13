@@ -465,7 +465,13 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
   const addDecoderRow = () => setDecoderRows((rows) => [...rows, newDecoderRow()]);
   const removeDecoderRow = (rowKey) => {
-    setDecoderRows((rows) => (rows.length <= 1 ? rows : rows.filter((r) => r.key !== rowKey)));
+    setDecoderRows((rows) => {
+      if (rows.length <= 1) {
+        // Keep one provisioning row available at all times; clear instead of removing.
+        return rows.map((r) => (r.key === rowKey ? { ...r, host: "", port: "", decoderId: "" } : r));
+      }
+      return rows.filter((r) => r.key !== rowKey);
+    });
   };
 
   const startRows = async (plansToStart) => {
@@ -672,7 +678,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
-                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="239.100.25.29" mono style={{ color: C.muted }} />
+                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="Host / IP" mono style={{ color: C.muted }} />
                   </Field>
                   <Field label="Port">
                     <Input
@@ -706,17 +712,20 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   </button>
                   <button
                     onClick={() => removeDecoderRow(row.key)}
-                    disabled={decoderRows.length <= 1}
+                    disabled={busy}
                     style={{
                       height: 34,
                       borderRadius: 2,
-                      border: `1px solid ${C.err}`,
-                      color: C.err,
+                      border: `1px solid ${decoderRows.length <= 1 ? "#ff7a86" : C.err}`,
+                      color: decoderRows.length <= 1 ? "#ff7a86" : C.err,
                       background: "transparent",
                       fontSize: 10,
+                      cursor: busy ? "not-allowed" : "pointer",
+                      opacity: busy ? 0.5 : 1,
                     }}
+                    title={decoderRows.length <= 1 ? "Clears this provisioning row (running decoders are stopped via STOP)." : "Removes this provisioning row."}
                   >
-                    Remove
+                    {decoderRows.length <= 1 ? "Clear" : "Remove"}
                   </button>
                 </div>
               ))}
@@ -752,7 +761,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     opacity: busy ? 0.5 : 1,
                   }}
                 >
-                  {busy ? "STARTING…" : "▶ START BATCH"}
+                  {busy ? "STARTING…" : use20227 ? "▶ START 2022-7 (A+B)" : "▶ START BATCH"}
                 </button>
                 <button
                   onClick={stopDecoder}
@@ -816,7 +825,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {use20227 && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 120px 1fr", gap: 10 }}>
                   <Field label="Leg B Host / IP">
-                    <Input value={legBHost} onChange={(e) => setLegBHost(e.target.value)} placeholder="239.100.25.30" mono />
+                    <Input value={legBHost} onChange={(e) => setLegBHost(e.target.value)} placeholder="Host / IP B" mono />
                   </Field>
                   <Field label="Leg B Port">
                     <Input value={legBPort} onChange={(e) => setLegBPort(e.target.value)} placeholder="Port B" mono />
