@@ -430,14 +430,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
       e.category === 'runtime_started' ||
       e.category === 'analyse_result'
     );
-    if (activityEvents.length === 0) {
+    const nonBootstrapActivityEvents = activityEvents.filter((e) => !e?.evidence?.bootstrap);
+    const activitySource = nonBootstrapActivityEvents.length > 0 ? nonBootstrapActivityEvents : activityEvents;
+    if (activitySource.length === 0) {
       return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
     }
-    const firstActiveTs = activityEvents[0].ts;
+    const firstActiveTs = activitySource[0].ts;
     const stopAfterActive = sorted.find((e) =>
       (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
     );
-    const lastActivityTs = activityEvents[activityEvents.length - 1]?.ts || firstActiveTs;
+    const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     // If the lane is currently active (no stop and freshness extends to window end),
     // render a continuous baseline over the selected window so operators do not see
@@ -486,6 +488,9 @@ function buildEventBlocks(events, timeStart, windowMs) {
     // Suppress nominal analyse heartbeat blocks; they create misleading
     // gray/green segmentation when lane baseline already indicates state.
     .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
+    // Synthetic "bootstrap started" markers are only lane-seeding helpers
+    // and should not render as visible event blocks.
+    .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
       const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
