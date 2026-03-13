@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart } from 'lucide-react';
+import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart, LogIn, Lock } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
 import StreamsPanel from './components/StreamsPanel';
 import TranscodePanel from './components/TranscodePanel';
@@ -35,14 +35,34 @@ function cpuColor(pct) {
   return '#00dd55';
 }
 
+function formatUptime(seconds) {
+  const s = Number(seconds);
+  if (!Number.isFinite(s) || s < 0) return 'n/a';
+  const total = Math.floor(s);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const mins = Math.floor((total % 3600) / 60);
+  const secs = total % 60;
+  if (days > 0) return `${days}d ${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
+  return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
+
 const INACTIVE_TAB_COLOR = '#7a7a7a';
 const ROLE_STORAGE_KEY = 'labotech:role:v1';
+const AUTH_STORAGE_KEY = 'labotech:auth-user:v1';
 const ROLES = {
   BES: 'bes',
   OPS: 'ops',
 };
+const LOGIN_PROFILES = {
+  admin: { password: 'labotech', role: ROLES.BES },
+  evc: { password: 'evcpass', role: ROLES.OPS },
+};
 const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
+const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
+const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
+const BUILD_TIME_UTC = import.meta.env.VITE_BUILD_TIME_UTC || null;
 const RACK_LOBBY_PUNCHLINES = [
   'check PCR before panic',
   'blame cables only after coffee',
@@ -50,9 +70,33 @@ const RACK_LOBBY_PUNCHLINES = [
   'first fix timing, then feelings',
 ];
 
-function LandingRoleSelect({ onSelectRole }) {
+function LandingAuth({ onLogin }) {
+  const [showForm, setShowForm] = useState(false);
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+
+  const submit = (e) => {
+    e.preventDefault();
+    const res = onLogin(username, password);
+    if (!res?.ok) {
+      setError('Invalid credentials');
+      return;
+    }
+    setError('');
+  };
+
   return (
-    <div className="min-h-screen flex items-center justify-center px-3 xl:px-6" style={{ background: 'transparent' }}>
+    <div
+      className="min-h-screen flex items-center justify-center px-3 xl:px-6"
+      style={{
+        backgroundImage:
+          'linear-gradient(180deg, rgba(8,12,18,0.45), rgba(7,10,16,0.78)), url("/broadcast-rack-bays.svg")',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        backgroundRepeat: 'no-repeat',
+      }}
+    >
       <div
         className="w-full max-w-[1800px] min-h-[700px] rounded-md border relative overflow-hidden flex flex-col"
         style={{
@@ -123,6 +167,7 @@ function LandingRoleSelect({ onSelectRole }) {
             />
           ))}
           <span className="ml-auto text-[8px] uppercase tracking-[0.16em] text-gray-500">Rack Interface MkII</span>
+          <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>{RELEASE_VERSION}</span>
         </div>
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1f27, #3a4656 20%, #3a4656 80%, #1a1f27)' }} />
 
@@ -136,7 +181,7 @@ function LandingRoleSelect({ onSelectRole }) {
                 Broadcast Engine Control Room
               </div>
               <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#4f5f78' }}>
-                Select operating profile
+                Secure operator access
               </div>
             </div>
             <img
@@ -149,38 +194,84 @@ function LandingRoleSelect({ onSelectRole }) {
           </div>
           <div className="mb-10 border-t" style={{ borderColor: '#212c3d' }} />
 
-          <div className="grid md:grid-cols-2 gap-5 my-6">
-            <button
-              onClick={() => onSelectRole(ROLES.BES)}
-              className="text-left rounded-sm border px-5 py-5 transition-all relative overflow-hidden"
-              style={{
-                borderColor: '#4c3568',
-                background: 'linear-gradient(180deg, #1b1425 0%, #120f1a 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 14px rgba(204,68,255,0.18)',
-              }}
-            >
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #7d4abf, #cc44ff, #7d4abf)' }} />
-              <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#cc9cff' }}>BES Mode</div>
-              <div className="text-[12px] text-gray-200 font-bold mb-1">Broadcast Engineering Suite</div>
-              <div className="text-[10px] text-gray-400">Full rack controls: Runtime, Transcoder, Forwarding, Decoder, API, diagnostics.</div>
-              <div className="mt-3 text-[8px] uppercase tracking-[0.14em]" style={{ color: '#7a8fb0' }}>Engineering deep mode</div>
-            </button>
-
-            <button
-              onClick={() => onSelectRole(ROLES.OPS)}
-              className="text-left rounded-sm border px-5 py-5 transition-all relative overflow-hidden"
-              style={{
-                borderColor: '#29634c',
-                background: 'linear-gradient(180deg, #102119 0%, #0d1712 100%)',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 14px rgba(0,221,85,0.16)',
-              }}
-            >
-              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #2f8a60, #00dd55, #2f8a60)' }} />
-              <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#8de8af' }}>OPS Mode</div>
-              <div className="text-[12px] text-gray-200 font-bold mb-1">Operations Wall</div>
-              <div className="text-[10px] text-gray-400">Focused view: TS analyser, decoder, multiview, live timeline, alarms.</div>
-              <div className="mt-3 text-[8px] uppercase tracking-[0.14em]" style={{ color: '#7a8fb0' }}>Mission control mode</div>
-            </button>
+          <div className="my-6 rounded-sm border p-5" style={{ borderColor: '#2c3b52', background: 'linear-gradient(180deg, #162233, #101a29)' }}>
+            {!showForm ? (
+              <div className="flex flex-col items-start gap-4">
+                <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: '#8ba3c7' }}>
+                  Secure access gate
+                </div>
+                <div className="text-[20px] font-black uppercase tracking-[0.12em] leading-none" style={{ color: '#c8dcff' }}>
+                  Control Room Access
+                </div>
+                <div className="text-[11px] text-gray-300 max-w-[720px]">
+                  Use your operator credentials to enter the shared engineering and operations workspace.
+                </div>
+                <button
+                  onClick={() => setShowForm(true)}
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-sm text-[10px] uppercase tracking-[0.14em] font-bold border"
+                  style={{
+                    color: '#d4e5ff',
+                    borderColor: '#3a5a86',
+                    background: 'linear-gradient(180deg, #183151, #12243b)',
+                  }}
+                >
+                  <LogIn className="w-3.5 h-3.5" />
+                  Enter Labotech
+                </button>
+              </div>
+            ) : (
+              <form onSubmit={submit} className="grid md:grid-cols-3 gap-3 items-end">
+                <label className="block">
+                  <div className="text-[9px] uppercase tracking-[0.14em] mb-1" style={{ color: '#7f99bf' }}>Username</div>
+                  <input
+                    value={username}
+                    onChange={(e) => setUsername(e.target.value)}
+                    className="w-full px-3 py-2 rounded-sm border text-[11px] bg-black/30 text-gray-200"
+                    style={{ borderColor: '#2f425f' }}
+                    placeholder="admin or evc"
+                    autoFocus
+                  />
+                </label>
+                <label className="block">
+                  <div className="text-[9px] uppercase tracking-[0.14em] mb-1" style={{ color: '#7f99bf' }}>Password</div>
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full px-3 py-2 rounded-sm border text-[11px] bg-black/30 text-gray-200"
+                    style={{ borderColor: '#2f425f' }}
+                    placeholder="••••••••"
+                  />
+                </label>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="submit"
+                    className="inline-flex items-center gap-2 px-4 py-2 rounded-sm text-[10px] uppercase tracking-[0.14em] font-bold border"
+                    style={{
+                      color: '#d4e5ff',
+                      borderColor: '#3a5a86',
+                      background: 'linear-gradient(180deg, #183151, #12243b)',
+                    }}
+                  >
+                    <Lock className="w-3.5 h-3.5" />
+                    Unlock
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowForm(false); setError(''); }}
+                    className="px-3 py-2 rounded-sm text-[9px] uppercase tracking-[0.12em] border"
+                    style={{ color: '#8ca5ca', borderColor: '#2b3a50', background: '#0b1320' }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+                {error && (
+                  <div className="md:col-span-3 text-[10px]" style={{ color: '#ff7686' }}>
+                    {error}
+                  </div>
+                )}
+              </form>
+            )}
           </div>
 
           <div
@@ -327,10 +418,14 @@ function LcdValue({ label, value, color }) {
 
 export default function App() {
   const [tab, setTab] = useState('analyse');
+  const [authUser, setAuthUser] = useState(null);
   const [role, setRole] = useState(null);
   const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
+  const [serverUptimeSec, setServerUptimeSec] = useState(null);
+  const [uptimeSampledAtMs, setUptimeSampledAtMs] = useState(null);
+  const [uptimeNowMs, setUptimeNowMs] = useState(Date.now());
   const [eventLog, setEventLog] = useState([]);
   const [alarmUnreadCritical, setAlarmUnreadCritical] = useState(0);
   const [lobbyLineIdx, setLobbyLineIdx] = useState(() => Math.floor(Math.random() * RACK_LOBBY_PUNCHLINES.length));
@@ -346,9 +441,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    const timer = setInterval(() => setUptimeNowMs(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
     try {
+      const savedUser = sessionStorage.getItem(AUTH_STORAGE_KEY);
       const saved = sessionStorage.getItem(ROLE_STORAGE_KEY);
-      if (saved === ROLES.BES || saved === ROLES.OPS) setRole(saved);
+      const profile = savedUser ? LOGIN_PROFILES[savedUser] : null;
+      if (profile) setAuthUser(savedUser);
+      if ((saved === ROLES.BES || saved === ROLES.OPS) && profile) setRole(saved);
+      else if (profile) setRole(profile.role);
     } catch (_) {}
   }, []);
 
@@ -359,20 +463,41 @@ export default function App() {
     return TABS;
   }, [role]);
 
+  const uptimeDisplay = useMemo(() => {
+    if (!Number.isFinite(serverUptimeSec)) return 'n/a';
+    const elapsedSec = Number.isFinite(uptimeSampledAtMs)
+      ? Math.max(0, Math.floor((uptimeNowMs - uptimeSampledAtMs) / 1000))
+      : 0;
+    return formatUptime(serverUptimeSec + elapsedSec);
+  }, [serverUptimeSec, uptimeSampledAtMs, uptimeNowMs]);
+
   useEffect(() => {
     if (!visibleTabs.some((t) => t.id === tab)) {
       setTab(visibleTabs[0]?.id || 'analyse');
     }
   }, [visibleTabs, tab]);
 
-  const handleSelectRole = (nextRole) => {
-    setRole(nextRole);
-    try { sessionStorage.setItem(ROLE_STORAGE_KEY, nextRole); } catch (_) {}
+  const handleLogin = (usernameRaw, passwordRaw) => {
+    const username = String(usernameRaw || '').trim().toLowerCase();
+    const password = String(passwordRaw || '');
+    const profile = LOGIN_PROFILES[username];
+    if (!profile || profile.password !== password) return { ok: false };
+    setAuthUser(username);
+    setRole(profile.role);
+    try {
+      sessionStorage.setItem(AUTH_STORAGE_KEY, username);
+      sessionStorage.setItem(ROLE_STORAGE_KEY, profile.role);
+    } catch (_) {}
+    return { ok: true };
   };
 
   const handleResetRole = () => {
+    setAuthUser(null);
     setRole(null);
-    try { sessionStorage.removeItem(ROLE_STORAGE_KEY); } catch (_) {}
+    try {
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+      sessionStorage.removeItem(ROLE_STORAGE_KEY);
+    } catch (_) {}
   };
 
   // ── Broadcast event toasts ────────────────────────────────────────────────
@@ -466,7 +591,11 @@ export default function App() {
     const load = async () => {
       try {
         const h = await getHealth();
-        if (mounted) setTelemetry(h.telemetry || null);
+        if (mounted) {
+          setTelemetry(h.telemetry || null);
+          setServerUptimeSec(Number.isFinite(Number(h?.uptime)) ? Number(h.uptime) : null);
+          setUptimeSampledAtMs(Date.now());
+        }
       } catch (_) {}
     };
     load();
@@ -481,8 +610,8 @@ export default function App() {
     setTab('decoder');
   };
 
-  if (!role) {
-    return <LandingRoleSelect onSelectRole={handleSelectRole} />;
+  if (!authUser || !role) {
+    return <LandingAuth onLogin={handleLogin} />;
   }
 
   return (
@@ -624,6 +753,20 @@ export default function App() {
             </div>
           )}
 
+          <div
+            className="hidden xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
+            style={{
+              background: '#101723',
+              border: '1px solid #2a3950',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+            }}
+            title={BUILD_TIME_UTC ? `Build: ${BUILD_TIME_UTC}` : 'Build metadata'}
+          >
+            <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Release</span>
+            <span className="text-[9px] font-bold" style={{ color: '#cfe2ff' }}>{RELEASE_VERSION}</span>
+            <span className="text-[8px]" style={{ color: '#6f86aa' }}>Uptime {uptimeDisplay}</span>
+          </div>
+
           {/* ── Connection status LED ───────────────────────────────────── */}
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-sm shrink-0"
@@ -659,9 +802,9 @@ export default function App() {
               background: 'linear-gradient(180deg, #0d1520, #0a1018)',
               boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px rgba(80,120,180,0.15)',
             }}
-            title={`Return to landing page (${RACK_LOBBY_PUNCHLINES[lobbyLineIdx]})`}
+            title={`Log out and return to landing page (${RACK_LOBBY_PUNCHLINES[lobbyLineIdx]})`}
           >
-            <span className="shrink-0">↩ Rack Lobby</span>
+            <span className="shrink-0">↩ Logout ({authUser})</span>
             <span
               className="hidden 2xl:inline truncate text-right ml-2"
               style={{ color: '#6f86aa' }}
