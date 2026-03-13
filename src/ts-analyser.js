@@ -42,9 +42,10 @@ const SMPTE_2022_7_THRESHOLDS = {
 };
 const AUDIO_LEVEL_HOLD_MS = Math.max(1000, Math.floor(_envNumber('AUDIO_LEVEL_HOLD_MS', 15000)));
 const LIVE_INPUT_HINTS = {
-  fifoSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_FIFO_SIZE', 10000000))),
+  // Conservative defaults avoid ENOMEM on constrained hosts.
+  fifoSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_FIFO_SIZE', 524288))),
   timeoutUs: Math.max(1, Math.floor(_envNumber('TS_INPUT_TIMEOUT_US', 7000000))),
-  reorderQueueSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_REORDER_QUEUE_SIZE', 1024))),
+  reorderQueueSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_REORDER_QUEUE_SIZE', 256))),
 };
 function _getNicName() {
   if (_multicastConfig) return _multicastConfig.nic || 'eno2';
@@ -130,14 +131,24 @@ class TSAnalyser extends EventEmitter {
           try {
             raw = await runFfprobeJson(primaryUrl);
           } catch (primaryErr) {
-            // RTP multicast feeds often need UDP/mpegts probing for one-shot ffprobe.
-            if (!this._isRtpUrl(this.url)) throw primaryErr;
-            const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
-            if (!udpUrl) throw primaryErr;
-            try {
-              raw = await runFfprobeJson(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
-            } catch (fallbackErr) {
-              throw new Error(`${primaryErr.message} | RTP UDP fallback failed: ${fallbackErr.message}`);
+            if (this._isLiveInputHintMemoryError(primaryErr)) {
+              // Host cannot allocate hinted UDP buffers; retry without hints.
+              raw = await runFfprobeJson(this.url);
+            } else {
+              // RTP multicast feeds often need UDP/mpegts probing for one-shot ffprobe.
+              if (!this._isRtpUrl(this.url)) throw primaryErr;
+              const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
+              if (!udpUrl) throw primaryErr;
+              try {
+                raw = await runFfprobeJson(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+              } catch (fallbackErr) {
+                if (this._isLiveInputHintMemoryError(fallbackErr)) {
+                  const plainUdp = this._rtpToUdpUrl(this.url) || '';
+                  raw = await runFfprobeJson(plainUdp, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+                } else {
+                  throw new Error(`${primaryErr.message} | RTP UDP fallback failed: ${fallbackErr.message}`);
+                }
+              }
             }
           }
 
@@ -1475,6 +1486,11 @@ class TSAnalyser extends EventEmitter {
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
+  }
+
+  _isLiveInputHintMemoryError(err) {
+    const msg = String((err && err.message) || '').toLowerCase();
+    return msg.includes('cannot allocate memory') || msg.includes('enomem');
   }
 
   _isRtpUrl(url) {
