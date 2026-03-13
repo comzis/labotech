@@ -756,11 +756,14 @@ class TSAnalyser extends EventEmitter {
       streamType,
       width: s.width || null,
       height: s.height || null,
-      fps: s.avg_frame_rate || null,
+      fps: this._parseFrameRate(s.avg_frame_rate || s.r_frame_rate),
       bitrate: this._parseBitrate(s.bit_rate),
       sampleRate: s.sample_rate || null,
       channels: s.channels || null,
       language: s.tags && s.tags['language'] || null,
+      fieldOrder: s.field_order || null,
+      scanType: this._scanTypeFromFieldOrder(s.field_order),
+      pixFmt: s.pix_fmt || null,
       colorSpace: s.color_space || null,
       colorTrc: s.color_transfer || null,
       colorPrimaries: s.color_primaries || null,
@@ -791,6 +794,32 @@ class TSAnalyser extends EventEmitter {
     if (/^\d+$/.test(str)) return parseInt(str, 10);
     const n = parseInt(str.replace(/[^\d]/g, ''), 10);
     return Number.isFinite(n) ? n : null;
+  }
+
+  _parseFrameRate(raw) {
+    if (raw === undefined || raw === null) return null;
+    const str = String(raw).trim();
+    if (!str || str.toUpperCase() === 'N/A') return null;
+    if (/^\d+(\.\d+)?$/.test(str)) return Number(str);
+    const frac = str.match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (frac) {
+      const num = Number(frac[1]);
+      const den = Number(frac[2]);
+      if (Number.isFinite(num) && Number.isFinite(den) && den > 0) {
+        return num / den;
+      }
+    }
+    return null;
+  }
+
+  _scanTypeFromFieldOrder(fieldOrder) {
+    if (!fieldOrder) return null;
+    const f = String(fieldOrder).toLowerCase();
+    if (f === 'progressive') return 'progressive';
+    if (f.includes('tt') || f.includes('tb') || f.includes('top')) return 'interlaced_tff';
+    if (f.includes('bb') || f.includes('bt') || f.includes('bottom')) return 'interlaced_bff';
+    if (f.includes('interlac')) return 'interlaced';
+    return null;
   }
 
   _mergeStreamInfo(globalStream, programStream) {

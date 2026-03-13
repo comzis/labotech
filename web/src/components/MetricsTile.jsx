@@ -9,6 +9,25 @@ const MAX_HISTORY = 60;
 const rttColor  = ms  => !ms  ? 'text-gray-500' : ms  < 30  ? 'text-green-400' : ms  < 80  ? 'text-yellow-400' : 'text-red-400';
 const lossColor = pct => !pct && pct !== 0 ? 'text-gray-500' : pct === 0 ? 'text-green-400' : pct < 1 ? 'text-yellow-400' : 'text-red-400';
 
+function parseFpsValue(value) {
+  if (value === undefined || value === null) return null;
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) return n;
+  const s = String(value).trim();
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!frac) return null;
+  const num = Number(frac[1]);
+  const den = Number(frac[2]);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return null;
+  const out = num / den;
+  return Number.isFinite(out) && out > 0 ? out : null;
+}
+
+function toFinite(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inputBitrateMeasuring: initInputBitrateMeasuring = false, lastMessage }) {
   const [history,      setHistory]      = useState([]);
   const [current,      setCurrent]      = useState(stats || null);
@@ -57,12 +76,13 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
   }, [initInputBitrateMeasuring]);
 
   // Broadcast standard: display TS bitrate in Mbps
-  const mbps      = current?.bitrate ? (current.bitrate / 1000).toFixed(2) : null;
+  const bitrateNum = toFinite(current?.bitrate);
+  const mbps      = bitrateNum != null && bitrateNum > 0 ? (bitrateNum / 1000).toFixed(2) : null;
   const normalizedInput = Number(inputBitrate);
   const inputMbps = Number.isFinite(normalizedInput) && normalizedInput > 0
     ? (normalizedInput / 1000).toFixed(2)
     : null;
-  const fps    = current?.fps     ? current.fps     : null;
+  const fps    = parseFpsValue(current?.fps);
   const speed  = current?.speed   ? current.speed   : null;
   const frame  = current?.frame   ? current.frame   : null;
 
@@ -124,7 +144,10 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
             <YAxis domain={[0, 'auto']} hide />
             <Tooltip
               contentStyle={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 6, fontSize: 10 }}
-              formatter={v => [`${(v / 1000).toFixed(2)} Mbps`, 'Bitrate']}
+              formatter={(v) => {
+                const n = toFinite(v);
+                return [n != null ? `${(n / 1000).toFixed(2)} Mbps` : '-', 'Bitrate'];
+              }}
               labelFormatter={() => ''}
             />
             <Area
@@ -171,22 +194,22 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
             </div>
 
             {/* Loss % bar — broadcast-standard traffic light */}
-            {srtStats.lossPercent != null && (
+            {toFinite(srtStats.lossPercent) != null && (
               <div className="space-y-1">
                 <div className="flex justify-between text-[10px] text-gray-500">
                   <span>Packet Loss</span>
-                  <span className={lossColor(srtStats.lossPercent)}>
-                    {srtStats.lossPercent.toFixed(2)}%
+                  <span className={lossColor(toFinite(srtStats.lossPercent))}>
+                    {toFinite(srtStats.lossPercent).toFixed(2)}%
                   </span>
                 </div>
                 <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
                   <motion.div
                     className={`h-full rounded-full ${
-                      srtStats.lossPercent === 0 ? 'bg-green-500'
-                      : srtStats.lossPercent < 1 ? 'bg-yellow-500'
+                      toFinite(srtStats.lossPercent) === 0 ? 'bg-green-500'
+                      : toFinite(srtStats.lossPercent) < 1 ? 'bg-yellow-500'
                       : 'bg-red-500'
                     }`}
-                    animate={{ width: `${Math.min(srtStats.lossPercent * 10, 100)}%` }}
+                    animate={{ width: `${Math.min(toFinite(srtStats.lossPercent) * 10, 100)}%` }}
                     transition={{ duration: 0.5 }}
                   />
                 </div>
