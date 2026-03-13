@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
 import { stopStream, stopTranscoder } from '../api';
@@ -82,17 +83,47 @@ export default function StreamsPanel({ lastMessage }) {
       <EncoderForm onStarted={refresh} />
 
       <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm text-gray-400 uppercase tracking-widest">
-            Runtime Processes (Running {running.length} / Total {all.length})
-          </h2>
-          {stopped.length > 0 && (
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: 10,
+            borderBottom: `1px solid ${C.border}`,
+            paddingBottom: 6,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Activity size={16} color={C.ok} />
+            <div>
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em' }}>Runtime Operations</div>
+              <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Process Monitoring & Service Health
+              </div>
+            </div>
+          </div>
+
+          {stopped.length > 0 ? (
             <button
               onClick={clearStopped}
-              className="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-3 py-1 rounded transition-colors"
+              style={{
+                border: `1px solid ${C.border}`,
+                background: C.panel,
+                color: C.muted,
+                borderRadius: 2,
+                padding: '6px 10px',
+                fontSize: 10,
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                cursor: 'pointer',
+              }}
             >
               Clear Stopped ({stopped.length})
             </button>
+          ) : (
+            <div style={{ fontSize: 10, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              Running {running.length} / Total {all.length}
+            </div>
           )}
         </div>
 
