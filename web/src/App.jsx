@@ -333,6 +333,8 @@ export default function App() {
   const [alarmUnreadCritical, setAlarmUnreadCritical] = useState(0);
   const [lobbyLineIdx, setLobbyLineIdx] = useState(() => Math.floor(Math.random() * RACK_LOBBY_PUNCHLINES.length));
   const errorToastSeenRef = useRef(new Map());
+  const dismissedEventKeysRef = useRef(new Set());
+  const dismissedEventSignaturesRef = useRef(new Set());
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -376,7 +378,13 @@ export default function App() {
     if (!lastMessage) return;
     const entry = toLogEntry(lastMessage);
     if (entry) {
-      setEventLog((prev) => [...prev, entry].slice(-1000));
+      const signature = `${entry.type}|${entry.id}|${entry.title}|${entry.details}`;
+      if (
+        !dismissedEventKeysRef.current.has(entry.key) &&
+        !dismissedEventSignaturesRef.current.has(signature)
+      ) {
+        setEventLog((prev) => [...prev, entry].slice(-1000));
+      }
       if (entry.severity === 'critical' && tab !== 'alarms') {
         setAlarmUnreadCritical((n) => n + 1);
       }
@@ -426,7 +434,16 @@ export default function App() {
       try {
         const seed = await getEvents();
         if (!mounted || !Array.isArray(seed)) return;
-        const normalized = seed.map(toLogEntry).filter(Boolean);
+        const normalized = seed
+          .map(toLogEntry)
+          .filter(Boolean)
+          .filter((e) => {
+            const signature = `${e.type}|${e.id}|${e.title}|${e.details}`;
+            return (
+              !dismissedEventKeysRef.current.has(e.key) &&
+              !dismissedEventSignaturesRef.current.has(signature)
+            );
+          });
         // Merge with existing in-session WS events so we don't lose live entries.
         setEventLog((prev) => {
           const dedup = new Map(prev.map((e) => [e.key, e]));
@@ -677,6 +694,19 @@ export default function App() {
           {tab === 'alarms'     && (
             <EventLogPanel
               events={eventLog}
+              onClearGhost={(selected) => {
+                if (!selected) return;
+                const signature = `${selected.type}|${selected.id}|${selected.title}|${selected.details}`;
+                dismissedEventKeysRef.current.add(selected.key);
+                dismissedEventSignaturesRef.current.add(signature);
+                setEventLog((prev) => prev.filter((e) => {
+                  const rowSignature = `${e.type}|${e.id}|${e.title}|${e.details}`;
+                  if (e.key === selected.key) return false;
+                  if (rowSignature === signature) return false;
+                  return true;
+                }));
+                toast.success('Ghost entry cleared', { duration: 2200 });
+              }}
               onClear={async () => {
                 try {
                   await clearEvents();
@@ -687,6 +717,8 @@ export default function App() {
                 }
                 setEventLog([]);
                 setAlarmUnreadCritical(0);
+                dismissedEventKeysRef.current.clear();
+                dismissedEventSignaturesRef.current.clear();
               }}
             />
           )}
