@@ -522,6 +522,13 @@ function getEventVisualStyle(category, severity) {
   };
 }
 
+function canonicalizeEventLane(event) {
+  if (!event) return null;
+  const laneId = normalizeLaneId(event.id || event.rawId || 'unknown');
+  if (laneId === event.id) return event;
+  return { ...event, id: laneId };
+}
+
 function num(v, digits = 3) {
   const n = Number(v);
   return Number.isFinite(n) ? Number(n.toFixed(digits)) : null;
@@ -552,7 +559,14 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Number.isFinite(Number(parsed.windowMs))) setWindowMs(Number(parsed.windowMs));
-        if (Array.isArray(parsed.events)) setEvents(parsed.events.slice(-MAX_EVENTS));
+        if (Array.isArray(parsed.events)) {
+          setEvents(
+            parsed.events
+              .map(canonicalizeEventLane)
+              .filter(Boolean)
+              .slice(-MAX_EVENTS)
+          );
+        }
         if (parsed.scaleMode === 'normalized' || parsed.scaleMode === 'absolute') setScaleMode(parsed.scaleMode);
         if (parsed.rangeMode === 'relative' || parsed.rangeMode === 'custom') setRangeMode(parsed.rangeMode);
         if (typeof parsed.customStartInput === 'string') setCustomStartInput(parsed.customStartInput);
@@ -614,10 +628,16 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   ]);
 
   const mergeTimelineEvents = (prev, incoming) => {
-    const byKey = new Map(prev.map((e) => [e.key, e]));
+    const byKey = new Map(
+      (prev || [])
+        .map(canonicalizeEventLane)
+        .filter(Boolean)
+        .map((e) => [e.key, e])
+    );
     (incoming || []).forEach((e) => {
-      if (!e) return;
-      byKey.set(e.key, e);
+      const normalized = canonicalizeEventLane(e);
+      if (!normalized) return;
+      byKey.set(normalized.key, normalized);
     });
     return Array.from(byKey.values()).sort((a, b) => a.ts - b.ts).slice(-MAX_EVENTS);
   };
