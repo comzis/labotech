@@ -319,7 +319,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [openCreate, setOpenCreate] = useState(false);
   const [mode, setMode] = useState('rtp');
   const [host, setHost] = useState('');
-  const [port, setPort] = useState('6501');
+  const [port, setPort] = useState('');
   const [decoderId, setDecoderId] = useState('');
   const [interval, setInterval] = useState('5000');
   const [latency, setLatency] = useState('2000');
@@ -439,8 +439,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               ))}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.100.25.29" />
-              <Field label="Port" value={port} onChange={setPort} type="number" placeholder="6501" />
+              <Field label="Host / IP" value={host} onChange={setHost} placeholder="Host / IP" />
+              <Field label="Port" value={port} onChange={setPort} type="number" placeholder="Port" />
               <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
               <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />
             </div>

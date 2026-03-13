@@ -45,6 +45,34 @@ function PidDisplay({ pid, pidHex }) {
   );
 }
 
+function extractPidEvidence(selected) {
+  const ev = selected?.evidence || {};
+  const etr = ev.etr || {};
+  const directPid = Number.isFinite(Number(ev.pid)) ? Number(ev.pid) : null;
+  const nestedPid = Number.isFinite(Number(etr.pid)) ? Number(etr.pid) : null;
+  const normalizedHex = typeof ev.pidHex === 'string' ? ev.pidHex.toUpperCase() : null;
+  const fromHex = normalizedHex && /^0X[0-9A-F]+$/.test(normalizedHex)
+    ? parseInt(normalizedHex, 16)
+    : null;
+  const hasEtrContext = Boolean(
+    ev.priority || etr.priority || ev.checkId || etr.checkId || etr.checkKey || ev.incidentId
+  );
+  const pid = directPid ?? nestedPid ?? fromHex ?? null;
+  const pidHex = normalizedHex
+    || etr.pidHex
+    || (pid != null ? formatPidHex(pid) : null);
+  const isPlaceholderZero = pid === 0 && (pidHex === '0x0000' || pidHex === '0X0000');
+  const safePid = isPlaceholderZero && !hasEtrContext ? null : pid;
+  const safePidHex = isPlaceholderZero && !hasEtrContext ? null : pidHex;
+  return {
+    pid: safePid,
+    pidHex: safePidHex,
+    priority: ev.priority || etr.priority || null,
+    checkId: ev.checkId || etr.checkId || etr.checkKey || null,
+    incidentId: ev.incidentId || null,
+  };
+}
+
 export default function EventLogPanel({ events = [], onClear = () => {} }) {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [query, setQuery] = useState('');
@@ -118,6 +146,7 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
       }));
   }, [events, severityFilter, query]);
   const selected = useMemo(() => rows.find((r) => r.__key === selectedRowKey) || null, [rows, selectedRowKey]);
+  const pidEvidence = useMemo(() => extractPidEvidence(selected), [selected]);
 
   return (
     <div style={{ fontFamily: "'Courier New',monospace", color: C.text }}>
@@ -287,13 +316,13 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
                 <div style={{ fontSize: 9, color: C.head, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 6 }}>PID / ETR Evidence</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', rowGap: 4, fontSize: 10 }}>
                   <span style={{ color: C.muted }}>PID</span>
-                  <PidDisplay pid={selected?.evidence?.pid} pidHex={selected?.evidence?.pidHex} />
+                  <PidDisplay pid={pidEvidence.pid} pidHex={pidEvidence.pidHex} />
                   <span style={{ color: C.muted }}>Priority</span>
-                  <span style={{ color: C.text }}>{selected?.evidence?.priority || '-'}</span>
+                  <span style={{ color: C.text }}>{pidEvidence.priority || '-'}</span>
                   <span style={{ color: C.muted }}>Check ID</span>
-                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{selected?.evidence?.checkId || '-'}</span>
+                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{pidEvidence.checkId || '-'}</span>
                   <span style={{ color: C.muted }}>Incident ID</span>
-                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{selected?.evidence?.incidentId || '-'}</span>
+                  <span style={{ color: C.text, fontFamily: "'Courier New',monospace" }}>{pidEvidence.incidentId || '-'}</span>
                 </div>
               </div>
               <div style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.panel, padding: 8 }}>
