@@ -5,11 +5,10 @@ import { startStream } from '../api';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
 import { C } from './BroadcastUI';
-import { SUPPORTED_VIDEO_CODECS, SUPPORTED_AUDIO_CODECS, profileOptionsForCodec } from '../utils/codecSupport';
 
 const DEFAULTS = {
   id: '', inputMode: 'rtp', inputHost: '', inputPort: '6501', input: '', inputLocalAddr: '',
-  // Output transport
+  // Output transport (encapsulator only)
   outputMode: 'srt',
   host: '', port: '9999', latency: '2000', passphrase: '', pbkeylen: '16', adapter: '', streamId: '',
   ttl: '16', localAddr: '',
@@ -17,11 +16,11 @@ const DEFAULTS = {
   serviceId: '1', transportStreamId: '1', originalNetworkId: '1',
   pmtPid: '4096', videoPid: '256',
   serviceName: '', serviceProvider: '',
-  // Video
-  videoCodec: 'libx264', videoBitrate: '10', preset: 'medium', profile: 'high', gopSize: '50', rateMode: 'cbr',
+  // Video (encapsulation passthrough)
+  videoCodec: 'copy', videoBitrate: '', preset: 'medium', profile: '', gopSize: '50', rateMode: 'cbr',
 };
 
-const DEFAULT_PAIR = { sourceIndex: 0, codec: 'aac', bitrate: '256k', channels: 2, language: '', pid: '' };
+const DEFAULT_PAIR = { sourceIndex: 0, codec: 'copy', bitrate: '', channels: 2, language: '', pid: '' };
 const formatPidHex = (pid) => (pid == null || Number.isNaN(Number(pid)) ? null : `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`);
 
 function buildInputUrl(inputMode, inputHost, inputPort, rawInput) {
@@ -43,27 +42,9 @@ export default function EncoderForm({ onStarted }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
-  const profileOptions = profileOptionsForCodec(form.videoCodec);
 
   const set = (k, v) => {
-    if (k === 'outputMode') {
-      setForm(f => ({
-        ...f,
-        outputMode: v,
-        host: '',
-        port: v === 'udp' || v === 'rtp' ? '6501' : '9999',
-      }));
-    } else if (k === 'videoCodec') {
-      setForm((f) => {
-        const nextProfileOptions = profileOptionsForCodec(v);
-        const nextProfile = nextProfileOptions.some((o) => o.value === f.profile)
-          ? f.profile
-          : (nextProfileOptions[0]?.value || '');
-        return { ...f, videoCodec: v, profile: nextProfile };
-      });
-    } else {
-      setForm(f => ({ ...f, [k]: v }));
-    }
+    setForm(f => ({ ...f, [k]: v }));
   };
 
   const addPair = () => setAudioPairs(p => [...p, { ...DEFAULT_PAIR, sourceIndex: p.length }]);
@@ -87,9 +68,12 @@ export default function EncoderForm({ onStarted }) {
       await startStream({
         ...form,
         input: builtInput,
+        outputMode: 'srt',
         host: cleanHost,
         port: parseInt(form.port),
         latency: parseInt(form.latency),
+        videoCodec: 'copy',
+        rateMode: 'cbr',
         gopSize: parseInt(form.gopSize),
         ttl: parseInt(form.ttl),
         serviceId: parseInt(form.serviceId),
@@ -99,6 +83,7 @@ export default function EncoderForm({ onStarted }) {
         videoPid: parseInt(form.videoPid),
         audioPairs: audioPairs.map(p => ({
           ...p,
+          codec: 'copy',
           sourceIndex: parseInt(p.sourceIndex),
           channels: parseInt(p.channels),
           pid: p.pid !== '' ? parseInt(p.pid) : undefined,
@@ -129,10 +114,10 @@ export default function EncoderForm({ onStarted }) {
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <Activity className="w-4 h-4 text-emerald-400" strokeWidth={1.8} />
-              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>Runtime</div>
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>SRT Encapsulator</div>
             </div>
             <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>
-              Encoder / Stream Services
+              Haivision Caller Mode / TS Pass-through
             </div>
           </div>
           <motion.button
@@ -148,7 +133,7 @@ export default function EncoderForm({ onStarted }) {
             }}
           >
             <Tv2 className="w-3 h-3" />
-            Create Runtime Instance
+            Create SRT Channel
           </motion.button>
         </div>
       )}
@@ -165,7 +150,7 @@ export default function EncoderForm({ onStarted }) {
           <div className="flex items-center justify-between mb-6">
             <h2 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
               <Settings2 className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-              Stream Configuration
+              SRT Encapsulator Configuration
             </h2>
             <button type="button" onClick={() => setOpen(false)} className="text-gray-500 hover:text-white transition-colors text-sm font-medium">
               ✕ Cancel
@@ -186,61 +171,41 @@ export default function EncoderForm({ onStarted }) {
                 ]} />
                 {form.inputMode !== 'custom' ? (
                   <>
-                    <Field label="Input Host / IP *" value={form.inputHost} onChange={v => set('inputHost', v)} required placeholder="239.100.25.29" />
-                    <Field label="Input Port *" value={form.inputPort} onChange={v => set('inputPort', v)} type="number" required placeholder="6501" />
+                    <Field label="Input Host / IP *" value={form.inputHost} onChange={v => set('inputHost', v)} required placeholder="Example: 239.100.25.29" />
+                    <Field label="Input Port *" value={form.inputPort} onChange={v => set('inputPort', v)} type="number" required placeholder="Example: 6501" />
                   </>
                 ) : (
                   <div className="sm:col-span-2">
-                    <Field label="Input Source URL *" value={form.input} onChange={v => set('input', v)} required placeholder="rtp://239.100.25.29:6501" />
+                    <Field label="Input Source URL *" value={form.input} onChange={v => set('input', v)} required placeholder="Example: rtp://239.100.25.29:6501" />
                   </div>
                 )}
-                <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Leave blank for eno2 multicast" />
-
-                {/* Output mode selector — spans full width */}
-                <div className="sm:col-span-2">
-                  <SelectField label="Output Mode" value={form.outputMode} onChange={v => set('outputMode', v)} options={[
-                    { value: 'srt', label: 'SRT — Secure Reliable Transport' },
-                    { value: 'rtp', label: 'RTP — MPEG-TS over RTP' },
-                    { value: 'udp', label: 'UDP — Legacy Multicast / Unicast MPEG-TS' },
-                  ]} />
-                </div>
+                <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Example: 10.67.18.29" />
 
                 {/* Target host + port — common to all modes */}
                 <Field
-                  label={form.outputMode === 'srt' ? 'SRT Target Host' : 'Destination IP'}
+                  label="SRT Target Host"
                   value={form.host} onChange={v => set('host', v)}
-                  placeholder={form.outputMode === 'udp' || form.outputMode === 'rtp' ? '239.100.25.29' : 'srt://host or IP'}
+                  placeholder="Example: 203.0.113.24"
                   required
                 />
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Port" value={form.port} onChange={v => set('port', v)} type="number" />
-                  {form.outputMode === 'srt'
-                    ? <Field label="Latency (ms)" value={form.latency} onChange={v => set('latency', v)} type="number" />
-                    : <Field label="TTL" value={form.ttl} onChange={v => set('ttl', v)} type="number" />
-                  }
+                  <Field label="Latency (ms)" value={form.latency} onChange={v => set('latency', v)} type="number" />
                 </div>
 
-                {/* SRT-only fields */}
-                {form.outputMode === 'srt' && <>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="Passphrase" value={form.passphrase} onChange={v => set('passphrase', v)} type="password" />
-                    <SelectField label="Encryption" value={form.pbkeylen} onChange={v => set('pbkeylen', v)} options={[
-                      { value: '16', label: 'AES-128' },
-                      { value: '24', label: 'AES-192' },
-                      { value: '32', label: 'AES-256' },
-                      { value: '0', label: 'None' }
-                    ]} />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="10.67.18.29" />
-                    <Field label="Stream ID" value={form.streamId} onChange={v => set('streamId', v)} placeholder="optional" />
-                  </div>
-                </>}
-
-                {/* UDP / RTP — source NIC binding */}
-                {(form.outputMode === 'udp' || form.outputMode === 'rtp') &&
-                  <Field label="Output NIC / IP" value={form.localAddr} onChange={v => set('localAddr', v)} placeholder="eno2" />
-                }
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Passphrase" value={form.passphrase} onChange={v => set('passphrase', v)} type="password" />
+                  <SelectField label="Encryption" value={form.pbkeylen} onChange={v => set('pbkeylen', v)} options={[
+                    { value: '16', label: 'AES-128' },
+                    { value: '24', label: 'AES-192' },
+                    { value: '32', label: 'AES-256' },
+                    { value: '0', label: 'None' }
+                  ]} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="Example: eno2 or 10.67.18.29" />
+                  <Field label="Stream ID" value={form.streamId} onChange={v => set('streamId', v)} placeholder="Example: channel-alpha" />
+                </div>
               </div>
             </BentoCard>
 
@@ -264,13 +229,12 @@ export default function EncoderForm({ onStarted }) {
                     <input type="number" min="0" max="31" value={p.sourceIndex}
                       onChange={e => updatePair(i, 'sourceIndex', e.target.value)}
                       className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 text-center focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
-                    <select value={p.codec} onChange={e => updatePair(i, 'codec', e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer">
-                      {SUPPORTED_AUDIO_CODECS.map((c) => <option key={c.value} value={c.value} className="bg-midnight-surface">{c.value}</option>)}
-                    </select>
-                    <input type="text" value={p.bitrate} placeholder="256k"
-                      onChange={e => updatePair(i, 'bitrate', e.target.value)}
-                      className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
+                    <div className="w-full bg-black/20 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-400">
+                      copy
+                    </div>
+                    <div className="w-full bg-black/20 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-500">
+                      n/a
+                    </div>
                     <select value={p.channels} onChange={e => updatePair(i, 'channels', e.target.value)}
                       className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer">
                       <option value="1" className="bg-midnight-surface">1</option>
@@ -321,21 +285,28 @@ export default function EncoderForm({ onStarted }) {
               </div>
             </BentoCard>
 
-            {/* Bento Card 4: Video Matrix (full width) */}
-            <BentoCard icon={Activity} title="Video Matrix" className="md:col-span-3 border-neon-purple/20 bg-neon-purple/5">
-              <div className="mb-3 text-[11px] text-amber-300/90 font-semibold tracking-wide">
-                GPU please 🙂 - CPU is working overtime.
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={SUPPORTED_VIDEO_CODECS} />
-                <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={profileOptions.length ? profileOptions : [{ value: '', label: 'n/a (copy)' }]} disabled={profileOptions.length === 0} />
-                <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
-                <Field label="Bitrate (Mbps)" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} placeholder="e.g. 10 or 12.5" />
-                <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />
-                <SelectField label="Rate Mode" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
+            {/* Bento Card 4: Encapsulation profile (full width) */}
+            <BentoCard icon={Activity} title="Encapsulation Profile" className="md:col-span-3 border-neon-purple/20 bg-neon-purple/5">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Video</div>
+                  <div className="text-sm text-gray-200 font-semibold">copy</div>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Audio</div>
+                  <div className="text-sm text-gray-200 font-semibold">copy (per track)</div>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Mux</div>
+                  <div className="text-sm text-gray-200 font-semibold">MPEG-TS</div>
+                </div>
+                <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-gray-500">Output</div>
+                  <div className="text-sm text-gray-200 font-semibold">Haivision SRT caller</div>
+                </div>
               </div>
               <div className="mt-2 text-[10px] text-gray-500">
-                Enter Mbps as a number. No fixed app cap; practical range depends on codec, profile, and transport capacity.
+                Dedicated encapsulation mode keeps source codecs untouched and focuses on SRT delivery reliability.
               </div>
             </BentoCard>
 
@@ -362,20 +333,18 @@ export default function EncoderForm({ onStarted }) {
 
             <BentoCard icon={Server} title="Mux Settings" className="md:col-span-1 border-neon-cyan/20 bg-neon-cyan/5">
               <div className="space-y-2 text-xs">
-                <div className="flex justify-between"><span className="text-gray-500">Output mode</span><span className="font-mono text-gray-300 uppercase">{form.outputMode}</span></div>
-                <div className="flex justify-between"><span className="text-gray-500">TTL</span><span className="font-mono text-gray-300">{form.ttl}</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Output mode</span><span className="font-mono text-gray-300 uppercase">srt</span></div>
+                <div className="flex justify-between"><span className="text-gray-500">Role</span><span className="font-mono text-gray-300">caller</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Adapter</span><span className="font-mono text-gray-300">{form.adapter || form.localAddr || '-'}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">Service ID</span><span className="font-mono text-gray-300">{form.serviceId}</span></div>
                 <div className="flex justify-between"><span className="text-gray-500">TS / ONID</span><span className="font-mono text-gray-300">{form.transportStreamId} / {form.originalNetworkId}</span></div>
               </div>
             </BentoCard>
 
-            <BentoCard icon={Settings2} title="Presets" className="md:col-span-1 border-neon-green/20 bg-neon-green/5">
+            <BentoCard icon={Settings2} title="Haivision Telemetry" className="md:col-span-1 border-neon-green/20 bg-neon-green/5">
               <div className="space-y-3">
-                <SelectField label="Quick preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
-                <SelectField label="Rate profile" value={form.rateMode} onChange={v => set('rateMode', v)} options={[{ value: 'cbr', label: 'CBR' }, { value: 'vbr', label: 'VBR' }]} />
                 <div className="text-[10px] text-gray-500">
-                  Preset choices are applied directly to this stream instance before start.
+                  Runtime panel surfaces RTT, rate, bandwidth, loss, retransmissions, and NAK counters from SRT libsrt statistics.
                 </div>
               </div>
             </BentoCard>
@@ -403,7 +372,7 @@ export default function EncoderForm({ onStarted }) {
               ) : (
                 <>
                   <Play className="w-4 h-4 fill-current" />
-                  START STREAM
+                  START ENCAPSULATION
                 </>
               )}
             </motion.button>
