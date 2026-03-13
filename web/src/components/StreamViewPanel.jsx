@@ -19,6 +19,8 @@ const WINDOW_OPTIONS = [
 const P1_KEYS = ['ts_sync', 'sync_byte', 'pat_error', 'cc_error', 'pmt_error', 'pid_error'];
 const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep', 'pts_error', 'cat_error'];
 const MAX_EVENTS = 1500;
+const EVENT_RETENTION_MS = 26 * 60 * 60 * 1000; // keep slightly above max 24h window
+const LANE_ACTIVITY_STALE_MS = 30 * 1000; // auto-expire no-heartbeat runtime lanes
 const EVENT_BLOCK_DURATION_MS = {
   etr290_alarm: 14000,
   etr290_incident: 18000,
@@ -435,10 +437,14 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const stopAfterActive = sorted.find((e) =>
       (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
     );
+    const lastActivityTs = activityEvents[activityEvents.length - 1]?.ts || firstActiveTs;
+    const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     const startX = Math.min(100, Math.max(0, ((Math.max(timeStart, firstActiveTs) - timeStart) / windowMs) * 100));
-    const stopX = stopAfterActive
-      ? Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, stopAfterActive.ts) - timeStart) / windowMs) * 100))
-      : null;
+    const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
+    const stopX = Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100));
+    if (stopX <= startX) {
+      return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
+    }
     if (stopX == null) {
       return `linear-gradient(90deg, #44556622 0%, #44556622 ${startX}%, #00dd5555 ${startX}%, #00dd5555 100%)`;
     }
@@ -628,15 +634,18 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   ]);
 
   const mergeTimelineEvents = (prev, incoming) => {
+    const cutoffTs = Date.now() - EVENT_RETENTION_MS;
     const byKey = new Map(
       (prev || [])
         .map(canonicalizeEventLane)
+        .filter((e) => e && Number.isFinite(e.ts) && e.ts >= cutoffTs)
         .filter(Boolean)
         .map((e) => [e.key, e])
     );
     (incoming || []).forEach((e) => {
       const normalized = canonicalizeEventLane(e);
       if (!normalized) return;
+      if (!Number.isFinite(normalized.ts) || normalized.ts < cutoffTs) return;
       byKey.set(normalized.key, normalized);
     });
     return Array.from(byKey.values()).sort((a, b) => a.ts - b.ts).slice(-MAX_EVENTS);
@@ -704,11 +713,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        if (synthetic.length === 0) return;
+        const freshSynthetic = synthetic.filter((e) => (Date.now() - e.ts) <= LANE_ACTIVITY_STALE_MS);
+        if (freshSynthetic.length === 0) return;
         setEvents((prev) => {
           // Only inject when the lane has no events yet in local timeline state.
           const seen = new Set(prev.map((e) => e.id));
-          const missing = synthetic.filter((e) => !seen.has(e.id));
+          const missing = freshSynthetic.filter((e) => !seen.has(e.id));
           return missing.length ? mergeTimelineEvents(prev, missing) : prev;
         });
       } catch (_) {}
