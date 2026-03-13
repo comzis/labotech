@@ -697,7 +697,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           <Dot c={C.cyan} />
           <span style={{ fontSize: 10, color: C.head, letterSpacing: "0.12em", textTransform: "uppercase", fontWeight: 700 }}>Decoder Operations</span>
         </div>
-        <Badge label="RUNNING" color={C.ok} filled />
       </div>
 
       <div style={{ padding: 10, display: "grid", gridTemplateColumns: "720px 1fr", gap: 10 }}>
