@@ -1329,38 +1329,20 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 {/* ── Active Decoders ──────────────────────────────────── */}
                 <PanelBox>
                   <SectionHead icon="📋" title="Active Decoders" right={<Badge label={`${activeIds.length} running`} color={activeIds.length ? C.ok : C.muted} small />} />
-                  <div style={{ padding: "8px 12px", display: "grid", gap: 6 }}>
+                  <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
                     {activeIds.length === 0 ? (
                       <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
                     ) : (
                       activeIds.map((id) => (
-                        <div
-                          key={id}
-                          style={{
-                            border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
-                            borderRadius: 2,
-                            background: selectedId === id ? `${C.cyan}10` : C.dim,
-                            padding: "6px 8px",
-                            display: "grid",
-                            gridTemplateColumns: "minmax(0,1fr) auto",
-                            gap: 8,
-                            alignItems: "center",
-                          }}
-                        >
+                        <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
                           <button
                             onClick={() => setSelectedId(id)}
                             style={{
-                              textAlign: "left",
-                              borderRadius: 2,
-                              border: `1px solid ${selectedId === id ? `${C.cyan}66` : `${C.border}AA`}`,
-                              background: "transparent",
+                              textAlign: "left", borderRadius: 2,
+                              border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
+                              background: selectedId === id ? `${C.cyan}12` : "transparent",
                               color: selectedId === id ? C.cyan : C.text,
-                              padding: "5px 8px",
-                              fontFamily: "'Courier New',monospace",
-                              fontSize: 10,
-                              whiteSpace: "normal",
-                              wordBreak: "break-word",
-                              lineHeight: 1.2,
+                              padding: "5px 8px", fontFamily: "'Courier New',monospace", fontSize: 10,
                             }}
                           >
                             {id}
@@ -1371,14 +1353,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                               try { await refreshActives(); } catch (_) {}
                             }}
                             style={{
-                              borderRadius: 2,
-                              border: `1px solid ${C.err}`,
-                              color: C.err,
-                              background: "transparent",
-                              fontSize: 9,
-                              fontWeight: 700,
+                              borderRadius: 2, border: `1px solid ${C.err}`, color: C.err,
+                              background: "transparent", fontSize: 9, fontWeight: 700,
                               fontFamily: "'Courier New',monospace",
-                              padding: "5px 10px",
                             }}
                           >
                             STOP

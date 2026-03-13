@@ -141,43 +141,6 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
       }
     });
   }
-  const expectedAudioStreams = [
-    ...((result?.programs || []).flatMap((p) => (p.streams || []).filter((s) => s.codecType === 'audio'))),
-    ...((result?.orphanStreams || []).filter((s) => s.codecType === 'audio')),
-  ];
-  const expectedAudioChannels = expectedAudioStreams.flatMap((s, streamIdx) => {
-    const count = Number(s?.channels);
-    if (!Number.isFinite(count) || count <= 0) return [];
-    const pid = Number.isFinite(Number(s?.pid)) ? Number(s.pid) : null;
-    return Array.from({ length: count }).map((_, chIdx) => ({
-      key: `s${streamIdx}-c${chIdx}`,
-      label: `A${streamIdx + 1}-Ch${chIdx + 1}`,
-      pid,
-    }));
-  });
-  const meteredRows = currentChannels.map((ch, idx) => {
-    const held = peakHoldRef.current[ch.ch];
-    const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
-    return {
-      key: `meter-${ch.ch}-${idx}`,
-      label: ch.label || `Ch${ch.ch + 1}`,
-      rmsDb: Number.isFinite(ch.rmsDb) ? ch.rmsDb : null,
-      peakDb: Number.isFinite(heldPeak) ? heldPeak : null,
-      pid: null,
-      metered: true,
-    };
-  });
-  const extraPlaceholders = expectedAudioChannels.length > meteredRows.length
-    ? expectedAudioChannels.slice(meteredRows.length).map((row) => ({
-      key: `placeholder-${row.key}`,
-      label: row.pid != null ? `${row.label} (PID ${row.pid})` : row.label,
-      rmsDb: null,
-      peakDb: null,
-      pid: row.pid,
-      metered: false,
-    }))
-    : [];
-  const displayAudioRows = [...meteredRows, ...extraPlaceholders];
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -297,8 +260,8 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
               {Number.isFinite(currentMeanDb) ? `${currentMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
-          {displayAudioRows.length > 0 ? (
-            <div className="space-y-1" style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
+          {currentChannels.length > 0 ? (
+            <div className="space-y-1">
               {/* Scale markers */}
               <div className="grid items-center gap-1 text-[8px] font-mono text-gray-600" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
                 <span />
@@ -309,13 +272,15 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
                 </div>
                 <span />
               </div>
-              {displayAudioRows.map((row) => {
+              {currentChannels.map((ch) => {
+                const held = peakHoldRef.current[ch.ch];
+                const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
                 return (
                   <VuBar
-                    key={row.key}
-                    label={row.label}
-                    rmsDb={row.rmsDb}
-                    peakDb={row.peakDb}
+                    key={ch.ch}
+                    label={ch.label || `Ch${ch.ch + 1}`}
+                    rmsDb={ch.rmsDb}
+                    peakDb={heldPeak}
                     showPeak
                   />
                 );

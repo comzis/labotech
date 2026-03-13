@@ -44,7 +44,8 @@ export default function MulticastPanel({ lastMessage }) {
     setForwarders(fwds);
     setForm((prev) => ({
       ...prev,
-      destIp: prev.destIp || cfg.address || '',
+      // Keep destination blank until operator enters/chooses it explicitly.
+      destIp: prev.destIp || '',
       engineerApproved: false,
     }));
   };
@@ -183,7 +184,7 @@ export default function MulticastPanel({ lastMessage }) {
                     />
                   </Field>
                   <Field label="Source Host / IP" required>
-                    <Input value={form.sourceHost} onChange={(e) => set('sourceHost', e.target.value)} placeholder="239.100.25.10" mono />
+                    <Input value={form.sourceHost} onChange={(e) => set('sourceHost', e.target.value)} placeholder="Host / IP" mono />
                   </Field>
                   <Field label="Source Port" required>
                     <Input value={form.sourcePort} onChange={(e) => set('sourcePort', e.target.value)} placeholder="5000" mono />
@@ -201,7 +202,7 @@ export default function MulticastPanel({ lastMessage }) {
               <div style={{ padding: '8px 10px', display: 'grid', gap: 8 }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 110px', gap: 8 }}>
                   <Field label="Destination IP" required>
-                    <Input value={form.destIp} onChange={(e) => set('destIp', e.target.value)} placeholder="239.100.25.29" mono />
+                    <Input value={form.destIp} onChange={(e) => set('destIp', e.target.value)} placeholder="Destination IP" mono />
                   </Field>
                   <Field label="Destination Port">
                     <Input value={form.destPort} onChange={(e) => set('destPort', e.target.value)} placeholder="1234" mono />
