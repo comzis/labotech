@@ -650,7 +650,7 @@ export default function App() {
 
           <button
             onClick={handleResetRole}
-            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1"
+            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1 2xl:w-[360px] 2xl:justify-between overflow-hidden"
             style={{
               color: '#9ab4d8',
               border: '1px solid #2b3950',
@@ -659,8 +659,13 @@ export default function App() {
             }}
             title={`Return to landing page (${RACK_LOBBY_PUNCHLINES[lobbyLineIdx]})`}
           >
-            <span>↩ Rack Lobby</span>
-            <span className="hidden 2xl:inline" style={{ color: '#6f86aa' }}>· {RACK_LOBBY_PUNCHLINES[lobbyLineIdx]}</span>
+            <span className="shrink-0">↩ Rack Lobby</span>
+            <span
+              className="hidden 2xl:inline truncate text-right ml-2"
+              style={{ color: '#6f86aa' }}
+            >
+              · {RACK_LOBBY_PUNCHLINES[lobbyLineIdx]}
+            </span>
           </button>
 
         </div>
