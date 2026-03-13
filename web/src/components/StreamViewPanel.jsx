@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import Sparkline from './Sparkline';
-import { getEvents } from '../api';
+import { getEvents, getAnalysers } from '../api';
 import { C } from './BroadcastUI';
 
 const STREAMVIEW_STATE_KEY = 'labotech:streamview:state:v2';
@@ -24,8 +24,8 @@ const EVENT_BLOCK_DURATION_MS = {
   etr290_incident: 18000,
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
-  runtime_started: 8000,
-  runtime_stopped: 8000,
+  runtime_started: 22000,
+  runtime_stopped: 14000,
   failover: 16000,
   analyse_result: 7000,
   etr290_status: 5000,
@@ -35,13 +35,14 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
   runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
-  runtime_started: { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' },
-  runtime_stopped: { alpha: 'bb', borderAlpha: '99', glowAlpha: '55' },
+  runtime_started: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '99' },
+  runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
   analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
   etr290_status: { alpha: '94', borderAlpha: '82', glowAlpha: '44' },
 };
 const LEGEND_TYPE_ITEMS = [
+  { key: 'start', label: 'start', category: 'runtime_started', severity: 'ok' },
   { key: 'etr_alarm', label: 'ETR alarm', category: 'etr290_alarm', severity: 'critical' },
   { key: 'incident', label: 'incident', category: 'etr290_incident', severity: 'warning' },
   { key: 'runtime', label: 'runtime', category: 'runtime_error', severity: 'critical' },
@@ -625,6 +626,48 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     };
   }, []);
 
+  // Guardrail for burst starts: if WS lifecycle messages are dropped during rapid
+  // batch creation, synthesize a visible "started" marker from active analysers.
+  useEffect(() => {
+    let mounted = true;
+    const seedFromActiveAnalysers = async () => {
+      try {
+        const list = await getAnalysers();
+        if (!mounted || !Array.isArray(list)) return;
+        const synthetic = list
+          .filter((a) => a && a.isRunning && a.id)
+          .map((a) => {
+            const laneId = normalizeLaneId(a.id);
+            const ts = Number(a?.lastResult?.probeTime) || Date.now();
+            return {
+              key: `bootstrap-${laneId}-started`,
+              ts,
+              id: laneId,
+              rawId: a.id,
+              category: 'runtime_started',
+              severity: 'ok',
+              title: 'Analyser active',
+              description: a.url || `${a.id} active`,
+              evidence: { bootstrap: true },
+            };
+          });
+        if (synthetic.length === 0) return;
+        setEvents((prev) => {
+          // Only inject when the lane has no events yet in local timeline state.
+          const seen = new Set(prev.map((e) => e.id));
+          const missing = synthetic.filter((e) => !seen.has(e.id));
+          return missing.length ? mergeTimelineEvents(prev, missing) : prev;
+        });
+      } catch (_) {}
+    };
+    seedFromActiveAnalysers();
+    const t = setInterval(seedFromActiveAnalysers, 5000);
+    return () => {
+      mounted = false;
+      clearInterval(t);
+    };
+  }, []);
+
   useEffect(() => {
     const t = setInterval(() => setNowMs(Date.now()), 1000);
     return () => clearInterval(t);
@@ -988,7 +1031,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               const y = LANE_TOP_PX + laneIdx * LANE_STEP_PX;
               const laneEventAtPointer = lanePointerStatus.find((row) => row.id === id)?.event || null;
               const lineColor = laneColorForEvent(mouseX != null ? laneEventAtPointer : null);
-              const laneAlerts = (laneMap[id] || []).filter((e) => e.severity === 'warning' || e.severity === 'critical');
+              const laneBlocks = laneBlocksById[id] || [];
               return (
                 <div key={id}>
                   <div
@@ -1000,13 +1043,13 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     }}
                   />
                   <div
-                    className="absolute left-2 -translate-y-1/2 text-[11px] text-gray-300 font-mono max-w-[260px] truncate px-1 rounded"
-                    style={{ top: `${y}px`, background: 'rgba(0,0,0,0.32)' }}
+                    className="absolute left-2 -translate-y-1/2 text-[11px] font-mono max-w-[320px] truncate px-1.5 rounded"
+                    style={{ top: `${y}px`, color: C.text, background: 'rgba(0,0,0,0.48)', border: '1px solid rgba(255,255,255,0.08)' }}
                     title={id}
                   >
                     {id}
                   </div>
-                  {laneAlerts.length > 0 && (
+                  {laneBlocks.length > 0 && (
                     <div
                       className="absolute left-0 right-0 overflow-hidden"
                       style={{
@@ -1014,7 +1057,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                         height: '6px',
                       }}
                     >
-                      {(laneBlocksById[id] || []).map((blk) => (
+                      {laneBlocks.map((blk) => (
                         <div
                           key={blk.key}
                           className="absolute h-full rounded-sm border"
