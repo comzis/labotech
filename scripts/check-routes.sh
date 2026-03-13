@@ -22,10 +22,27 @@ done
 
 echo ""
 echo "--- UDP buffer sizes ---"
-for key in net.core.rmem_max net.core.wmem_max; do
+for key in \
+  net.core.rmem_max \
+  net.core.wmem_max \
+  net.core.rmem_default \
+  net.core.wmem_default \
+  net.core.netdev_max_backlog \
+  net.ipv4.udp_rmem_min \
+  net.ipv4.udp_wmem_min \
+  net.ipv4.igmp_max_memberships; do
   val=$(sysctl -n $key 2>/dev/null || echo "?")
   printf "  %-25s %s\n" "$key:" "$val"
 done
+
+echo ""
+echo "--- CPU governor (cpu0) ---"
+if [[ -f /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor ]]; then
+  gov=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo "?")
+  printf "  %-25s %s\n" "scaling_governor:" "$gov"
+else
+  echo "  (cpu governor path unavailable)"
+fi
 
 echo ""
 echo "--- Interface $NIC ---"

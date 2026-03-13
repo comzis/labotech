@@ -39,6 +39,19 @@ sudo bash scripts/setup-host.sh
 sudo bash scripts/check-routes.sh   # verify networking
 ```
 
+Optional (high-load RTP/SRT/transcode tuning profile):
+
+```bash
+sudo bash scripts/optimize-host-v2.sh
+sudo bash scripts/check-routes.sh
+```
+
+Rollback v2 tuning:
+
+```bash
+sudo bash scripts/rollback-host-optimization-v2.sh
+```
+
 ### 2. Configure environment
 
 ```bash
@@ -235,6 +248,7 @@ Operator visibility fields:
 - `dvb.probeDiagnostics.dolbyE`
 
 For deployment checks and troubleshooting runbook, see `docs/engineering-support-manual.md`.
+For the latest UI hardening + SMPTE 2022-7 implementation details and validation evidence, see `docs/ui-hardening-and-20227-worklog.md`.
 
 ---
 
@@ -371,6 +385,8 @@ npm test
 
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
 - Engineering operations runbook: `docs/engineering-support-manual.md`
+- UI hardening and SMPTE 2022-7 worklog: `docs/ui-hardening-and-20227-worklog.md`
+- Ubuntu host tuning scripts: `scripts/optimize-host-v2.sh` and `scripts/rollback-host-optimization-v2.sh`
 - Standardized production upgrade: `bash scripts/upgrade-prod.sh [tag-or-ref]`
 - Deploy a fixed version tag/ref: `bash scripts/deploy-ref.sh <tag-or-ref>`
 - Roll back quickly to prior tag: `bash scripts/rollback-last-tag.sh`

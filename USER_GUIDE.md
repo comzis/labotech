@@ -89,6 +89,21 @@ sudo systemctl restart cpufrequtils
 cat /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor
 ```
 
+### 3.2b One-command host optimization profile (recommended)
+
+Use the bundled script for combined kernel/network/CPU baseline tuning:
+
+```bash
+sudo bash scripts/optimize-host-v2.sh
+sudo bash scripts/check-routes.sh
+```
+
+Rollback:
+
+```bash
+sudo bash scripts/rollback-host-optimization-v2.sh
+```
+
 ### 3.3 Network Buffer Tuning
 
 Prevents UDP packet drops on high-bitrate multicast and SRT streams:
@@ -440,6 +455,7 @@ Provides a real-time health overview of all active streams and transcoders.
 For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Stream View timeline operation, multiview refresh behavior, and production troubleshooting workflows, use:
 
 - `docs/engineering-support-manual.md`
+- `docs/ui-hardening-and-20227-worklog.md` (latest decoder/multiview/2022-7 implementation and validation log)
 
 ---
 
