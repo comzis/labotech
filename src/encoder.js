@@ -36,6 +36,15 @@ function normBitrate(val, defaultUnit = 'M') {
   return `${Math.round(num)}${defaultUnit}`;  // audio: plain number = kbps
 }
 
+function envInt(name, fallback) {
+  const parsed = parseInt(process.env[name], 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+const LIVE_INPUT_FIFO_SIZE = envInt('TS_INPUT_FIFO_SIZE', 10000000);
+const LIVE_INPUT_TIMEOUT_US = envInt('TS_INPUT_TIMEOUT_US', 7000000);
+const LIVE_INPUT_REORDER_QUEUE = envInt('TS_INPUT_REORDER_QUEUE_SIZE', 512);
+
 class SRTEncoder extends EventEmitter {
   constructor(options = {}) {
     super();
@@ -143,9 +152,9 @@ class SRTEncoder extends EventEmitter {
     const args = [];
     if (type === 'rtp' || type === 'udp') {
       const sep = this.input.includes('?') ? '&' : '?';
-      // fifo_size: 10 MB receive buffer to handle bursts; overrun_nonfatal: keep
-      // running on overflow rather than crashing (logs a warning instead)
-      let inputUrl = `${this.input}${sep}fifo_size=10000000&overrun_nonfatal=1`;
+      // Tunable receive buffering for bursty RTP/UDP ingest.
+      // overrun_nonfatal keeps pipeline alive on transient overflow.
+      let inputUrl = `${this.input}${sep}fifo_size=${LIVE_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${LIVE_INPUT_TIMEOUT_US}&reorder_queue_size=${LIVE_INPUT_REORDER_QUEUE}`;
       // Only append localaddr if it looks like a valid IP (not a stray character)
       const validIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(this.inputLocalAddr);
       if (this.inputLocalAddr && validIp) inputUrl += `&localaddr=${this.inputLocalAddr}`;

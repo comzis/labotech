@@ -25,6 +25,15 @@ const _thumbPendingById = new Map(); // safeStreamId -> Promise<string>
 const THUMBNAIL_DIR      = path.join(__dirname, '..', 'logs', 'thumbnails');
 const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
 const THUMBNAIL_QUALITY_PROFILE = String(process.env.THUMBNAIL_QUALITY_PROFILE || 'high').trim().toLowerCase();
+const TS_INPUT_FIFO_SIZE = Number.isFinite(parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
+  ? Math.max(1, parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
+  : 20000000;
+const TS_INPUT_TIMEOUT_US = Number.isFinite(parseInt(process.env.TS_INPUT_TIMEOUT_US, 10))
+  ? Math.max(1, parseInt(process.env.TS_INPUT_TIMEOUT_US, 10))
+  : 7000000;
+const TS_INPUT_REORDER_QUEUE_SIZE = Number.isFinite(parseInt(process.env.TS_INPUT_REORDER_QUEUE_SIZE, 10))
+  ? Math.max(1, parseInt(process.env.TS_INPUT_REORDER_QUEUE_SIZE, 10))
+  : 1024;
 const SNMP_HOST          = process.env.SNMP_MANAGER_HOST || '10.67.18.1';
 const SYSLOG_HOST        = process.env.SYSLOG_HOST       || '10.67.18.1';
 const SYSLOG_PORT        = parseInt(process.env.SYSLOG_PORT) || 514;
@@ -96,7 +105,7 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     let src = inputUrl;
     if (inputUrl.startsWith('udp://') || inputUrl.startsWith('rtp://')) {
       const sep = inputUrl.includes('?') ? '&' : '?';
-      src = `${inputUrl}${sep}fifo_size=20000000&overrun_nonfatal=1&timeout=7000000&reorder_queue_size=1024`;
+      src = `${inputUrl}${sep}fifo_size=${TS_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${TS_INPUT_TIMEOUT_US}&reorder_queue_size=${TS_INPUT_REORDER_QUEUE_SIZE}`;
     }
 
     const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
