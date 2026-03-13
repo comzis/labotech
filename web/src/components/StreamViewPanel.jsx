@@ -415,6 +415,33 @@ function buildLaneGradient(events, timeStart, windowMs) {
     return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
+  const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
+
+  // Fallback when ETR heartbeat is not present:
+  // keep lane steady green from first observed runtime/analyse activity,
+  // and return to gray only after explicit stop.
+  if (!hasEtrStateEvents) {
+    const activityEvents = sorted.filter((e) =>
+      e.category === 'runtime_started' ||
+      e.category === 'analyse_result'
+    );
+    if (activityEvents.length === 0) {
+      return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
+    }
+    const firstActiveTs = activityEvents[0].ts;
+    const stopAfterActive = sorted.find((e) =>
+      (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
+    );
+    const startX = Math.min(100, Math.max(0, ((Math.max(timeStart, firstActiveTs) - timeStart) / windowMs) * 100));
+    const stopX = stopAfterActive
+      ? Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, stopAfterActive.ts) - timeStart) / windowMs) * 100))
+      : null;
+    if (stopX == null) {
+      return `linear-gradient(90deg, #44556622 0%, #44556622 ${startX}%, #00dd5555 ${startX}%, #00dd5555 100%)`;
+    }
+    return `linear-gradient(90deg, #44556622 0%, #44556622 ${startX}%, #00dd5555 ${startX}%, #00dd5555 ${stopX}%, #44556622 ${stopX}%, #44556622 100%)`;
+  }
+
   // Determine initial severity: last known state BEFORE the window.
   // If no events precede the window, use 'unknown' (gray) — not 'ok'.
   let currentSeverity = 'unknown';
@@ -442,6 +469,9 @@ function buildEventBlocks(events, timeStart, windowMs) {
   const end = timeStart + windowMs;
   return events
     .filter((e) => e && e.ts != null)
+    // Suppress nominal analyse heartbeat blocks; they create misleading
+    // gray/green segmentation when lane baseline already indicates state.
+    .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
       const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;

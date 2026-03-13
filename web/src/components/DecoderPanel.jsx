@@ -786,7 +786,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   };
 
   return (
-    <div className="space-y-4 font-sans">
+    <div className="space-y-4 broadcast-legacy">
       <BentoCard icon={Radio} title="Decoder Provisioning (Compact)">
         <div className="grid grid-cols-3 gap-1.5">
           {PROBE_MODES.map(v => (

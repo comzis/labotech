@@ -56,7 +56,7 @@ export default function ConfidenceMonitor({ lastMessage }) {
   ].filter(s => s.isRunning);
 
   return (
-    <div className="space-y-8 font-sans">
+    <div className="space-y-8 broadcast-legacy">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
