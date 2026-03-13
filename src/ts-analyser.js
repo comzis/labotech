@@ -40,6 +40,7 @@ const SMPTE_2022_7_THRESHOLDS = {
   maxReorderedEvents: _envNumber('TS_20227_MAX_REORDER_EVENTS', 0),
   requireNicCapture: String(process.env.TS_20227_REQUIRE_NIC_CAPTURE || 'true').toLowerCase() !== 'false',
 };
+const AUDIO_LEVEL_HOLD_MS = Math.max(1000, Math.floor(_envNumber('AUDIO_LEVEL_HOLD_MS', 15000)));
 const LIVE_INPUT_HINTS = {
   fifoSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_FIFO_SIZE', 10000000))),
   timeoutUs: Math.max(1, Math.floor(_envNumber('TS_INPUT_TIMEOUT_US', 7000000))),
@@ -212,7 +213,36 @@ class TSAnalyser extends EventEmitter {
             result.dvb.bitrateSource = this.lastResult.dvb.bitrateSource;
             result.dvb.bitrateHeldFromPrevious = true;
           }
-          result.audioLevels = audioLevels;
+          const hasFreshAudioLevels = Boolean(
+            audioLevels && (
+              (Array.isArray(audioLevels.channels) && audioLevels.channels.length > 0) ||
+              Number.isFinite(Number(audioLevels.meanDb)) ||
+              Number.isFinite(Number(audioLevels.maxDb))
+            )
+          );
+          if (hasFreshAudioLevels) {
+            result.audioLevels = audioLevels;
+          } else {
+            const lastAudio = this.lastResult?.audioLevels || null;
+            const lastProbeTime = Number(this.lastResult?.probeTime || 0);
+            const ageMs = lastProbeTime > 0 ? (Date.now() - lastProbeTime) : Number.POSITIVE_INFINITY;
+            if (lastAudio && ageMs <= AUDIO_LEVEL_HOLD_MS) {
+              // Keep last valid meter sample briefly to avoid VU bar blink/drop
+              // on occasional astats probe misses under load.
+              result.audioLevels = lastAudio;
+              result.dvb.probeDiagnostics = {
+                ...(result.dvb.probeDiagnostics || {}),
+                audioLevels: {
+                  attempted: true,
+                  heldFromPrevious: true,
+                  holdMs: AUDIO_LEVEL_HOLD_MS,
+                  ageMs,
+                },
+              };
+            } else {
+              result.audioLevels = audioLevels;
+            }
+          }
           if (runThumbnailCapture) {
             // One-shot probe: capture synchronously so the caller gets a fresh frame.
             try {
