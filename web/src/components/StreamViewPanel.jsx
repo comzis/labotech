@@ -24,6 +24,7 @@ const LANE_ACTIVITY_STALE_MS = 30 * 1000; // auto-expire no-heartbeat runtime la
 const STARTED_RECENTLY_MS = 90 * 1000;
 const LIVE_TICK_MS = 2000;
 const MAX_FUTURE_SKEW_MS = 5000;
+const ACTIVE_ANALYSER_SEED_MS = 2000;
 const EVENT_BLOCK_DURATION_MS = {
   etr290_alarm: 14000,
   etr290_incident: 18000,
@@ -137,6 +138,8 @@ function isExpectedNoSignalError(message) {
   const m = String(message || '').toLowerCase();
   return (
     m.includes('ffprobe exited 1') ||
+    m.includes('empty probe payload') ||
+    m.includes('no input packets observed during probe window') ||
     m.includes('connection refused') ||
     m.includes('input/output error') ||
     m.includes('server returned 404') ||
@@ -769,7 +772,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       } catch (_) {}
     };
     seedFromActiveAnalysers();
-    const t = setInterval(seedFromActiveAnalysers, 5000);
+    const t = setInterval(seedFromActiveAnalysers, ACTIVE_ANALYSER_SEED_MS);
     return () => {
       mounted = false;
       clearInterval(t);

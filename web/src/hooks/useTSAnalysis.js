@@ -11,6 +11,7 @@ export default function useTSAnalysis() {
   const [resultsById, setResultsById] = useState({});
   const [decoderMeta, setDecoderMeta] = useState({});
   const stopSuppressedUntilRef = useRef(new Map());
+  const refreshInFlightRef = useRef(null);
 
   const cleanupSuppression = useCallback(() => {
     const now = Date.now();
@@ -41,28 +42,35 @@ export default function useTSAnalysis() {
   }, []);
 
   const refreshActives = useCallback(async () => {
-    try {
-      cleanupSuppression();
-      const analysers = await getAnalysers();
-      const runningIds = analysers
-        .filter((a) => a.isRunning)
-        .map((a) => a.id)
-        .filter((id) => !isSuppressed(id));
-      setActiveIds(runningIds);
-      const meta = {};
-      const restored = {};
-      analysers.forEach(a => {
-        if (isSuppressed(a.id)) return;
-        meta[a.id] = { id: a.id, url: a.url, isRunning: a.isRunning };
-        if (a.lastResult) {
-          restored[a.id] = { id: a.id, ...a.lastResult };
+    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    refreshInFlightRef.current = (async () => {
+      try {
+        cleanupSuppression();
+        const analysers = await getAnalysers();
+        const runningIds = analysers
+          .filter((a) => a.isRunning)
+          .map((a) => a.id)
+          .filter((id) => !isSuppressed(id));
+        setActiveIds(runningIds);
+        const meta = {};
+        const restored = {};
+        analysers.forEach(a => {
+          if (isSuppressed(a.id)) return;
+          meta[a.id] = { id: a.id, url: a.url, isRunning: a.isRunning };
+          if (a.lastResult) {
+            restored[a.id] = { id: a.id, ...a.lastResult };
+          }
+        });
+        setDecoderMeta(meta);
+        if (Object.keys(restored).length > 0) {
+          setResultsById(prev => ({ ...prev, ...restored }));
         }
-      });
-      setDecoderMeta(meta);
-      if (Object.keys(restored).length > 0) {
-        setResultsById(prev => ({ ...prev, ...restored }));
+      } catch (_) {}
+      finally {
+        refreshInFlightRef.current = null;
       }
-    } catch (_) {}
+    })();
+    return refreshInFlightRef.current;
   }, [cleanupSuppression, isSuppressed]);
 
   const startContinuous = useCallback(async (id, url, interval, nicName) => {
