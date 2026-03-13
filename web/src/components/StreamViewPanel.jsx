@@ -140,9 +140,12 @@ function isExpectedNoSignalError(message) {
 function normalizeLaneId(rawId) {
   const id = String(rawId || '').trim();
   if (!id) return 'unknown';
-  // ETR monitor IDs are typically prefixed (etr-<decoder-id>) while analyser
-  // events use plain decoder IDs. Normalize both into one visual lane.
-  return id.replace(/^etr[-_:]/i, '') || id;
+  // Collapse monitor/analyser/runtime identifiers into one canonical lane id.
+  // This avoids split lanes such as etr-<id>, analyser-<id>, and decoder-<id>
+  // all rendering independently for the same underlying stream lifecycle.
+  let lane = id.replace(/^etr[-_:]/i, '');
+  lane = lane.replace(/^analyser[-_:]/i, 'decoder-');
+  return lane || id;
 }
 
 function toUtc(ts) {
