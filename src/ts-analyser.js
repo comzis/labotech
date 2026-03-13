@@ -279,6 +279,7 @@ class TSAnalyser extends EventEmitter {
               if (cachedUrl) result.thumbnailUrl = cachedUrl;
             }
           }
+          result = this._normalizeAndSortResult(result);
           result = this._attachHealthAssessment(result);
           this.lastResult = result;
           this.emit('result', result);
@@ -915,34 +916,11 @@ class TSAnalyser extends EventEmitter {
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
       const available = tsduckData.pids.filter((r) => r && r.pid != null && !existingPidSet.has(r.pid));
-      const usedPidSet = new Set();
-
-      // First, patch missing PID fields on known program/orphan rows so operator tables
-      // show PID values in-place instead of only in appended orphan entries.
-      const missing = allExisting.filter((s) => s && s.pid == null);
-      for (const s of missing) {
-        let pickIdx = -1;
-        if (s.codecType) {
-          pickIdx = available.findIndex((r) => !usedPidSet.has(r.pid) && r.codecType && r.codecType === s.codecType);
-        }
-        if (pickIdx < 0) {
-          pickIdx = available.findIndex((r) => !usedPidSet.has(r.pid));
-        }
-        if (pickIdx < 0) continue;
-        const row = available[pickIdx];
-        s.pid = row.pid;
-        s.pidHex = `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`;
-        if (!s.streamType && row.streamType) s.streamType = row.streamType;
-        if (!s.codecName && row.codecName) s.codecName = row.codecName;
-        if (!s.language && row.language) s.language = row.language;
-        if (!s.bitrate && row.bitrate) s.bitrate = row.bitrate;
-        usedPidSet.add(row.pid);
-        existingPidSet.add(row.pid);
-      }
-
-      // Then append any still-unmapped tsduck PIDs as orphan rows.
+      // Do not "guess-assign" tsduck PID rows onto PID-less streams by codec type.
+      // That heuristic can mis-bind video/audio between cycles under unstable probes.
+      // Keep existing rows untouched and append only verified PID rows as orphans.
       for (const row of available) {
-        if (usedPidSet.has(row.pid) || existingPidSet.has(row.pid)) continue;
+        if (existingPidSet.has(row.pid)) continue;
         existingPidSet.add(row.pid);
         next.orphanStreams.push({
           index: `tsduck-${row.pid}`,
@@ -1351,25 +1329,29 @@ class TSAnalyser extends EventEmitter {
     const allExisting = programs.flatMap((p) => p.streams).concat(orphanStreams);
     const used = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
     const candidates = fallbackRows.filter((r) => r && r.pid != null && !used.has(r.pid));
-    const consume = (codecType) => {
-      let idx = -1;
-      if (codecType) idx = candidates.findIndex((r) => !used.has(r.pid) && r.codecType === codecType);
-      if (idx < 0) idx = candidates.findIndex((r) => !used.has(r.pid));
-      if (idx < 0) return null;
-      const row = candidates[idx];
+    // Keep fallback rows non-destructive: append verified PID rows instead of
+    // rebinding unknown streams with codec-based heuristics.
+    for (const row of candidates) {
+      if (used.has(row.pid)) continue;
       used.add(row.pid);
-      return row;
-    };
-    for (const stream of allExisting) {
-      if (!stream || stream.pid != null) continue;
-      const row = consume(stream.codecType);
-      if (!row) continue;
-      stream.pid = row.pid;
-      stream.pidHex = row.pidHex || `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`;
-      if (!stream.streamType && row.streamType) stream.streamType = row.streamType;
-      if (!stream.codecName && row.codecName) stream.codecName = row.codecName;
-      if (!stream.language && row.language) stream.language = row.language;
-      if (!stream.bitrate && row.bitrate) stream.bitrate = row.bitrate;
+      orphanStreams.push({
+        index: typeof row.index === 'number' ? row.index : `fallback-${row.pid}`,
+        codecType: row.codecType || 'data',
+        codecName: row.codecName || 'unknown',
+        pid: row.pid,
+        pidHex: row.pidHex || `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`,
+        streamType: row.streamType || null,
+        width: null,
+        height: null,
+        fps: null,
+        bitrate: row.bitrate || null,
+        sampleRate: null,
+        channels: null,
+        language: row.language || null,
+        colorSpace: null,
+        colorTrc: null,
+        colorPrimaries: null,
+      });
     }
     const allStreams = programs.flatMap((p) => p.streams).concat(orphanStreams);
     const pidCount = allStreams.filter((s) => s.pid != null).length;
@@ -1381,6 +1363,64 @@ class TSAnalyser extends EventEmitter {
         ...(result.dvb || {}),
         pidCount,
       },
+    };
+  }
+
+  _normalizeAndSortResult(result) {
+    if (!result) return result;
+    const typeOrder = { video: 0, audio: 1, subtitle: 2, data: 3, unknown: 9 };
+    const normType = (v) => {
+      const t = String(v || '').toLowerCase();
+      if (!t) return 'unknown';
+      if (t === 'video' || t === 'audio' || t === 'data' || t === 'subtitle') return t;
+      return 'unknown';
+    };
+    const pidNum = (s) => (Number.isFinite(Number(s?.pid)) ? Number(s.pid) : Number.POSITIVE_INFINITY);
+    const cmpStream = (a, b) => {
+      const ta = typeOrder[normType(a?.codecType)] ?? 9;
+      const tb = typeOrder[normType(b?.codecType)] ?? 9;
+      if (ta !== tb) return ta - tb;
+      const pa = pidNum(a);
+      const pb = pidNum(b);
+      if (pa !== pb) return pa - pb;
+      const ca = String(a?.codecName || '').toLowerCase();
+      const cb = String(b?.codecName || '').toLowerCase();
+      if (ca !== cb) return ca.localeCompare(cb);
+      const ia = Number.isFinite(Number(a?.index)) ? Number(a.index) : Number.POSITIVE_INFINITY;
+      const ib = Number.isFinite(Number(b?.index)) ? Number(b.index) : Number.POSITIVE_INFINITY;
+      return ia - ib;
+    };
+    const dedupeAndSort = (rows) => {
+      const map = new Map();
+      (rows || []).forEach((s) => {
+        if (!s) return;
+        const t = normType(s.codecType);
+        const pidKey = Number.isFinite(Number(s.pid))
+          ? String(Number(s.pid))
+          : String(s.pidHex || `idx-${s.index ?? 'na'}`).toUpperCase();
+        const codecKey = String(s.codecName || '').toLowerCase();
+        const key = `${pidKey}|${t}|${codecKey}`;
+        if (!map.has(key)) map.set(key, { ...s, codecType: t });
+      });
+      return Array.from(map.values()).sort(cmpStream);
+    };
+
+    const programs = [...(result.programs || [])]
+      .map((p) => ({
+        ...p,
+        streams: dedupeAndSort(p.streams || []),
+      }))
+      .sort((a, b) => {
+        const pa = Number.isFinite(Number(a?.programId)) ? Number(a.programId) : Number.POSITIVE_INFINITY;
+        const pb = Number.isFinite(Number(b?.programId)) ? Number(b.programId) : Number.POSITIVE_INFINITY;
+        if (pa !== pb) return pa - pb;
+        return String(a?.name || '').localeCompare(String(b?.name || ''));
+      });
+    const orphanStreams = dedupeAndSort(result.orphanStreams || []);
+    return {
+      ...result,
+      programs,
+      orphanStreams,
     };
   }
 
