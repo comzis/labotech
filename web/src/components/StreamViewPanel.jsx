@@ -439,7 +439,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     );
     const lastActivityTs = activityEvents[activityEvents.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
-    const startX = Math.min(100, Math.max(0, ((Math.max(timeStart, firstActiveTs) - timeStart) / windowMs) * 100));
+    // If the lane is currently active (no stop and freshness extends to window end),
+    // render a continuous baseline over the selected window so operators do not see
+    // a tiny right-edge fragment after tab switches/remount.
+    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs);
+    const effectiveStartTs = isActiveNow ? timeStart : Math.max(timeStart, firstActiveTs);
+    const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
     const stopX = Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100));
     if (stopX <= startX) {
