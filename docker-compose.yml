@@ -3,6 +3,13 @@ services:
     build: .
     container_name: labotech
     network_mode: host
+    cpus: 2.0
+    mem_limit: 2048m
+    shm_size: 256m
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
     cap_add:
       - NET_ADMIN
       - NET_RAW
