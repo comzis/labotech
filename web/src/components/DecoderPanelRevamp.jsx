@@ -18,6 +18,7 @@ const REFRESH_OPTIONS_MS = [
   { value: 15000, label: "15 seconds" },
   { value: 30000, label: "30 seconds" },
 ];
+const BATCH_START_CONCURRENCY = 4;
 
 const ETR_CHECK_FIELDS = [
   { id: "ts_sync", label: "TS Sync" },
@@ -489,33 +490,58 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     const etrFailed = [];
     setEtrActionNote(null);
     const usedIds = new Set([...(activeIds || [])]);
-    for (let i = 0; i < plansToStart.length; i += 1) {
-      const row = plansToStart[i];
+    const planned = plansToStart.map((row) => {
       const requestedId = row.decoderId?.trim() || `decoder-${runStamp}`;
       const id = makeMultiviewDecoderId({ requestedId, use20227: use20227 && addToMultiview, usedSet: usedIds });
+      return { row, id };
+    });
+
+    const startOne = async ({ row, id }) => {
       try {
         if (addToMultiview) {
           await startContinuous(id, row.url, parseInt(intervalMs, 10) || 5000, captureNic || undefined);
         } else {
           await probe(row.url);
         }
-        started.push(id);
-        if (enableEtrOnProvision) {
-          try {
-            await etr.start(`etr-${id}`, row.url, captureNic || undefined, {
-              profileName: selectedProfileName || undefined,
-              config: etrConfig,
-            });
-            etrStarted.push(id);
-          } catch (etrErr) {
-            etrFailed.push({ id, message: `ETR attach warning: ${etrErr?.message || "failed"}` });
-          }
-        }
       } catch (err) {
-        failed.push({ id, message: err?.message || "Provision failed" });
+        return { id, started: false, error: err?.message || "Provision failed" };
       }
-      // Smooth startup pressure on analyser backend for large batch starts.
-      if (i < plansToStart.length - 1) {
+
+      if (!enableEtrOnProvision) {
+        return { id, started: true, etrStarted: false, etrError: null };
+      }
+
+      try {
+        await etr.start(`etr-${id}`, row.url, captureNic || undefined, {
+          profileName: selectedProfileName || undefined,
+          config: etrConfig,
+        });
+        return { id, started: true, etrStarted: true, etrError: null };
+      } catch (etrErr) {
+        return {
+          id,
+          started: true,
+          etrStarted: false,
+          etrError: `ETR attach warning: ${etrErr?.message || "failed"}`,
+        };
+      }
+    };
+
+    for (let i = 0; i < planned.length; i += BATCH_START_CONCURRENCY) {
+      const batch = planned.slice(i, i + BATCH_START_CONCURRENCY);
+      // Bounded parallel startup to improve bring-up time without overwhelming host IO/process table.
+      const results = await Promise.all(batch.map(startOne));
+      results.forEach((r) => {
+        if (!r.started) {
+          failed.push({ id: r.id, message: r.error || "Provision failed" });
+          return;
+        }
+        started.push(r.id);
+        if (r.etrStarted) etrStarted.push(r.id);
+        if (r.etrError) etrFailed.push({ id: r.id, message: r.etrError });
+      });
+      // Small inter-batch gap smooths ffprobe/thumbnail burst pressure.
+      if (i + BATCH_START_CONCURRENCY < planned.length) {
         await new Promise((resolve) => setTimeout(resolve, 180));
       }
     }
