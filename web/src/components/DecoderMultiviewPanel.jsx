@@ -424,18 +424,12 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   useEffect(() => {
     setPanels((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
-      let changed = false;
-      let next = prev.map((p) => {
-        const filtered = (p.decoderIds || []).filter((id) => activeIds.includes(id));
-        if (filtered.length !== (p.decoderIds || []).length) changed = true;
-        return filtered === p.decoderIds ? p : { ...p, decoderIds: filtered };
-      });
-      const assignedCount = next.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
-      if (activeIds.length > 0 && assignedCount === 0) {
-        next = next.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
-        changed = true;
-      }
-      return changed ? next : prev;
+      const assignedCount = prev.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
+      // Preserve workspace routing even when activeIds is temporarily empty
+      // (tab switch/remount/refresh race). This keeps parked decoder assignments.
+      if (assignedCount > 0 || activeIds.length === 0) return prev;
+      // First-time seed only when no panel routing exists at all.
+      return prev.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
     });
   }, [activeIds]);
 
