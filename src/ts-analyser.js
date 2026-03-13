@@ -86,36 +86,66 @@ class TSAnalyser extends EventEmitter {
     const runThumbnailCapture = !isContinuous;
 
     return new Promise((resolve, reject) => {
-      const inputUrl = this._withLiveInputHints(this.url);
-      const args = [
-        '-v', 'quiet',
-        '-analyzeduration', '7000000',
-        '-probesize', '7000000',
-        '-print_format', 'json',
-        '-show_programs',
-        '-show_streams',
-        '-show_format',
-        inputUrl,
-      ];
+      const runFfprobeJson = (probeUrl, extraArgs = []) => new Promise((resolveProbe, rejectProbe) => {
+        const args = [
+          '-v', 'quiet',
+          '-analyzeduration', '7000000',
+          '-probesize', '7000000',
+          ...extraArgs,
+          '-print_format', 'json',
+          '-show_programs',
+          '-show_streams',
+          '-show_format',
+          probeUrl,
+        ];
+        const proc = spawn('ffprobe', args);
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => { stdout += d.toString(); });
+        proc.stderr.on('data', d => { stderr += d.toString(); });
+        proc.on('error', (err) => {
+          rejectProbe(new Error(`ffprobe spawn failed: ${err && err.message ? err.message : 'unknown error'}`));
+        });
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            return rejectProbe(new Error(`ffprobe exited ${code}: ${stderr.trim()}`));
+          }
+          const out = String(stdout || '').trim();
+          if (!out) {
+            return rejectProbe(new Error(`ffprobe returned empty probe payload${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+          }
+          try {
+            const raw = JSON.parse(out);
+            return resolveProbe(raw);
+          } catch (_) {
+            return rejectProbe(new Error(`ffprobe returned invalid JSON payload${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+          }
+        });
+      });
 
-      const proc = spawn('ffprobe', args);
-      let stdout = '';
-      let stderr = '';
-
-      proc.stdout.on('data', d => { stdout += d.toString(); });
-      proc.stderr.on('data', d => { stderr += d.toString(); });
-
-      proc.on('exit', async (code) => {
-        if (code !== 0) {
-          return reject(new Error(`ffprobe exited ${code}: ${stderr.trim()}`));
-        }
+      (async () => {
         try {
-          const raw = JSON.parse(stdout);
+          const primaryUrl = this._withLiveInputHints(this.url);
+          let raw = null;
+          try {
+            raw = await runFfprobeJson(primaryUrl);
+          } catch (primaryErr) {
+            // RTP multicast feeds often need UDP/mpegts probing for one-shot ffprobe.
+            if (!this._isRtpUrl(this.url)) throw primaryErr;
+            const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
+            if (!udpUrl) throw primaryErr;
+            try {
+              raw = await runFfprobeJson(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+            } catch (fallbackErr) {
+              throw new Error(`${primaryErr.message} | RTP UDP fallback failed: ${fallbackErr.message}`);
+            }
+          }
+
           let result = this.parseStructure(raw);
           // Some RTP/TS sources omit ids for all or part of program streams.
           // Always attempt PID backfill from ffmpeg banner lines and patch any gaps.
           const pidProbe = await this._probeStreamPidsFromFfmpeg();
-          result = this._applyPidMap(result, pidProbe.pidByIndex || {});
+          result = this._applyPidMap(result, pidProbe || {});
           result = this._applyFallbackPidRows(result, pidProbe.rows || []);
           const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = await Promise.all([
             runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
@@ -287,7 +317,7 @@ class TSAnalyser extends EventEmitter {
         } catch (e) {
           reject(e);
         }
-      });
+      })();
 
       proc.on('error', reject);
     });
@@ -1258,19 +1288,36 @@ class TSAnalyser extends EventEmitter {
   _buildPidProbeResult(rows) {
     const cleanRows = Array.isArray(rows) ? rows.filter((r) => r && r.pid != null) : [];
     const pidByIndex = {};
+    const rowByIndex = {};
     cleanRows.forEach((r) => {
-      if (typeof r.index === 'number' && r.pid != null) pidByIndex[r.index] = r.pid;
+      if (typeof r.index === 'number' && r.pid != null) {
+        pidByIndex[r.index] = r.pid;
+        rowByIndex[r.index] = r;
+      }
     });
-    return { pidByIndex, rows: cleanRows };
+    return { pidByIndex, rowByIndex, rows: cleanRows };
   }
 
-  _applyPidMap(result, pidMap) {
-    if (!result || !pidMap || Object.keys(pidMap).length === 0) return result;
+  _applyPidMap(result, pidProbe) {
+    if (!result || !pidProbe || typeof pidProbe !== 'object') return result;
+    const hasWrappedProbe = Object.prototype.hasOwnProperty.call(pidProbe, 'pidByIndex');
+    const pidMap = hasWrappedProbe ? (pidProbe.pidByIndex || {}) : pidProbe;
+    const rowByIndex = hasWrappedProbe ? (pidProbe.rowByIndex || {}) : {};
+    if (Object.keys(pidMap).length === 0) return result;
+    const sameCodecFamily = (a, b) => {
+      const ta = String(a || '').toLowerCase();
+      const tb = String(b || '').toLowerCase();
+      if (!ta || !tb) return true;
+      return ta === tb;
+    };
     const patchStream = (s) => {
       if (!s) return s;
       if (s.pid != null) return s;
       const pid = pidMap[s.index];
       if (pid == null) return s;
+      const ref = rowByIndex[s.index] || null;
+      // Prevent PID shuffling: only trust index mapping when stream family matches.
+      if (ref && !sameCodecFamily(s.codecType, ref.codecType)) return s;
       return {
         ...s,
         pid,
