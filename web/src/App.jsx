@@ -43,6 +43,12 @@ const ROLES = {
 };
 const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
+const RACK_LOBBY_PUNCHLINES = [
+  'check PCR before panic',
+  'blame cables only after coffee',
+  'if in doubt, inspect CC',
+  'first fix timing, then feelings',
+];
 
 function LandingRoleSelect({ onSelectRole }) {
   return (
@@ -325,7 +331,15 @@ export default function App() {
   const [telemetry, setTelemetry] = useState(null);
   const [eventLog, setEventLog] = useState([]);
   const [alarmUnreadCritical, setAlarmUnreadCritical] = useState(0);
+  const [lobbyLineIdx, setLobbyLineIdx] = useState(() => Math.floor(Math.random() * RACK_LOBBY_PUNCHLINES.length));
   const errorToastSeenRef = useRef(new Map());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLobbyLineIdx((idx) => (idx + 1) % RACK_LOBBY_PUNCHLINES.length);
+    }, 7000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     try {
@@ -619,11 +633,17 @@ export default function App() {
 
           <button
             onClick={handleResetRole}
-            className="ml-1 px-2 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0"
-            style={{ color: '#8ea3c2', border: '1px solid #273347', background: '#0b111a' }}
-            title="Switch role"
+            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1"
+            style={{
+              color: '#9ab4d8',
+              border: '1px solid #2b3950',
+              background: 'linear-gradient(180deg, #0d1520, #0a1018)',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px rgba(80,120,180,0.15)',
+            }}
+            title={`Return to landing page (${RACK_LOBBY_PUNCHLINES[lobbyLineIdx]})`}
           >
-            {role === ROLES.OPS ? 'OPS' : 'BES'}
+            <span>↩ Rack Lobby</span>
+            <span className="hidden 2xl:inline" style={{ color: '#6f86aa' }}>· {RACK_LOBBY_PUNCHLINES[lobbyLineIdx]}</span>
           </button>
 
         </div>
