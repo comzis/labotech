@@ -319,7 +319,6 @@ class TSAnalyser extends EventEmitter {
         }
       })();
 
-      proc.on('error', reject);
     });
   }
 
