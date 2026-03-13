@@ -73,7 +73,7 @@ function extractPidEvidence(selected) {
   };
 }
 
-export default function EventLogPanel({ events = [], onClear = () => {} }) {
+export default function EventLogPanel({ events = [], onClear = () => {}, onClearGhost = () => {} }) {
   const [severityFilter, setSeverityFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [selectedRowKey, setSelectedRowKey] = useState(null);
@@ -203,6 +203,23 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
               }}
             >
               Clear
+            </button>
+            <button
+              onClick={() => onClearGhost(selected)}
+              disabled={!selected}
+              title={selected ? 'Remove selected ghost/stale event' : 'Select an event first'}
+              style={{
+                border: `1px solid ${selected ? C.warn : C.border}`,
+                background: 'transparent',
+                color: selected ? C.warn : C.muted,
+                borderRadius: 2,
+                padding: '4px 8px',
+                fontSize: 9,
+                cursor: selected ? 'pointer' : 'not-allowed',
+                opacity: selected ? 1 : 0.55,
+              }}
+            >
+              Clear Ghost
             </button>
 
             <button
