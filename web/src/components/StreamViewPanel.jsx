@@ -1093,11 +1093,19 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       top: `${y - (LANE_LINE_THICKNESS_PX / 2)}px`,
                       height: `${LANE_LINE_THICKNESS_PX}px`,
                       background: laneLineById[id] || lineColor,
+                      zIndex: 1,
                     }}
                   />
                   <div
                     className="absolute left-2 -translate-y-1/2 text-[11px] font-mono max-w-[320px] truncate px-1.5 rounded"
-                    style={{ top: `${y}px`, color: C.text, background: 'rgba(0,0,0,0.48)', border: '1px solid rgba(255,255,255,0.08)' }}
+                    style={{
+                      top: `${y}px`,
+                      color: C.text,
+                      background: '#07090df0',
+                      border: '1px solid rgba(255,255,255,0.10)',
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.45)',
+                      zIndex: 4,
+                    }}
                     title={id}
                   >
                     {id}
@@ -1108,6 +1116,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       style={{
                         top: `${y - 3}px`,
                         height: '6px',
+                        zIndex: 2,
                       }}
                     >
                       {laneBlocks.map((blk) => (
