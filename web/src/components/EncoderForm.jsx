@@ -5,6 +5,7 @@ import { startStream } from '../api';
 import BentoCard, { containerVariants } from './ui/BentoCard';
 import { Field, SelectField, PidField } from './ui/MatrixField';
 import { C } from './BroadcastUI';
+import { SUPPORTED_VIDEO_CODECS, SUPPORTED_AUDIO_CODECS, profileOptionsForCodec } from '../utils/codecSupport';
 
 const DEFAULTS = {
   id: '', inputMode: 'rtp', inputHost: '', inputPort: '6501', input: '', inputLocalAddr: '',
@@ -42,6 +43,7 @@ export default function EncoderForm({ onStarted }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(false);
+  const profileOptions = profileOptionsForCodec(form.videoCodec);
 
   const set = (k, v) => {
     if (k === 'outputMode') {
@@ -51,6 +53,14 @@ export default function EncoderForm({ onStarted }) {
         host: '',
         port: v === 'udp' || v === 'rtp' ? '6501' : '9999',
       }));
+    } else if (k === 'videoCodec') {
+      setForm((f) => {
+        const nextProfileOptions = profileOptionsForCodec(v);
+        const nextProfile = nextProfileOptions.some((o) => o.value === f.profile)
+          ? f.profile
+          : (nextProfileOptions[0]?.value || '');
+        return { ...f, videoCodec: v, profile: nextProfile };
+      });
     } else {
       setForm(f => ({ ...f, [k]: v }));
     }
@@ -241,7 +251,7 @@ export default function EncoderForm({ onStarted }) {
                       className="w-full bg-black/40 border border-white/10 rounded-lg px-1 py-2 text-xs text-gray-200 text-center focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all" />
                     <select value={p.codec} onChange={e => updatePair(i, 'codec', e.target.value)}
                       className="w-full bg-black/40 border border-white/10 rounded-lg px-2 py-2 text-xs text-gray-200 focus:outline-none focus:border-neon-cyan/50 focus:bg-neon-cyan/5 transition-all appearance-none cursor-pointer">
-                      {['aac', 'mp2', 'ac3', 'eac3', 'copy'].map(c => <option key={c} value={c} className="bg-midnight-surface">{c}</option>)}
+                      {SUPPORTED_AUDIO_CODECS.map((c) => <option key={c.value} value={c.value} className="bg-midnight-surface">{c.value}</option>)}
                     </select>
                     <input type="text" value={p.bitrate} placeholder="256k"
                       onChange={e => updatePair(i, 'bitrate', e.target.value)}
@@ -302,8 +312,8 @@ export default function EncoderForm({ onStarted }) {
                 GPU please 🙂 - CPU is working overtime.
               </div>
               <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-                <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={['libx264', 'libx265', 'copy']} />
-                <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={['baseline', 'main', 'high', 'high422']} />
+                <SelectField label="Codec" value={form.videoCodec} onChange={v => set('videoCodec', v)} options={SUPPORTED_VIDEO_CODECS} />
+                <SelectField label="Profile" value={form.profile} onChange={v => set('profile', v)} options={profileOptions.length ? profileOptions : [{ value: '', label: 'n/a (copy)' }]} disabled={profileOptions.length === 0} />
                 <SelectField label="Preset" value={form.preset} onChange={v => set('preset', v)} options={['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow']} />
                 <Field label="Bitrate (Mbps)" value={form.videoBitrate} onChange={v => set('videoBitrate', v)} placeholder="e.g. 10 or 12.5" />
                 <Field label="GOP" value={form.gopSize} onChange={v => set('gopSize', v)} type="number" />

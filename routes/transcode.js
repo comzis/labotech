@@ -3,6 +3,7 @@
 const express = require('express');
 const WebSocket = require('ws');
 const Transcoder = require('../src/transcoder');
+const { isSupportedVideoCodec, isSupportedAudioCodec, SUPPORTED_VIDEO_CODECS, SUPPORTED_AUDIO_CODECS } = require('../src/codec-support');
 
 module.exports = function (transcoders, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
@@ -76,6 +77,18 @@ module.exports = function (transcoders, wss, saveState = () => {}, broadcastFn =
     const validModes = ['srt', 'udp', 'rtp'];
     if (outputMode && !validModes.includes(outputMode)) {
       return res.status(400).json({ error: `outputMode must be one of: ${validModes.join(', ')}` });
+    }
+    if (videoCodec && !isSupportedVideoCodec(videoCodec)) {
+      return res.status(400).json({ error: `videoCodec must be one of: ${SUPPORTED_VIDEO_CODECS.join(', ')}` });
+    }
+    if (audioCodec && !isSupportedAudioCodec(audioCodec)) {
+      return res.status(400).json({ error: `audioCodec must be one of: ${SUPPORTED_AUDIO_CODECS.join(', ')}` });
+    }
+    if (Array.isArray(audioPairs)) {
+      const invalidPair = audioPairs.find((p) => p && p.codec && !isSupportedAudioCodec(p.codec));
+      if (invalidPair) {
+        return res.status(400).json({ error: `audioPairs codec must be one of: ${SUPPORTED_AUDIO_CODECS.join(', ')}` });
+      }
     }
 
     let transcoder;
