@@ -22,6 +22,7 @@ const analysers = new Map();     // id → TSAnalyser
 const etr290monitors = new Map(); // id → ETR290Analyser
 
 let _lastCpuSample = null;
+let _etrOrphanWatchdog = null;
 
 function _sampleCpuPercent() {
   const cpus = os.cpus();
@@ -111,6 +112,64 @@ function broadcastStats(wss, type, id, stats) {
 
 function saveState() {
   persistence.save(streams, transcoders, forwarders);
+}
+
+function _isManagedEtrMonitorId(id) {
+  const v = String(id || '');
+  return /^etr-(decoder|analyser)-/i.test(v);
+}
+
+function _linkedAnalyserIdFromEtrId(id) {
+  const v = String(id || '');
+  if (!v.startsWith('etr-')) return null;
+  return v.slice(4) || null;
+}
+
+function startEtrOrphanWatchdog() {
+  if (_etrOrphanWatchdog) return;
+  const graceMs = Math.max(5000, parseInt(process.env.ETR_ORPHAN_GRACE_MS || '15000', 10) || 15000);
+  const checkEveryMs = Math.max(2000, parseInt(process.env.ETR_ORPHAN_CHECK_MS || '5000', 10) || 5000);
+  const missingSince = new Map(); // monitorId -> first missing timestamp
+
+  _etrOrphanWatchdog = setInterval(() => {
+    const now = Date.now();
+    for (const [monitorId, mon] of etr290monitors.entries()) {
+      if (!mon || !mon.isRunning) {
+        missingSince.delete(monitorId);
+        continue;
+      }
+      if (!_isManagedEtrMonitorId(monitorId)) {
+        // Keep manually managed ETR monitors untouched.
+        missingSince.delete(monitorId);
+        continue;
+      }
+      const linkedAnalyserId = _linkedAnalyserIdFromEtrId(monitorId);
+      if (!linkedAnalyserId) {
+        missingSince.delete(monitorId);
+        continue;
+      }
+      const linkedAnalyser = analysers.get(linkedAnalyserId);
+      if (linkedAnalyser && linkedAnalyser.isRunning) {
+        missingSince.delete(monitorId);
+        continue;
+      }
+      const firstMissingAt = missingSince.get(monitorId) || now;
+      if (!missingSince.has(monitorId)) {
+        missingSince.set(monitorId, firstMissingAt);
+        continue;
+      }
+      if ((now - firstMissingAt) < graceMs) continue;
+      try {
+        mon.stop();
+      } catch (_) {
+        // best-effort cleanup
+      }
+      etr290monitors.delete(monitorId);
+      missingSince.delete(monitorId);
+      console.log(`[health] Auto-stopped orphan ETR monitor ${monitorId} (linked analyser ${linkedAnalyserId} not running)`);
+    }
+  }, checkEveryMs);
+  if (typeof _etrOrphanWatchdog.unref === 'function') _etrOrphanWatchdog.unref();
 }
 
 // ─── Restore persisted engines after boot ────────────────────────────────────
@@ -246,6 +305,7 @@ function start() {
 
   server.listen(API_PORT, API_HOST, () => {
     console.log(`Labotech API listening on http://${API_HOST}:${API_PORT}`);
+    startEtrOrphanWatchdog();
     // Restore engines after a short delay to let the event loop settle
     setTimeout(() => restoreState(broadcast), 2000);
   });
