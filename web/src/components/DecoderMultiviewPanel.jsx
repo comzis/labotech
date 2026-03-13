@@ -129,7 +129,7 @@ function extractThumbTimestamp(thumbnailUrl) {
   return Number.isFinite(ts) ? ts : null;
 }
 
-function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode }) {
+function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode, isStopping = false }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   const transportRate = resolveTransportBitrate(result);
@@ -204,10 +204,18 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         </span>
         <button
           onClick={onStop}
+          disabled={isStopping}
           className="text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
-          style={{ background: 'rgba(180,30,30,0.3)', border: '1px solid rgba(220,50,50,0.3)', color: '#f87171', borderRadius: '2px' }}
+          style={{
+            background: 'rgba(180,30,30,0.3)',
+            border: '1px solid rgba(220,50,50,0.3)',
+            color: '#f87171',
+            borderRadius: '2px',
+            opacity: isStopping ? 0.55 : 1,
+            cursor: isStopping ? 'not-allowed' : 'pointer',
+          }}
         >
-          Stop
+          {isStopping ? 'Stopping…' : 'Stop'}
         </button>
       </div>
 
@@ -340,6 +348,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
+  const [stoppingIds, setStoppingIds] = useState(new Set());
 
   useEffect(() => {
     try {
@@ -691,11 +700,26 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               meta={decoderMeta[id]}
               result={resultsById[id]}
               onStop={async () => {
-                await stop(id);
-                await refreshActives();
+                if (stoppingIds.has(id)) return;
+                setStoppingIds((prev) => {
+                  const next = new Set(prev);
+                  next.add(id);
+                  return next;
+                });
+                try {
+                  await stop(id);
+                } finally {
+                  await refreshActives();
+                  setStoppingIds((prev) => {
+                    const next = new Set(prev);
+                    next.delete(id);
+                    return next;
+                  });
+                }
               }}
               nowMs={nowMs}
               engineerMode={engineerMode}
+              isStopping={stoppingIds.has(id)}
             />
           ))}
         </div>
