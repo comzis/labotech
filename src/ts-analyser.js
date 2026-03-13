@@ -111,7 +111,7 @@ class TSAnalyser extends EventEmitter {
           const pidProbe = await this._probeStreamPidsFromFfmpeg();
           result = this._applyPidMap(result, pidProbe.pidByIndex || {});
           result = this._applyFallbackPidRows(result, pidProbe.rows || []);
-          const [tsduckProbe, measuredBitrateBps, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = await Promise.all([
+          const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = await Promise.all([
             runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
             runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
             this._probeAudioLevels(),
@@ -180,13 +180,32 @@ class TSAnalyser extends EventEmitter {
             programConfig: null,
             error: null,
           };
-          if (measuredBitrateBps && measuredBitrateBps > 0) {
+          const measuredBitrateBps = Number(transportProbe && transportProbe.bitrateBps);
+          if (Number.isFinite(measuredBitrateBps) && measuredBitrateBps > 0) {
             result.dvb.measuredBitrateBps = measuredBitrateBps;
             // tsduck is preferred when available, otherwise use measured remux bitrate.
             if (!result.dvb.bitrateBps || result.dvb.bitrateSource !== 'tsduck') {
               result.dvb.bitrateBps = measuredBitrateBps;
               result.dvb.bitrateSource = 'measured';
             }
+          }
+          if (transportProbe && transportProbe.srtStats) {
+            result.dvb.srtStats = transportProbe.srtStats;
+          } else if (this.lastResult?.dvb?.srtStats) {
+            // Keep last known libsrt counters between heavy probe intervals.
+            result.dvb.srtStats = this.lastResult.dvb.srtStats;
+          }
+          // When transport-level probes are skipped, avoid jumping back to low-confidence
+          // container/stream-derived values in CBR operational views.
+          if (
+            !runHeavyProbe &&
+            this.lastResult?.dvb?.bitrateBps > 0 &&
+            ['format', 'streams'].includes(String(result.dvb.bitrateSource || '').toLowerCase()) &&
+            ['tsduck', 'measured'].includes(String(this.lastResult?.dvb?.bitrateSource || '').toLowerCase())
+          ) {
+            result.dvb.bitrateBps = this.lastResult.dvb.bitrateBps;
+            result.dvb.bitrateSource = this.lastResult.dvb.bitrateSource;
+            result.dvb.bitrateHeldFromPrevious = true;
           }
           result.audioLevels = audioLevels;
           if (runThumbnailCapture) {
@@ -440,19 +459,64 @@ class TSAnalyser extends EventEmitter {
           }
         }
 
+        let bitrateBps = null;
         // Primary: size/time calculation (most accurate for MPEG-TS remux)
         if (totalSize > 0 && outTimeUs > 0) {
           const seconds = outTimeUs / 1e6;
           if (Number.isFinite(seconds) && seconds > 0) {
             const bps = Math.round((totalSize * 8) / seconds);
-            if (Number.isFinite(bps) && bps > 0) return resolve(bps);
+            if (Number.isFinite(bps) && bps > 0) bitrateBps = bps;
           }
         }
         // Fallback: bitrate= field reported directly by FFmpeg
-        if (progressKbps > 0) return resolve(Math.round(progressKbps * 1000));
+        if (progressKbps > 0) bitrateBps = Math.round(progressKbps * 1000);
+
+        const srtStats = this._extractSrtStatsFromLog(stderr);
+        if (bitrateBps || srtStats) {
+          return resolve({
+            bitrateBps: bitrateBps || null,
+            srtStats: srtStats || null,
+          });
+        }
         resolve(null);
       });
     });
+  }
+
+  _extractSrtStatsFromLog(stderr) {
+    if (!stderr) return null;
+    const last = (rx) => {
+      const matches = Array.from(String(stderr).matchAll(rx));
+      if (!matches.length) return null;
+      return matches[matches.length - 1][1];
+    };
+    const num = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const srt = {};
+    const rateMbps = num(last(/(?:^|[\s,])rate=([\d.]+)\s*mbps/ig));
+    const bwMbps = num(last(/(?:^|[\s,])bw=([\d.]+)\s*mbps/ig));
+    const rttMs = num(last(/(?:^|[\s,])rtt=([\d.]+)\s*ms/ig));
+    const pktTotal = num(last(/(?:^|[\s,])total=(\d+)\s*pkts?/ig));
+    const pktRetrans = num(last(/(?:^|[\s,])retrans=(\d+)\s*pkts?/ig));
+    const pktLost = num(last(/(?:^|[\s,])(?:loss|lost)=(\d+)\s*pkts?/ig));
+    const pktDropped = num(last(/(?:^|[\s,])(?:drop|dropped)=(\d+)\s*pkts?/ig));
+    const pktNak = num(last(/(?:^|[\s,])nak=(\d+)\s*pkts?/ig));
+    const pktAck = num(last(/(?:^|[\s,])ack=(\d+)\s*pkts?/ig));
+    if (rateMbps != null) srt.rateMbps = rateMbps;
+    if (bwMbps != null) srt.bwMbps = bwMbps;
+    if (rttMs != null) srt.rttMs = rttMs;
+    if (pktTotal != null) srt.pktTotal = pktTotal;
+    if (pktRetrans != null) srt.pktRetrans = pktRetrans;
+    if (pktLost != null) srt.pktLost = pktLost;
+    if (pktDropped != null) srt.pktDropped = pktDropped;
+    if (pktNak != null) srt.pktNak = pktNak;
+    if (pktAck != null) srt.pktAck = pktAck;
+    if (srt.pktTotal > 0 && srt.pktLost != null) {
+      srt.lossPercent = parseFloat(((srt.pktLost / srt.pktTotal) * 100).toFixed(3));
+    }
+    return Object.keys(srt).length > 0 ? srt : null;
   }
 
   _probeTimestampDiscontinuities() {

@@ -5,6 +5,8 @@ import Sparkline from './Sparkline';
 import { getEvents } from '../api';
 import { C } from './BroadcastUI';
 
+const STREAMVIEW_STATE_KEY = 'labotech:streamview:state:v2';
+
 const WINDOW_OPTIONS = [
   { value: 5 * 60 * 1000, label: '5m' },
   { value: 15 * 60 * 1000, label: '15m' },
@@ -189,14 +191,18 @@ function toEvent(msg) {
           checkLabel: etrCheckLabel(checkKey, k),
         };
       });
+    const hasActiveChecks = activeChecks.length > 0;
     return {
       key: `${ts}-${msg.id || 'unknown'}-status`,
       ts,
       id: laneId,
       rawId: msg.id || 'etr',
       category: 'etr290_status',
-      severity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
-      title: hasP1 ? 'ETR 290 status: Priority 1 active' : hasP2 ? 'ETR 290 status: Priority 2 active' : 'ETR 290 status: nominal',
+      // Keep status heartbeats informational to avoid conflicting with alarm/incident views.
+      severity: 'info',
+      // But retain true ETR state for lane-level timeline coloring.
+      stateSeverity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
+      title: hasP1 ? 'ETR 290 status heartbeat: Priority 1 active' : hasP2 ? 'ETR 290 status heartbeat: Priority 2 active' : 'ETR 290 status heartbeat: nominal',
       description: activeChecks.length > 0
         ? `Active checks: ${activeChecks.map((c) => c.checkLabel).join(', ')}`
         : 'No active ETR 290 errors',
@@ -206,6 +212,7 @@ function toEvent(msg) {
           priority: statusPriority,
           priorityLabel: etrPriorityLabel(statusPriority),
           activeChecks,
+          hasActiveChecks,
         },
       },
     };
@@ -366,14 +373,29 @@ function colorForSeverity(severity) {
   return '#00ddff';
 }
 
+function laneSeverity(event) {
+  if (!event) return 'unknown';
+  return event.stateSeverity || event.severity || 'unknown';
+}
+
+function laneStateSeverity(event) {
+  if (!event) return null;
+  const isEtrStateEvent = event.category === 'etr290_status'
+    || event.category === 'etr290_alarm'
+    || event.category === 'etr290_incident'
+    || event.category === 'etr290_incident_cleared';
+  if (!isEtrStateEvent) return null;
+  return laneSeverity(event);
+}
+
 function laneColorForEvent(event) {
   if (!event) return '#ffffff26';
-  if (event.category === 'etr290_alarm') return '#ffb266aa';
-  if (event.category === 'etr290_incident' || event.category === 'etr290_incident_cleared') return '#b784ffaa';
-  if (event.severity === 'critical') return '#ff6b6baa';
-  if (event.severity === 'warning') return '#ffe680aa';
-  if (event.severity === 'ok') return '#00dd5566';
-  return '#66ccff66';
+  const sev = laneStateSeverity(event);
+  if (!sev) return '#44556666';
+  if (sev === 'critical') return '#ff6b6baa';
+  if (sev === 'warning') return '#ffe680aa';
+  if (sev === 'ok') return '#00dd5566';
+  return '#44556666';
 }
 
 function colorForLaneSeverity(severity) {
@@ -393,14 +415,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
   // If no events precede the window, use 'unknown' (gray) — not 'ok'.
   let currentSeverity = 'unknown';
   for (const e of sorted) {
-    if (e.ts <= timeStart) currentSeverity = e.severity || currentSeverity;
+    const state = laneStateSeverity(e);
+    if (e.ts <= timeStart && state) currentSeverity = state || currentSeverity;
     else break;
   }
   const parts = [`${colorForLaneSeverity(currentSeverity)}55 0%`];
   for (const e of sorted) {
     if (e.ts < timeStart || e.ts > timeStart + windowMs) continue;
+    const nextSeverity = laneStateSeverity(e);
+    if (!nextSeverity) continue;
     const x = Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100));
-    const nextSeverity = e.severity || currentSeverity;
     parts.push(`${colorForLaneSeverity(currentSeverity)}55 ${x}%`);
     parts.push(`${colorForLaneSeverity(nextSeverity)}55 ${x}%`);
     currentSeverity = nextSeverity;
@@ -417,7 +441,8 @@ function buildEventBlocks(events, timeStart, windowMs) {
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
       const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
-      const severityFactor = e.severity === 'critical' ? 1.35 : e.severity === 'warning' ? 1.15 : 1.0;
+      const sev = laneSeverity(e);
+      const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
       const dur = Math.round(baseDur * severityFactor);
       const endTs = Math.min(end, startTs + dur);
       if (endTs <= timeStart || startTs >= end) return null;
@@ -442,7 +467,8 @@ function buildEventBlocks(events, timeStart, windowMs) {
 function getEventVisualDurationMs(event) {
   if (!event) return 6000;
   const baseDur = EVENT_BLOCK_DURATION_MS[event.category] || 6000;
-  const severityFactor = event.severity === 'critical' ? 1.35 : event.severity === 'warning' ? 1.15 : 1.0;
+  const sev = laneSeverity(event);
+  const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
   return Math.round(baseDur * severityFactor);
 }
 
@@ -480,13 +506,74 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [customEndInput, setCustomEndInput] = useState('');
   const [customRange, setCustomRange] = useState(null); // { startMs, endMs }
   const [rangeError, setRangeError] = useState('');
+  const [uiRestored, setUiRestored] = useState(false);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(STREAMVIEW_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Number.isFinite(Number(parsed.windowMs))) setWindowMs(Number(parsed.windowMs));
+        if (Array.isArray(parsed.events)) setEvents(parsed.events.slice(-MAX_EVENTS));
+        if (parsed.scaleMode === 'normalized' || parsed.scaleMode === 'absolute') setScaleMode(parsed.scaleMode);
+        if (parsed.rangeMode === 'relative' || parsed.rangeMode === 'custom') setRangeMode(parsed.rangeMode);
+        if (typeof parsed.customStartInput === 'string') setCustomStartInput(parsed.customStartInput);
+        if (typeof parsed.customEndInput === 'string') setCustomEndInput(parsed.customEndInput);
+        if (parsed.customRange && Number.isFinite(parsed.customRange.startMs) && Number.isFinite(parsed.customRange.endMs)) {
+          setCustomRange({ startMs: parsed.customRange.startMs, endMs: parsed.customRange.endMs });
+        }
+        if (typeof parsed.freezeCursor === 'boolean') setFreezeCursor(parsed.freezeCursor);
+        if (Number.isFinite(Number(parsed.mouseX))) setMouseX(Number(parsed.mouseX));
+        if (Number.isFinite(Number(parsed.mouseY))) setMouseY(Number(parsed.mouseY));
+        if (typeof parsed.mouseLaneId === 'string') setMouseLaneId(parsed.mouseLaneId);
+      }
+    } catch (_) {}
+    setUiRestored(true);
+  }, []);
+
+  useEffect(() => {
+    if (!uiRestored) return;
+    if (customStartInput && customEndInput) return;
     const end = Date.now();
-    const start = end - WINDOW_OPTIONS[1].value;
+    const start = end - windowMs;
     setCustomStartInput(toDateTimeLocalValue(start));
     setCustomEndInput(toDateTimeLocalValue(end));
-  }, []);
+  }, [uiRestored, customStartInput, customEndInput, windowMs]);
+
+  useEffect(() => {
+    if (!uiRestored) return;
+    try {
+      sessionStorage.setItem(
+        STREAMVIEW_STATE_KEY,
+        JSON.stringify({
+          windowMs,
+          events: events.slice(-MAX_EVENTS),
+          scaleMode,
+          rangeMode,
+          customStartInput,
+          customEndInput,
+          customRange,
+          freezeCursor,
+          mouseX,
+          mouseY,
+          mouseLaneId,
+        })
+      );
+    } catch (_) {}
+  }, [
+    uiRestored,
+    windowMs,
+    events,
+    scaleMode,
+    rangeMode,
+    customStartInput,
+    customEndInput,
+    customRange,
+    freezeCursor,
+    mouseX,
+    mouseY,
+    mouseLaneId,
+  ]);
 
   const mergeTimelineEvents = (prev, incoming) => {
     const byKey = new Map(prev.map((e) => [e.key, e]));
@@ -727,8 +814,13 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     const start = end - windowMs;
     setCustomStartInput(toDateTimeLocalValue(start));
     setCustomEndInput(toDateTimeLocalValue(end));
+    setCustomRange(null);
     setRangeMode('relative');
     setRangeError('');
+    setFreezeCursor(false);
+    setMouseX(null);
+    setMouseY(null);
+    setMouseLaneId(null);
   };
 
   return (

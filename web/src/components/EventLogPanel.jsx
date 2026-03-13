@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ShieldCheck } from 'lucide-react';
+import { toast } from 'sonner';
 import { C, Badge, Dot, PanelBox, SectionHead, Input } from './BroadcastUI';
 
 function toUtc(ts) {
@@ -61,6 +62,7 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(href);
+    toast.success(`Exported ${events.length} event(s) as JSONL`, { duration: 2500 });
   };
 
   const exportCsv = () => {
@@ -92,6 +94,7 @@ export default function EventLogPanel({ events = [], onClear = () => {} }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(href);
+    toast.success(`Exported ${events.length} event(s) as CSV`, { duration: 2500 });
   };
 
   const rows = useMemo(() => {

@@ -88,11 +88,18 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (mode === 'udp') return `udp://${host}:${port}`;
   if (mode === 'rtp') return `rtp://${host}:${port}`;
   let url = `srt://${host}:${port}`;
-  const params = [];
+  const params = ['stats=1', 'statsintvl=1'];
   if (latency) params.push(`latency=${latency}`);
   if (passphrase) params.push(`passphrase=${passphrase}`);
   if (params.length) url += `?${params.join('&')}`;
   return url;
+}
+
+function getMultiviewDisplayName(id) {
+  const raw = String(id || '');
+  const m = raw.match(/^2022-7-consolidated(?:-(\d+))?$/i);
+  if (!m) return raw;
+  return m[1] ? `2022-7 consolidated #${m[1]}` : '2022-7 consolidated';
 }
 
 function Stat({ label, value }) {
@@ -125,7 +132,7 @@ function extractThumbTimestamp(thumbnailUrl) {
   return Number.isFinite(ts) ? ts : null;
 }
 
-function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
+function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
   // Per-channel audio levels from astats probe
@@ -184,7 +191,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
         style={{ background: 'linear-gradient(180deg, #242424 0%, #1a1a1a 100%)', borderBottom: '1px solid #0a0a0a', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}
       >
         <StatusDot status={signalOk ? 'live' : 'warning'} pulse={signalOk} />
-        <span className="font-mono text-[10px] text-gray-400 truncate flex-1">{id}</span>
+        <span className="font-mono text-[10px] text-gray-400 truncate flex-1" title={id}>{displayName || id}</span>
         <span
           className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0"
           style={signalOk
@@ -234,7 +241,7 @@ function DecoderCard({ id, meta, result, onStop, nowMs, engineerMode }) {
       </div>
 
       {/* Info panel */}
-      <div className="p-2.5 space-y-2" style={{ background: '#141414' }}>
+      <div className="p-2 space-y-1.5" style={{ background: '#141414' }}>
         <div className="text-[10px] font-mono truncate engraved">{meta?.url || result?.url || '-'}</div>
         <div
           className="text-[10px] font-mono uppercase tracking-wider"
@@ -466,11 +473,12 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8 gap-3 mt-4">
+        <div className="grid gap-2 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))' }}>
           {activeIds.map((id) => (
             <DecoderCard
               key={id}
               id={id}
+              displayName={getMultiviewDisplayName(id)}
               meta={decoderMeta[id]}
               result={resultsById[id]}
               onStop={async () => {

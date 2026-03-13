@@ -40,7 +40,6 @@ const ETR_CHECK_FIELDS = [
   { id: "empty_buf", label: "Empty Buffer" },
 ];
 
-const RECOMMENDED_DECODER_PORT = "6501";
 // ETSI TR 101 290 compliant default alarm thresholds.
 // Value = number of consecutive violations before incident is created.
 // P1: any single occurrence is critical. P2: small debounce where FFmpeg noise is known.
@@ -73,7 +72,7 @@ function newDecoderRow(seed = Date.now()) {
   return {
     key: `${seed}-${Math.random().toString(36).slice(2, 8)}`,
     host: "",
-    port: RECOMMENDED_DECODER_PORT,
+    port: "",
     decoderId: "",
   };
 }
@@ -89,7 +88,7 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (mode === "udp") return `udp://${host}:${port}`;
   if (mode === "rtp") return `rtp://${host}:${port}`;
   let url = `srt://${host}:${port}`;
-  const params = [];
+  const params = ["stats=1", "statsintvl=1"];
   if (latency) params.push(`latency=${latency}`);
   if (passphrase) params.push(`passphrase=${passphrase}`);
   if (params.length) url += `?${params.join("&")}`;
@@ -133,19 +132,45 @@ function extractPidRows(selectedResult) {
   const rows = [];
   (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
   (selectedResult?.orphanStreams || []).forEach((s) => rows.push(s));
-  return rows
+  const normalized = rows
     .map((s) => ({
-      pid: s.pid,
+      pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
       pidHex: s.pidHex,
       codecType: s.codecType || s.type || "unknown",
       codec: s.codecName || s.codec || s.description || "-",
       bitrate: Number(s.bitrate || 0),
-    }))
+    }));
+
+  // Deduplicate to keep one stable row per PID + codec type.
+  // Prefer entries with richer metadata (codec text, bitrate).
+  const byPidType = new Map();
+  normalized.forEach((row) => {
+    const pidKey = row.pid != null
+      ? String(row.pid)
+      : (row.pidHex ? String(row.pidHex).toUpperCase() : "unknown");
+    const key = `${pidKey}|${row.codecType || "unknown"}`;
+    const prev = byPidType.get(key);
+    if (!prev) {
+      byPidType.set(key, row);
+      return;
+    }
+    const prevScore = (prev.codec && prev.codec !== "-" ? 1 : 0) + (prev.bitrate > 0 ? 1 : 0);
+    const nextScore = (row.codec && row.codec !== "-" ? 1 : 0) + (row.bitrate > 0 ? 1 : 0);
+    if (nextScore >= prevScore) byPidType.set(key, row);
+  });
+
+  return Array.from(byPidType.values())
     .sort((a, b) => {
       const ta = PID_TYPE_ORDER[a.codecType] ?? 9;
       const tb = PID_TYPE_ORDER[b.codecType] ?? 9;
       if (ta !== tb) return ta - tb;
       return (Number(a.pid) || 0) - (Number(b.pid) || 0);
+    })
+    .map((row) => {
+      const pidKey = row.pid != null
+        ? String(row.pid)
+        : (row.pidHex ? String(row.pidHex).toUpperCase() : "unknown");
+      return { ...row, rowKey: `${pidKey}|${row.codecType || "unknown"}` };
     })
     .slice(0, 20);
 }
@@ -161,6 +186,11 @@ function makeUniqueDecoderId(baseId, usedSet) {
   const candidate = `${cleanBase}-${i}`;
   usedSet.add(candidate);
   return candidate;
+}
+
+function makeMultiviewDecoderId({ requestedId, use20227, usedSet }) {
+  const base = use20227 ? "2022-7-consolidated" : requestedId;
+  return makeUniqueDecoderId(base, usedSet);
 }
 
 function renderPidRef(pid, pidHex) {
@@ -220,11 +250,12 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [captureNic, setCaptureNic] = useState("");
   const [use20227, setUse20227] = useState(false);
   const [legBHost, setLegBHost] = useState("");
-  const [legBPort, setLegBPort] = useState("6502");
+  const [legBPort, setLegBPort] = useState("");
   const [legBNic, setLegBNic] = useState("");
   const [selectedId, setSelectedId] = useState("");
   const [provisionSummary, setProvisionSummary] = useState(null);
   const [forensicById, setForensicById] = useState({});
+  const [tsRateById, setTsRateById] = useState({});
   const [subTab, setSubTab] = useState("quality");
   const [profileName, setProfileName] = useState("");
   const [profileDescription, setProfileDescription] = useState("Broadcast baseline profile");
@@ -270,6 +301,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       const decoderId = normalizeLaneId(lastMessage.id);
       const arrival = lastMessage?.dvb?.arrival || {};
       const iat = arrival?.iatMs || {};
+      const tsRateBps = Number(lastMessage?.dvb?.bitrateBps || 0);
       const sample = {
         ts: lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now(),
         iatMin: Number(iat.min) || 0,
@@ -277,8 +309,14 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         iatP95: Number(iat.p95) || 0,
         jitter: Number(arrival.jitterMs) || 0,
         loss: Number(arrival.packetLossPct) || 0,
+        tsRateBps: Number.isFinite(tsRateBps) && tsRateBps > 0 ? tsRateBps : 0,
+        tsRateSource: lastMessage?.dvb?.bitrateSource || null,
       };
       setForensicById((prev) => ({
+        ...prev,
+        [decoderId]: [...(prev[decoderId] || []), sample].slice(-120),
+      }));
+      setTsRateById((prev) => ({
         ...prev,
         [decoderId]: [...(prev[decoderId] || []), sample].slice(-120),
       }));
@@ -389,11 +427,37 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     const fromRow = rowPlans.find((r) => r.decoderId?.trim() === selectedId)?.url;
     return fromRow || "";
   }, [selectedId, resultsById, selectedResult, rowPlans]);
+  const startBatchHint = busy
+    ? "Decoder operation in progress..."
+    : validRowPlans.length === 0
+      ? "Fill at least one valid Host/IP + Port row to enable batch start."
+      : "";
+  const stopDecoderHint = busy
+    ? "Decoder operation in progress..."
+    : !selectedId
+      ? "Select a running decoder to stop."
+      : "";
+  const enableEtrHint = busy
+    ? "Decoder operation in progress..."
+    : !selectedId
+      ? "Select a decoder first."
+      : !selectedDecoderUrl
+        ? "Start decoder first so ETR can attach to a live URL."
+        : "";
+  const applyEtrHint = busy
+    ? "Decoder operation in progress..."
+    : !selectedId
+      ? "Select a decoder first."
+      : !selectedEtrExists
+        ? "Enable ETR first, then apply config."
+        : "";
 
   const m = qualityMetrics(selectedEtrStatus, selectedResult);
   const pids = extractPidRows(selectedResult);
   const forensic = forensicById[selectedId] || [];
   const latestForensic = forensic.length ? forensic[forensic.length - 1] : null;
+  const tsRateSeries = tsRateById[selectedId] || [];
+  const latestTsRate = tsRateSeries.length ? tsRateSeries[tsRateSeries.length - 1] : null;
 
   const updateRow = (rowKey, patch) => {
     setDecoderRows((rows) => rows.map((r) => (r.key === rowKey ? { ...r, ...patch } : r)));
@@ -416,7 +480,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     for (let i = 0; i < plansToStart.length; i += 1) {
       const row = plansToStart[i];
       const requestedId = row.decoderId?.trim() || `decoder-${runStamp}`;
-      const id = makeUniqueDecoderId(requestedId, usedIds);
+      const id = makeMultiviewDecoderId({ requestedId, use20227: use20227 && addToMultiview, usedSet: usedIds });
       try {
         if (addToMultiview) {
           await startContinuous(id, row.url, parseInt(intervalMs, 10) || 5000, captureNic || undefined);
@@ -614,7 +678,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <Input
                       value={row.port}
                       onChange={(e) => updateRow(row.key, { port: e.target.value })}
-                      placeholder={RECOMMENDED_DECODER_PORT}
+                      placeholder="Port"
                       mono
                       style={{ color: C.muted }}
                     />
@@ -708,6 +772,12 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   {busy ? "STOPPING…" : "■ STOP DECODER"}
                 </button>
               </div>
+              {(startBatchHint || stopDecoderHint) && (
+                <div style={{ display: "grid", gap: 2, fontSize: 9, color: C.muted }}>
+                  {startBatchHint ? <div>{startBatchHint}</div> : null}
+                  {stopDecoderHint ? <div>{stopDecoderHint}</div> : null}
+                </div>
+              )}
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Capture NIC (optional)">
@@ -749,7 +819,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <Input value={legBHost} onChange={(e) => setLegBHost(e.target.value)} placeholder="239.100.25.30" mono />
                   </Field>
                   <Field label="Leg B Port">
-                    <Input value={legBPort} onChange={(e) => setLegBPort(e.target.value)} placeholder="6502" mono />
+                    <Input value={legBPort} onChange={(e) => setLegBPort(e.target.value)} placeholder="Port B" mono />
                   </Field>
                   <Field label="Leg B NIC (optional)">
                     <Input value={legBNic} onChange={(e) => setLegBNic(e.target.value)} placeholder="eno3" mono />
@@ -791,6 +861,14 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       ■ Stop
                     </button>
                   </div>
+                  {(enableEtrHint || (!selectedEtrExists && !busy ? "No running ETR monitor for selected decoder." : "")) && (
+                    <div style={{ display: "grid", gap: 2, fontSize: 9, color: C.muted, marginTop: -2 }}>
+                      {(enableEtrHint || "No running ETR monitor for selected decoder.") ? (
+                        <div>{enableEtrHint || "No running ETR monitor for selected decoder."}</div>
+                      ) : null}
+                      {applyEtrHint ? <div>{applyEtrHint}</div> : null}
+                    </div>
+                  )}
 
                   {/* ── Alert priority toggles ──────────────────────────── */}
                   <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 3, padding: "8px 10px" }}>
@@ -886,6 +964,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   >
                     {busy ? "APPLYING…" : "↻  APPLY CONFIG TO RUNNING MONITOR"}
                   </button>
+                  {applyEtrHint && !enableEtrHint && <div style={{ fontSize: 9, color: C.muted }}>{applyEtrHint}</div>}
 
                   {etrActionNote && (
                     <div style={{ fontSize: 10, padding: "4px 8px", borderRadius: 2, background: C.dim,
@@ -1048,7 +1127,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             };
 
             const svc = selectedResult?.dvb?.services?.[0];
-            const totalBitrate = selectedResult?.dvb?.bitrateBps || selectedResult?.dvb?.measuredBitrateBps;
+            const tsInputRateBps = Number(selectedResult?.dvb?.bitrateBps || selectedResult?.dvb?.measuredBitrateBps || 0);
+            const tsRateSource = selectedResult?.dvb?.bitrateSource || latestTsRate?.tsRateSource || "-";
+            const tsRateSamples = tsRateSeries
+              .map((s) => Number(s.tsRateBps || 0))
+              .filter((v) => Number.isFinite(v) && v > 0)
+              .slice(-12);
+            const tsRateAvgBps = tsRateSamples.length
+              ? Math.round(tsRateSamples.reduce((a, b) => a + b, 0) / tsRateSamples.length)
+              : 0;
 
             return (
               <>
@@ -1107,8 +1194,13 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
                       <StatBox label="Service Name" value={svc?.serviceName || "-"} color={svc?.serviceName ? C.cyan : C.muted} />
                       <StatBox label="Provider" value={svc?.serviceProvider || "-"} color={C.text} />
-                      <StatBox label="Total Bitrate" value={bpsFmt(totalBitrate)} color={totalBitrate ? C.ok : C.muted} />
+                      <StatBox label="TS Input Rate" value={bpsFmt(tsInputRateBps)} color={tsInputRateBps ? C.ok : C.muted} />
                       <StatBox label="Services" value={String(selectedResult?.dvb?.serviceCount ?? selectedResult?.programs?.length ?? "-")} color={C.text} />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
+                      <StatBox label="TS Rate (rolling avg)" value={bpsFmt(tsRateAvgBps)} color={tsRateAvgBps ? C.cyan : C.muted} />
+                      <StatBox label="TS Rate Source" value={String(tsRateSource).toUpperCase()} color={tsRateSource === "tsduck" || tsRateSource === "measured" ? C.ok : C.warn} />
+                      <StatBox label="Rate Hold" value={selectedResult?.dvb?.bitrateHeldFromPrevious ? "ON" : "OFF"} color={selectedResult?.dvb?.bitrateHeldFromPrevious ? C.info : C.muted} />
                     </div>
 
                     {/* Video profile */}
@@ -1125,7 +1217,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           <StatBox label="Frame Rate" value={videoStream.fps ? `${Number(videoStream.fps).toFixed(2)} fps` : "-"} color={C.text} />
                           <StatBox label="Scan" value={scanLabel(videoStream.fieldOrder)} color={C.text} />
                           <StatBox label="Chroma" value={chromaLabel(videoStream.pixFmt)} color={C.text} />
-                          <StatBox label="Bitrate" value={bpsFmt(videoStream.bitrate)} color={C.text} />
+                          <StatBox label="ES Bitrate" value={bpsFmt(videoStream.bitrate)} color={C.text} />
                         </div>
                       </div>
                     )}
@@ -1163,8 +1255,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     {pids.length === 0 ? (
                       <div style={{ color: C.muted, fontSize: 10 }}>No PID information available yet.</div>
                     ) : (
-                      pids.map((p, idx) => (
-                        <div key={`${p.pid || idx}-${idx}`} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr 90px", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
+                      pids.map((p) => (
+                        <div key={p.rowKey} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr 90px", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
                           {renderPidRef(p.pid, p.pidHex)}
                           <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
                           <span style={{ color: C.text, fontSize: 10 }}>{p.codec}</span>
@@ -1231,10 +1323,42 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             <PanelBox>
               <SectionHead icon="⚡" title="SMPTE ST 2022-7 Path Selection" right={<Badge label={use20227 ? "ENABLED" : "DISABLED"} color={use20227 ? C.s22 : C.muted} small />} />
               <div style={{ padding: "10px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
-                <StatBox label="Mode" value={use20227 ? "Dual Path (A/B)" : "Single Path"} color={use20227 ? C.s22 : C.muted} />
-                <StatBox label="Checked by probe" value={String(Boolean(selectedResult?.dvb?.smpte20227?.checked))} color={selectedResult?.dvb?.smpte20227?.checked ? C.ok : C.muted} />
-                <StatBox label="2022-7 state" value={selectedResult?.dvb?.smpte20227?.state || "-"} color={selectedResult?.dvb?.smpte20227?.state === "ok" ? C.ok : selectedResult?.dvb?.smpte20227?.state ? C.warn : C.muted} />
-                <StatBox label="Gap events" value={String(selectedResult?.dvb?.smpte20227?.metrics?.gapEvents ?? 0)} color={Number(selectedResult?.dvb?.smpte20227?.metrics?.gapEvents || 0) > 0 ? C.warn : C.ok} />
+                {(() => {
+                  const s = selectedResult?.dvb?.smpte20227 || {};
+                  const m = s.metrics || {};
+                  const arrival = selectedResult?.dvb?.arrival || {};
+                  const iat = arrival.iatMs || {};
+                  const seq = arrival.rtpSequence || {};
+                  const iatMin = Number(iat.min);
+                  const iatAvg = Number(iat.avg);
+                  const iatP95 = Number(iat.p95);
+                  const iatMax = Number(iat.max);
+                  const timingSkewMs = Number.isFinite(iatMax) && Number.isFinite(iatMin) ? Math.max(0, iatMax - iatMin) : null;
+                  const p95AvgDeltaMs = Number.isFinite(iatP95) && Number.isFinite(iatAvg) ? Math.max(0, iatP95 - iatAvg) : null;
+                  const gapEvents = Number(seq.gapEvents ?? m.gapEvents ?? 0);
+                  const duplicateEvents = Number(seq.duplicateEvents ?? m.duplicateEvents ?? 0);
+                  const reorderedEvents = Number(seq.reorderedEvents ?? m.reorderedEvents ?? 0);
+                  const packetLossPct = Number(arrival.packetLossPct ?? m.packetLossPct ?? 0);
+                  const inOrder = Boolean(seq.observed) && gapEvents === 0 && duplicateEvents === 0 && reorderedEvents === 0;
+                  return (
+                    <>
+                      <StatBox label="Mode" value={use20227 ? "Dual Path (A/B)" : "Single Path"} color={use20227 ? C.s22 : C.muted} />
+                      <StatBox label="Checked by probe" value={String(Boolean(s.checked))} color={s.checked ? C.ok : C.muted} />
+                      <StatBox label="2022-7 state" value={s.state || "-"} color={s.state === "compliant" ? C.ok : s.state ? C.warn : C.muted} />
+                      <StatBox label="SMPTE compliant" value={s.compliant == null ? "-" : s.compliant ? "YES" : "NO"} color={s.compliant == null ? C.muted : s.compliant ? C.ok : C.err} />
+                      <StatBox label="RTP sequence observed" value={String(Boolean(seq.observed ?? m.seqObserved))} color={seq.observed || m.seqObserved ? C.ok : C.warn} />
+                      <StatBox label="Sequence order" value={inOrder ? "IN ORDER" : "OUT OF ORDER"} color={inOrder ? C.ok : C.warn} />
+                      <StatBox label="Gap events" value={String(gapEvents)} color={gapEvents > 0 ? C.warn : C.ok} />
+                      <StatBox label="Duplicate events" value={String(duplicateEvents)} color={duplicateEvents > 0 ? C.warn : C.ok} />
+                      <StatBox label="Reordered events" value={String(reorderedEvents)} color={reorderedEvents > 0 ? C.warn : C.ok} />
+                      <StatBox label="Packet loss %" value={Number.isFinite(packetLossPct) ? `${packetLossPct.toFixed(3)}%` : "-"} color={packetLossPct > 0 ? C.err : C.ok} />
+                      <StatBox label="Inter-packet delay avg" value={Number.isFinite(iatAvg) ? `${iatAvg.toFixed(3)} ms` : "-"} color={Number.isFinite(iatAvg) && iatAvg > 10 ? C.warn : C.ok} />
+                      <StatBox label="Inter-packet delay p95" value={Number.isFinite(iatP95) ? `${iatP95.toFixed(3)} ms` : "-"} color={Number.isFinite(iatP95) && iatP95 > 25 ? C.err : C.ok} />
+                      <StatBox label="Packet-arrival skew" value={Number.isFinite(timingSkewMs) ? `${timingSkewMs.toFixed(3)} ms` : "-"} color={Number.isFinite(timingSkewMs) && timingSkewMs > 20 ? C.warn : C.ok} />
+                      <StatBox label="P95-AVG delta" value={Number.isFinite(p95AvgDeltaMs) ? `${p95AvgDeltaMs.toFixed(3)} ms` : "-"} color={Number.isFinite(p95AvgDeltaMs) && p95AvgDeltaMs > 10 ? C.warn : C.ok} />
+                    </>
+                  );
+                })()}
                 <div style={{ gridColumn: "1 / -1", background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "6px 8px" }}>
                   <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 2 }}>Leg A URL</div>
                   <div style={{ fontFamily: "'Courier New',monospace", fontSize: 10, color: legAUrl ? C.cyan : C.muted }}>{legAUrl || "-"}</div>
@@ -1246,6 +1370,24 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 <div style={{ gridColumn: "1 / -1", fontSize: 10, color: C.muted, border: `1px solid ${C.border}`, borderRadius: 2, padding: "6px 8px", background: `${C.s22}08` }}>
                   {selectedResult?.dvb?.smpte20227?.reason || "Choose dual-path mode to track A/B leg evidence and consolidation notes."}
                   {use20227 && legBNic ? ` Leg B NIC: ${legBNic}.` : ""}
+                </div>
+                <div style={{ gridColumn: "1 / -1", border: `1px solid ${C.border}`, borderRadius: 2, background: C.dim, padding: "6px 8px" }}>
+                  <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+                    SRT Transport Stats (Haivision/libsrt)
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+                    <StatBox label="NAK" value={selectedResult?.dvb?.srtStats?.pktNak ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktNak || 0) > 0 ? C.warn : C.ok} />
+                    <StatBox label="Retransmitted" value={selectedResult?.dvb?.srtStats?.pktRetrans ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktRetrans || 0) > 0 ? C.warn : C.ok} />
+                    <StatBox label="Dropped" value={selectedResult?.dvb?.srtStats?.pktDropped ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktDropped || 0) > 0 ? C.err : C.ok} />
+                    <StatBox label="Lost" value={selectedResult?.dvb?.srtStats?.pktLost ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktLost || 0) > 0 ? C.err : C.ok} />
+                    <StatBox label="ACK" value={selectedResult?.dvb?.srtStats?.pktAck ?? "-"} color={C.text} />
+                    <StatBox label="RTT" value={selectedResult?.dvb?.srtStats?.rttMs != null ? `${Number(selectedResult.dvb.srtStats.rttMs).toFixed(2)} ms` : "-"} color={C.text} />
+                  </div>
+                  {!selectedResult?.dvb?.srtStats && (
+                    <div style={{ marginTop: 6, fontSize: 9, color: C.muted }}>
+                      No libsrt counters detected yet. Start SRT input with active traffic to populate NAK/ACK/retransmit metrics.
+                    </div>
+                  )}
                 </div>
               </div>
             </PanelBox>
