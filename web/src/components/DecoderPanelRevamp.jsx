@@ -514,6 +514,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       } catch (err) {
         failed.push({ id, message: err?.message || "Provision failed" });
       }
+      // Smooth startup pressure on analyser backend for large batch starts.
+      if (i < plansToStart.length - 1) {
+        await new Promise((resolve) => setTimeout(resolve, 180));
+      }
     }
     if (started.length) setSelectedId(started[started.length - 1]);
     try {

@@ -1680,8 +1680,21 @@ class TSAnalyser extends EventEmitter {
         this._thumbnailTimer = setTimeout(runThumbnail, thumbIntervalMs);
       }
     };
-    // First thumbnail fires immediately so the UI shows a frame quickly.
-    runThumbnail();
+    const phaseSeed = String(this.id || '');
+    const phaseHash = phaseSeed.split('').reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 0);
+    // Stagger startup across analysers to avoid ffprobe/ffmpeg thundering herd
+    // when many decoders are started in batch.
+    const probeStartJitterMs = Math.min(
+      Math.max(200, Math.floor(this.interval * 0.6)),
+      2000
+    ) > 0
+      ? (phaseHash % Math.min(Math.max(200, Math.floor(this.interval * 0.6)), 2000))
+      : 0;
+    const thumbStartJitterMs = thumbIntervalMs > 0 ? (phaseHash % Math.min(thumbIntervalMs, 1500)) : 0;
+
+    // First thumbnail fires quickly but with small jitter to smooth burst starts.
+    if (this._thumbnailTimer) clearTimeout(this._thumbnailTimer);
+    this._thumbnailTimer = setTimeout(runThumbnail, thumbStartJitterMs);
 
     const run = async () => {
       const startedAt = Date.now();
@@ -1697,7 +1710,8 @@ class TSAnalyser extends EventEmitter {
       }
     };
 
-    run();
+    if (this._timer) clearTimeout(this._timer);
+    this._timer = setTimeout(run, probeStartJitterMs);
     this.emit('started', { id: this.id });
     return this;
   }
