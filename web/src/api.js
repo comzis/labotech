@@ -10,7 +10,11 @@ async function requestDetailed(method, path, body) {
   const contentType = res.headers.get('content-type') || '';
   let data = null;
   if (contentType.includes('application/json')) {
-    data = await res.json();
+    try {
+      data = await res.json();
+    } catch (_) {
+      data = { error: `Invalid or empty JSON response (HTTP ${res.status})` };
+    }
   } else {
     const text = await res.text();
     data = text ? { error: text } : {};
