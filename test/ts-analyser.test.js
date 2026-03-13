@@ -152,7 +152,7 @@ describe('TSAnalyser', () => {
       expect(enriched.orphanStreams.some((s) => s.pid === 0x0110)).toBe(true);
     });
 
-    test('maps tsduck PIDs into program streams when IDs are missing', () => {
+    test('keeps unresolved program rows and appends tsduck PID rows as orphan streams', () => {
       const base = analyser.parseStructure({
         programs: [
           {
@@ -175,8 +175,10 @@ describe('TSAnalyser', () => {
         ],
       });
       const rows = enriched.programs[0].streams;
-      expect(rows[0].pid).toBe(0x0100);
-      expect(rows[1].pid).toBe(0x0101);
+      expect(rows[0].pid).toBe(null);
+      expect(rows[1].pid).toBe(null);
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0100 && s.codecType === 'video')).toBe(true);
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0101 && s.codecType === 'audio')).toBe(true);
     });
   });
 
@@ -452,7 +454,7 @@ describe('TSAnalyser', () => {
       expect(res.rows).toHaveLength(2);
     });
 
-    test('applies forced-mpegts fallback rows into unresolved streams', () => {
+    test('appends forced-mpegts fallback rows without rebinding unresolved streams', () => {
       const parsed = analyser.parseStructure({
         programs: [
           {
@@ -472,8 +474,10 @@ describe('TSAnalyser', () => {
         { pid: 256, pidHex: '0x0100', codecType: 'video', codecName: 'h264' },
         { pid: 257, pidHex: '0x0101', codecType: 'audio', codecName: 'mp2' },
       ]);
-      expect(enriched.programs[0].streams[0].pid).toBe(256);
-      expect(enriched.programs[0].streams[1].pid).toBe(257);
+      expect(enriched.programs[0].streams[0].pid).toBe(null);
+      expect(enriched.programs[0].streams[1].pid).toBe(null);
+      expect(enriched.orphanStreams.some((s) => s.pid === 256 && s.codecType === 'video')).toBe(true);
+      expect(enriched.orphanStreams.some((s) => s.pid === 257 && s.codecType === 'audio')).toBe(true);
       expect(enriched.dvb.pidCount).toBeGreaterThanOrEqual(2);
     });
   });
