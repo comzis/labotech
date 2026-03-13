@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -36,6 +36,158 @@ function cpuColor(pct) {
 }
 
 const INACTIVE_TAB_COLOR = '#7a7a7a';
+const ROLE_STORAGE_KEY = 'labotech:role:v1';
+const ROLES = {
+  BES: 'bes',
+  OPS: 'ops',
+};
+const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
+const PARTNER_LOGO_SRC = '/eurovision-services.png';
+
+function LandingRoleSelect({ onSelectRole }) {
+  return (
+    <div className="min-h-screen flex items-center justify-center px-3 xl:px-6" style={{ background: 'transparent' }}>
+      <div
+        className="w-full max-w-[1800px] min-h-[700px] rounded-md border relative overflow-hidden flex flex-col"
+        style={{
+          background: 'linear-gradient(180deg, #1a1d22 0%, #12161c 58%, #0c1016 100%)',
+          borderColor: '#2e3642',
+          boxShadow: '0 20px 70px rgba(0,0,0,0.72), inset 0 1px 0 rgba(255,255,255,0.06), inset 0 -1px 0 rgba(0,0,0,0.6)',
+        }}
+      >
+        {/* Rack ears */}
+        <div
+          className="absolute left-0 top-0 bottom-0"
+          style={{ width: 22, background: 'linear-gradient(180deg, #202833, #161c26)', borderRight: '1px solid #2a3340' }}
+        />
+        <div
+          className="absolute right-0 top-0 bottom-0"
+          style={{ width: 22, background: 'linear-gradient(180deg, #202833, #161c26)', borderLeft: '1px solid #2a3340' }}
+        />
+        {/* Rack screws */}
+        {[
+          { t: 10, l: 10 }, { t: 10, r: 10 }, { b: 10, l: 10 }, { b: 10, r: 10 },
+        ].map((p, idx) => (
+          <span
+            key={`screw-${idx}`}
+            className="absolute rounded-full"
+            style={{
+              width: 9,
+              height: 9,
+              background: 'radial-gradient(circle at 35% 30%, #9aa3b3, #505968 55%, #2b3240)',
+              boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.2), 0 0 2px rgba(0,0,0,0.5)',
+              ...p,
+            }}
+          />
+        ))}
+        {[84, 196, 308, 420, 532, 644].map((top, i) => (
+          <React.Fragment key={`ear-bolts-${i}`}>
+            <span
+              className="absolute rounded-full"
+              style={{
+                width: 8, height: 8, left: 7, top,
+                background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
+                boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
+              }}
+            />
+            <span
+              className="absolute rounded-full"
+              style={{
+                width: 8, height: 8, right: 7, top,
+                background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
+                boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
+              }}
+            />
+          </React.Fragment>
+        ))}
+
+        {/* Rack rail top LEDs */}
+        <div className="px-8 pt-3 pb-1 flex items-center gap-2">
+          {['#8aa2c5', '#7f93b2', '#a8b3c6', '#6e819f', '#93a2b8', '#7489a9'].map((c, i) => (
+            <span
+              key={`rail-led-${i}`}
+              style={{
+                width: 6,
+                height: 6,
+                borderRadius: '50%',
+                background: c,
+                boxShadow: `0 0 4px ${c}aa`,
+                opacity: 0.65,
+              }}
+            />
+          ))}
+          <span className="ml-auto text-[8px] uppercase tracking-[0.16em] text-gray-500">Rack Interface MkII</span>
+        </div>
+        <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1f27, #3a4656 20%, #3a4656 80%, #1a1f27)' }} />
+
+        <div className="p-6 md:p-8 flex-1 flex flex-col">
+          <div className="flex items-start justify-between gap-4 mb-2">
+            <div>
+              <div className="text-[13px] font-black uppercase tracking-[0.3em] leading-none mb-2" style={{ color: '#e0e0e0' }}>
+                LABOTECH
+              </div>
+              <div className="text-[9px] uppercase tracking-[0.24em]" style={{ color: '#6f86aa' }}>
+                Broadcast Engine Control Room
+              </div>
+              <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#4f5f78' }}>
+                Select operating profile
+              </div>
+            </div>
+            <img
+              src={PARTNER_LOGO_SRC}
+              alt="Eurovision Services"
+              className="shrink-0"
+              style={{ height: 30, width: 'auto', opacity: 0.92, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))' }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
+          </div>
+          <div className="mb-10 border-t" style={{ borderColor: '#212c3d' }} />
+
+          <div className="grid md:grid-cols-2 gap-5 my-6">
+            <button
+              onClick={() => onSelectRole(ROLES.BES)}
+              className="text-left rounded-sm border px-5 py-5 transition-all relative overflow-hidden"
+              style={{
+                borderColor: '#4c3568',
+                background: 'linear-gradient(180deg, #1b1425 0%, #120f1a 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 14px rgba(204,68,255,0.18)',
+              }}
+            >
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #7d4abf, #cc44ff, #7d4abf)' }} />
+              <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#cc9cff' }}>BES Mode</div>
+              <div className="text-[12px] text-gray-200 font-bold mb-1">Broadcast Engineering Suite</div>
+              <div className="text-[10px] text-gray-400">Full rack controls: Runtime, Transcoder, Forwarding, Decoder, API, diagnostics.</div>
+              <div className="mt-3 text-[8px] uppercase tracking-[0.14em]" style={{ color: '#7a8fb0' }}>Engineering deep mode</div>
+            </button>
+
+            <button
+              onClick={() => onSelectRole(ROLES.OPS)}
+              className="text-left rounded-sm border px-5 py-5 transition-all relative overflow-hidden"
+              style={{
+                borderColor: '#29634c',
+                background: 'linear-gradient(180deg, #102119 0%, #0d1712 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), 0 0 14px rgba(0,221,85,0.16)',
+              }}
+            >
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: 'linear-gradient(90deg, #2f8a60, #00dd55, #2f8a60)' }} />
+              <div className="text-[10px] uppercase tracking-[0.2em] mb-2" style={{ color: '#8de8af' }}>OPS Mode</div>
+              <div className="text-[12px] text-gray-200 font-bold mb-1">Operations Wall</div>
+              <div className="text-[10px] text-gray-400">Focused view: TS analyser, decoder, multiview, live timeline, alarms.</div>
+              <div className="mt-3 text-[8px] uppercase tracking-[0.14em]" style={{ color: '#7a8fb0' }}>Mission control mode</div>
+            </button>
+          </div>
+
+          <div
+            className="mt-auto rounded-sm border px-4 py-3 text-[10px] uppercase tracking-[0.12em]"
+            style={{ borderColor: '#2a3448', background: '#0a0f17', color: '#7fa1d8', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)' }}
+          >
+            Punchline: Keep calm, check PCR, and blame the cable only after coffee.
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function isExpectedNoSignalError(message) {
   const m = String(message || '').toLowerCase();
@@ -167,12 +319,43 @@ function LcdValue({ label, value, color }) {
 
 export default function App() {
   const [tab, setTab] = useState('analyse');
+  const [role, setRole] = useState(null);
   const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
   const [eventLog, setEventLog] = useState([]);
   const [alarmUnreadCritical, setAlarmUnreadCritical] = useState(0);
   const errorToastSeenRef = useRef(new Map());
+
+  useEffect(() => {
+    try {
+      const saved = sessionStorage.getItem(ROLE_STORAGE_KEY);
+      if (saved === ROLES.BES || saved === ROLES.OPS) setRole(saved);
+    } catch (_) {}
+  }, []);
+
+  const visibleTabs = useMemo(() => {
+    if (role === ROLES.OPS) {
+      return TABS.filter((t) => !OPS_HIDDEN_TABS.has(t.id));
+    }
+    return TABS;
+  }, [role]);
+
+  useEffect(() => {
+    if (!visibleTabs.some((t) => t.id === tab)) {
+      setTab(visibleTabs[0]?.id || 'analyse');
+    }
+  }, [visibleTabs, tab]);
+
+  const handleSelectRole = (nextRole) => {
+    setRole(nextRole);
+    try { sessionStorage.setItem(ROLE_STORAGE_KEY, nextRole); } catch (_) {}
+  };
+
+  const handleResetRole = () => {
+    setRole(null);
+    try { sessionStorage.removeItem(ROLE_STORAGE_KEY); } catch (_) {}
+  };
 
   // ── Broadcast event toasts ────────────────────────────────────────────────
   useEffect(() => {
@@ -265,6 +448,10 @@ export default function App() {
     setTab('decoder');
   };
 
+  if (!role) {
+    return <LandingRoleSelect onSelectRole={handleSelectRole} />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col font-mono" style={{ background: 'transparent' }}>
       <Toaster
@@ -319,7 +506,7 @@ export default function App() {
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
           <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-center">
-            {TABS.map(t => {
+            {visibleTabs.map(t => {
               const Icon = t.icon;
               const isActive = tab === t.id;
               return (
@@ -429,6 +616,16 @@ export default function App() {
             />
             <ServiceStatusBadge connected={connected} />
           </div>
+
+          <button
+            onClick={handleResetRole}
+            className="ml-1 px-2 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0"
+            style={{ color: '#8ea3c2', border: '1px solid #273347', background: '#0b111a' }}
+            title="Switch role"
+          >
+            {role === ROLES.OPS ? 'OPS' : 'BES'}
+          </button>
+
         </div>
 
         {/* Rack rail bottom-edge line */}
