@@ -1110,7 +1110,22 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               ...(selectedResult?.orphanStreams || []),
             ];
             const videoStream = allStreams.find((s) => s.codecType === "video");
-            const audioStreams = allStreams.filter((s) => s.codecType === "audio");
+            // Keep audio rows stable across probe cycles to avoid perceived "rotation".
+            const audioStreams = allStreams
+              .filter((s) => s.codecType === "audio")
+              .slice()
+              .sort((a, b) => {
+                const pidA = Number.isFinite(Number(a?.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+                const pidB = Number.isFinite(Number(b?.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+                if (pidA !== pidB) return pidA - pidB;
+                const codecA = String(a?.codecName || a?.codec || "");
+                const codecB = String(b?.codecName || b?.codec || "");
+                if (codecA !== codecB) return codecA.localeCompare(codecB);
+                const srA = Number(a?.sampleRate || 0);
+                const srB = Number(b?.sampleRate || 0);
+                if (srA !== srB) return srA - srB;
+                return Number(a?.channels || 0) - Number(b?.channels || 0);
+              });
             const firstAudio = audioStreams[0] || null;
 
             // Chroma subsampling label from pixFmt
