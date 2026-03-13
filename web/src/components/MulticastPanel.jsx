@@ -24,10 +24,15 @@ const DEFAULTS = {
 };
 
 function buildSourceUrl({ sourceMode, sourceHost, sourcePort }) {
-  if (!sourceHost || !sourcePort) return '';
-  if (sourceMode === 'rtp') return `rtp://${sourceHost}:${sourcePort}`;
-  if (sourceMode === 'srt') return `srt://${sourceHost}:${sourcePort}?mode=listener&latency=2000`;
-  return `udp://${sourceHost}:${sourcePort}`;
+  const cleanHost = String(sourceHost || '')
+    .trim()
+    .replace(/^[a-z][a-z0-9+\-.]*:\/\//i, '')
+    .split('/')[0];
+  const cleanPort = String(sourcePort || '').trim();
+  if (!cleanHost || !cleanPort) return '';
+  if (sourceMode === 'rtp') return `rtp://${cleanHost}:${cleanPort}`;
+  if (sourceMode === 'srt') return `srt://${cleanHost}:${cleanPort}?mode=listener&latency=2000`;
+  return `udp://${cleanHost}:${cleanPort}`;
 }
 
 export default function MulticastPanel({ lastMessage }) {

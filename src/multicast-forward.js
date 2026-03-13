@@ -11,6 +11,9 @@ const DEFAULT_REQUIRE_EXPLICIT_DEST = IS_TEST_RUNTIME
   ? false
   : String(process.env.FORWARD_REQUIRE_EXPLICIT_DEST || 'true').toLowerCase() !== 'false';
 const SAFE_NIC_RE = /^[a-zA-Z0-9_.:-]{1,32}$/;
+const LIVE_INPUT_FIFO_SIZE = parseInt(process.env.TS_INPUT_FIFO_SIZE || '524288', 10) || 524288;
+const LIVE_INPUT_TIMEOUT_US = parseInt(process.env.TS_INPUT_TIMEOUT_US || '7000000', 10) || 7000000;
+const LIVE_INPUT_REORDER_QUEUE = parseInt(process.env.TS_INPUT_REORDER_QUEUE_SIZE || '256', 10) || 256;
 
 function isValidIpv4(ip) {
   if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(String(ip || ''))) return false;
@@ -34,7 +37,7 @@ class MulticastForwarder extends EventEmitter {
   constructor(options = {}) {
     super();
     this.id          = options.id;
-    this.sourceUrl   = options.sourceUrl;   // udp://239.x.x.x:port
+    this.sourceUrl   = String(options.sourceUrl || '').trim();   // udp://239.x.x.x:port
     this.destIp      = options.destIp;      // 239.100.25.x
     this.destPort    = options.destPort || 1234;
     this.nic         = options.nic || DEFAULT_NIC;
@@ -50,6 +53,7 @@ class MulticastForwarder extends EventEmitter {
     this.isRunning   = false;
     this.startTime   = null;
     this.lastStats   = null;
+    this._stderrBuffer = [];
   }
 
   buildMulticastUrl() {
@@ -129,17 +133,21 @@ class MulticastForwarder extends EventEmitter {
 
     // Append UDP buffer options to source URL to prevent packet loss / PAT drops
     const sep = this.sourceUrl.includes('?') ? '&' : '?';
-    const srcUrl = this.sourceUrl.startsWith('udp://') || this.sourceUrl.startsWith('rtp://')
-      ? `${this.sourceUrl}${sep}fifo_size=10000000&overrun_nonfatal=1`
+    const isLiveTsSource = this.sourceUrl.startsWith('udp://') || this.sourceUrl.startsWith('rtp://');
+    const srcUrl = isLiveTsSource
+      ? `${this.sourceUrl}${sep}fifo_size=${LIVE_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${LIVE_INPUT_TIMEOUT_US}&reorder_queue_size=${LIVE_INPUT_REORDER_QUEUE}`
       : this.sourceUrl;
+
+    const inputArgs = isLiveTsSource
+      ? ['-fflags', '+discardcorrupt', '-f', 'mpegts', '-i', srcUrl]
+      : ['-i', srcUrl];
 
     const args = [
       '-hide_banner',
       '-loglevel', 'warning',
       '-stats',
-      '-fflags', '+discardcorrupt',
       '-avoid_negative_ts', 'make_non_negative',
-      '-i', srcUrl,
+      ...inputArgs,
       '-c', 'copy',
       '-f', 'mpegts',
       '-mpegts_copyts', '1',   // preserve original TS timestamps + PAT/PMT
@@ -153,7 +161,9 @@ class MulticastForwarder extends EventEmitter {
 
     this.process.stderr.on('data', (data) => {
       data.toString().split('\n').forEach(line => {
-        if (line.trim()) this._parseStats(line);
+        if (!line.trim()) return;
+        this._stderrBuffer = [...this._stderrBuffer.slice(-9), line];
+        this._parseStats(line);
       });
     });
 
@@ -165,7 +175,8 @@ class MulticastForwarder extends EventEmitter {
         this.emit('stopped', { id: this.id, code, signal });
       } else {
         this._stopping = false;
-        this.emit('error', new Error(`Forwarder FFmpeg exited with code ${code}`));
+        const context = (this._stderrBuffer || []).slice(-5).join(' | ');
+        this.emit('error', new Error(`Forwarder FFmpeg exited with code ${code}: ${context}`));
       }
     });
 
