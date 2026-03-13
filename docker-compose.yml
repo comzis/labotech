@@ -4,6 +4,7 @@ services:
     container_name: labotech
     network_mode: host
     cpus: ${LABOTECH_CPUS:-4.0}
+    cpuset: ${LABOTECH_CPUSET:-0-3}
     mem_limit: ${LABOTECH_MEM_LIMIT:-4096m}
     shm_size: ${LABOTECH_SHM_SIZE:-512m}
     ulimits:
@@ -21,6 +22,37 @@ services:
     restart: unless-stopped
     healthcheck:
       test: [ "CMD-SHELL", "wget -qO- \"http://$${API_HOST:-10.67.18.29}:$${API_PORT:-4000}/health\" >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  labotech-encapsulator:
+    build: .
+    container_name: labotech-encapsulator
+    network_mode: host
+    command: ["node", "src/encapsulator-index.js"]
+    cpus: ${ENCAPSULATOR_CPUS:-2.0}
+    cpuset: ${ENCAPSULATOR_CPUSET:-4-5}
+    mem_limit: ${ENCAPSULATOR_MEM_LIMIT:-2048m}
+    shm_size: ${ENCAPSULATOR_SHM_SIZE:-256m}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    env_file:
+      - docker-env.txt
+    environment:
+      - ENCAPSULATOR_HOST=127.0.0.1
+      - ENCAPSULATOR_PORT=4100
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- \"http://127.0.0.1:4100/health\" >/dev/null 2>&1 || exit 1" ]
       interval: 30s
       timeout: 5s
       retries: 3

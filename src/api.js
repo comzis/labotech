@@ -277,6 +277,7 @@ function start() {
   }
 
   app.use('/streams',   require('../routes/streams')(streams, wss, saveState, broadcast));
+  app.use('/encap',     require('../routes/encap')());
   app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
   app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast));

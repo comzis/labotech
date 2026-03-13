@@ -18,6 +18,7 @@ export default defineConfig({
         target: 'http://127.0.0.1:4000',
         ws: true,
       },
+      '/encap': 'http://127.0.0.1:4000',
       '/transcode': 'http://127.0.0.1:4000',
       '/multicast': 'http://127.0.0.1:4000',
       '/analyse': 'http://127.0.0.1:4000',

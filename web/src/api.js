@@ -33,10 +33,11 @@ async function request(method, path, body) {
 }
 
 // Streams
-export const getStreams = () => request('GET', '/streams');
-export const startStream = (body) => request('POST', '/streams', body);
-export const getStream = (id) => request('GET', `/streams/${id}`);
-export const stopStream = (id) => request('DELETE', `/streams/${id}`);
+export const getStreams = () => request('GET', '/encap/channels');
+export const startStream = (body) => request('POST', '/encap/channels', body);
+export const getStream = (id) => request('GET', `/encap/channels/${id}`);
+export const stopStream = (id) => request('DELETE', `/encap/channels/${id}`);
+export const getEncapsulatorHealth = () => request('GET', '/encap/health');
 
 // Transcode
 export const getTranscoders = () => request('GET', '/transcode');
