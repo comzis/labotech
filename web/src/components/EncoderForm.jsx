@@ -118,21 +118,36 @@ export default function EncoderForm({ onStarted }) {
   return (
     <div className="broadcast-legacy" style={{ marginBottom: 48, fontFamily: "'Courier New',monospace", color: C.text }}>
       {!open && (
-        <div className="flex justify-between items-center gap-3">
+        <div
+          className="flex justify-between items-center gap-3"
+          style={{
+            borderBottom: `1px solid ${C.border}`,
+            paddingBottom: 6,
+            marginBottom: 8,
+          }}
+        >
           <div>
-            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-              <Activity className="w-6 h-6 text-emerald-400" strokeWidth={1.5} />
-              Runtime
-            </h1>
-            <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Encoder / Stream Services</p>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <Activity className="w-4 h-4 text-emerald-400" strokeWidth={1.8} />
+              <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>Runtime</div>
+            </div>
+            <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>
+              Encoder / Stream Services
+            </div>
           </div>
           <motion.button
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setOpen(true)}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all bg-gradient-to-r from-neon-cyan/18 to-sky-600/18 border border-neon-cyan/30 text-cyan-100 shadow-lg shadow-neon-cyan/10 hover:shadow-neon-cyan/25"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-[0.1em] transition-all"
+            style={{
+              border: `1px solid ${C.ok}`,
+              background: `${C.ok}14`,
+              color: C.ok,
+              boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px ${C.ok}22`,
+            }}
           >
-            <Tv2 className="w-4 h-4" />
+            <Tv2 className="w-3 h-3" />
             Create Runtime Instance
           </motion.button>
         </div>

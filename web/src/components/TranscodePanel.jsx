@@ -253,22 +253,40 @@ export default function TranscodePanel({ lastMessage }) {
   return (
     <div className="broadcast-legacy" style={{ fontFamily: "'Courier New',monospace", color: C.text, display: 'grid', gap: 24 }}>
       {/* Start form Toggle */}
-      <div className="flex justify-between items-center">
+      <div
+        className="flex justify-between items-center"
+        style={{
+          borderBottom: `1px solid ${C.border}`,
+          paddingBottom: 6,
+          marginBottom: 8,
+        }}
+      >
         <div>
-          <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
-            <Activity className="w-6 h-6 text-neon-purple" strokeWidth={1.5} />
-            Transcoder
-          </h1>
-          <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Service Conditioning and Delivery</p>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Activity className="w-4 h-4 text-neon-purple" strokeWidth={1.8} />
+            <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: '0.05em', color: C.text }}>Transcoder</div>
+          </div>
+          <div style={{ fontSize: 9, color: C.muted, textTransform: 'uppercase', letterSpacing: '0.1em', marginTop: 2 }}>
+            Service Conditioning and Delivery
+          </div>
         </div>
         <button
           onClick={() => setOpen(o => !o)}
-          className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all ${open
-            ? 'bg-gray-800 text-gray-400 hover:text-white border border-white/10'
-            : 'bg-gradient-to-r from-neon-purple/25 to-purple-600/25 border border-neon-purple/35 text-purple-100 shadow-lg shadow-neon-purple/15 hover:shadow-neon-purple/30'
-            }`}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-[0.1em] transition-all"
+          style={open
+            ? {
+                border: `1px solid ${C.border}`,
+                background: C.panel,
+                color: C.muted,
+              }
+            : {
+                border: `1px solid ${C.ok}`,
+                background: `${C.ok}14`,
+                color: C.ok,
+                boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px ${C.ok}22`,
+              }}
         >
-          {open ? 'Cancel' : <><Tv2 className="w-4 h-4" /> Create Broadcast Profile</>}
+          {open ? 'Cancel' : <><Tv2 className="w-3 h-3" /> Create Broadcast Profile</>}
         </button>
       </div>
 

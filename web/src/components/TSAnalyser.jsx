@@ -222,15 +222,6 @@ function stableText(v) {
   return String(v || "").toLowerCase();
 }
 
-function numericPidValue(stream) {
-  const pid = Number(stream?.pid);
-  if (Number.isFinite(pid)) return pid;
-  if (typeof stream?.pidHex === "string" && /^0x[0-9a-f]+$/i.test(stream.pidHex.trim())) {
-    return parseInt(stream.pidHex, 16);
-  }
-  return Number.POSITIVE_INFINITY;
-}
-
 function PidRef({ pidLike, color = C.accent }) {
   const p = toPidParts(pidLike);
   if (p.dec == null && !p.hex) {
@@ -446,22 +437,31 @@ export default function TSAnalyser({ lastMessage }) {
       running: 4,
       scrambled: Boolean(p.scrambled),
       eit: true,
-      streams: (p.streams || [])
-        .map((s) => ({
-        pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
-        pidHex: s.pidHex || null,
-        type: (s.codecType || "data").toUpperCase(),
-        codec: s.codecName || "-",
-        kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
-      }))
-        .sort((a, b) => {
+      streams: (() => {
+        const sorted = (p.streams || [])
+          .map((s) => ({
+            pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+            pidHex: s.pidHex || null,
+            type: (s.codecType || "data").toUpperCase(),
+            codec: s.codecName || "-",
+            kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
+          }))
+          .sort((a, b) => {
           const pidA = Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
           const pidB = Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
           if (pidA !== pidB) return pidA - pidB;
           const typeCmp = stableText(a.type).localeCompare(stableText(b.type));
           if (typeCmp !== 0) return typeCmp;
           return stableText(a.codec).localeCompare(stableText(b.codec));
-        }),
+          });
+        const dupCounts = new Map();
+        return sorted.map((s) => {
+          const base = `${s.pid ?? s.pidHex ?? "na"}|${s.type}|${s.codec}`;
+          const idx = dupCounts.get(base) || 0;
+          dupCounts.set(base, idx + 1);
+          return { ...s, rowKey: `${base}|${idx}` };
+        });
+      })(),
     }))
       .sort((a, b) => {
         const numA = Number.isFinite(Number(a.num)) ? Number(a.num) : Number.POSITIVE_INFINITY;
@@ -1073,7 +1073,7 @@ export default function TSAnalyser({ lastMessage }) {
                   <div style={{ fontSize: 8, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Elementary Streams</div>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead><tr><TH>PID</TH><TH>Stream Type</TH><TH>Codec</TH><TH right>Bitrate</TH></tr></thead>
-                    <tbody>{p.streams.map((s) => <tr key={`${p.num ?? "na"}-${numericPidValue(s)}-${s.type}-${s.codec}`}><TD mono><PidRef pidLike={s.pid ?? s.pidHex} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
+                    <tbody>{p.streams.map((s) => <tr key={`${p.num ?? "na"}-${s.rowKey}`}><TD mono><PidRef pidLike={s.pid ?? s.pidHex} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
                   </table>
                 </div>
               </div>

@@ -131,15 +131,13 @@ function qualityMetrics(etrStatus, tsResult) {
 const PID_TYPE_ORDER = { video: 0, audio: 1, data: 2, subtitle: 3, unknown: 9 };
 
 function preferredPidRow(a, b) {
-  const score = (row) => (row.codec && row.codec !== "-" ? 1 : 0) + (row.bitrate > 0 ? 1 : 0);
+  const score = (row) => (row.codec && row.codec !== "-" ? 1 : 0);
   const scoreA = score(a);
   const scoreB = score(b);
   if (scoreA !== scoreB) return scoreA > scoreB ? a : b;
 
-  // Deterministic tie-breakers prevent row text "bouncing" between probe cycles.
-  const bitrateA = Number.isFinite(Number(a.bitrate)) ? Number(a.bitrate) : 0;
-  const bitrateB = Number.isFinite(Number(b.bitrate)) ? Number(b.bitrate) : 0;
-  if (bitrateA !== bitrateB) return bitrateA > bitrateB ? a : b;
+  // Deterministic tie-breakers must avoid live bitrate to prevent cycle-to-cycle flips.
+  // Bitrate is volatile and can reorder equivalent candidates each refresh.
 
   const codecA = String(a.codec || "").toLowerCase();
   const codecB = String(b.codec || "").toLowerCase();
