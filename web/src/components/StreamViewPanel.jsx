@@ -1257,6 +1257,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 const latest = lane?.latest?.evidence?.arrival || null;
                 const latestIat = latest?.iatMs || {};
                 const latestDiag = lane?.latest?.evidence?.probeDiagnostics?.tsduck || null;
+                const tsduckMissing = typeof latestDiag?.error === 'string' && latestDiag.error.includes('ENOENT');
                 const hasForensicMetrics = Boolean(latest) || (lane?.iatMin?.length || lane?.iatAvg?.length || lane?.iatP95?.length || lane?.jitter?.length || lane?.loss?.length);
                 return (
                   <div key={`forensic-${id}`} className="rounded border border-white/10 bg-black/30 p-2">
@@ -1284,15 +1285,16 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       <div className="text-gray-500">No analyse samples yet for this lane.</div>
                     ) : !hasForensicMetrics ? (
                       <div className="text-gray-500">
-                        Analyse samples received, but arrival telemetry is unavailable.
-                        {latestDiag ? (
+                        Analyse samples received; advanced arrival telemetry is unavailable.
+                        {tsduckMissing ? (
                           <span className="block mt-1 text-[10px]">
-                            tsduck attempted: {String(latestDiag.attempted)} · available: {String(latestDiag.available)} · ok: {String(latestDiag.ok)}
-                            {latestDiag.error ? ` · error: ${latestDiag.error}` : ''}
+                            Optional `tsanalyze` tool is not installed on this host (fallback mode active).
                           </span>
-                        ) : (
-                          <span className="block mt-1 text-[10px]">No probe diagnostics in sample payload.</span>
-                        )}
+                        ) : latestDiag?.error ? (
+                          <span className="block mt-1 text-[10px]">
+                            Probe diagnostics: {latestDiag.error}
+                          </span>
+                        ) : null}
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
