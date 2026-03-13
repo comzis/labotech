@@ -398,7 +398,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   };
 
   return (
-    <div className="space-y-6 font-sans">
+    <div className="space-y-6 broadcast-legacy">
       <BentoCard icon={Monitor} title="Decoder Multiview">
         <div className="flex items-center justify-between">
           <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">All Active Decoders</h2>

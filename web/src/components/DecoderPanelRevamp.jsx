@@ -647,7 +647,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   };
 
   return (
-    <div style={{ fontFamily: "'Segoe UI',sans-serif", background: C.bg, color: C.text, minHeight: "100vh" }}>
+    <div style={{ fontFamily: "'Courier New',monospace", background: C.bg, color: C.text, minHeight: "100vh" }}>
       <div style={{ padding: "8px 10px 0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
           <Dot c={C.cyan} />

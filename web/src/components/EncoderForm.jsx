@@ -108,17 +108,24 @@ export default function EncoderForm({ onStarted }) {
   return (
     <div className="broadcast-legacy" style={{ marginBottom: 48, fontFamily: "'Courier New',monospace", color: C.text }}>
       {!open && (
-        <motion.button
-          whileHover={{ scale: 1.02, boxShadow: '0 0 20px rgba(34,211,238,0.2)' }}
-          whileTap={{ scale: 0.98 }}
-          onClick={() => setOpen(true)}
-          className="bg-gradient-to-r from-neon-blue/20 to-neon-cyan/20 border border-neon-cyan/35 backdrop-blur-md rounded-2xl px-6 py-3.5 flex items-center justify-center gap-3 w-full hover:from-neon-blue/30 hover:to-neon-cyan/30 transition-colors group cursor-pointer"
-        >
-          <div className="w-9 h-9 rounded-full bg-black/35 border border-neon-cyan/30 flex items-center justify-center group-hover:border-neon-cyan/50 transition-colors">
-            <Radio className="w-4.5 h-4.5 text-neon-cyan" strokeWidth={1.8} />
+        <div className="flex justify-between items-center gap-3">
+          <div>
+            <h1 className="text-2xl font-bold text-white tracking-tight flex items-center gap-2">
+              <Activity className="w-6 h-6 text-emerald-400" strokeWidth={1.5} />
+              Runtime
+            </h1>
+            <p className="text-xs text-gray-500 mt-1 uppercase tracking-widest font-medium opacity-80">Encoder / Stream Services</p>
           </div>
-          <span className="text-gray-100 font-semibold tracking-wide text-base uppercase">Create Stream Instance</span>
-        </motion.button>
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => setOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold uppercase tracking-wide transition-all bg-gradient-to-r from-neon-cyan/18 to-sky-600/18 border border-neon-cyan/30 text-cyan-100 shadow-lg shadow-neon-cyan/10 hover:shadow-neon-cyan/25"
+          >
+            <Tv2 className="w-4 h-4" />
+            Create Runtime Instance
+          </motion.button>
+        </div>
       )}
 
       {open && (
