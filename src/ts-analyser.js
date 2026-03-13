@@ -40,6 +40,11 @@ const SMPTE_2022_7_THRESHOLDS = {
   maxReorderedEvents: _envNumber('TS_20227_MAX_REORDER_EVENTS', 0),
   requireNicCapture: String(process.env.TS_20227_REQUIRE_NIC_CAPTURE || 'true').toLowerCase() !== 'false',
 };
+const LIVE_INPUT_HINTS = {
+  fifoSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_FIFO_SIZE', 10000000))),
+  timeoutUs: Math.max(1, Math.floor(_envNumber('TS_INPUT_TIMEOUT_US', 7000000))),
+  reorderQueueSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_REORDER_QUEUE_SIZE', 1024))),
+};
 function _getNicName() {
   if (_multicastConfig) return _multicastConfig.nic || 'eno2';
   try {
@@ -1353,7 +1358,7 @@ class TSAnalyser extends EventEmitter {
     if (!url) return url;
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
-    return `${url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
+    return `${url}${sep}fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
   }
 
   _isRtpUrl(url) {
