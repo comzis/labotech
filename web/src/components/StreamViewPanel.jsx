@@ -21,12 +21,16 @@ const P2_KEYS = ['transport_error', 'crc_error', 'pcr_disc', 'pcr_acc', 'pcr_rep
 const MAX_EVENTS = 1500;
 const EVENT_RETENTION_MS = 26 * 60 * 60 * 1000; // keep slightly above max 24h window
 const LANE_ACTIVITY_STALE_MS = 30 * 1000; // auto-expire no-heartbeat runtime lanes
+const STARTED_RECENTLY_MS = 90 * 1000;
+const LIVE_TICK_MS = 2000;
+const MAX_FUTURE_SKEW_MS = 5000;
 const EVENT_BLOCK_DURATION_MS = {
   etr290_alarm: 14000,
   etr290_incident: 18000,
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
   runtime_started: 22000,
+  runtime_heartbeat: 5000,
   runtime_stopped: 14000,
   failover: 16000,
   analyse_result: 7000,
@@ -38,6 +42,7 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
   runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
   runtime_started: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '99' },
+  runtime_heartbeat: { alpha: '82', borderAlpha: '74', glowAlpha: '3a' },
   runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
   analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
@@ -156,9 +161,27 @@ function toUtc(ts) {
   return d.toISOString().replace('T', ' ').replace('Z', ' UTC');
 }
 
+function parseEventTimestamp(rawTime) {
+  const now = Date.now();
+  if (rawTime == null) return now;
+  if (typeof rawTime === 'number' && Number.isFinite(rawTime)) {
+    return rawTime > (now + MAX_FUTURE_SKEW_MS) ? now : rawTime;
+  }
+  if (typeof rawTime === 'string') {
+    const trimmed = rawTime.trim();
+    if (/^\d+$/.test(trimmed)) {
+      const numeric = Number(trimmed);
+      if (Number.isFinite(numeric)) return numeric > (now + MAX_FUTURE_SKEW_MS) ? now : numeric;
+    }
+    const parsed = new Date(trimmed).getTime();
+    if (Number.isFinite(parsed)) return parsed > (now + MAX_FUTURE_SKEW_MS) ? now : parsed;
+  }
+  return now;
+}
+
 function toEvent(msg) {
   if (!msg?.type) return null;
-  const ts = msg.time ? new Date(msg.time).getTime() : Date.now();
+  const ts = parseEventTimestamp(msg.time);
   if (!Number.isFinite(ts)) return null;
   if (msg.type === 'etr290_alarm') {
     const laneId = normalizeLaneId(msg.id || 'etr');
@@ -428,6 +451,7 @@ function buildLaneGradient(events, timeStart, windowMs) {
   if (!hasEtrStateEvents) {
     const activityEvents = sorted.filter((e) =>
       e.category === 'runtime_started' ||
+      e.category === 'runtime_heartbeat' ||
       e.category === 'analyse_result'
     );
     const nonBootstrapActivityEvents = activityEvents.filter((e) => !e?.evidence?.bootstrap);
@@ -436,15 +460,18 @@ function buildLaneGradient(events, timeStart, windowMs) {
       return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
     }
     const firstActiveTs = activitySource[0].ts;
+    const hadActivityBeforeWindow = activitySource.some((e) => e.ts <= timeStart);
     const stopAfterActive = sorted.find((e) =>
       (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
     );
     const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
-    // If the lane is currently active (no stop and freshness extends to window end),
-    // render a continuous baseline over the selected window so operators do not see
-    // a tiny right-edge fragment after tab switches/remount.
-    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs);
+    // Only paint full-window active baseline when we have evidence the lane
+    // was already active before the visible window. Otherwise, a fresh start
+    // in live mode incorrectly looks like activity existed earlier.
+    const isActiveNow = !stopAfterActive
+      && staleStopTs >= (timeStart + windowMs)
+      && hadActivityBeforeWindow;
     const effectiveStartTs = isActiveNow ? timeStart : Math.max(timeStart, firstActiveTs);
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
@@ -488,6 +515,7 @@ function buildEventBlocks(events, timeStart, windowMs) {
     // Suppress nominal analyse heartbeat blocks; they create misleading
     // gray/green segmentation when lane baseline already indicates state.
     .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
+    .filter((e) => e.category !== 'runtime_heartbeat')
     // Synthetic "bootstrap started" markers are only lane-seeding helpers
     // and should not render as visible event blocks.
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
@@ -591,9 +619,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           setCustomRange({ startMs: parsed.customRange.startMs, endMs: parsed.customRange.endMs });
         }
         if (typeof parsed.freezeCursor === 'boolean') setFreezeCursor(parsed.freezeCursor);
-        if (Number.isFinite(Number(parsed.mouseX))) setMouseX(Number(parsed.mouseX));
-        if (Number.isFinite(Number(parsed.mouseY))) setMouseY(Number(parsed.mouseY));
-        if (typeof parsed.mouseLaneId === 'string') setMouseLaneId(parsed.mouseLaneId);
       }
     } catch (_) {}
     setUiRestored(true);
@@ -622,9 +647,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           customEndInput,
           customRange,
           freezeCursor,
-          mouseX,
-          mouseY,
-          mouseLaneId,
         })
       );
     } catch (_) {}
@@ -638,9 +660,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     customEndInput,
     customRange,
     freezeCursor,
-    mouseX,
-    mouseY,
-    mouseLaneId,
   ]);
 
   const mergeTimelineEvents = (prev, incoming) => {
@@ -710,7 +729,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           .filter((a) => a && a.isRunning && a.id)
           .map((a) => {
             const laneId = normalizeLaneId(a.id);
-            const ts = Number(a?.lastResult?.probeTime) || Date.now();
+            const ts = Date.now();
             return {
               key: `bootstrap-${laneId}-started`,
               ts,
@@ -723,13 +742,29 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        const freshSynthetic = synthetic.filter((e) => (Date.now() - e.ts) <= LANE_ACTIVITY_STALE_MS);
-        if (freshSynthetic.length === 0) return;
+        const heartbeat = list
+          .filter((a) => a && a.isRunning && a.id)
+          .map((a) => {
+            const laneId = normalizeLaneId(a.id);
+            return {
+              key: `bootstrap-${laneId}-heartbeat`,
+              ts: Date.now(),
+              id: laneId,
+              rawId: a.id,
+              category: 'runtime_heartbeat',
+              severity: 'ok',
+              title: 'Analyser heartbeat',
+              description: a.url || `${a.id} active`,
+              evidence: { bootstrap: true },
+            };
+          });
+        const syntheticEvents = [...synthetic, ...heartbeat];
+        if (syntheticEvents.length === 0) return;
         setEvents((prev) => {
           // Only inject when the lane has no events yet in local timeline state.
           const seen = new Set(prev.map((e) => e.id));
-          const missing = freshSynthetic.filter((e) => !seen.has(e.id));
-          return missing.length ? mergeTimelineEvents(prev, missing) : prev;
+          const missing = synthetic.filter((e) => !seen.has(e.id));
+          return mergeTimelineEvents(prev, [...missing, ...heartbeat]);
         });
       } catch (_) {}
     };
@@ -742,9 +777,10 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNowMs(Date.now()), 1000);
+    if (rangeMode !== 'relative') return undefined;
+    const t = setInterval(() => setNowMs(Date.now()), LIVE_TICK_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [rangeMode]);
 
   const timeEnd = rangeMode === 'custom' && customRange ? customRange.endMs : nowMs;
   const timeStart = rangeMode === 'custom' && customRange ? customRange.startMs : (timeEnd - windowMs);
@@ -896,6 +932,16 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     }
     return out;
   }, [laneIds, laneMap, timeStart, effectiveWindowMs]);
+  const laneRecentStartById = useMemo(() => {
+    const out = {};
+    for (const id of laneIds) {
+      const latestStart = (laneMap[id] || [])
+        .filter((e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap)
+        .sort((a, b) => b.ts - a.ts)[0];
+      out[id] = Boolean(latestStart && (timeEnd - latestStart.ts) <= STARTED_RECENTLY_MS);
+    }
+    return out;
+  }, [laneIds, laneMap, timeEnd]);
 
   const popupPos = useMemo(() => {
     if (mouseX == null || mouseY == null) return null;
@@ -1129,6 +1175,14 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     title={id}
                   >
                     {id}
+                    {laneRecentStartById[id] && (
+                      <span
+                        className="ml-1.5 inline-flex items-center rounded border border-emerald-400/40 bg-emerald-500/15 px-1 py-0 text-[9px] uppercase tracking-wide text-emerald-300"
+                        title="Started recently"
+                      >
+                        new
+                      </span>
+                    )}
                   </div>
                   {laneBlocks.length > 0 && (
                     <div
