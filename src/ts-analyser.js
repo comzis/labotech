@@ -113,7 +113,7 @@ class TSAnalyser extends EventEmitter {
           }
           const out = String(stdout || '').trim();
           if (!out) {
-            return rejectProbe(new Error(`ffprobe returned empty probe payload${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+            return rejectProbe(new Error(`ffprobe returned empty probe payload (no input packets observed during probe window)${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
           }
           try {
             const raw = JSON.parse(out);

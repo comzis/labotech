@@ -134,6 +134,8 @@ function isExpectedNoSignalError(message) {
   const m = String(message || '').toLowerCase();
   return (
     m.includes('ffprobe exited 1') ||
+    m.includes('empty probe payload') ||
+    m.includes('no input packets observed during probe window') ||
     m.includes('connection refused') ||
     m.includes('input/output error') ||
     m.includes('server returned 404') ||

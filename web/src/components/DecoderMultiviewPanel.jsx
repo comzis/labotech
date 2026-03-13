@@ -8,6 +8,8 @@ import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'MCR-WALL-A';
+const MULTIVIEW_REFRESH_MS = 12000;
+const MULTIVIEW_CLOCK_TICK_MS = 3000;
 
 function normalizePanelName(raw) {
   return String(raw || '')
@@ -406,7 +408,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   useEffect(() => {
     const t = setInterval(() => {
       refreshActives();
-    }, 4000);
+    }, MULTIVIEW_REFRESH_MS);
     return () => clearInterval(t);
   }, [refreshActives]);
 
@@ -415,7 +417,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   }, [lastMessage, onWsResult]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), 1000);
+    const timer = setInterval(() => setNowMs(Date.now()), MULTIVIEW_CLOCK_TICK_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -485,7 +487,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     const id = decoderId || `decoder-${Date.now()}`;
     try {
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
-      await refreshActives();
       setPanels((prev) => prev.map((p) => {
         if (p.id !== activePanelId) return p;
         if ((p.decoderIds || []).includes(id)) return p;
@@ -493,6 +494,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       }));
       setOpenCreate(false);
       setDecoderId('');
+      // Sync in background; do not block first-tile render.
+      refreshActives();
     } catch (_) {
       // Hook exposes error state; keep form open for correction/retry.
     }
@@ -709,7 +712,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                 try {
                   await stop(id);
                 } finally {
-                  await refreshActives();
+                  // Background refresh keeps UI responsive while stop settles.
+                  refreshActives();
                   setStoppingIds((prev) => {
                     const next = new Set(prev);
                     next.delete(id);
