@@ -8,6 +8,7 @@ import { getPresets, getBroadcastPresets, getTranscoders, startTranscoder, stopT
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import { C } from './BroadcastUI';
+import { SUPPORTED_VIDEO_CODECS, SUPPORTED_AUDIO_CODECS } from '../utils/codecSupport';
 
 const DEFAULTS = {
   id: '',
@@ -344,9 +345,9 @@ export default function TranscodePanel({ lastMessage }) {
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200"
                     >
                       <option value="" className="bg-midnight-surface">Auto (from profile/slot)</option>
-                      <option value="libx264" className="bg-midnight-surface">H.264 (libx264)</option>
-                      <option value="libx265" className="bg-midnight-surface">H.265/HEVC (libx265)</option>
-                      <option value="copy" className="bg-midnight-surface">Pass-through (copy)</option>
+                      {SUPPORTED_VIDEO_CODECS.map((codec) => (
+                        <option key={codec.value} value={codec.value} className="bg-midnight-surface">{codec.label}</option>
+                      ))}
                     </select>
                   </div>
                   <div className="flex flex-col gap-1.5">
@@ -357,11 +358,9 @@ export default function TranscodePanel({ lastMessage }) {
                       className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-2.5 text-sm text-gray-200"
                     >
                       <option value="" className="bg-midnight-surface">Auto (from profile/slot)</option>
-                      <option value="aac" className="bg-midnight-surface">AAC-LC</option>
-                      <option value="mp2" className="bg-midnight-surface">MPEG-1 Layer II (MP2)</option>
-                      <option value="ac3" className="bg-midnight-surface">AC-3 (Dolby Digital)</option>
-                      <option value="eac3" className="bg-midnight-surface">E-AC-3 (Dolby Digital Plus)</option>
-                      <option value="copy" className="bg-midnight-surface">Pass-through (copy)</option>
+                      {SUPPORTED_AUDIO_CODECS.map((codec) => (
+                        <option key={codec.value} value={codec.value} className="bg-midnight-surface">{codec.label}</option>
+                      ))}
                     </select>
                   </div>
                 </div>

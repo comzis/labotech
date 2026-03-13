@@ -227,6 +227,59 @@ describe('SRTEncoder', () => {
     test('toJSON returns null audioPairs when using legacy flat config', () => {
       expect(enc.toJSON().audioPairs).toBeNull();
     });
+
+    test('audio pair copy codec omits bitrate and channel re-encode flags', () => {
+      const encCopyPair = new SRTEncoder({
+        id: 'copy-pair',
+        input: 'udp://239.1.1.1:5000',
+        host: '10.0.0.1',
+        port: 9999,
+        audioPairs: [{ sourceIndex: 0, codec: 'copy', bitrate: '256k', channels: 2 }],
+      });
+      const args = encCopyPair.buildFFmpegArgs();
+      const copyIdx = args.indexOf('-c:a:0');
+      expect(copyIdx).toBeGreaterThan(-1);
+      expect(args[copyIdx + 1]).toBe('copy');
+      expect(args).not.toContain('-b:a:0');
+      expect(args).not.toContain('-ac:a:0');
+    });
+
+    test('legacy audio copy omits bitrate and channel re-encode flags', () => {
+      const encCopyAudio = new SRTEncoder({
+        id: 'copy-audio',
+        input: 'udp://239.1.1.1:5000',
+        host: '10.0.0.1',
+        port: 9999,
+        audioCodec: 'copy',
+      });
+      const args = encCopyAudio.buildFFmpegArgs();
+      const copyIdx = args.indexOf('-c:a');
+      expect(copyIdx).toBeGreaterThan(-1);
+      expect(args[copyIdx + 1]).toBe('copy');
+      expect(args).not.toContain('-b:a');
+      expect(args).not.toContain('-ac');
+    });
+  });
+
+  describe('codec profile normalization', () => {
+    test('normalizes invalid HEVC profile to main', () => {
+      const encHevc = new SRTEncoder({
+        id: 'hevc-main',
+        input: 'udp://239.1.1.1:5000',
+        videoCodec: 'libx265',
+        profile: 'high',
+      });
+      expect(encHevc.profile).toBe('main');
+    });
+
+    test('copy video mode keeps profile null', () => {
+      const encCopy = new SRTEncoder({
+        id: 'copy-video',
+        input: 'udp://239.1.1.1:5000',
+        videoCodec: 'copy',
+      });
+      expect(encCopy.profile).toBeNull();
+    });
   });
 
   describe('DVB muxer', () => {

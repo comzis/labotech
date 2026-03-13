@@ -3,6 +3,7 @@
 const express = require('express');
 const WebSocket = require('ws');
 const SRTEncoder = require('../src/encoder');
+const { isSupportedVideoCodec, isSupportedAudioCodec, SUPPORTED_VIDEO_CODECS, SUPPORTED_AUDIO_CODECS } = require('../src/codec-support');
 
 module.exports = function (streams, wss, saveState = () => {}, broadcastFn = null) {
   const router = express.Router();
@@ -72,6 +73,18 @@ module.exports = function (streams, wss, saveState = () => {}, broadcastFn = nul
     }
     if (effectiveMode !== 'null' && !port) {
       return res.status(400).json({ error: `port is required when outputMode is ${effectiveMode}` });
+    }
+    if (videoCodec && !isSupportedVideoCodec(videoCodec)) {
+      return res.status(400).json({ error: `videoCodec must be one of: ${SUPPORTED_VIDEO_CODECS.join(', ')}` });
+    }
+    if (audioCodec && !isSupportedAudioCodec(audioCodec)) {
+      return res.status(400).json({ error: `audioCodec must be one of: ${SUPPORTED_AUDIO_CODECS.join(', ')}` });
+    }
+    if (Array.isArray(audioPairs)) {
+      const invalidPair = audioPairs.find((p) => p && p.codec && !isSupportedAudioCodec(p.codec));
+      if (invalidPair) {
+        return res.status(400).json({ error: `audioPairs codec must be one of: ${SUPPORTED_AUDIO_CODECS.join(', ')}` });
+      }
     }
 
     const encoder = new SRTEncoder({

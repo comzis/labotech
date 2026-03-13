@@ -4,6 +4,7 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const path = require('path');
 const { THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
+const { normalizeVideoCodec, normalizeAudioCodec, normalizeVideoProfile } = require('./codec-support');
 
 // ─── Bitrate normalisation ───────────────────────────────────────────────────
 // Accepts plain numbers and appends the correct unit so FFmpeg never sees
@@ -65,9 +66,9 @@ class SRTEncoder extends EventEmitter {
     this.adapter = options.adapter || null;
     this.streamId = options.streamId || null;
     this.videoBitrate = normBitrate(options.videoBitrate || '10M', 'M');
-    this.videoCodec = options.videoCodec || 'libx264';
+    this.videoCodec = normalizeVideoCodec(options.videoCodec || 'libx264');
     this.preset = options.preset || 'medium';
-    this.profile = options.profile || 'high';
+    this.profile = normalizeVideoProfile(this.videoCodec, options.profile);
     this.gopSize = options.gopSize || 50;
     this.pixFmt = options.pixFmt || 'yuv420p';
     this.rateMode = options.rateMode || 'cbr'; // 'cbr' | 'vbr'
@@ -95,7 +96,7 @@ class SRTEncoder extends EventEmitter {
     if (Array.isArray(options.audioPairs) && options.audioPairs.length > 0) {
       this.audioPairs = options.audioPairs.map((p, i) => ({
         sourceIndex: p.sourceIndex != null ? parseInt(p.sourceIndex) : 0,
-        codec: p.codec || 'aac',
+        codec: normalizeAudioCodec(p.codec || 'aac'),
         bitrate: normBitrate(p.bitrate || '256k', 'k'),
         channels: p.channels != null ? parseInt(p.channels) : 2,
         language: p.language || null,
@@ -106,7 +107,7 @@ class SRTEncoder extends EventEmitter {
       this.audioPairs = null;
       // Legacy flat config — kept for backward compatibility
       this.audioBitrate = normBitrate(options.audioBitrate || '256k', 'k');
-      this.audioCodec = options.audioCodec || 'aac';
+      this.audioCodec = normalizeAudioCodec(options.audioCodec || 'aac');
       const ac = options.audioChannels || 'stereo';
       if (ac === 'mono') this.audioChannels = 1;
       else if (ac === '5.1') this.audioChannels = 6;
@@ -251,13 +252,15 @@ class SRTEncoder extends EventEmitter {
     args.push(
       '-c:v', this.videoCodec,
       '-preset', this.preset,
-      '-profile:v', this.profile,
       '-g', this.gopSize.toString(),
       '-keyint_min', this.gopSize.toString(), // prevent early keyframes between GOPs
       '-sc_threshold', '0',                   // disable scene-cut keyframes — CBR requires fixed GOP
       '-b:v', this.videoBitrate,
       '-pix_fmt', this.pixFmt,
     );
+    if (this.profile) {
+      args.push('-profile:v', this.profile);
+    }
 
     const x265Params = [];
     if (this.rateMode === 'cbr') {
@@ -293,11 +296,19 @@ class SRTEncoder extends EventEmitter {
     // ─── Audio encoding ─────────────────────────────────────────────────────
     if (this.audioPairs) {
       this.audioPairs.forEach((p, i) => {
-        args.push(`-c:a:${i}`, p.codec, `-b:a:${i}`, p.bitrate, `-ac:a:${i}`, String(p.channels));
+        if (p.codec === 'copy') {
+          args.push(`-c:a:${i}`, 'copy');
+        } else {
+          args.push(`-c:a:${i}`, p.codec, `-b:a:${i}`, p.bitrate, `-ac:a:${i}`, String(p.channels));
+        }
         if (p.language) args.push(`-metadata:s:a:${i}`, `language=${p.language}`);
       });
     } else {
-      args.push('-c:a', this.audioCodec, '-b:a', this.audioBitrate, '-ac', this.audioChannels.toString());
+      if (this.audioCodec === 'copy') {
+        args.push('-c:a', 'copy');
+      } else {
+        args.push('-c:a', this.audioCodec, '-b:a', this.audioBitrate, '-ac', this.audioChannels.toString());
+      }
     }
 
     // Prevent muxing queue overflow on high-bitrate streams (>= 10 Mbps)
