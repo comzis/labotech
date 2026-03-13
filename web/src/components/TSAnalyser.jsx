@@ -203,6 +203,19 @@ function fmtNumber(value, digits = 2) {
   return n != null ? n.toFixed(digits) : null;
 }
 
+function stableText(v) {
+  return String(v || "").toLowerCase();
+}
+
+function numericPidValue(stream) {
+  const pid = Number(stream?.pid);
+  if (Number.isFinite(pid)) return pid;
+  if (typeof stream?.pidHex === "string" && /^0x[0-9a-f]+$/i.test(stream.pidHex.trim())) {
+    return parseInt(stream.pidHex, 16);
+  }
+  return Number.POSITIVE_INFINITY;
+}
+
 function PidRef({ pidLike, color = C.accent }) {
   const p = toPidParts(pidLike);
   if (p.dec == null && !p.hex) {
@@ -374,11 +387,11 @@ export default function TSAnalyser({ lastMessage }) {
   const p3fail = etrChecks.filter((r) => r.p === 3 && !r.ok).length;
 
   const pidRows = useMemo(() => {
-    const rows = [];
+    const rowsMap = new Map();
     (activeResult?.programs || []).forEach((p) => {
       (p.streams || []).forEach((s) => {
         const streamBps = toFiniteNumber(s.bitrateBps);
-        rows.push({
+        const row = {
           pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
           pidHex: s.pidHex || null,
           type: (s.codecType || "data").toUpperCase(),
@@ -386,29 +399,55 @@ export default function TSAnalyser({ lastMessage }) {
           bps: streamBps != null && streamBps > 0 ? `${(streamBps / 1000).toFixed(1)} kbps` : "-",
           cc: 0,
           ok: true,
-        });
+        };
+        const key = `${row.pid ?? row.pidHex ?? "na"}-${row.type}`;
+        if (!rowsMap.has(key)) rowsMap.set(key, row);
       });
+    });
+    const rows = Array.from(rowsMap.values()).sort((a, b) => {
+      const pidA = Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+      const pidB = Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+      if (pidA !== pidB) return pidA - pidB;
+      const typeCmp = stableText(a.type).localeCompare(stableText(b.type));
+      if (typeCmp !== 0) return typeCmp;
+      return stableText(a.label).localeCompare(stableText(b.label));
     });
     if (rows.length === 0) return [];
     return rows;
   }, [activeResult]);
 
   const programs = useMemo(() => {
-    return (activeResult?.programs || []).map((p) => ({
+    return (activeResult?.programs || [])
+      .map((p) => ({
       num: Number.isFinite(Number(p.programId)) ? Number(p.programId) : null,
       name: p.name || p.serviceName || `Service ${p.programId}`,
       provider: p.provider || p.providerName || "-",
       running: 4,
       scrambled: Boolean(p.scrambled),
       eit: true,
-      streams: (p.streams || []).map((s) => ({
+      streams: (p.streams || [])
+        .map((s) => ({
         pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
         pidHex: s.pidHex || null,
         type: (s.codecType || "data").toUpperCase(),
         codec: s.codecName || "-",
         kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
-      })),
-    }));
+      }))
+        .sort((a, b) => {
+          const pidA = Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+          const pidB = Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+          if (pidA !== pidB) return pidA - pidB;
+          const typeCmp = stableText(a.type).localeCompare(stableText(b.type));
+          if (typeCmp !== 0) return typeCmp;
+          return stableText(a.codec).localeCompare(stableText(b.codec));
+        }),
+    }))
+      .sort((a, b) => {
+        const numA = Number.isFinite(Number(a.num)) ? Number(a.num) : Number.POSITIVE_INFINITY;
+        const numB = Number.isFinite(Number(b.num)) ? Number(b.num) : Number.POSITIVE_INFINITY;
+        if (numA !== numB) return numA - numB;
+        return stableText(a.name).localeCompare(stableText(b.name));
+      });
   }, [activeResult]);
 
   const dvbTables = useMemo(() => {
@@ -888,7 +927,7 @@ export default function TSAnalyser({ lastMessage }) {
             <thead><tr><TH>PID</TH><TH>Type</TH><TH>Description</TH><TH right>Bitrate</TH><TH right>CC Errs</TH><TH>Status</TH></tr></thead>
             <tbody>
               {pidRows.map((p, i) => (
-                <tr key={`pid-${i}`}>
+                <tr key={`pid-${p.pid ?? p.pidHex ?? "na"}-${p.type}`}>
                   <TD mono><PidRef pidLike={p.pid ?? p.pidHex} /></TD><TD><Badge label={p.type} color={p.type === "VIDEO" ? C.purple : p.type === "AUDIO" ? C.info : C.head} small /></TD><TD>{p.label}</TD><TD right mono><Mono v={p.bps} c={C.cyan} size={10} /></TD><TD right mono><span style={{ color: p.cc > 0 ? C.err : C.muted }}>{p.cc}</span></TD><TD><Badge label={p.ok ? "OK" : "ERR"} color={p.ok ? C.ok : C.err} small /></TD>
                 </tr>
               ))}
@@ -901,14 +940,14 @@ export default function TSAnalyser({ lastMessage }) {
       {tab === "Programs" && (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {programs.map((p) => (
-            <Panel key={String(p.num)} title={`${p.name} · ${p.num ?? "-"}`} status={p.scrambled ? "SCRAMBLED" : "FTA"} right={p.provider}>
+            <Panel key={`${p.num ?? "na"}-${p.name}`} title={`${p.name} · ${p.num ?? "-"}`} status={p.scrambled ? "SCRAMBLED" : "FTA"} right={p.provider}>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 3fr", gap: 12 }}>
                 <div><KV k="Program Num" v={p.num != null ? String(p.num) : "-"} vc={C.accent} /><KV k="Service Name" v={p.name} vc={C.cyan} /><KV k="Provider" v={p.provider} /><KV k="Running" v={p.running === 4 ? "Running" : "Not running"} vc={C.ok} /><KV k="Scrambled" v={p.scrambled ? "YES" : "NO"} vc={p.scrambled ? C.err : C.ok} /></div>
                 <div>
                   <div style={{ fontSize: 8, color: C.muted, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Elementary Streams</div>
                   <table style={{ width: "100%", borderCollapse: "collapse" }}>
                     <thead><tr><TH>PID</TH><TH>Stream Type</TH><TH>Codec</TH><TH right>Bitrate</TH></tr></thead>
-                    <tbody>{p.streams.map((s, j) => <tr key={`${p.num}-${j}`}><TD mono><PidRef pidLike={s.pid ?? s.pidHex} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
+                    <tbody>{p.streams.map((s) => <tr key={`${p.num ?? "na"}-${numericPidValue(s)}-${s.type}-${s.codec}`}><TD mono><PidRef pidLike={s.pid ?? s.pidHex} /></TD><TD><Badge label={s.type} color={s.type === "VIDEO" ? C.purple : s.type === "AUDIO" ? C.info : C.gold} small /></TD><TD>{s.codec}</TD><TD right mono><Mono v={s.kbps === "-" ? "-" : `${s.kbps} kbps`} c={C.cyan} size={10} /></TD></tr>)}</tbody>
                   </table>
                 </div>
               </div>
