@@ -285,6 +285,8 @@ function toEvent(msg) {
       : severity === 'warning'
         ? 'TS Analysis (warning)'
         : 'TS Analysis (OK)';
+    const bitrateBps = Number(dvb.bitrateBps);
+    const bitrateMbps = Number.isFinite(bitrateBps) && bitrateBps > 0 ? Number((bitrateBps / 1e6).toFixed(3)) : null;
     return {
       key: `${ts}-${msg.id || 'analyse'}-analyse`,
       ts,
@@ -293,10 +295,10 @@ function toEvent(msg) {
       category: 'analyse_result',
       severity,
       title,
-      description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${(dvb.bitrateBps ? (dvb.bitrateBps / 1e6).toFixed(2) : '0.00')} Mbps${healthScore != null ? ` · health ${healthScore}/100` : ''}`,
+      description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${bitrateMbps != null ? bitrateMbps.toFixed(2) : '0.00'} Mbps${healthScore != null ? ` · health ${healthScore}/100` : ''}`,
       evidence: {
         bitrateSource: dvb.bitrateSource || null,
-        bitrateMbps: dvb.bitrateBps ? Number((dvb.bitrateBps / 1e6).toFixed(3)) : null,
+        bitrateMbps,
         pidCount: dvb.pidCount ?? null,
         serviceCount: dvb.serviceCount ?? null,
         siIntervalsSec: si.intervalsSec || null,
@@ -380,11 +382,10 @@ function laneSeverity(event) {
 
 function laneStateSeverity(event) {
   if (!event) return null;
-  const isEtrStateEvent = event.category === 'etr290_status'
-    || event.category === 'etr290_alarm'
-    || event.category === 'etr290_incident'
-    || event.category === 'etr290_incident_cleared';
-  if (!isEtrStateEvent) return null;
+  // Keep lane baseline tied to heartbeat truth only (current ETR state),
+  // and render incidents/alarms as overlays so past incidents don't tint
+  // the whole lane state after they have cleared.
+  if (event.category !== 'etr290_status') return null;
   return laneSeverity(event);
 }
 
@@ -486,7 +487,8 @@ function getEventVisualStyle(category, severity) {
 }
 
 function num(v, digits = 3) {
-  return typeof v === 'number' && Number.isFinite(v) ? Number(v.toFixed(digits)) : null;
+  const n = Number(v);
+  return Number.isFinite(n) ? Number(n.toFixed(digits)) : null;
 }
 
 export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {

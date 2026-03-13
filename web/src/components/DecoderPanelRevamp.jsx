@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
+import { resolveTransportBitrate } from "../utils/transportBitrate";
 
 const PROBE_MODES = [
   { value: "rtp", label: "RTP" },
@@ -240,6 +241,11 @@ function StatBox({ label, value, color = C.text }) {
   );
 }
 
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
 export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [mode, setMode] = useState("rtp");
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
@@ -301,7 +307,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       const decoderId = normalizeLaneId(lastMessage.id);
       const arrival = lastMessage?.dvb?.arrival || {};
       const iat = arrival?.iatMs || {};
-      const tsRateBps = Number(lastMessage?.dvb?.bitrateBps || 0);
+      const transportRate = resolveTransportBitrate(lastMessage);
       const sample = {
         ts: lastMessage.time ? new Date(lastMessage.time).getTime() : Date.now(),
         iatMin: Number(iat.min) || 0,
@@ -309,8 +315,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         iatP95: Number(iat.p95) || 0,
         jitter: Number(arrival.jitterMs) || 0,
         loss: Number(arrival.packetLossPct) || 0,
-        tsRateBps: Number.isFinite(tsRateBps) && tsRateBps > 0 ? tsRateBps : 0,
-        tsRateSource: lastMessage?.dvb?.bitrateSource || null,
+        tsRateBps: Number.isFinite(transportRate.bps) && transportRate.bps > 0 ? transportRate.bps : 0,
+        tsRateSource: transportRate.source || null,
       };
       setForensicById((prev) => ({
         ...prev,
@@ -490,9 +496,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       try {
         if (addToMultiview) {
           await startContinuous(id, row.url, parseInt(intervalMs, 10) || 5000, captureNic || undefined);
-          try {
-            await probe(row.url);
-          } catch (_) {}
         } else {
           await probe(row.url);
         }
@@ -678,7 +681,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP">
-                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="Host / IP" mono style={{ color: C.muted }} />
+                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="Host / IP" mono style={{ color: row.host ? C.text : C.head }} />
                   </Field>
                   <Field label="Port">
                     <Input
@@ -686,11 +689,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       onChange={(e) => updateRow(row.key, { port: e.target.value })}
                       placeholder="Port"
                       mono
-                      style={{ color: C.muted }}
+                      style={{ color: row.port ? C.text : C.head }}
                     />
                   </Field>
                   <Field label="Decoder ID (optional)">
-                    <Input value={row.decoderId} onChange={(e) => updateRow(row.key, { decoderId: e.target.value })} placeholder="decoder-a" mono style={{ color: C.muted }} />
+                    <Input value={row.decoderId} onChange={(e) => updateRow(row.key, { decoderId: e.target.value })} placeholder="decoder-a" mono style={{ color: row.decoderId ? C.text : C.head }} />
                   </Field>
                   <button
                     onClick={() => startSingleDecoderRow(row.key)}
@@ -1122,11 +1125,13 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             };
 
             const scanLabel = (fieldOrder) => {
-              if (!fieldOrder || fieldOrder === "progressive") return "Progressive";
-              if (/interlac/i.test(fieldOrder)) return "Interlaced";
-              if (/top/i.test(fieldOrder)) return "TFF";
-              if (/bottom/i.test(fieldOrder)) return "BFF";
-              return fieldOrder;
+              if (!fieldOrder) return "-";
+              const f = String(fieldOrder).toLowerCase();
+              if (f === "progressive") return "Progressive";
+              if (f.includes("tt") || f.includes("tb") || f.includes("top")) return "Interlaced (TFF)";
+              if (f.includes("bb") || f.includes("bt") || f.includes("bottom")) return "Interlaced (BFF)";
+              if (/interlac/i.test(f)) return "Interlaced";
+              return String(fieldOrder);
             };
 
             const bpsFmt = (bps) => {
@@ -1135,16 +1140,25 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               return n >= 1e6 ? `${(n / 1e6).toFixed(2)} Mbps` : `${(n / 1e3).toFixed(1)} kbps`;
             };
 
+            const fpsNumber = (fpsLike) => {
+              if (fpsLike === undefined || fpsLike === null) return null;
+              if (Number.isFinite(Number(fpsLike)) && Number(fpsLike) > 0) return Number(fpsLike);
+              const s = String(fpsLike).trim();
+              if (!s || s.toUpperCase() === "N/A" || s === "0/0") return null;
+              const m = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+              if (!m) return null;
+              const num = Number(m[1]);
+              const den = Number(m[2]);
+              if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return null;
+              const out = num / den;
+              return Number.isFinite(out) && out > 0 ? out : null;
+            };
+
             const svc = selectedResult?.dvb?.services?.[0];
-            const tsInputRateBps = Number(selectedResult?.dvb?.bitrateBps || selectedResult?.dvb?.measuredBitrateBps || 0);
-            const tsRateSource = selectedResult?.dvb?.bitrateSource || latestTsRate?.tsRateSource || "-";
-            const tsRateSamples = tsRateSeries
-              .map((s) => Number(s.tsRateBps || 0))
-              .filter((v) => Number.isFinite(v) && v > 0)
-              .slice(-12);
-            const tsRateAvgBps = tsRateSamples.length
-              ? Math.round(tsRateSamples.reduce((a, b) => a + b, 0) / tsRateSamples.length)
-              : 0;
+            const videoFps = fpsNumber(videoStream?.fps);
+            const transportRate = resolveTransportBitrate(selectedResult);
+            const tsInputRateBps = Number(transportRate.bps || 0);
+            const tsRateSource = transportRate.source || latestTsRate?.tsRateSource || "-";
 
             return (
               <>
@@ -1158,9 +1172,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </div>
 
                 {/* ── Top row: ETR counters + thumbnail ───────────────── */}
-                <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "1fr 200px" : "1fr", gap: 8, alignItems: "start" }}>
+                <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "minmax(0,1fr) clamp(300px, 34vw, 520px)" : "1fr", gap: 8, alignItems: "start" }}>
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
                       <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
                       <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
                       <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
@@ -1170,12 +1184,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     {selectedResult?.dvb?.arrival && (() => {
                       const arr = selectedResult.dvb.arrival;
                       const iat = arr.iatMs || {};
+                      const iatAvg = toFiniteNumber(iat.avg);
+                      const iatP95 = toFiniteNumber(iat.p95);
+                      const netJitter = toFiniteNumber(arr.jitterMs);
+                      const lossPct = toFiniteNumber(arr.packetLossPct);
                       return (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
-                          <StatBox label="IAT avg" value={iat.avg != null ? `${Number(iat.avg).toFixed(2)} ms` : "-"} color={Number(iat.avg) > 50 ? C.warn : C.ok} />
-                          <StatBox label="IAT p95" value={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} color={Number(iat.p95) > 150 ? C.err : C.ok} />
-                          <StatBox label="Net Jitter" value={arr.jitterMs != null ? `${Number(arr.jitterMs).toFixed(2)} ms` : "-"} color={Number(arr.jitterMs) > 5 ? C.warn : C.ok} />
-                          <StatBox label="Pkt Loss %" value={arr.packetLossPct != null ? `${Number(arr.packetLossPct).toFixed(3)}%` : "-"} color={Number(arr.packetLossPct) > 0.01 ? C.err : C.ok} />
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
+                          <StatBox label="IAT avg" value={iatAvg != null ? `${iatAvg.toFixed(2)} ms` : "-"} color={iatAvg != null && iatAvg > 50 ? C.warn : C.ok} />
+                          <StatBox label="IAT p95" value={iatP95 != null ? `${iatP95.toFixed(2)} ms` : "-"} color={iatP95 != null && iatP95 > 150 ? C.err : C.ok} />
+                          <StatBox label="Net Jitter" value={netJitter != null ? `${netJitter.toFixed(2)} ms` : "-"} color={netJitter != null && netJitter > 5 ? C.warn : C.ok} />
+                          <StatBox label="Pkt Loss %" value={lossPct != null ? `${lossPct.toFixed(3)}%` : "-"} color={lossPct != null && lossPct > 0.01 ? C.err : C.ok} />
                         </div>
                       );
                     })()}
@@ -1185,9 +1203,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   {selectedResult?.thumbnailUrl && (
                     <div style={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
                       <div style={{ fontSize: 8, color: C.muted, padding: "4px 6px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>Live Frame</div>
-                      <img src={selectedResult.thumbnailUrl} alt="Stream frame" style={{ width: "100%", display: "block" }} onError={(e) => { e.target.parentElement.style.display = "none"; }} />
+                      <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a" }}>
+                        <img src={selectedResult.thumbnailUrl} alt="Stream frame" style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }} onError={(e) => { e.target.parentElement.parentElement.style.display = "none"; }} />
+                      </div>
                       {svc?.serviceName && (
-                        <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }} title={svc.serviceName}>
                           {svc.serviceName}
                         </div>
                       )}
@@ -1207,8 +1227,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       <StatBox label="Services" value={String(selectedResult?.dvb?.serviceCount ?? selectedResult?.programs?.length ?? "-")} color={C.text} />
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-                      <StatBox label="TS Rate (rolling avg)" value={bpsFmt(tsRateAvgBps)} color={tsRateAvgBps ? C.cyan : C.muted} />
-                      <StatBox label="TS Rate Source" value={String(tsRateSource).toUpperCase()} color={tsRateSource === "tsduck" || tsRateSource === "measured" ? C.ok : C.warn} />
+                      <StatBox label="Video Bitrate" value={bpsFmt(videoStream?.bitrate)} color={toFiniteNumber(videoStream?.bitrate) ? C.purple : C.muted} />
+                      <StatBox label="TS Input Source" value={String(tsRateSource).toUpperCase()} color={transportRate.trusted ? C.ok : C.warn} />
                       <StatBox label="Rate Hold" value={selectedResult?.dvb?.bitrateHeldFromPrevious ? "ON" : "OFF"} color={selectedResult?.dvb?.bitrateHeldFromPrevious ? C.info : C.muted} />
                     </div>
 
@@ -1223,8 +1243,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                             value={videoStream.width && videoStream.height ? `${videoStream.width}×${videoStream.height}` : "-"}
                             color={C.text}
                           />
-                          <StatBox label="Frame Rate" value={videoStream.fps ? `${Number(videoStream.fps).toFixed(2)} fps` : "-"} color={C.text} />
-                          <StatBox label="Scan" value={scanLabel(videoStream.fieldOrder)} color={C.text} />
+                          <StatBox label="Frame Rate" value={videoFps != null ? `${videoFps.toFixed(2)} fps` : "-"} color={C.text} />
+                          <StatBox label="Scan" value={scanLabel(videoStream.scanType || videoStream.fieldOrder)} color={C.text} />
                           <StatBox label="Chroma" value={chromaLabel(videoStream.pixFmt)} color={C.text} />
                           <StatBox label="ES Bitrate" value={bpsFmt(videoStream.bitrate)} color={C.text} />
                         </div>
@@ -1237,14 +1257,20 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         <div style={{ fontSize: 8, color: C.info, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
                           Audio ({audioStreams.length} track{audioStreams.length !== 1 ? "s" : ""})
                         </div>
-                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                          {audioStreams.slice(0, 4).map((s, i) => (
-                            <div key={i} style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
-                              <StatBox label={`Track ${i + 1} Codec`} value={s.codecName || "-"} color={C.info} />
-                              <StatBox label="Channels" value={s.channels ? `${s.channels}ch` : "-"} color={C.text} />
-                              <StatBox label="Layout" value={s.channelLayout || (s.channels === 2 ? "stereo" : s.channels === 1 ? "mono" : "-")} color={C.text} />
-                              <StatBox label="Sample Rate" value={s.sampleRate ? `${(Number(s.sampleRate) / 1000).toFixed(1)} kHz` : "-"} color={C.text} />
-                              <StatBox label="Bitrate" value={bpsFmt(s.bitrate)} color={C.text} />
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(300px,1fr))", gap: 6 }}>
+                          {audioStreams.map((s, i) => (
+                            <div key={`${s.pid || "audio"}-${i}`} style={{ border: `1px solid ${C.border}`, borderRadius: 2, background: C.dim, padding: "6px 8px" }}>
+                              <div style={{ fontSize: 8, color: C.info, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 6 }}>
+                                Track {i + 1}
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
+                                <StatBox label="PID" value={renderPidRef(s.pid, s.pidHex)} color={C.accent} />
+                                <StatBox label="Codec" value={s.codecName || "-"} color={C.info} />
+                                <StatBox label="Bitrate" value={bpsFmt(s.bitrate)} color={C.text} />
+                                <StatBox label="Channels" value={s.channels ? `${s.channels}ch` : "-"} color={C.text} />
+                                <StatBox label="Layout" value={s.channelLayout || (s.channels === 2 ? "stereo" : s.channels === 1 ? "mono" : "-")} color={C.text} />
+                                <StatBox label="Sample Rate" value={(() => { const sr = toFiniteNumber(s.sampleRate); return sr != null ? `${(sr / 1000).toFixed(1)} kHz` : "-"; })()} color={C.text} />
+                              </div>
                             </div>
                           ))}
                         </div>
@@ -1260,16 +1286,40 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 {/* ── PID Table ────────────────────────────────────────── */}
                 <PanelBox>
                   <SectionHead icon="📋" title="PID Table" />
-                  <div style={{ padding: "8px 12px", maxHeight: 200, overflowY: "auto" }}>
+                  <div style={{ padding: "8px 12px", maxHeight: 260, overflowY: "auto", display: "grid", gap: 6 }}>
                     {pids.length === 0 ? (
                       <div style={{ color: C.muted, fontSize: 10 }}>No PID information available yet.</div>
                     ) : (
                       pids.map((p) => (
-                        <div key={p.rowKey} style={{ display: "grid", gridTemplateColumns: "90px 100px 1fr 90px", gap: 8, padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
-                          {renderPidRef(p.pid, p.pidHex)}
-                          <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
-                          <span style={{ color: C.text, fontSize: 10 }}>{p.codec}</span>
-                          <span style={{ color: C.muted, fontSize: 9, textAlign: "right", fontFamily: "'Courier New',monospace" }}>{bpsFmt(p.bitrate)}</span>
+                        <div
+                          key={p.rowKey}
+                          style={{
+                            border: `1px solid ${C.border}`,
+                            borderRadius: 2,
+                            background: C.dim,
+                            padding: "6px 8px",
+                            display: "grid",
+                            gridTemplateColumns: "minmax(120px,0.8fr) minmax(95px,0.7fr) minmax(0,1.4fr) minmax(110px,0.8fr)",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>PID</div>
+                            {renderPidRef(p.pid, p.pidHex)}
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Type</div>
+                            <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                          </div>
+                          <div style={{ minWidth: 0 }}>
+                            <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Description</div>
+                            <span style={{ color: C.text, fontSize: 10, display: "block", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.25 }}>{p.codec}</span>
+                          </div>
+                          <div style={{ minWidth: 0, textAlign: "right" }}>
+                            <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Bitrate</div>
+                            <span style={{ color: C.muted, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{bpsFmt(p.bitrate)}</span>
+                          </div>
                         </div>
                       ))
                     )}
@@ -1279,20 +1329,38 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 {/* ── Active Decoders ──────────────────────────────────── */}
                 <PanelBox>
                   <SectionHead icon="📋" title="Active Decoders" right={<Badge label={`${activeIds.length} running`} color={activeIds.length ? C.ok : C.muted} small />} />
-                  <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ padding: "8px 12px", display: "grid", gap: 6 }}>
                     {activeIds.length === 0 ? (
                       <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
                     ) : (
                       activeIds.map((id) => (
-                        <div key={id} style={{ display: "grid", gridTemplateColumns: "1fr 72px", gap: 6 }}>
+                        <div
+                          key={id}
+                          style={{
+                            border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
+                            borderRadius: 2,
+                            background: selectedId === id ? `${C.cyan}10` : C.dim,
+                            padding: "6px 8px",
+                            display: "grid",
+                            gridTemplateColumns: "minmax(0,1fr) auto",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
                           <button
                             onClick={() => setSelectedId(id)}
                             style={{
-                              textAlign: "left", borderRadius: 2,
-                              border: `1px solid ${selectedId === id ? C.cyan : C.border}`,
-                              background: selectedId === id ? `${C.cyan}12` : "transparent",
+                              textAlign: "left",
+                              borderRadius: 2,
+                              border: `1px solid ${selectedId === id ? `${C.cyan}66` : `${C.border}AA`}`,
+                              background: "transparent",
                               color: selectedId === id ? C.cyan : C.text,
-                              padding: "5px 8px", fontFamily: "'Courier New',monospace", fontSize: 10,
+                              padding: "5px 8px",
+                              fontFamily: "'Courier New',monospace",
+                              fontSize: 10,
+                              whiteSpace: "normal",
+                              wordBreak: "break-word",
+                              lineHeight: 1.2,
                             }}
                           >
                             {id}
@@ -1303,9 +1371,14 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                               try { await refreshActives(); } catch (_) {}
                             }}
                             style={{
-                              borderRadius: 2, border: `1px solid ${C.err}`, color: C.err,
-                              background: "transparent", fontSize: 9, fontWeight: 700,
+                              borderRadius: 2,
+                              border: `1px solid ${C.err}`,
+                              color: C.err,
+                              background: "transparent",
+                              fontSize: 9,
+                              fontWeight: 700,
                               fontFamily: "'Courier New',monospace",
+                              padding: "5px 10px",
                             }}
                           >
                             STOP
@@ -1385,12 +1458,19 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     SRT Transport Stats (Haivision/libsrt)
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+                    {(() => {
+                      const rttMs = toFiniteNumber(selectedResult?.dvb?.srtStats?.rttMs);
+                      return (
+                        <>
                     <StatBox label="NAK" value={selectedResult?.dvb?.srtStats?.pktNak ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktNak || 0) > 0 ? C.warn : C.ok} />
                     <StatBox label="Retransmitted" value={selectedResult?.dvb?.srtStats?.pktRetrans ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktRetrans || 0) > 0 ? C.warn : C.ok} />
                     <StatBox label="Dropped" value={selectedResult?.dvb?.srtStats?.pktDropped ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktDropped || 0) > 0 ? C.err : C.ok} />
                     <StatBox label="Lost" value={selectedResult?.dvb?.srtStats?.pktLost ?? "-"} color={Number(selectedResult?.dvb?.srtStats?.pktLost || 0) > 0 ? C.err : C.ok} />
                     <StatBox label="ACK" value={selectedResult?.dvb?.srtStats?.pktAck ?? "-"} color={C.text} />
-                    <StatBox label="RTT" value={selectedResult?.dvb?.srtStats?.rttMs != null ? `${Number(selectedResult.dvb.srtStats.rttMs).toFixed(2)} ms` : "-"} color={C.text} />
+                    <StatBox label="RTT" value={rttMs != null ? `${rttMs.toFixed(2)} ms` : "-"} color={C.text} />
+                        </>
+                      );
+                    })()}
                   </div>
                   {!selectedResult?.dvb?.srtStats && (
                     <div style={{ marginTop: 6, fontSize: 9, color: C.muted }}>
@@ -1408,8 +1488,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               <div style={{ padding: "10px 12px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                 <StatBox label="Capture NIC" value={captureNic || "auto"} color={C.cyan} />
                 <StatBox label="Active Decoders" value={activeIds.length} color={activeIds.length ? C.ok : C.muted} />
-                <StatBox label="Latest IAT avg" value={latestForensic ? `${latestForensic.iatAvg.toFixed(3)} ms` : "-"} color={C.text} />
-                <StatBox label="Latest Loss" value={latestForensic ? `${latestForensic.loss.toFixed(3)} %` : "-"} color={latestForensic && latestForensic.loss > 0 ? C.warn : C.ok} />
+                <StatBox label="Latest IAT avg" value={Number.isFinite(latestForensic?.iatAvg) ? `${latestForensic.iatAvg.toFixed(3)} ms` : "-"} color={C.text} />
+                <StatBox label="Latest Loss" value={Number.isFinite(latestForensic?.loss) ? `${latestForensic.loss.toFixed(3)} %` : "-"} color={Number.isFinite(latestForensic?.loss) && latestForensic.loss > 0 ? C.warn : C.ok} />
               </div>
             </PanelBox>
           )}

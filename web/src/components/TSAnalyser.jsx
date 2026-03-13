@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
+import { resolveTransportBitrate } from "../utils/transportBitrate";
 
 const C = {
   bg: "#07090d",
@@ -179,11 +180,6 @@ function countPids(result) {
   return fromPrograms + ((result.orphanStreams || []).length);
 }
 
-function toMbpsNumber(bps) {
-  const n = Number(bps || 0);
-  return Number.isFinite(n) && n > 0 ? Number((n / 1e6).toFixed(3)) : 0;
-}
-
 function toPidParts(pidLike) {
   if (pidLike == null) return { dec: null, hex: null };
   if (Number.isFinite(Number(pidLike))) {
@@ -195,6 +191,16 @@ function toPidParts(pidLike) {
     return { dec, hex: pidLike.toUpperCase() };
   }
   return { dec: null, hex: null };
+}
+
+function toFiniteNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function fmtNumber(value, digits = 2) {
+  const n = toFiniteNumber(value);
+  return n != null ? n.toFixed(digits) : null;
 }
 
 function PidRef({ pidLike, color = C.accent }) {
@@ -337,7 +343,8 @@ export default function TSAnalyser({ lastMessage }) {
 
   const activeUrl = activeResult?.url || buildProbeUrl({ mode, host, port, latency, passphrase });
   const target = parseTargetFromUrl(activeUrl);
-  const bps = toMbpsNumber(activeResult?.dvb?.bitrateBps || activeResult?.dvb?.measuredBitrateBps);
+  const transportRate = resolveTransportBitrate(activeResult);
+  const bps = transportRate.mbps != null ? Number(transportRate.mbps.toFixed(3)) : null;
   const packets = Number(activeResult?.dvb?.packets || activeResult?.packetCount || 0);
   const ccErrors = Number(activeResult?.dvb?.continuityCounterErrors?.count || 0);
   const pcrJitter = activeResult?.dvb?.pcr?.jitterMs;
@@ -370,12 +377,13 @@ export default function TSAnalyser({ lastMessage }) {
     const rows = [];
     (activeResult?.programs || []).forEach((p) => {
       (p.streams || []).forEach((s) => {
+        const streamBps = toFiniteNumber(s.bitrateBps);
         rows.push({
           pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
           pidHex: s.pidHex || null,
           type: (s.codecType || "data").toUpperCase(),
           label: s.codecName || s.streamType || "-",
-          bps: s.bitrateBps ? `${(Number(s.bitrateBps) / 1000).toFixed(1)} kbps` : "-",
+          bps: streamBps != null && streamBps > 0 ? `${(streamBps / 1000).toFixed(1)} kbps` : "-",
           cc: 0,
           ok: true,
         });
@@ -448,13 +456,15 @@ export default function TSAnalyser({ lastMessage }) {
   const st20227Rows = useMemo(() => {
     const a = activeResult;
     const b = activeResultB;
+    const rateA = resolveTransportBitrate(a);
+    const rateB = resolveTransportBitrate(b);
     const rows = [];
     if (a) {
       rows.push({
         leg: "A",
         name: "Primary leg",
         color: C.blue,
-        net: `${toMbpsNumber(a?.dvb?.bitrateBps)} Mbps`,
+        net: rateA.mbps != null ? `${rateA.mbps.toFixed(3)} Mbps` : "-",
         pids: Number(a?.dvb?.pidCount ?? countPids(a)),
         svcs: Number(a?.dvb?.serviceCount ?? a?.programs?.length ?? 0),
         src: parseTargetFromUrl(a?.url).host,
@@ -468,7 +478,7 @@ export default function TSAnalyser({ lastMessage }) {
         leg: "B",
         name: "Secondary leg",
         color: C.red,
-        net: `${toMbpsNumber(b?.dvb?.bitrateBps)} Mbps`,
+        net: rateB.mbps != null ? `${rateB.mbps.toFixed(3)} Mbps` : "-",
         pids: Number(b?.dvb?.pidCount ?? countPids(b)),
         svcs: Number(b?.dvb?.serviceCount ?? b?.programs?.length ?? 0),
         src: parseTargetFromUrl(b?.url).host,
@@ -482,7 +492,7 @@ export default function TSAnalyser({ lastMessage }) {
         leg: "2022-7",
         name: "Merged stream",
         color: C.gold,
-        net: `${toMbpsNumber(a?.dvb?.bitrateBps)} Mbps`,
+        net: rateA.mbps != null ? `${rateA.mbps.toFixed(3)} Mbps` : "-",
         pids: "-",
         svcs: "-",
         src: "-",
@@ -662,8 +672,8 @@ export default function TSAnalyser({ lastMessage }) {
         </div>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", gap: 5, marginBottom: 8 }}>
-        {[{ l: "BITRATE", v: `${bps.toFixed(3)} Mbps`, c: C.cyan }, { l: "PACKETS", v: packets.toLocaleString(), c: C.text }, { l: "CC ERRORS", v: String(ccErrors), c: ccErrors > 0 ? C.err : C.ok }, { l: "PCR JITTER", v: pcrJitter != null ? `${pcrJitter} ms` : "-", c: pcrJitter != null ? C.ok : C.muted }, { l: "NULL PKT", v: nullPct != null ? `${nullPct} %` : "-", c: C.text }, { l: "SERVICES", v: String(servicesCount), c: C.ok }, { l: "PIDs", v: String(pidsCount), c: C.text }, { l: "SCORE", v: score != null ? `${score} %` : "-", c: score != null && score >= 90 ? C.ok : C.warn }].map((s) => (
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(9,1fr)", gap: 5, marginBottom: 8 }}>
+        {[{ l: "BITRATE", v: bps != null ? `${bps.toFixed(3)} Mbps` : "-", c: bps != null ? C.cyan : C.muted }, { l: "RATE SRC", v: String((transportRate.source || '-')).toUpperCase(), c: transportRate.trusted ? C.ok : C.warn }, { l: "PACKETS", v: packets.toLocaleString(), c: C.text }, { l: "CC ERRORS", v: String(ccErrors), c: ccErrors > 0 ? C.err : C.ok }, { l: "PCR JITTER", v: pcrJitter != null ? `${pcrJitter} ms` : "-", c: pcrJitter != null ? C.ok : C.muted }, { l: "NULL PKT", v: nullPct != null ? `${nullPct} %` : "-", c: C.text }, { l: "SERVICES", v: String(servicesCount), c: C.ok }, { l: "PIDs", v: String(pidsCount), c: C.text }, { l: "SCORE", v: score != null ? `${score} %` : "-", c: score != null && score >= 90 ? C.ok : C.warn }].map((s) => (
           <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
             <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
             <div style={{ fontSize: 12, color: s.c, fontWeight: 700 }}>{s.v}</div>
@@ -776,19 +786,23 @@ export default function TSAnalyser({ lastMessage }) {
               {(() => {
                 const arr = activeResult?.dvb?.arrival || {};
                 const iat = arr.iatMs || {};
-                const hasIat = iat.avg != null;
-                const jitter = arr.jitterMs;
-                const loss = arr.packetLossPct;
+                const iatAvg = toFiniteNumber(iat.avg);
+                const iatMin = toFiniteNumber(iat.min);
+                const iatMax = toFiniteNumber(iat.max);
+                const iatP95 = toFiniteNumber(iat.p95);
+                const jitter = toFiniteNumber(arr.jitterMs);
+                const loss = toFiniteNumber(arr.packetLossPct);
+                const hasIat = iatAvg != null;
                 return hasIat || jitter != null || loss != null ? (
                   <div>
                     {hasIat && <>
-                      <KV k="IAT avg" v={`${Number(iat.avg).toFixed(2)} ms`} vc={Number(iat.avg) > 50 ? C.warn : C.ok} />
-                      <KV k="IAT min" v={iat.min != null ? `${Number(iat.min).toFixed(2)} ms` : "-"} />
-                      <KV k="IAT max" v={iat.max != null ? `${Number(iat.max).toFixed(2)} ms` : "-"} />
-                      <KV k="IAT p95" v={iat.p95 != null ? `${Number(iat.p95).toFixed(2)} ms` : "-"} vc={Number(iat.p95) > 150 ? C.err : C.ok} />
+                      <KV k="IAT avg" v={fmtNumber(iatAvg, 2) != null ? `${fmtNumber(iatAvg, 2)} ms` : "-"} vc={iatAvg != null && iatAvg > 50 ? C.warn : C.ok} />
+                      <KV k="IAT min" v={fmtNumber(iatMin, 2) != null ? `${fmtNumber(iatMin, 2)} ms` : "-"} />
+                      <KV k="IAT max" v={fmtNumber(iatMax, 2) != null ? `${fmtNumber(iatMax, 2)} ms` : "-"} />
+                      <KV k="IAT p95" v={fmtNumber(iatP95, 2) != null ? `${fmtNumber(iatP95, 2)} ms` : "-"} vc={iatP95 != null && iatP95 > 150 ? C.err : C.ok} />
                     </>}
-                    {jitter != null && <KV k="Jitter" v={`${Number(jitter).toFixed(2)} ms`} vc={Number(jitter) > 5 ? C.warn : C.ok} />}
-                    {loss != null && <KV k="Pkt Loss" v={`${Number(loss).toFixed(3)} %`} vc={Number(loss) > 0.01 ? C.err : C.ok} />}
+                    {jitter != null && <KV k="Jitter" v={`${jitter.toFixed(2)} ms`} vc={jitter > 5 ? C.warn : C.ok} />}
+                    {loss != null && <KV k="Pkt Loss" v={`${loss.toFixed(3)} %`} vc={loss > 0.01 ? C.err : C.ok} />}
                   </div>
                 ) : (
                   <span style={{ fontSize: 9, color: C.muted }}>IAT sniffer not active (set Capture NIC)</span>

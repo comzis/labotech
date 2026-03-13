@@ -17,6 +17,24 @@ const MODE_STYLE = {
   rtp: 'bg-violet-900/60 text-violet-300 border-violet-700/40',
 };
 const formatPidHex = (pid) => (pid == null ? 'N/A' : `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`);
+const formatDisplayFps = (value) => {
+  if (value === undefined || value === null) return '';
+  const n = Number(value);
+  if (Number.isFinite(n) && n > 0) return `${n.toFixed(2)}fps`;
+  const s = String(value).trim();
+  const frac = s.match(/^(\d+)\s*\/\s*(\d+)$/);
+  if (!frac) return '';
+  const num = Number(frac[1]);
+  const den = Number(frac[2]);
+  if (!Number.isFinite(num) || !Number.isFinite(den) || den <= 0) return '';
+  const fps = num / den;
+  return Number.isFinite(fps) && fps > 0 ? `${fps.toFixed(2)}fps` : '';
+};
+const formatMbps = (value) => {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return `${(n / 1000).toFixed(2)} Mbps`;
+};
 const PidRef = ({ pid }) => (
   pid == null ? <span style={{ color: C.muted }}>N/A</span> : (
     <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 6 }}>
@@ -160,7 +178,7 @@ export default function StreamsPanel({ lastMessage }) {
                         st.kind === 'video' ? 'bg-blue-900/40 text-blue-300 border-blue-700/40' : 'bg-green-900/40 text-green-300 border-green-700/40'
                       }`}>
                         {st.kind === 'video'
-                          ? `${st.codec} ${st.width ? `${st.width}×${st.height}` : ''} ${st.fps ? `${st.fps}fps` : ''}`.trim()
+                          ? `${st.codec} ${st.width ? `${st.width}×${st.height}` : ''} ${formatDisplayFps(st.fps)}`.trim()
                           : `${st.codec} ${st.sampleRate ? `${st.sampleRate}Hz` : ''}`.trim()
                         }
                       </span>
@@ -178,15 +196,15 @@ export default function StreamsPanel({ lastMessage }) {
                   )}
                 </div>
                 <div className="text-[11px] font-mono text-gray-500">
-                  Input bitrate: {s.inputBitrate
-                    ? `${(s.inputBitrate / 1000).toFixed(2)} Mbps${s.inputBitrateSource ? ` (${s.inputBitrateSource})` : ''}`
+                  Input bitrate: {formatMbps(s.inputBitrate)
+                    ? `${formatMbps(s.inputBitrate)}${s.inputBitrateSource ? ` (${s.inputBitrateSource})` : ''}`
                     : s.inputBitrateMeasuring
                       ? 'measuring...'
                       : s.isRunning
                         ? 'pending'
                         : '-'
-                  } · Output bitrate: {s.lastStats?.bitrate
-                    ? `${(s.lastStats.bitrate / 1000).toFixed(2)} Mbps`
+                  } · Output bitrate: {formatMbps(s.lastStats?.bitrate)
+                    ? formatMbps(s.lastStats?.bitrate)
                     : s.isRunning ? 'pending' : '-'}
                 </div>
 
@@ -260,9 +278,9 @@ function ConfidenceEmbed({ stream }) {
     setImgError(false);
   }, [tick, stream.id]);
   const thumbUrl = `${THUMB_BASE}/${stream.id}.jpg?t=${tick}`;
-  const outputMbps = stream?.lastStats?.bitrate ? (stream.lastStats.bitrate / 1000).toFixed(2) : null;
+  const outputMbps = formatMbps(stream?.lastStats?.bitrate);
   const inputBr = Number(stream?.inputBitrate);
-  const inputMbps = Number.isFinite(inputBr) && inputBr > 0 ? (inputBr / 1000).toFixed(2) : null;
+  const inputMbps = formatMbps(inputBr);
 
   return (
     <div className="bg-black/20 border border-white/5 rounded-2xl p-3 space-y-2">
@@ -283,11 +301,11 @@ function ConfidenceEmbed({ stream }) {
       <div className="grid grid-cols-2 gap-2 text-[11px] font-mono">
         <div className="rounded border border-white/10 bg-black/30 px-2 py-1">
           <span className="text-gray-500">Input</span>{' '}
-          <span className={inputMbps ? 'text-emerald-300' : 'text-gray-600'}>{inputMbps ? `${inputMbps} Mbps` : '-'}</span>
+          <span className={inputMbps ? 'text-emerald-300' : 'text-gray-600'}>{inputMbps || '-'}</span>
         </div>
         <div className="rounded border border-white/10 bg-black/30 px-2 py-1">
           <span className="text-gray-500">Output</span>{' '}
-          <span className={outputMbps ? 'text-neon-cyan' : 'text-gray-600'}>{outputMbps ? `${outputMbps} Mbps` : '-'}</span>
+          <span className={outputMbps ? 'text-neon-cyan' : 'text-gray-600'}>{outputMbps || '-'}</span>
         </div>
       </div>
     </div>

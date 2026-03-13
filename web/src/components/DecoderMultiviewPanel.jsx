@@ -4,27 +4,13 @@ import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
+import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 
 function countPids(result) {
   if (!result) return 0;
   const programCount = (result.programs || []).reduce((acc, p) => acc + ((p.streams || []).length), 0);
   return programCount + ((result.orphanStreams || []).length);
-}
-
-function resolveDisplayBitrateMbps(result) {
-  // Prefer transport-level measurements for multiview consistency.
-  // format-only estimates on live RTP/UDP can be misleadingly low.
-  const measuredBps = result?.dvb?.measuredBitrateBps || result?.dvb?.tsduckBitrateBps;
-  if (measuredBps != null && measuredBps > 0) return measuredBps / 1e6;
-  const bps = result?.dvb?.bitrateBps;
-  const source = result?.dvb?.bitrateSource;
-  if (bps != null && bps > 0 && source && source !== 'format') return bps / 1e6;
-  // Last-resort: sum individual ES bitrates (always an undercount)
-  const total = (result?.programs || [])
-    .flatMap(p => p.streams || [])
-    .reduce((sum, s) => sum + (s.bitrate || 0), 0);
-  return total > 0 ? total / 1e6 : null;
 }
 
 // Map dBFS value (-60..0) to bar percentage
@@ -45,7 +31,7 @@ function meterColor(db) {
 function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
   const rmsPct  = dbToPercent(rmsDb);
   const peakPct = dbToPercent(peakDb);
-  const active  = rmsDb != null;
+  const active  = Number.isFinite(rmsDb);
   const color   = meterColor(rmsDb);
   const peakColor = meterColor(peakDb);
   return (
@@ -77,7 +63,7 @@ function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
         )}
       </div>
       <span className="text-[9px] font-mono text-right" style={{ color: active ? color : '#555' }}>
-        {rmsDb != null ? `${rmsDb.toFixed(1)}` : 'n/a'}
+        {active ? `${rmsDb.toFixed(1)}` : 'n/a'}
       </span>
     </div>
   );
@@ -135,6 +121,7 @@ function extractThumbTimestamp(thumbnailUrl) {
 function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode }) {
   const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
   const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  const transportRate = resolveTransportBitrate(result);
   // Per-channel audio levels from astats probe
   const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
   const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
@@ -154,6 +141,43 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
       }
     });
   }
+  const expectedAudioStreams = [
+    ...((result?.programs || []).flatMap((p) => (p.streams || []).filter((s) => s.codecType === 'audio'))),
+    ...((result?.orphanStreams || []).filter((s) => s.codecType === 'audio')),
+  ];
+  const expectedAudioChannels = expectedAudioStreams.flatMap((s, streamIdx) => {
+    const count = Number(s?.channels);
+    if (!Number.isFinite(count) || count <= 0) return [];
+    const pid = Number.isFinite(Number(s?.pid)) ? Number(s.pid) : null;
+    return Array.from({ length: count }).map((_, chIdx) => ({
+      key: `s${streamIdx}-c${chIdx}`,
+      label: `A${streamIdx + 1}-Ch${chIdx + 1}`,
+      pid,
+    }));
+  });
+  const meteredRows = currentChannels.map((ch, idx) => {
+    const held = peakHoldRef.current[ch.ch];
+    const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
+    return {
+      key: `meter-${ch.ch}-${idx}`,
+      label: ch.label || `Ch${ch.ch + 1}`,
+      rmsDb: Number.isFinite(ch.rmsDb) ? ch.rmsDb : null,
+      peakDb: Number.isFinite(heldPeak) ? heldPeak : null,
+      pid: null,
+      metered: true,
+    };
+  });
+  const extraPlaceholders = expectedAudioChannels.length > meteredRows.length
+    ? expectedAudioChannels.slice(meteredRows.length).map((row) => ({
+      key: `placeholder-${row.key}`,
+      label: row.pid != null ? `${row.label} (PID ${row.pid})` : row.label,
+      rmsDb: null,
+      peakDb: null,
+      pid: row.pid,
+      metered: false,
+    }))
+    : [];
+  const displayAudioRows = [...meteredRows, ...extraPlaceholders];
   // Keep the last successfully loaded src so the tile doesn't blank during
   // the write gap between probe cycles (atomic rename means the old file
   // stays readable until the new one is ready).
@@ -183,7 +207,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   return (
     <div
       className="flex flex-col overflow-hidden"
-      style={{ background: '#111', border: '1px solid #252525', borderRadius: '3px', boxShadow: '0 4px 16px rgba(0,0,0,0.6)' }}
+      style={{ background: '#111', border: '1px solid #252525', borderRadius: '3px', boxShadow: '0 4px 16px rgba(0,0,0,0.6)', minWidth: 0 }}
     >
       {/* Bezel header */}
       <div
@@ -242,7 +266,12 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
 
       {/* Info panel */}
       <div className="p-2 space-y-1.5" style={{ background: '#141414' }}>
-        <div className="text-[10px] font-mono truncate engraved">{meta?.url || result?.url || '-'}</div>
+        <div
+          className="text-[10px] font-mono engraved"
+          style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
+        >
+          {meta?.url || result?.url || '-'}
+        </div>
         <div
           className="text-[10px] font-mono uppercase tracking-wider"
           style={{ color: freshness.color }}
@@ -255,7 +284,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         >
           thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
         </div>
-        <div className="text-[11px] text-gray-300 font-mono truncate">
+        <div className="text-[11px] text-gray-300 font-mono" style={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
           <span className="engraved">SVC </span>{primaryService}
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
         </div>
@@ -264,12 +293,12 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         <div>
           <div className="flex items-center justify-between text-[10px] mb-1.5">
             <span className="engraved uppercase tracking-widest">Audio Levels</span>
-            <span className="font-mono text-[9px]" style={{ color: currentMeanDb != null ? meterColor(currentMeanDb) : '#555' }}>
-              {currentMeanDb != null ? `${currentMeanDb.toFixed(1)} dBFS` : 'n/a'}
+            <span className="font-mono text-[9px]" style={{ color: Number.isFinite(currentMeanDb) ? meterColor(currentMeanDb) : '#555' }}>
+              {Number.isFinite(currentMeanDb) ? `${currentMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
-          {currentChannels.length > 0 ? (
-            <div className="space-y-1">
+          {displayAudioRows.length > 0 ? (
+            <div className="space-y-1" style={{ maxHeight: 240, overflowY: 'auto', paddingRight: 2 }}>
               {/* Scale markers */}
               <div className="grid items-center gap-1 text-[8px] font-mono text-gray-600" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
                 <span />
@@ -280,15 +309,13 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
                 </div>
                 <span />
               </div>
-              {currentChannels.map((ch) => {
-                const held = peakHoldRef.current[ch.ch];
-                const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
+              {displayAudioRows.map((row) => {
                 return (
                   <VuBar
-                    key={ch.ch}
-                    label={ch.label || `Ch${ch.ch + 1}`}
-                    rmsDb={ch.rmsDb}
-                    peakDb={heldPeak}
+                    key={row.key}
+                    label={row.label}
+                    rmsDb={row.rmsDb}
+                    peakDb={row.peakDb}
                     showPeak
                   />
                 );
@@ -306,8 +333,11 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         <div className="grid grid-cols-4 gap-1">
           <Stat label="Programs" value={String(result?.programs?.length || 0)} />
           <Stat label="PIDs"     value={String(countPids(result))} />
-          <Stat label="Bitrate"  value={resolveDisplayBitrateMbps(result) != null ? `${resolveDisplayBitrateMbps(result).toFixed(2)} Mbps` : '-'} />
+          <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
           <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+        </div>
+        <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
+          TS source: {transportRate.source.toUpperCase()}
         </div>
       </div>
     </div>
@@ -473,7 +503,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        <div className="grid gap-2 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))' }}>
+        <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
           {activeIds.map((id) => (
             <DecoderCard
               key={id}
