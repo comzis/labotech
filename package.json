@@ -6,6 +6,8 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "nodemon src/index.js",
+    "start:encap": "node src/encapsulator-index.js",
+    "dev:encap": "nodemon src/encapsulator-index.js",
     "test": "jest --runInBand",
     "test:watch": "jest --watch"
   },

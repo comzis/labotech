@@ -23,4 +23,5 @@ COPY config/ ./config/
 COPY --from=builder /app/web/dist ./web/dist
 RUN mkdir -p /app/logs
 EXPOSE 4000
+EXPOSE 4100
 CMD ["node", "src/index.js"]

@@ -28,7 +28,14 @@ function toFinite(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inputBitrateMeasuring: initInputBitrateMeasuring = false, lastMessage }) {
+export default function MetricsTile({
+  id,
+  stats,
+  srtStats: initialSrtStats = null,
+  inputBitrate: initInputBr,
+  inputBitrateMeasuring: initInputBitrateMeasuring = false,
+  lastMessage,
+}) {
   const [history,      setHistory]      = useState([]);
   const [current,      setCurrent]      = useState(stats || null);
   const [srtStats,     setSrtStats]     = useState(null);
@@ -37,6 +44,17 @@ export default function MetricsTile({ id, stats, inputBitrate: initInputBr, inpu
   const [inputStreams, setInputStreams] = useState(null);
   const [ffmpegError,  setFfmpegError]  = useState(null);
   const [infoMessage, setInfoMessage] = useState(null);
+
+  useEffect(() => {
+    if (stats) {
+      setCurrent(stats);
+      setHistory((h) => [...h.slice(-(MAX_HISTORY - 1)), { t: h.length, v: stats.bitrate || 0 }]);
+    }
+  }, [stats]);
+
+  useEffect(() => {
+    if (initialSrtStats) setSrtStats(initialSrtStats);
+  }, [initialSrtStats]);
 
   useEffect(() => {
     if (!lastMessage) return;

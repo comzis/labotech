@@ -8,6 +8,7 @@ services:
     container_name: labotech-dev
     network_mode: host
     cpus: ${LABOTECH_CPUS:-4.0}
+    cpuset: ${LABOTECH_CPUSET:-0-3}
     mem_limit: ${LABOTECH_MEM_LIMIT:-4096m}
     shm_size: ${LABOTECH_SHM_SIZE:-512m}
     ulimits:
@@ -26,5 +27,37 @@ services:
       - .env
     environment:
       - NODE_ENV=development
+      - ENCAPSULATOR_API_URL=http://127.0.0.1:4100
     command: npx nodemon src/index.js
+    restart: unless-stopped
+
+  labotech-encapsulator:
+    build:
+      context: .
+      target: dev
+    container_name: labotech-encapsulator-dev
+    network_mode: host
+    cpus: ${ENCAPSULATOR_CPUS:-2.0}
+    cpuset: ${ENCAPSULATOR_CPUSET:-4-5}
+    mem_limit: ${ENCAPSULATOR_MEM_LIMIT:-2048m}
+    shm_size: ${ENCAPSULATOR_SHM_SIZE:-256m}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+      - ./src:/app/src
+      - ./routes:/app/routes
+    env_file:
+      - .env
+    environment:
+      - NODE_ENV=development
+      - ENCAPSULATOR_HOST=127.0.0.1
+      - ENCAPSULATOR_PORT=4100
+    command: npx nodemon src/encapsulator-index.js
     restart: unless-stopped

@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
-import { stopStream } from '../api';
+import { getEncapsulatorHealth, stopStream } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
@@ -47,10 +47,29 @@ const PidRef = ({ pid }) => (
 
 export default function StreamsPanel({ lastMessage }) {
   const { streams, loading, error, refresh } = useStreams();
+  const [encapHealth, setEncapHealth] = useState(null);
 
   useEffect(() => {
     if (lastMessage?.type === 'stopped') refresh();
   }, [lastMessage, refresh]);
+
+  useEffect(() => {
+    let mounted = true;
+    const loadHealth = async () => {
+      try {
+        const h = await getEncapsulatorHealth();
+        if (mounted) setEncapHealth(h);
+      } catch (_) {
+        if (mounted) setEncapHealth(null);
+      }
+    };
+    loadHealth();
+    const timer = setInterval(loadHealth, 15000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, []);
 
   const handleStop = async (id) => {
     try {
@@ -129,6 +148,12 @@ export default function StreamsPanel({ lastMessage }) {
 
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
         {error && <p className="text-red-400  text-sm">{error}</p>}
+        {encapHealth && (
+          <div className="mb-3 rounded border border-cyan-700/30 bg-cyan-950/20 px-3 py-2 text-[11px] font-mono text-cyan-200">
+            SRT service: {encapHealth.status} · libsrt {encapHealth?.capabilities?.libsrt ? 'enabled' : 'missing'} · {encapHealth?.capabilities?.details || 'unknown'}
+            {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) ? ` · CPU ${encapHealth.telemetry.cpuPercent}%` : ''}
+          </div>
+        )}
 
         {!loading && streams.length === 0 && (
           <p className="text-gray-600 text-sm">No active encapsulation channels.</p>
@@ -289,6 +314,7 @@ export default function StreamsPanel({ lastMessage }) {
                     <MetricsTile
                       id={s.id}
                       stats={s.lastStats}
+                      srtStats={s.srtStats}
                       inputBitrate={s.inputBitrate}
                       inputBitrateMeasuring={s.inputBitrateMeasuring}
                       lastMessage={lastMessage}
