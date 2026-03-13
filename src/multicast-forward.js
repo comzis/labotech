@@ -2,6 +2,7 @@
 
 const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
+const fs = require('fs');
 
 const DEFAULT_NIC    = process.env.MULTICAST_NIC    || 'eno2';
 const DEFAULT_SUBNET = process.env.FORWARD_MULTICAST_SUBNET || '239.100.25.0/26';
@@ -32,6 +33,18 @@ function isInSubnet(ip, subnet) {
   const mask = bits ? (~0 << (32 - parseInt(bits))) >>> 0 : 0xffffffff;
   return (ipToInt(ip) & mask) === (ipToInt(base) & mask);
 }
+
+function resolveIpCommand() {
+  const preferred = process.env.FORWARD_IP_BIN;
+  if (preferred && fs.existsSync(preferred)) return preferred;
+  const candidates = ['/sbin/ip', '/usr/sbin/ip', '/bin/ip', '/usr/bin/ip'];
+  for (const p of candidates) {
+    if (fs.existsSync(p)) return p;
+  }
+  return 'ip';
+}
+
+const IP_CMD = resolveIpCommand();
 
 class MulticastForwarder extends EventEmitter {
   constructor(options = {}) {
@@ -96,16 +109,21 @@ class MulticastForwarder extends EventEmitter {
 
   _runIp(args) {
     return new Promise((resolve, reject) => {
-      const proc = spawn('ip', args);
+      const proc = spawn(IP_CMD, args);
       let stdout = '';
       let stderr = '';
 
       proc.stdout.on('data', d => { stdout += d.toString(); });
       proc.stderr.on('data', d => { stderr += d.toString(); });
-      proc.on('error', reject);
+      proc.on('error', (err) => {
+        if (err && err.code === 'ENOENT') {
+          return reject(new Error(`ip route tool not found (tried: ${IP_CMD}). Install iproute2 in runtime image.`));
+        }
+        return reject(err);
+      });
       proc.on('exit', (code) => {
         if (code === 0) resolve({ stdout, stderr });
-        else reject(new Error(stderr.trim() || `ip ${args.join(' ')} failed (${code})`));
+        else reject(new Error(stderr.trim() || `${IP_CMD} ${args.join(' ')} failed (${code})`));
       });
     });
   }
