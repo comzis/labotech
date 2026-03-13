@@ -130,6 +130,28 @@ function qualityMetrics(etrStatus, tsResult) {
 
 const PID_TYPE_ORDER = { video: 0, audio: 1, data: 2, subtitle: 3, unknown: 9 };
 
+function preferredPidRow(a, b) {
+  const score = (row) => (row.codec && row.codec !== "-" ? 1 : 0) + (row.bitrate > 0 ? 1 : 0);
+  const scoreA = score(a);
+  const scoreB = score(b);
+  if (scoreA !== scoreB) return scoreA > scoreB ? a : b;
+
+  // Deterministic tie-breakers prevent row text "bouncing" between probe cycles.
+  const bitrateA = Number.isFinite(Number(a.bitrate)) ? Number(a.bitrate) : 0;
+  const bitrateB = Number.isFinite(Number(b.bitrate)) ? Number(b.bitrate) : 0;
+  if (bitrateA !== bitrateB) return bitrateA > bitrateB ? a : b;
+
+  const codecA = String(a.codec || "").toLowerCase();
+  const codecB = String(b.codec || "").toLowerCase();
+  if (codecA !== codecB) return codecA.localeCompare(codecB) <= 0 ? a : b;
+
+  const hexA = String(a.pidHex || "").toUpperCase();
+  const hexB = String(b.pidHex || "").toUpperCase();
+  if (hexA !== hexB) return hexA.localeCompare(hexB) <= 0 ? a : b;
+
+  return a;
+}
+
 function extractPidRows(selectedResult) {
   const rows = [];
   (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
@@ -156,9 +178,7 @@ function extractPidRows(selectedResult) {
       byPidType.set(key, row);
       return;
     }
-    const prevScore = (prev.codec && prev.codec !== "-" ? 1 : 0) + (prev.bitrate > 0 ? 1 : 0);
-    const nextScore = (row.codec && row.codec !== "-" ? 1 : 0) + (row.bitrate > 0 ? 1 : 0);
-    if (nextScore >= prevScore) byPidType.set(key, row);
+    byPidType.set(key, preferredPidRow(prev, row));
   });
 
   return Array.from(byPidType.values())
