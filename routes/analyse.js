@@ -45,6 +45,7 @@ module.exports = function(analysers, wss, broadcastFn = null) {
 
     analyser.startContinuous();
     analysers.set(id, analyser);
+    broadcast({ type: 'analyse_started', id, message: `${id} analyser started` });
     res.status(201).json(analyser.toJSON());
   });
 
@@ -61,6 +62,7 @@ module.exports = function(analysers, wss, broadcastFn = null) {
     if (!a) return res.status(404).json({ error: 'Analyser not found' });
     a.stop();
     analysers.delete(req.params.id);
+    broadcast({ type: 'analyse_stopped', id: req.params.id, message: `${req.params.id} analyser stopped` });
     res.json({ stopped: req.params.id });
   });
 

@@ -339,30 +339,32 @@ function toEvent(msg) {
       description: msg.message || 'Primary input switched to backup',
     };
   }
-  if (msg.type === 'started') {
+  if (msg.type === 'started' || msg.type === 'analyse_started') {
     const laneId = normalizeLaneId(msg.id || 'system');
+    const isAnalyser = msg.type === 'analyse_started';
     return {
-      key: `${ts}-${msg.id || 'system'}-started`,
+      key: `${ts}-${msg.id || 'system'}-${msg.type}`,
       ts,
       id: laneId,
       rawId: msg.id || 'system',
       category: 'runtime_started',
       severity: 'ok',
-      title: 'Stream started',
-      description: msg.message || `${msg.id} started`,
+      title: isAnalyser ? 'Analyser started' : 'Stream started',
+      description: msg.message || `${msg.id} ${isAnalyser ? 'analyser started' : 'started'}`,
     };
   }
-  if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped') {
+  if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped' || msg.type === 'analyse_stopped') {
     const laneId = normalizeLaneId(msg.id || 'system');
+    const isAnalyser = msg.type === 'analyse_stopped';
     return {
-      key: `${ts}-${msg.id || 'system'}-stopped`,
+      key: `${ts}-${msg.id || 'system'}-${msg.type}`,
       ts,
       id: laneId,
       rawId: msg.id || 'system',
       category: 'runtime_stopped',
       severity: 'unknown',
-      title: 'Stream stopped',
-      description: msg.message || `${msg.id} stopped`,
+      title: isAnalyser ? 'Analyser stopped' : 'Stream stopped',
+      description: msg.message || `${msg.id} ${isAnalyser ? 'analyser stopped' : 'stopped'}`,
     };
   }
   return null;
