@@ -165,7 +165,11 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   const thumbFresh = thumbAgeSec != null ? thumbAgeSec <= 8 : false;
   const hasTelemetry = Boolean(result?.probeTime);
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
-  const signalOk = hasTelemetry && staleMs <= 15000;
+  const isRunning = Boolean(meta?.isRunning);
+  const telemetryFresh = hasTelemetry && staleMs <= 15000;
+  // Operator preference: active running decoders remain green while lock/telemetry warms up.
+  // If telemetry exists and goes stale, downgrade to warning.
+  const signalOk = isRunning && (!hasTelemetry || telemetryFresh);
 
   return (
     <div
@@ -185,7 +189,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
             ? { background: 'rgba(0,120,50,0.25)', borderColor: 'rgba(0,221,85,0.35)', color: '#86efac' }
             : { background: 'rgba(120,80,0,0.25)', borderColor: 'rgba(255,170,0,0.35)', color: '#facc15' }}
         >
-          {signalOk ? 'Live' : 'Monitoring'}
+          {signalOk ? (hasTelemetry ? 'Live' : 'Running') : 'Monitoring'}
         </span>
         <button
           onClick={onStop}
