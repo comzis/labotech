@@ -461,7 +461,13 @@ export default function App() {
             <EventLogPanel
               events={eventLog}
               onClear={async () => {
-                try { await clearEvents(); } catch (_) {}
+                try {
+                  await clearEvents();
+                  toast.success('Alarm log cleared', { duration: 3000 });
+                } catch (err) {
+                  toast.error(`Failed to clear alarm log: ${err?.message || 'unknown error'}`, { duration: 5000 });
+                  return;
+                }
                 setEventLog([]);
                 setAlarmUnreadCritical(0);
               }}

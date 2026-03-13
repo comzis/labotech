@@ -166,7 +166,7 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (mode === "udp") return `udp://${host}:${port}`;
   if (mode === "rtp") return `rtp://${host}:${port}`;
   let url = `srt://${host}:${port}`;
-  const params = [];
+  const params = ["stats=1", "statsintvl=1"];
   if (latency) params.push(`latency=${latency}`);
   if (passphrase) params.push(`passphrase=${passphrase}`);
   if (params.length) url += `?${params.join("&")}`;
@@ -225,6 +225,7 @@ export default function TSAnalyser({ lastMessage }) {
   const [activeIdB, setActiveIdB] = useState("");
   const [monitorLabel, setMonitorLabel] = useState("");
   const [eventRows, setEventRows] = useState([]);
+  const [actionNote, setActionNote] = useState(null); // { type: 'ok'|'warn'|'err'|'info', text: string }
   // ETR per-priority enable/disable and per-check thresholds
   const [etrP1, setEtrP1] = useState(true);
   const [etrP2, setEtrP2] = useState(true);
@@ -519,10 +520,14 @@ export default function TSAnalyser({ lastMessage }) {
   const handleProbe = async (e) => {
     e.preventDefault();
     const urlA = buildProbeUrl({ mode, host, port, latency, passphrase });
-    if (!urlA) return;
+    if (!urlA) {
+      setActionNote({ type: "warn", text: "Enter valid Host/IP and Port before starting probe." });
+      return;
+    }
     try {
       await probe(urlA);
       const idA = makeMonitorId(monitorLabel || "analyser");
+      let idB = "";
       await startContinuous(idA, urlA, 5000);
       setActiveId(idA);
       await etr.start(`etr-${idA}`, urlA, undefined, { config: buildEtrConfig() });
@@ -530,32 +535,47 @@ export default function TSAnalyser({ lastMessage }) {
         const urlB = buildProbeUrl({ mode, host: hostB, port: portB, latency, passphrase });
         if (urlB) {
           await probe(urlB);
-          const idB = makeMonitorId(`${monitorLabel || "analyser"}-b`);
+          idB = makeMonitorId(`${monitorLabel || "analyser"}-b`);
           await startContinuous(idB, urlB, 5000);
           setActiveIdB(idB);
         }
       }
       await refreshActives();
       await etr.refreshActives();
-    } catch (_) {}
+      setActionNote({ type: "ok", text: dualLeg ? `Probe started (A+B): ${idA}${idB ? `, ${idB}` : ""}` : `Probe started: ${idA}` });
+    } catch (err) {
+      setActionNote({ type: "err", text: err?.message || "Failed to start probe." });
+    }
   };
 
   const handleStopSelected = async () => {
-    if (activeId) {
+    if (!activeId) {
+      setActionNote({ type: "warn", text: "Select an active monitor first." });
+      return;
+    }
+    try {
       await stop(activeId);
       try { await etr.stop(`etr-${activeId}`); } catch (_) {}
       if (activeId === activeIdB) setActiveIdB("");
       setActiveId("");
+      setActionNote({ type: "ok", text: "Selected monitor stopped." });
+    } catch (err) {
+      setActionNote({ type: "err", text: err?.message || "Failed to stop selected monitor." });
     }
   };
 
   const handleStopAll = async () => {
+    if (monitoredIds.length === 0) {
+      setActionNote({ type: "warn", text: "No active monitors to stop." });
+      return;
+    }
     for (const id of monitoredIds) {
       try { await stop(id); } catch (_) {}
       try { await etr.stop(`etr-${id}`); } catch (_) {}
     }
     setActiveId("");
     setActiveIdB("");
+    setActionNote({ type: "ok", text: "All monitors stopped." });
   };
 
   const [applyConfigStatus, setApplyConfigStatus] = useState(null); // null | 'ok' | 'err'
@@ -630,6 +650,17 @@ export default function TSAnalyser({ lastMessage }) {
       </div>
 
       {error && <div style={{ color: C.err, marginBottom: 8 }}>{error}</div>}
+      {actionNote && (
+        <div
+          style={{
+            color: actionNote.type === "err" ? C.err : actionNote.type === "warn" ? C.warn : actionNote.type === "ok" ? C.ok : C.cyan,
+            marginBottom: 8,
+            fontSize: 10,
+          }}
+        >
+          {actionNote.text}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(8,1fr)", gap: 5, marginBottom: 8 }}>
         {[{ l: "BITRATE", v: `${bps.toFixed(3)} Mbps`, c: C.cyan }, { l: "PACKETS", v: packets.toLocaleString(), c: C.text }, { l: "CC ERRORS", v: String(ccErrors), c: ccErrors > 0 ? C.err : C.ok }, { l: "PCR JITTER", v: pcrJitter != null ? `${pcrJitter} ms` : "-", c: pcrJitter != null ? C.ok : C.muted }, { l: "NULL PKT", v: nullPct != null ? `${nullPct} %` : "-", c: C.text }, { l: "SERVICES", v: String(servicesCount), c: C.ok }, { l: "PIDs", v: String(pidsCount), c: C.text }, { l: "SCORE", v: score != null ? `${score} %` : "-", c: score != null && score >= 90 ? C.ok : C.warn }].map((s) => (
