@@ -4,11 +4,23 @@ const { spawn, execFile } = require('child_process');
 const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // Limit concurrent thumbnail captures to avoid CPU pile-up when many decoders run.
-const THUMB_CONCURRENCY = parseInt(process.env.THUMBNAIL_MAX_CONCURRENT, 10) || 4;
+// If THUMBNAIL_MAX_CONCURRENT is not set, auto-size by CPU cores with a safe cap.
+function _defaultThumbConcurrency() {
+  const cores = Array.isArray(os.cpus()) ? os.cpus().length : 4;
+  const byCores = Math.floor(cores / 2);
+  return Math.max(4, Math.min(12, byCores || 4));
+}
+const _envThumbConcurrency = parseInt(process.env.THUMBNAIL_MAX_CONCURRENT, 10);
+const THUMB_CONCURRENCY = Number.isFinite(_envThumbConcurrency) && _envThumbConcurrency > 0
+  ? _envThumbConcurrency
+  : _defaultThumbConcurrency();
 let _thumbRunning = 0;
 const _thumbQueue = [];
+// Deduplicate captures per stream so queue pressure doesn't create stale rotations.
+const _thumbPendingById = new Map(); // safeStreamId -> Promise<string>
 
 const THUMBNAIL_DIR      = path.join(__dirname, '..', 'logs', 'thumbnails');
 const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
@@ -186,13 +198,18 @@ function _doCaptureThumbnail(streamId, inputUrl) {
  * @returns {Promise<string>} path to thumbnail file
  */
 function captureThumbnail(streamId, inputUrl) {
-  return new Promise((resolve, reject) => {
+  const safeId = sanitizeStreamId(streamId);
+  const pending = _thumbPendingById.get(safeId);
+  if (pending) return pending;
+
+  const taskPromise = new Promise((resolve, reject) => {
     const run = () => {
       _thumbRunning += 1;
       _doCaptureThumbnail(streamId, inputUrl)
         .then(resolve, reject)
         .finally(() => {
           _thumbRunning -= 1;
+          _thumbPendingById.delete(safeId);
           if (_thumbQueue.length > 0) _thumbQueue.shift()();
         });
     };
@@ -202,6 +219,8 @@ function captureThumbnail(streamId, inputUrl) {
       _thumbQueue.push(run);
     }
   });
+  _thumbPendingById.set(safeId, taskPromise);
+  return taskPromise;
 }
 
 /**
