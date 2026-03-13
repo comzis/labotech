@@ -6,6 +6,17 @@ import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
+const DEFAULT_PANEL_ID = 'panel-default';
+const DEFAULT_PANEL_NAME = 'MCR-WALL-A';
+
+function normalizePanelName(raw) {
+  return String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+}
 
 function countPids(result) {
   if (!result) return 0;
@@ -316,6 +327,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
 export default function DecoderMultiviewPanel({ lastMessage }) {
   const { activeIds, resultsById, decoderMeta, error, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
   const [openCreate, setOpenCreate] = useState(false);
+  const [openPanelCommission, setOpenPanelCommission] = useState(false);
   const [mode, setMode] = useState('rtp');
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
@@ -325,6 +337,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [passphrase, setPassphrase] = useState('');
   const [nowMs, setNowMs] = useState(Date.now());
   const [engineerMode, setEngineerMode] = useState(true);
+  const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
+  const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
+  const [newPanelName, setNewPanelName] = useState('');
 
   useEffect(() => {
     try {
@@ -340,6 +355,17 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       if (parsed?.latency != null) setLatency(String(parsed.latency));
       if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
       if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+      if (Array.isArray(parsed?.panels) && parsed.panels.length > 0) {
+        const sanitized = parsed.panels
+          .map((p, idx) => ({
+            id: String(p?.id || `panel-${idx + 1}`),
+            name: normalizePanelName(p?.name || `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
+            decoderIds: Array.isArray(p?.decoderIds) ? p.decoderIds.map((id) => String(id)) : [],
+          }))
+          .filter((p) => p.id);
+        if (sanitized.length > 0) setPanels(sanitized);
+      }
+      if (parsed?.activePanelId != null) setActivePanelId(String(parsed.activePanelId));
     } catch (_) {}
   }, []);
 
@@ -357,10 +383,12 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           latency,
           passphrase,
           engineerMode,
+          panels,
+          activePanelId,
         })
       );
     } catch (_) {}
-  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode]);
+  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, panels, activePanelId]);
 
   useEffect(() => {
     refreshActives();
@@ -382,7 +410,72 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     return () => clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    if (panels.length === 0) {
+      setPanels([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
+      setActivePanelId(DEFAULT_PANEL_ID);
+      return;
+    }
+    if (!panels.some((p) => p.id === activePanelId)) {
+      setActivePanelId(panels[0].id);
+    }
+  }, [panels, activePanelId]);
+
+  useEffect(() => {
+    setPanels((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      let changed = false;
+      let next = prev.map((p) => {
+        const filtered = (p.decoderIds || []).filter((id) => activeIds.includes(id));
+        if (filtered.length !== (p.decoderIds || []).length) changed = true;
+        return filtered === p.decoderIds ? p : { ...p, decoderIds: filtered };
+      });
+      const assignedCount = next.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
+      if (activeIds.length > 0 && assignedCount === 0) {
+        next = next.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [activeIds]);
+
   const probeUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
+  const activePanel = panels.find((p) => p.id === activePanelId) || panels[0] || null;
+  const visibleIds = activeIds.filter((id) => (activePanel?.decoderIds || []).includes(id));
+  const normalizedDraftPanelName = normalizePanelName(newPanelName);
+  const panelNameInUse = panels.some((p) => p.name.toUpperCase() === normalizedDraftPanelName);
+  const panelNameValid = normalizedDraftPanelName.length >= 3 && !panelNameInUse;
+
+  const toggleDecoderInActivePanel = (id) => {
+    if (!activePanel) return;
+    setPanels((prev) => prev.map((p) => {
+      if (p.id !== activePanel.id) return p;
+      const has = (p.decoderIds || []).includes(id);
+      const decoderIds = has ? p.decoderIds.filter((x) => x !== id) : [...p.decoderIds, id];
+      return { ...p, decoderIds };
+    }));
+  };
+
+  const createPanel = () => {
+    const name = normalizedDraftPanelName;
+    if (!name || name.length < 3) return;
+    if (panelNameInUse) return;
+    const id = `panel-${Date.now()}`;
+    const panel = { id, name, decoderIds: [] };
+    setPanels((prev) => [...prev, panel]);
+    setActivePanelId(id);
+    setNewPanelName('');
+    setOpenPanelCommission(false);
+  };
+
+  const removePanel = (id) => {
+    if (id === DEFAULT_PANEL_ID) return;
+    setPanels((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      return next.length > 0 ? next : [{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }];
+    });
+    if (activePanelId === id) setActivePanelId(DEFAULT_PANEL_ID);
+  };
 
   const handleCreate = async () => {
     if (!probeUrl) return;
@@ -390,6 +483,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     try {
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
       await refreshActives();
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), id] };
+      }));
       setOpenCreate(false);
       setDecoderId('');
     } catch (_) {
@@ -401,9 +499,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     <div className="space-y-6 broadcast-legacy">
       <BentoCard icon={Monitor} title="Decoder Multiview">
         <div className="flex items-center justify-between">
-          <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">All Active Decoders</h2>
+          <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">Multiview Workspaces</h2>
           <div className="flex items-center gap-3">
-            <div className="text-[10px] text-gray-500 font-mono">Active: {activeIds.length}</div>
+            <div className="text-[10px] text-gray-500 font-mono">
+              Active: {activeIds.length} · Panel: {activePanel?.name || '-'} ({visibleIds.length})
+            </div>
             <button
               onClick={() => setEngineerMode((v) => !v)}
               className={`text-xs px-2 py-1 rounded border ${
@@ -415,6 +515,13 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               Engineer Mode: {engineerMode ? 'ON' : 'OFF'}
             </button>
             <button
+              onClick={() => setOpenPanelCommission((v) => !v)}
+              className="inline-flex items-center gap-1 text-xs bg-neon-purple/20 hover:bg-neon-purple/30 text-neon-purple border border-neon-purple/40 px-2 py-1 rounded"
+            >
+              <Plus className="w-3 h-3" />
+              Panel
+            </button>
+            <button
               onClick={() => setOpenCreate(v => !v)}
               className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
             >
@@ -423,6 +530,112 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             </button>
           </div>
         </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {panels.map((panel) => (
+            <div key={panel.id} className="inline-flex items-center">
+              <button
+                onClick={() => setActivePanelId(panel.id)}
+                className={`text-[10px] font-mono uppercase tracking-[0.1em] px-2.5 py-1 rounded-l border ${
+                  activePanelId === panel.id
+                    ? 'border-neon-cyan/60 text-neon-cyan bg-neon-cyan/10'
+                    : 'border-white/15 text-gray-400 bg-black/20'
+                }`}
+                title={panel.name}
+              >
+                {panel.name}
+              </button>
+              {panel.id !== DEFAULT_PANEL_ID && (
+                <button
+                  onClick={() => removePanel(panel.id)}
+                  className="text-[9px] px-1.5 py-1 rounded-r border border-l-0 transition-colors"
+                  style={{
+                    borderColor: 'rgba(255,255,255,0.12)',
+                    color: '#6b7280',
+                    background: 'rgba(0,0,0,0.22)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#9ca3af';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)';
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.34)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#6b7280';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.22)';
+                  }}
+                  title="Remove panel"
+                >
+                  x
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {openPanelCommission && (
+          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-black/20 space-y-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Panel Commissioning</div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
+              <Field
+                label="Panel Callsign"
+                value={newPanelName}
+                onChange={(v) => setNewPanelName(v)}
+                placeholder="e.g. MCR-WALL-A"
+              />
+              <button
+                onClick={createPanel}
+                disabled={!panelNameValid}
+                className="text-xs px-3 py-2 rounded border disabled:opacity-50 border-neon-cyan/40 text-neon-cyan bg-neon-cyan/10"
+              >
+                Rack Panel
+              </button>
+              <button
+                onClick={() => {
+                  setOpenPanelCommission(false);
+                  setNewPanelName('');
+                }}
+                className="text-xs px-3 py-2 rounded border border-white/15 text-gray-400 bg-black/20"
+              >
+                Abort
+              </button>
+            </div>
+            <div className="text-[10px] font-mono text-gray-500">
+              TAB PREVIEW: [{normalizedDraftPanelName || '---'}]
+            </div>
+            {!panelNameValid && newPanelName ? (
+              <div className="text-[10px] text-amber-300">
+                {panelNameInUse ? 'Callsign already in use.' : 'Use 3-24 chars: A-Z, 0-9, -'}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {activeIds.length > 0 && activePanel && (
+          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-black/20">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold mb-2">
+              Panel Routing - {activePanel.name}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {activeIds.map((id) => {
+                const assigned = (activePanel.decoderIds || []).includes(id);
+                return (
+                  <button
+                    key={`route-${activePanel.id}-${id}`}
+                    onClick={() => toggleDecoderInActivePanel(id)}
+                    className={`text-[10px] font-mono px-2 py-1 rounded border ${
+                      assigned
+                        ? 'border-neon-cyan/60 text-neon-cyan bg-neon-cyan/10'
+                        : 'border-white/15 text-gray-500 bg-black/20'
+                    }`}
+                  >
+                    {id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {openCreate && (
           <div className="mt-4 p-3 rounded-xl border border-white/10 bg-black/20 space-y-3">
@@ -468,12 +681,15 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
         {activeIds.length === 0 && (
           <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from Decoder tab.</p>
         )}
+        {activeIds.length > 0 && visibleIds.length === 0 && (
+          <p className="text-gray-500 text-sm mt-4">No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.</p>
+        )}
         {error && (
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
         <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {activeIds.map((id) => (
+          {visibleIds.map((id) => (
             <DecoderCard
               key={id}
               id={id}
