@@ -682,42 +682,10 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[66px] flex items-center gap-2 xl:gap-3">
-
-          {/* Logo / product ID */}
-          <div className="flex items-center gap-2 shrink-0">
-            {/* Rack "power" LED */}
-            <div
-              className="w-3 h-3 rounded-full animate-led-pulse"
-              style={{
-                background: 'radial-gradient(circle at 38% 32%, #ffffff44, #00dd55bb, #00dd55)',
-                boxShadow: '0 0 6px rgba(0,221,85,0.8), 0 0 14px rgba(0,221,85,0.4)',
-              }}
-            />
-            <div className="flex flex-col">
-              <div
-                className="text-[13px] font-black uppercase tracking-[0.3em] leading-none"
-                style={{ color: '#e0e0e0', textShadow: '0 0 12px rgba(255,255,255,0.08)' }}
-              >
-                LABOTECH
-              </div>
-              <div
-                className="text-[8px] uppercase tracking-[0.18em] leading-none mt-0.5 whitespace-nowrap"
-                style={{ color: '#7f99bf', textShadow: '0 1px 0 rgba(0,0,0,0.4)' }}
-              >
-                Team Work · Engineering · Operations · SLA
-              </div>
-              <div className="text-[8px] leading-none mt-1 text-gray-500">
-                HPE DL360 · Powered by Docker
-              </div>
-            </div>
-          </div>
-
-          {/* Divider */}
-          <div style={{ width: '1px', height: '28px', background: 'linear-gradient(180deg, transparent, #333, transparent)' }} />
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[66px] flex items-center gap-1 xl:gap-2">
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
-          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start">
+          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start mr-auto">
             {visibleTabs.map(t => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -774,7 +742,7 @@ export default function App() {
           {/* ── Telemetry LCD readout ───────────────────────────────────── */}
           {telemetry && (
             <div
-              className="hidden xl:flex items-center gap-2 px-2 py-1 font-mono rounded-sm shrink-0"
+              className="hidden 2xl:flex items-center gap-2 px-2 py-1 font-mono rounded-sm shrink-0"
               style={{
                 background: '#0a0a0a',
                 border: '1px solid #1a1a1a',
@@ -795,41 +763,25 @@ export default function App() {
             </div>
           )}
 
-          <div
-            className="hidden 2xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
-            style={{
-              background: '#101723',
-              border: '1px solid #2a3950',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-            }}
-            title={BUILD_TIME_UTC ? `Build: ${BUILD_TIME_UTC}` : 'Build metadata'}
-          >
-            <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Release</span>
-            <span className="text-[9px] font-bold" style={{ color: '#cfe2ff' }}>{RELEASE_VERSION}</span>
-            <span className="text-[8px]" style={{ color: '#6f86aa' }}>Uptime {uptimeDisplay}</span>
-          </div>
-
-          {(preflight || monitoringPolicy) && (
+          {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
             <div
-              className="hidden 2xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
+              className="hidden 2xl:flex items-center gap-1.5 px-1.5 py-1 rounded-sm shrink-0"
               style={{
                 background: '#10151d',
                 border: '1px solid #2a3342',
                 boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
               }}
-              title={preflight?.nicCapture?.reason || 'Tooling preflight'}
+              title={`${preflight?.nicCapture?.reason || 'Tooling preflight'}${BUILD_TIME_UTC ? ` · Build: ${BUILD_TIME_UTC}` : ''}`}
             >
-              <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Probe</span>
-              <span className="text-[9px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
+              <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>U</span>
+              <span className="text-[8px]" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
+              <span style={{ color: '#222' }}>|</span>
+              <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>P</span>
+              <span className="text-[8px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
                 {String(preflight?.status || 'pending').toUpperCase()}
               </span>
               <span className="text-[8px]" style={{ color: '#6f86aa' }}>
                 {preflight?.nicCapture?.tool || 'no-capture-tool'}
-              </span>
-              <span style={{ color: '#222' }}>|</span>
-              <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Policy</span>
-              <span className="text-[9px] font-bold" style={{ color: '#9ed0ff' }}>
-                {monitoringPolicy?.profile || 'default'}
               </span>
             </div>
           )}
@@ -862,7 +814,7 @@ export default function App() {
 
           <button
             onClick={handleResetRole}
-            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1 2xl:w-[280px] 2xl:justify-between overflow-hidden"
+            className="ml-1 px-2.5 py-1 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 2xl:w-[190px] 2xl:justify-between overflow-hidden"
             style={{
               color: '#9ab4d8',
               border: '1px solid #2b3950',
