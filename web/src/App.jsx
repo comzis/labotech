@@ -538,9 +538,9 @@ function toLogEntry(msg) {
 // Small LCD-style readout for telemetry
 function LcdValue({ label, value, color }) {
   return (
-    <span className="flex items-center gap-1 font-mono text-[9px] whitespace-nowrap">
-      <span style={{ color: '#444' }}>{label}</span>
-      <span style={{ color, textShadow: `0 0 6px ${color}88` }}>{value ?? 'n/a'}</span>
+    <span className="flex items-center gap-1 font-mono text-[8px] whitespace-nowrap">
+      <span className="uppercase tracking-[0.08em]" style={{ color: '#9fc5f1' }}>{label}</span>
+      <span className="font-bold" style={{ color, textShadow: `0 0 6px ${color}88` }}>{value ?? 'n/a'}</span>
     </span>
   );
 }
@@ -941,19 +941,19 @@ export default function App() {
                 onClick={handleResetRole}
                 className="h-6 px-2 rounded-sm text-[7px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
                 style={{
-                  color: '#ffe8bf',
-                  border: '1px solid #8a6534',
-                  background: 'linear-gradient(180deg, #4b371b 0%, #332410 58%, #261a0b 100%)',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 0 10px rgba(220,160,70,0.28), 0 0 18px rgba(130,90,35,0.22)',
-                  textShadow: '0 0 6px rgba(255,210,140,0.35)',
+                  color: '#d8ebff',
+                  border: '1px solid #5e8fce',
+                  background: 'linear-gradient(180deg, #163457 0%, #112947 58%, #0d1f37 100%)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 0 10px rgba(104,164,235,0.28), 0 0 18px rgba(58,110,180,0.22)',
+                  textShadow: '0 0 6px rgba(175,215,255,0.35)',
                 }}
                 title="Log out and return to landing page"
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full"
                   style={{
-                    background: 'radial-gradient(circle at 35% 30%, #ffffff66, #ffd07a)',
-                    boxShadow: '0 0 5px rgba(255,208,122,0.92)',
+                    background: 'radial-gradient(circle at 35% 30%, #ffffff66, #8ec2ff)',
+                    boxShadow: '0 0 5px rgba(142,194,255,0.92)',
                   }}
                 />
                 <span className="shrink-0">↩ Logout ({authUser})</span>
@@ -966,9 +966,9 @@ export default function App() {
               <div
                 className="hidden xl:flex items-center h-7 gap-2 px-2.5 rounded-sm shrink-0"
                 style={{
-                  background: 'linear-gradient(180deg, #2b1120, #1f0c16)',
-                  border: '1px solid #8a3f64',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 0 10px rgba(200,85,140,0.28)',
+                  background: 'linear-gradient(180deg, #132338, #0f1b2b)',
+                  border: '1px solid #5e8fce',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), 0 0 10px rgba(104,164,235,0.26)',
                 }}
                 title="CPU, memory, and uptime"
               >
@@ -979,7 +979,7 @@ export default function App() {
                       value={telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : null}
                       color={cpuColor(telemetry.cpuPercent)}
                     />
-                    <span style={{ color: '#4a2837' }}>|</span>
+                    <span style={{ color: '#2f4f72' }}>|</span>
                     <LcdValue
                       label="MEM"
                       value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
@@ -989,9 +989,9 @@ export default function App() {
                 )}
                 {Number.isFinite(serverUptimeSec) && (
                   <>
-                    <span style={{ color: '#4a2837' }}>|</span>
-                    <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#d497b6' }}>UPTIME</span>
-                    <span className="text-[8px] font-bold" style={{ color: '#ffd9ec' }}>{uptimeDisplay}</span>
+                    <span style={{ color: '#2f4f72' }}>|</span>
+                    <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#9fc5f1' }}>UPTIME</span>
+                    <span className="text-[8px] font-bold" style={{ color: '#d8ebff' }}>{uptimeDisplay}</span>
                   </>
                 )}
               </div>
