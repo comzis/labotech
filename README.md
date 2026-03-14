@@ -207,6 +207,16 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **Transport integrity checks** for timestamp discontinuities and continuity counter (CC) errors
 - **Composite health model** (`dvb.health`) including score, severity, and reasons for operator triage
 
+### Recent broadcast-grade monitoring improvements
+
+- **Server-side event window filtering:** `GET /api/events?since=<ts>` is used by the UI to avoid reloading stale event-ring history outside timeline scope.
+- **Timeline retention policy:** 26-hour horizon (24h operator window + 2h safety margin) for both browser restore and API backlog hydration.
+- **Lane continuity hardening:** active lanes can be reconstructed after refresh/idle using full-history gradient seeding and running-state lane inclusion logic.
+- **P1 severity semantics in timeline:** P1 ETR alarms are represented distinctly in timeline rendering while alarm/log workflows keep dedicated severity mapping.
+- **Probe-cycle stability improvements:** decoder PID rows are deduplicated by physical PID to prevent heavy/light probe-cycle row rotation.
+- **Per-stream metadata carry-forward:** analyser preserves structural fields (`profile`, `level`, color metadata, audio layout) across sparse probe cycles to avoid false blanks.
+- **Per-PID bitrate enrichment:** tsduck PCR-derived PID bitrates backfill ffprobe `N/A` values where possible.
+
 ---
 
 ## Optional Dolby E Adapter (Linux)
