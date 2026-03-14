@@ -683,6 +683,18 @@ export default function App() {
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
         <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[82px] flex items-center gap-1 xl:gap-2">
+          <div
+            className="hidden xl:flex items-center h-7 px-2 rounded-sm shrink-0 text-[8px] uppercase tracking-[0.1em]"
+            style={{
+              color: '#8ea9d1',
+              background: '#10151d',
+              border: '1px solid #2a3342',
+              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+            }}
+            title="Labotech runtime platform"
+          >
+            LABOTECH · Powered by Docker
+          </div>
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
           <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start mr-auto">
