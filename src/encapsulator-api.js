@@ -11,6 +11,19 @@ const SRTEncapsulatorChannel = require('./encapsulator-channel');
 
 const ENCAPSULATOR_HOST = process.env.ENCAPSULATOR_HOST || '127.0.0.1';
 const ENCAPSULATOR_PORT = parseInt(process.env.ENCAPSULATOR_PORT, 10) || 4100;
+const GUARDRAIL_ENABLED = String(process.env.ENCAP_CPU_GUARDRAIL_ENABLED || 'true').toLowerCase() !== 'false';
+const GUARDRAIL_WARN_CPU_PCT = Number.isFinite(Number(process.env.ENCAP_CPU_WARN_PCT))
+  ? Number(process.env.ENCAP_CPU_WARN_PCT)
+  : 70;
+const GUARDRAIL_BLOCK_CPU_PCT = Number.isFinite(Number(process.env.ENCAP_CPU_BLOCK_PCT))
+  ? Number(process.env.ENCAP_CPU_BLOCK_PCT)
+  : 75;
+const GUARDRAIL_CAPACITY_PER_CORE = Number.isFinite(Number(process.env.ENCAP_CAPACITY_PER_CORE))
+  ? Number(process.env.ENCAP_CAPACITY_PER_CORE)
+  : 20;
+const GUARDRAIL_STREAM_MBPS = Number.isFinite(Number(process.env.ENCAP_CAPACITY_STREAM_MBPS))
+  ? Number(process.env.ENCAP_CAPACITY_STREAM_MBPS)
+  : 22;
 
 const channels = new Map();
 let _lastCpuSample = null;
@@ -39,23 +52,85 @@ function sampleCpuPercent() {
 
 function ffmpegCapabilities() {
   return new Promise((resolve) => {
-    const proc = spawn('ffmpeg', ['-version']);
+    const proc = spawn('ffmpeg', ['-hide_banner', '-protocols']);
     let out = '';
     proc.stdout.on('data', (d) => { out += d.toString(); });
     proc.stderr.on('data', (d) => { out += d.toString(); });
     proc.on('error', () => resolve({ ok: false, libsrt: false, details: 'ffmpeg not available' }));
     proc.on('exit', (code) => {
-      const libsrt = /enable-libsrt/i.test(out);
-      const firstLine = (out.split('\n')[0] || '').trim();
-      resolve({ ok: code === 0, libsrt, details: firstLine || 'unknown ffmpeg version' });
+      const hasProtocolSrt = /(^|\s)srt(\s|$)/im.test(out);
+      const details = hasProtocolSrt
+        ? 'ffmpeg protocol srt available'
+        : 'ffmpeg protocol srt missing';
+      resolve({ ok: code === 0, libsrt: hasProtocolSrt, details });
     });
   });
+}
+
+function cpusetCoreCount(cpusetValue) {
+  const raw = String(cpusetValue || '').trim();
+  if (!raw) return null;
+  let total = 0;
+  for (const seg of raw.split(',')) {
+    const part = seg.trim();
+    if (!part) continue;
+    if (part.includes('-')) {
+      const [a, b] = part.split('-').map((v) => parseInt(v, 10));
+      if (Number.isFinite(a) && Number.isFinite(b) && b >= a) total += (b - a + 1);
+    } else {
+      const n = parseInt(part, 10);
+      if (Number.isFinite(n)) total += 1;
+    }
+  }
+  return total > 0 ? total : null;
+}
+
+function configuredEncapCoreCount() {
+  const byCpus = Number(process.env.ENCAPSULATOR_CPUS);
+  if (Number.isFinite(byCpus) && byCpus > 0) return byCpus;
+  const bySet = cpusetCoreCount(process.env.ENCAPSULATOR_CPUSET);
+  if (Number.isFinite(bySet) && bySet > 0) return bySet;
+  return os.cpus()?.length || 1;
+}
+
+function evaluateGuardrail() {
+  const cpuPercent = sampleCpuPercent();
+  const configuredCores = configuredEncapCoreCount();
+  const estimatedMaxStreams = Math.max(1, Math.floor(configuredCores * GUARDRAIL_CAPACITY_PER_CORE));
+  const projectedStreams = channels.size + 1;
+  const projectedLoadPct = Number(((projectedStreams / estimatedMaxStreams) * 100).toFixed(1));
+  const cpuWarn = Number.isFinite(cpuPercent) && cpuPercent >= GUARDRAIL_WARN_CPU_PCT;
+  const cpuBlock = Number.isFinite(cpuPercent) && cpuPercent >= GUARDRAIL_BLOCK_CPU_PCT;
+  const streamWarn = projectedLoadPct >= 85;
+  const streamBlock = projectedStreams > estimatedMaxStreams;
+  const warn = GUARDRAIL_ENABLED && (cpuWarn || streamWarn);
+  const block = GUARDRAIL_ENABLED && (cpuBlock || streamBlock);
+  const reasons = [];
+  if (cpuWarn) reasons.push(`cpu ${cpuPercent}%`);
+  if (streamWarn) reasons.push(`projected stream load ${projectedLoadPct}%`);
+  if (streamBlock) reasons.push(`projected streams ${projectedStreams} exceed estimated max ${estimatedMaxStreams}`);
+  return {
+    enabled: GUARDRAIL_ENABLED,
+    warn,
+    block,
+    reasons,
+    cpuPercent: Number.isFinite(cpuPercent) ? cpuPercent : null,
+    warnCpuPct: GUARDRAIL_WARN_CPU_PCT,
+    blockCpuPct: GUARDRAIL_BLOCK_CPU_PCT,
+    configuredCores,
+    capacityPerCore: GUARDRAIL_CAPACITY_PER_CORE,
+    streamMbpsBaseline: GUARDRAIL_STREAM_MBPS,
+    estimatedMaxStreams,
+    projectedStreams,
+    projectedLoadPct,
+  };
 }
 
 function createHealthPayload(capability) {
   const totalMem = os.totalmem();
   const freeMem = os.freemem();
   const usedMem = totalMem - freeMem;
+  const guardrail = evaluateGuardrail();
   return {
     status: capability.libsrt ? 'ok' : 'degraded',
     service: 'labotech-encapsulator',
@@ -64,8 +139,9 @@ function createHealthPayload(capability) {
     host: ENCAPSULATOR_HOST,
     port: ENCAPSULATOR_PORT,
     capabilities: capability,
+    guardrail,
     telemetry: {
-      cpuPercent: sampleCpuPercent(),
+      cpuPercent: guardrail.cpuPercent,
       load1m: Number(os.loadavg()[0].toFixed(2)),
       memoryPercent: Number(((usedMem / totalMem) * 100).toFixed(1)),
       memoryUsedMB: Math.round(usedMem / (1024 * 1024)),
@@ -115,6 +191,13 @@ function startEncapsulatorApi() {
     if (!id || !input) return res.status(400).json({ error: 'id and input are required' });
     if (!host || !port) return res.status(400).json({ error: 'host and port are required' });
     if (channels.has(id)) return res.status(409).json({ error: `Channel ${id} already exists` });
+    const guardrail = evaluateGuardrail();
+    if (guardrail.block) {
+      return res.status(429).json({
+        error: `Encapsulator guardrail blocked start: ${guardrail.reasons.join(' | ') || 'threshold reached'}`,
+        guardrail,
+      });
+    }
 
     const channel = new SRTEncapsulatorChannel({
       id, input, inputLocalAddr, host, port, latency,
@@ -132,7 +215,11 @@ function startEncapsulatorApi() {
     try {
       channel.start();
       channels.set(id, channel);
-      res.status(201).json(channel.toJSON());
+      const payload = channel.toJSON();
+      if (guardrail.warn) {
+        payload.guardrailWarning = `Guardrail warning: ${guardrail.reasons.join(' | ') || 'approaching threshold'}`;
+      }
+      res.status(201).json(payload);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
