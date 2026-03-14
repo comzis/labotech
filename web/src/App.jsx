@@ -690,7 +690,7 @@ export default function App() {
                 LABOTECH
               </div>
               <div
-                className="text-[8px] uppercase tracking-[0.24em] leading-none mt-0.5"
+                className="text-[8px] uppercase tracking-[0.18em] leading-none mt-0.5 whitespace-nowrap"
                 style={{ color: '#7f99bf', textShadow: '0 1px 0 rgba(0,0,0,0.4)' }}
               >
                 Team Work · Engineering · Operations · SLA
@@ -705,7 +705,7 @@ export default function App() {
           <div style={{ width: '1px', height: '28px', background: 'linear-gradient(180deg, transparent, #333, transparent)' }} />
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
-          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-center">
+          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start">
             {visibleTabs.map(t => {
               const Icon = t.icon;
               const isActive = tab === t.id;
@@ -780,14 +780,6 @@ export default function App() {
                 value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
                 color={cpuColor(telemetry.memoryPercent)}
               />
-              <span className="hidden 2xl:inline" style={{ color: '#222' }}>|</span>
-              <span className="hidden 2xl:inline">
-                <LcdValue
-                  label=""
-                  value={`${telemetry.memoryUsedMB || 0}/${telemetry.memoryTotalMB || 0}MB`}
-                  color="#555"
-                />
-              </span>
             </div>
           )}
 
@@ -833,7 +825,7 @@ export default function App() {
 
           <button
             onClick={handleResetRole}
-            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1 2xl:w-[360px] 2xl:justify-between overflow-hidden"
+            className="ml-1 px-3 py-1 rounded-sm text-[9px] uppercase tracking-[0.1em] shrink-0 inline-flex items-center gap-1 2xl:w-[280px] 2xl:justify-between overflow-hidden"
             style={{
               color: '#9ab4d8',
               border: '1px solid #2b3950',

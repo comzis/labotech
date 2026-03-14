@@ -8,6 +8,7 @@ import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'MCR-WALL-A';
+const DEFAULT_ENGINEER_MODE_LABEL = 'Engineer Mode';
 const MULTIVIEW_REFRESH_MS = 12000;
 const MULTIVIEW_CLOCK_TICK_MS = 3000;
 
@@ -366,6 +367,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [passphrase, setPassphrase] = useState('');
   const [nowMs, setNowMs] = useState(Date.now());
   const [engineerMode, setEngineerMode] = useState(true);
+  const [engineerModeLabel, setEngineerModeLabel] = useState(DEFAULT_ENGINEER_MODE_LABEL);
+  const [isEditingEngineerModeLabel, setIsEditingEngineerModeLabel] = useState(false);
+  const [engineerModeLabelDraft, setEngineerModeLabelDraft] = useState(DEFAULT_ENGINEER_MODE_LABEL);
   const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
@@ -385,6 +389,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       if (parsed?.latency != null) setLatency(String(parsed.latency));
       if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
       if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+      if (parsed?.engineerModeLabel != null) {
+        const nextLabel = String(parsed.engineerModeLabel).trim();
+        if (nextLabel) setEngineerModeLabel(nextLabel.slice(0, 32));
+      }
       if (Array.isArray(parsed?.panels) && parsed.panels.length > 0) {
         const sanitized = parsed.panels
           .map((p, idx) => ({
@@ -413,12 +421,29 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           latency,
           passphrase,
           engineerMode,
+          engineerModeLabel,
           panels,
           activePanelId,
         })
       );
     } catch (_) {}
-  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, panels, activePanelId]);
+  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, engineerModeLabel, panels, activePanelId]);
+
+  const beginEngineerModeLabelEdit = () => {
+    setEngineerModeLabelDraft(engineerModeLabel);
+    setIsEditingEngineerModeLabel(true);
+  };
+
+  const commitEngineerModeLabelEdit = () => {
+    const trimmed = String(engineerModeLabelDraft || '').trim();
+    setEngineerModeLabel(trimmed ? trimmed.slice(0, 32) : DEFAULT_ENGINEER_MODE_LABEL);
+    setIsEditingEngineerModeLabel(false);
+  };
+
+  const cancelEngineerModeLabelEdit = () => {
+    setEngineerModeLabelDraft(engineerModeLabel);
+    setIsEditingEngineerModeLabel(false);
+  };
 
   useEffect(() => {
     refreshActives();
@@ -529,16 +554,36 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             <div className="text-[10px] text-gray-500 font-mono">
               Active: {activeIds.length} · Panel: {activePanel?.name || '-'} ({visibleIds.length})
             </div>
-            <button
-              onClick={() => setEngineerMode((v) => !v)}
-              className={`text-xs px-2 py-1 rounded border ${
-                engineerMode
-                  ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
-                  : 'border-white/10 text-gray-400 bg-black/20'
-              }`}
-            >
-              Engineer Mode: {engineerMode ? 'ON' : 'OFF'}
-            </button>
+            {isEditingEngineerModeLabel ? (
+              <div className="inline-flex items-center gap-1">
+                <input
+                  value={engineerModeLabelDraft}
+                  onChange={(e) => setEngineerModeLabelDraft(e.target.value)}
+                  onBlur={commitEngineerModeLabelEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEngineerModeLabelEdit();
+                    if (e.key === 'Escape') cancelEngineerModeLabelEdit();
+                  }}
+                  maxLength={32}
+                  autoFocus
+                  className="text-xs px-2 py-1 rounded border border-neon-cyan/50 text-neon-cyan bg-black/30 min-w-[130px]"
+                  title="Enter to save, Esc to cancel"
+                />
+              </div>
+            ) : (
+              <button
+                onClick={() => setEngineerMode((v) => !v)}
+                onDoubleClick={beginEngineerModeLabelEdit}
+                className={`text-xs px-2 py-1 rounded border ${
+                  engineerMode
+                    ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
+                    : 'border-white/10 text-gray-400 bg-black/20'
+                }`}
+                title="Click to toggle. Double-click label to edit."
+              >
+                {engineerModeLabel}: {engineerMode ? 'ON' : 'OFF'}
+              </button>
+            )}
             <button
               onClick={() => setOpenPanelCommission((v) => !v)}
               className="inline-flex items-center gap-1 text-xs bg-neon-purple/20 hover:bg-neon-purple/30 text-neon-purple border border-neon-purple/40 px-2 py-1 rounded"
