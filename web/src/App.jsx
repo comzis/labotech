@@ -682,7 +682,7 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[66px] flex items-center gap-1 xl:gap-2">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[82px] flex items-center gap-1 xl:gap-2">
 
           {/* ── Pushbutton nav ──────────────────────────────────────────── */}
           <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start mr-auto">
@@ -736,56 +736,6 @@ export default function App() {
             })}
           </nav>
 
-          {/* Divider */}
-          <div style={{ width: '1px', height: '28px', background: 'linear-gradient(180deg, transparent, #333, transparent)' }} />
-
-          {/* ── Telemetry LCD readout ───────────────────────────────────── */}
-          {telemetry && (
-            <div
-              className="hidden 2xl:flex items-center gap-2 px-2 py-1 font-mono rounded-sm shrink-0"
-              style={{
-                background: '#0a0a0a',
-                border: '1px solid #1a1a1a',
-                boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.6)',
-              }}
-            >
-              <LcdValue
-                label="CPU"
-                value={telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : null}
-                color={cpuColor(telemetry.cpuPercent)}
-              />
-              <span style={{ color: '#222' }}>|</span>
-              <LcdValue
-                label="MEM"
-                value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
-                color={cpuColor(telemetry.memoryPercent)}
-              />
-            </div>
-          )}
-
-          {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
-            <div
-              className="hidden 2xl:flex items-center gap-1.5 px-1.5 py-1 rounded-sm shrink-0"
-              style={{
-                background: '#10151d',
-                border: '1px solid #2a3342',
-                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-              }}
-              title={`${preflight?.nicCapture?.reason || 'Tooling preflight'}${BUILD_TIME_UTC ? ` · Build: ${BUILD_TIME_UTC}` : ''}`}
-            >
-              <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>U</span>
-              <span className="text-[8px]" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
-              <span style={{ color: '#222' }}>|</span>
-              <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>P</span>
-              <span className="text-[8px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
-                {String(preflight?.status || 'pending').toUpperCase()}
-              </span>
-              <span className="text-[8px]" style={{ color: '#6f86aa' }}>
-                {preflight?.nicCapture?.tool || 'no-capture-tool'}
-              </span>
-            </div>
-          )}
-
           {/* ── Connection status LED ───────────────────────────────────── */}
           <div
             className="flex items-center gap-2 px-3 py-1.5 rounded-sm shrink-0"
@@ -812,25 +762,79 @@ export default function App() {
             <ServiceStatusBadge connected={connected} />
           </div>
 
-          <button
-            onClick={handleResetRole}
-            className="ml-1 px-2.5 py-1 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 2xl:w-[190px] 2xl:justify-between overflow-hidden"
-            style={{
-              color: '#9ab4d8',
-              border: '1px solid #2b3950',
-              background: 'linear-gradient(180deg, #0d1520, #0a1018)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px rgba(80,120,180,0.15)',
-            }}
-            title={`Log out and return to landing page (${activePunchline})`}
-          >
-            <span className="shrink-0">↩ Logout ({authUser})</span>
-            <span
-              className="hidden 2xl:inline truncate text-right ml-2"
+          <div className="ml-1 shrink-0 flex flex-col items-end gap-1">
+            <div
+              className="text-[8px] leading-none text-right max-w-[360px] 2xl:max-w-[520px]"
               style={{ color: '#6f86aa' }}
+              title={activePunchline}
             >
-              · {activePunchline}
-            </span>
-          </button>
+              {activePunchline}
+            </div>
+            <div className="flex items-center justify-end gap-1.5">
+              {telemetry && (
+                <div
+                  className="hidden xl:flex items-center gap-1.5 px-1.5 py-1 font-mono rounded-sm shrink-0"
+                  style={{
+                    background: '#0a0a0a',
+                    border: '1px solid #1a1a1a',
+                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.6)',
+                  }}
+                >
+                  <LcdValue
+                    label="CPU"
+                    value={telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : null}
+                    color={cpuColor(telemetry.cpuPercent)}
+                  />
+                  <span style={{ color: '#222' }}>|</span>
+                  <LcdValue
+                    label="MEM"
+                    value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
+                    color={cpuColor(telemetry.memoryPercent)}
+                  />
+                </div>
+              )}
+              {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
+                <div
+                  className="hidden 2xl:flex items-center gap-1 px-1.5 py-1 rounded-sm shrink-0"
+                  style={{
+                    background: '#10151d',
+                    border: '1px solid #2a3342',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                  }}
+                  title={`${preflight?.nicCapture?.reason || 'Tooling preflight'}${BUILD_TIME_UTC ? ` · Build: ${BUILD_TIME_UTC}` : ''}`}
+                >
+                  <span className="text-[8px] uppercase tracking-[0.06em]" style={{ color: '#7f99bf' }}>U</span>
+                  <span className="text-[8px]" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
+                  <span style={{ color: '#222' }}>|</span>
+                  <span className="text-[8px] uppercase tracking-[0.06em]" style={{ color: '#7f99bf' }}>P</span>
+                  <span className="text-[8px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
+                    {String(preflight?.status || 'pending').toUpperCase()}
+                  </span>
+                </div>
+              )}
+              <button
+                onClick={handleResetRole}
+                className="px-2.5 py-1 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
+                style={{
+                  color: '#ffe8bf',
+                  border: '1px solid #8a6534',
+                  background: 'linear-gradient(180deg, #4b371b 0%, #332410 58%, #261a0b 100%)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), 0 0 10px rgba(220,160,70,0.28), 0 0 18px rgba(130,90,35,0.22)',
+                  textShadow: '0 0 6px rgba(255,210,140,0.35)',
+                }}
+                title="Log out and return to landing page"
+              >
+                <span
+                  className="w-1.5 h-1.5 rounded-full"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, #ffffff66, #ffd07a)',
+                    boxShadow: '0 0 5px rgba(255,208,122,0.92)',
+                  }}
+                />
+                <span className="shrink-0">↩ Logout ({authUser})</span>
+              </button>
+            </div>
+          </div>
 
         </div>
 
@@ -839,7 +843,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-20 mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
+      <main className="flex-1 mt-24 mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
         {/* Subtle rack-rail side lines */}
         <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
           style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
