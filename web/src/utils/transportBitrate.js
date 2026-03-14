@@ -13,8 +13,13 @@ export function resolveTransportBitrate(result) {
   const source = String(result?.dvb?.bitrateSource || '').toLowerCase();
   const held = Boolean(result?.dvb?.bitrateHeldFromPrevious);
   const trustedBySource = source === 'tsduck' || source === 'measured';
-  if (Number.isFinite(bps) && bps > 0 && (trustedBySource || held)) {
-    return { bps, mbps: bps / 1e6, source: source || (held ? 'held' : '-'), trusted: true };
+  if (Number.isFinite(bps) && bps > 0) {
+    return {
+      bps,
+      mbps: bps / 1e6,
+      source: source || (held ? 'held' : '-'),
+      trusted: Boolean(trustedBySource || held),
+    };
   }
 
   return { bps: null, mbps: null, source: source || '-', trusted: false };

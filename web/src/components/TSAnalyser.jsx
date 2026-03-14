@@ -402,7 +402,7 @@ export default function TSAnalyser({ lastMessage }) {
     const rowsMap = new Map();
     (activeResult?.programs || []).forEach((p) => {
       (p.streams || []).forEach((s) => {
-        const streamBps = toFiniteNumber(s.bitrateBps);
+        const streamBps = toFiniteNumber(s.bitrate ?? s.bitrateBps);
         const row = {
           pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
           pidHex: s.pidHex || null,
@@ -444,7 +444,7 @@ export default function TSAnalyser({ lastMessage }) {
             pidHex: s.pidHex || null,
             type: (s.codecType || "data").toUpperCase(),
             codec: s.codecName || "-",
-            kbps: s.bitrateBps ? Math.round(Number(s.bitrateBps) / 1000) : "-",
+            kbps: toFiniteNumber(s.bitrate ?? s.bitrateBps) != null ? Math.round(Number(s.bitrate ?? s.bitrateBps) / 1000) : "-",
           }))
           .sort((a, b) => {
           const pidA = Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;

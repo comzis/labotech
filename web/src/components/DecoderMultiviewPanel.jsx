@@ -622,12 +622,12 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             )}
             <button
               onClick={() => setOpenPanelCommission((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] px-3 py-1.5 rounded border transition-all duration-150"
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded border transition-all duration-150"
               style={{
-                color: '#fff6c7',
-                borderColor: 'rgba(250, 204, 21, 0.95)',
-                background: 'linear-gradient(180deg, rgba(250,204,21,0.42), rgba(217,119,6,0.38))',
-                boxShadow: '0 0 18px rgba(250,204,21,0.55), inset 0 1px 0 rgba(255,255,255,0.25)',
+                color: '#a5f3fc',
+                borderColor: 'rgba(34, 211, 238, 0.45)',
+                background: 'rgba(34, 211, 238, 0.12)',
+                boxShadow: '0 0 10px rgba(34,211,238,0.22), inset 0 1px 0 rgba(255,255,255,0.10)',
               }}
             >
               <Plus className="w-3 h-3" />
