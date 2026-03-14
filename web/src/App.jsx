@@ -68,6 +68,7 @@ const LOGIN_PROFILES = {
 };
 const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
+const BRAND_MARK_SRC = '/labotech-mark.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
 const BUILD_TIME_UTC = import.meta.env.VITE_BUILD_TIME_UTC || null;
@@ -210,11 +211,48 @@ function LandingAuth({ onLogin, punchline }) {
         </div>
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1f27, #3a4656 20%, #3a4656 80%, #1a1f27)' }} />
 
-        <div className="p-6 md:p-8 flex-1 flex flex-col">
-          <div className="flex items-start justify-between gap-4 mb-2">
+        <div className="p-6 md:p-8 flex-1 flex flex-col relative">
+          <div className="mb-2">
             <div>
-              <div className="text-[13px] font-black uppercase tracking-[0.3em] leading-none mb-2" style={{ color: '#e0e0e0' }}>
-                LABOTECH
+              <div
+                className="inline-flex items-center h-16 px-4 rounded-sm gap-3 relative mb-2"
+                style={{
+                  background: 'linear-gradient(180deg, #1a1f27 0%, #11161d 62%, #0b0f14 100%), repeating-linear-gradient(90deg, rgba(120,140,170,0.06) 0, rgba(120,140,170,0.06) 2px, transparent 2px, transparent 8px)',
+                  border: '1px solid #3a4453',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.5), 0 0 16px rgba(0,0,0,0.38)',
+                }}
+                title="Labotech identity"
+              >
+                <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+                <span className="absolute right-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+                <span className="absolute left-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+                <span className="absolute right-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+                <span
+                  className="w-[30px] h-[30px] rounded-sm shrink-0 overflow-hidden flex items-center justify-center"
+                  style={{
+                    background: 'linear-gradient(180deg, #1a2230, #111722)',
+                    border: '1px solid #5f6f87',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
+                  }}
+                >
+                  <img
+                    src={BRAND_MARK_SRC}
+                    alt="Labotech mark"
+                    className="w-full h-full object-contain scale-[1.22]"
+                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                  />
+                </span>
+                <span className="flex flex-col leading-none">
+                  <span
+                    className="text-[15px] font-black uppercase tracking-[0.2em]"
+                    style={{ color: '#e2eaf6', textShadow: '0 0 10px rgba(140,165,200,0.22)' }}
+                  >
+                    LABOTECH
+                  </span>
+                  <span className="text-[6px] uppercase tracking-[0.12em] mt-0.5" style={{ color: '#75839a' }}>
+                    Powered by Docker
+                  </span>
+                </span>
               </div>
               <div
                 className="text-[9px] uppercase tracking-[0.22em]"
@@ -226,14 +264,22 @@ function LandingAuth({ onLogin, punchline }) {
                 Secure operator access
               </div>
             </div>
-            <img
-              src={PARTNER_LOGO_SRC}
-              alt="Eurovision Services"
-              className="shrink-0"
-              style={{ height: 30, width: 'auto', opacity: 0.92, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))' }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
           </div>
+          <img
+            src={PARTNER_LOGO_SRC}
+            alt="Eurovision Services"
+            className="shrink-0"
+            style={{
+              position: 'absolute',
+              top: 22,
+              right: 28,
+              height: 34,
+              width: 'auto',
+              opacity: 0.92,
+              filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))',
+            }}
+            onError={(e) => { e.currentTarget.style.display = 'none'; }}
+          />
           <div className="mb-10 border-t" style={{ borderColor: '#212c3d' }} />
 
           <div className="my-6 rounded-sm border p-5" style={{ borderColor: '#2c3b52', background: 'linear-gradient(180deg, #162233, #101a29)' }}>
@@ -682,138 +728,111 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[82px] flex items-center gap-1 xl:gap-2">
-          <div
-            className="hidden xl:flex items-center h-7 px-2 rounded-sm shrink-0 text-[8px] uppercase tracking-[0.1em]"
-            style={{
-              color: '#8ea9d1',
-              background: '#10151d',
-              border: '1px solid #2a3342',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-            }}
-            title="Labotech runtime platform"
-          >
-            LABOTECH · Powered by Docker
-          </div>
-
-          {/* ── Pushbutton nav ──────────────────────────────────────────── */}
-          <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start mr-auto">
-            {visibleTabs.map(t => {
-              const Icon = t.icon;
-              const isActive = tab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => setTab(t.id)}
-                  className="flex flex-col items-center justify-center gap-0.5 w-[88px] xl:w-[96px] h-[44px] px-1 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
-                  style={isActive ? {
-                    background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
-                    border: `1px solid ${t.led}44`,
-                    boxShadow: `0 0 10px ${t.led}33, inset 0 1px 0 rgba(255,255,255,0.04)`,
-                  } : {
-                    background: 'linear-gradient(180deg, #1c1c1c 0%, #141414 100%)',
-                    border: '1px solid #222',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(0,0,0,0.4)',
-                  }}
-                >
-                  {/* LED indicator above icon */}
-                  <div
-                    className="w-2 h-2 rounded-full"
-                    style={isActive ? {
-                      background: `radial-gradient(circle at 40% 30%, #ffffff55, ${t.led})`,
-                      boxShadow: `0 0 4px ${t.led}, 0 0 8px ${t.led}88`,
-                    } : {
-                      background: '#1a1a1a',
-                      boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)',
-                    }}
-                  />
-                  <Icon
-                    className="w-3 h-3"
-                    strokeWidth={isActive ? 2 : 1.5}
-                    style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
-                  />
-                  <span
-                    className="text-[8px] font-bold uppercase tracking-[0.08em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
-                    style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
-                  >
-                    {t.label}
-                  </span>
-                  {t.id === 'alarms' && alarmUnreadCritical > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                      {alarmUnreadCritical > 9 ? '9+' : alarmUnreadCritical}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
-          </nav>
-
-          <div className="ml-1 shrink-0 flex flex-col items-end gap-1">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[96px] flex flex-col justify-center gap-1.5">
+          <div className="flex items-center gap-1 xl:gap-2">
             <div
-              className="text-[9px] leading-none text-right max-w-[360px] 2xl:max-w-[520px]"
+              className="hidden xl:flex items-center h-12 px-3 rounded-sm shrink-0 gap-2.5 relative"
+              style={{
+                background: 'linear-gradient(180deg, #161a21 0%, #0f1319 62%, #0b0f14 100%)',
+                border: '1px solid #2b313c',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05), inset 0 -1px 0 rgba(0,0,0,0.45), 0 0 12px rgba(0,0,0,0.35)',
+              }}
+              title="Labotech identity"
+            >
+              <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+              <span className="absolute right-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+              <span className="absolute left-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+              <span className="absolute right-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+              <span
+                className="w-[18px] h-[18px] rounded-sm shrink-0 overflow-hidden"
+                style={{
+                  background: '#161c26',
+                  border: '1px solid #4e5e76',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
+                }}
+              >
+                <img
+                  src={BRAND_MARK_SRC}
+                  alt="Labotech mark"
+                  className="w-full h-full object-contain"
+                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
+                />
+              </span>
+              <span className="flex flex-col leading-none">
+                <span
+                  className="text-[12px] font-black uppercase tracking-[0.18em]"
+                  style={{ color: '#d8e0ec', textShadow: '0 0 10px rgba(140,165,200,0.2)' }}
+                >
+                  LABOTECH
+                </span>
+                <span className="text-[7px] uppercase tracking-[0.1em]" style={{ color: '#8895a8' }}>
+                  Powered by Docker
+                </span>
+              </span>
+            </div>
+
+            {/* ── Pushbutton nav ──────────────────────────────────────────── */}
+            <nav className="flex items-center gap-1 xl:gap-1.5 flex-1 min-w-0 justify-start mr-auto">
+              {visibleTabs.map(t => {
+                const Icon = t.icon;
+                const isActive = tab === t.id;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => setTab(t.id)}
+                    className="flex flex-col items-center justify-center gap-0.5 w-[88px] xl:w-[96px] h-[44px] px-1 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
+                    style={isActive ? {
+                      background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
+                      border: `1px solid ${t.led}44`,
+                      boxShadow: `0 0 10px ${t.led}33, inset 0 1px 0 rgba(255,255,255,0.04)`,
+                    } : {
+                      background: 'linear-gradient(180deg, #1c1c1c 0%, #141414 100%)',
+                      border: '1px solid #222',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    {/* LED indicator above icon */}
+                    <div
+                      className="w-2 h-2 rounded-full"
+                      style={isActive ? {
+                        background: `radial-gradient(circle at 40% 30%, #ffffff55, ${t.led})`,
+                        boxShadow: `0 0 4px ${t.led}, 0 0 8px ${t.led}88`,
+                      } : {
+                        background: '#1a1a1a',
+                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)',
+                      }}
+                    />
+                    <Icon
+                      className="w-3 h-3"
+                      strokeWidth={isActive ? 2 : 1.5}
+                      style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
+                    />
+                    <span
+                      className="text-[8px] font-bold uppercase tracking-[0.08em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
+                      style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
+                    >
+                      {t.label}
+                    </span>
+                    {t.id === 'alarms' && alarmUnreadCritical > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[8px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {alarmUnreadCritical > 9 ? '9+' : alarmUnreadCritical}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <div
+              className="hidden 2xl:block text-[9px] leading-none text-right max-w-[420px] truncate"
               style={{ color: '#6f86aa' }}
               title={activePunchline}
             >
               {activePunchline}
             </div>
-            <div className="flex items-center justify-end gap-1.5">
-              {telemetry && (
-                <div
-                  className="hidden xl:flex items-center h-7 gap-1.5 px-2 font-mono rounded-sm shrink-0"
-                  style={{
-                    background: '#0a0a0a',
-                    border: '1px solid #1a1a1a',
-                    boxShadow: 'inset 0 2px 4px rgba(0,0,0,0.6)',
-                  }}
-                >
-                  <LcdValue
-                    label="CPU"
-                    value={telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : null}
-                    color={cpuColor(telemetry.cpuPercent)}
-                  />
-                  <span style={{ color: '#222' }}>|</span>
-                  <LcdValue
-                    label="MEM"
-                    value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
-                    color={cpuColor(telemetry.memoryPercent)}
-                  />
-                </div>
-              )}
-              {Number.isFinite(serverUptimeSec) && (
-                <div
-                  className="hidden xl:flex items-center h-7 gap-1.5 px-2 rounded-sm shrink-0"
-                  style={{
-                    background: '#101723',
-                    border: '1px solid #2a3950',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-                  }}
-                  title={BUILD_TIME_UTC ? `Build: ${BUILD_TIME_UTC}` : 'Server uptime'}
-                >
-                  <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>UPTIME</span>
-                  <span className="text-[8px] font-bold" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
-                </div>
-              )}
-              {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
-                <div
-                  className="hidden 2xl:flex items-center h-7 gap-1 px-1.5 rounded-sm shrink-0"
-                  style={{
-                    background: '#10151d',
-                    border: '1px solid #2a3342',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
-                  }}
-                  title={`${preflight?.nicCapture?.reason || 'Tooling preflight'}${BUILD_TIME_UTC ? ` · Build: ${BUILD_TIME_UTC}` : ''}`}
-                >
-                  <span className="text-[8px] uppercase tracking-[0.06em]" style={{ color: '#7f99bf' }}>U</span>
-                  <span className="text-[8px]" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
-                  <span style={{ color: '#222' }}>|</span>
-                  <span className="text-[8px] uppercase tracking-[0.06em]" style={{ color: '#7f99bf' }}>P</span>
-                  <span className="text-[8px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
-                    {String(preflight?.status || 'pending').toUpperCase()}
-                  </span>
-                </div>
-              )}
+            <div className="ml-1 shrink-0 flex items-center gap-1">
               <div
-                className="hidden xl:flex items-center h-7 gap-1.5 px-2 rounded-sm shrink-0"
+                className="hidden xl:flex items-center h-6 gap-1 px-1.5 rounded-sm shrink-0"
                 style={connected ? {
                   background: '#0a1a0a',
                   border: '1px solid #1a3a1a',
@@ -838,7 +857,7 @@ export default function App() {
               </div>
               <button
                 onClick={handleResetRole}
-                className="h-7 px-2.5 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
+                className="h-6 px-2 rounded-sm text-[7px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
                 style={{
                   color: '#ffe8bf',
                   border: '1px solid #8a6534',
@@ -860,6 +879,59 @@ export default function App() {
             </div>
           </div>
 
+          <div className="flex items-center justify-end gap-1.5">
+            {(telemetry || Number.isFinite(serverUptimeSec)) && (
+              <div
+                className="hidden xl:flex items-center h-7 gap-2 px-2.5 rounded-sm shrink-0"
+                style={{
+                  background: 'linear-gradient(180deg, #2b1120, #1f0c16)',
+                  border: '1px solid #8a3f64',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.06), 0 0 10px rgba(200,85,140,0.28)',
+                }}
+                title="CPU, memory, and uptime"
+              >
+                {telemetry && (
+                  <>
+                    <LcdValue
+                      label="CPU"
+                      value={telemetry.cpuPercent != null ? `${telemetry.cpuPercent}%` : null}
+                      color={cpuColor(telemetry.cpuPercent)}
+                    />
+                    <span style={{ color: '#4a2837' }}>|</span>
+                    <LcdValue
+                      label="MEM"
+                      value={telemetry.memoryPercent != null ? `${telemetry.memoryPercent}%` : null}
+                      color={cpuColor(telemetry.memoryPercent)}
+                    />
+                  </>
+                )}
+                {Number.isFinite(serverUptimeSec) && (
+                  <>
+                    <span style={{ color: '#4a2837' }}>|</span>
+                    <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#d497b6' }}>UPTIME</span>
+                    <span className="text-[8px] font-bold" style={{ color: '#ffd9ec' }}>{uptimeDisplay}</span>
+                  </>
+                )}
+              </div>
+            )}
+            {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
+              <div
+                className="hidden 2xl:flex items-center h-7 gap-1 px-1.5 rounded-sm shrink-0"
+                style={{
+                  background: '#10151d',
+                  border: '1px solid #2a3342',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                }}
+                title={`${preflight?.nicCapture?.reason || 'Tooling preflight'}${BUILD_TIME_UTC ? ` · Build: ${BUILD_TIME_UTC}` : ''}`}
+              >
+                <span className="text-[8px] uppercase tracking-[0.06em]" style={{ color: '#7f99bf' }}>P</span>
+                <span className="text-[8px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
+                  {String(preflight?.status || 'pending').toUpperCase()}
+                </span>
+              </div>
+            )}
+          </div>
+
         </div>
 
         {/* Rack rail bottom-edge line */}
@@ -867,7 +939,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-24 mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
+      <main className="flex-1 mt-28 mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
         {/* Subtle rack-rail side lines */}
         <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
           style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />

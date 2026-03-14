@@ -1,0 +1,16 @@
+---
+description: Require explicit approval before removing UI/features or implementing impactful code changes
+alwaysApply: true
+---
+
+# Change Safety and Approval Gate
+
+- Never remove, hide, or degrade any UI element or user-facing functionality unless the user explicitly approves that specific change.
+- If a request is ambiguous, ask a clarifying question before making UI/feature removals.
+- Before implementing non-trivial code changes, perform a short impact assessment covering:
+  - affected modules/files
+  - expected behavior changes
+  - regression risk level
+- Present the impact assessment clearly and obtain user confirmation before proceeding with impactful changes.
+- Preserve existing behavior by default; prefer minimal, reversible changes.
+- When requested changes could affect existing flows, include a brief validation plan (build/test/runtime checks) before implementation.
