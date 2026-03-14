@@ -15,6 +15,16 @@ TARGET_REF="${1:-origin/main}"
 API_HOST="${API_HOST:-10.67.18.29}"
 API_PORT="${API_PORT:-4000}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
+COMPOSE_BIN=""
+
+if docker compose version >/dev/null 2>&1; then
+  COMPOSE_BIN="docker compose"
+elif command -v docker-compose >/dev/null 2>&1; then
+  COMPOSE_BIN="docker-compose"
+else
+  echo "ERROR: missing docker compose (v2) and docker-compose (v1)"
+  exit 2
+fi
 
 echo "==> Recover target: ${TARGET_REF}"
 git fetch --all --tags --prune
@@ -38,9 +48,9 @@ npm ci
 npm run build
 cd "$APP_DIR"
 
-echo "==> Recreating stack with Docker Compose v2..."
-docker compose down --remove-orphans || true
-docker compose up -d --build --force-recreate
+echo "==> Recreating stack with ${COMPOSE_BIN}..."
+${COMPOSE_BIN} down --remove-orphans || true
+${COMPOSE_BIN} up -d --build --force-recreate
 
 echo "==> Post-recovery verification..."
 curl --silent --show-error --fail "${HEALTH_URL}" >/dev/null
