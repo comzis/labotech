@@ -98,6 +98,63 @@ systemctl list-timers --all | rg labotech-housekeeping
 journalctl -u labotech-housekeeping.service -n 100 --no-pager
 ```
 
+### Engineering handover command set (server)
+
+Use this sequence during handover to apply latest code and deploy safely with disk guards.
+
+```bash
+cd ~/LaboTech/labotech
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+git log --oneline -n 4
+```
+
+Enable housekeeping timer (run once per host):
+
+```bash
+sudo cp scripts/systemd/labotech-housekeeping.service /etc/systemd/system/
+sudo cp scripts/systemd/labotech-housekeeping.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now labotech-housekeeping.timer
+systemctl list-timers --all | rg labotech-housekeeping
+```
+
+Run deployment:
+
+```bash
+bash scripts/deploy-one-shot.sh
+```
+
+Optional stricter thresholds:
+
+```bash
+MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/deploy-one-shot.sh
+```
+
+Post-deploy verification:
+
+```bash
+curl -fsS http://10.67.18.29:4000/health | jq .
+bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
+bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+```
+
+If disk-related failure occurs:
+
+```bash
+df -h
+df -i
+docker system df
+docker builder prune -af
+docker image prune -af
+docker container prune -f
+docker system prune -af
+sudo journalctl --vacuum-time=7d
+sudo apt-get clean
+bash scripts/deploy-one-shot.sh
+```
+
 ---
 
 ## 2) TS Analysis Accuracy Strategy
@@ -340,6 +397,23 @@ Operational note:
 - `26h` is a memory horizon for timeline evidence, not a forced "stream still running" duration.
 - If stale context is suspected during troubleshooting, clear browser storage or run `DELETE /api/events` in controlled maintenance windows.
 
+### Timeline warning hysteresis and SI behavior
+
+To reduce false-positive orange blips in `Stream View` during transient probe joins:
+
+- Backend health severity now applies hysteresis:
+  - `warning` escalates only after 2 consecutive warning probes.
+  - `critical` escalates immediately.
+  - `ok` recovers immediately.
+- Frontend timeline treats `dvb.health.severity` as authoritative when present (`ok` / `warning` / `critical`).
+- SI table violations (`nit/sdt/eitPf/tdt`) are used as warning fallback only when a legacy result has no health object.
+
+Diagnostic fields exposed in analyser health:
+
+- `dvb.health.hysteresis.raw`
+- `dvb.health.hysteresis.warnCount`
+- `dvb.health.hysteresis.critCount`
+
 ### Interpreting IAT/Jitter panels
 
 - IAT/jitter/loss values come from `dvb.arrival`.
@@ -404,6 +478,12 @@ LABOTECH merges multiple data sources to improve correctness:
 - ffprobe program/global stream merge by index
 - ffmpeg PID backfill for missing stream IDs
 - optional tsduck enrichment for bitrate/services/PID/SI
+
+Recent hardening for PID correctness:
+
+- PID 0 (PAT) is explicitly excluded from tsduck PID extraction and enrichment paths.
+- tsduck PID extraction now keeps the best entry per PID (prefers bitrate-bearing rows) to avoid PMT-reference rows masking measured bitrate rows.
+- Fallback/tsduck orphan append paths require `pid > 0`, preventing PAT from surfacing as a stream candidate.
 
 If PID count or bitrate appears inconsistent:
 
