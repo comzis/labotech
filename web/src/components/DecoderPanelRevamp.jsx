@@ -265,6 +265,75 @@ function toFiniteNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function computeWindowAveragedBps(samples, windowMs = 10000) {
+  if (!Array.isArray(samples) || samples.length === 0) return null;
+  const endTs = Number(samples[samples.length - 1]?.ts);
+  if (!Number.isFinite(endTs)) return null;
+  const values = samples
+    .filter((s) => Number.isFinite(Number(s?.ts)) && (endTs - Number(s.ts)) <= windowMs)
+    .map((s) => Number(s?.tsRateBps))
+    .filter((v) => Number.isFinite(v) && v > 0)
+    .sort((a, b) => a - b);
+  if (values.length === 0) return null;
+  // Robust average: trim extremes to avoid single-sample probe spikes.
+  if (values.length >= 5) {
+    const trim = Math.max(1, Math.floor(values.length * 0.1));
+    const core = values.slice(trim, values.length - trim);
+    if (core.length > 0) {
+      const sum = core.reduce((acc, v) => acc + v, 0);
+      return sum / core.length;
+    }
+  }
+  const sum = values.reduce((acc, v) => acc + v, 0);
+  return sum / values.length;
+}
+
+function dominantRateSource(samples, windowMs = 10000) {
+  if (!Array.isArray(samples) || samples.length === 0) return null;
+  const endTs = Number(samples[samples.length - 1]?.ts);
+  if (!Number.isFinite(endTs)) return null;
+  const counts = new Map();
+  samples
+    .filter((s) => Number.isFinite(Number(s?.ts)) && (endTs - Number(s.ts)) <= windowMs)
+    .forEach((s) => {
+      const src = String(s?.tsRateSource || "").toLowerCase();
+      if (!src) return;
+      counts.set(src, (counts.get(src) || 0) + 1);
+    });
+  let best = null;
+  let bestCount = -1;
+  for (const [src, count] of counts.entries()) {
+    if (count > bestCount) {
+      best = src;
+      bestCount = count;
+    }
+  }
+  return best;
+}
+
+function pickPreferredVideoStream(streams) {
+  const videos = (streams || []).filter((s) => String(s?.codecType || "").toLowerCase() === "video");
+  if (!videos.length) return null;
+  const score = (s) => {
+    let points = 0;
+    if (toFiniteNumber(s?.bitrate) != null && Number(s.bitrate) > 0) points += 4;
+    if (s?.scanType || s?.fieldOrder) points += 3;
+    if (toFiniteNumber(s?.width) != null && toFiniteNumber(s?.height) != null) points += 2;
+    if (toFiniteNumber(s?.fps) != null) points += 1;
+    return points;
+  };
+  return videos
+    .slice()
+    .sort((a, b) => {
+      const scoreDiff = score(b) - score(a);
+      if (scoreDiff !== 0) return scoreDiff;
+      const pidA = Number.isFinite(Number(a?.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+      const pidB = Number.isFinite(Number(b?.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+      if (pidA !== pidB) return pidA - pidB;
+      return String(a?.codecName || "").localeCompare(String(b?.codecName || ""));
+    })[0];
+}
+
 export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [mode, setMode] = useState("rtp");
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
@@ -1156,7 +1225,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               ...((selectedResult?.programs || []).flatMap((p) => p.streams || [])),
               ...(selectedResult?.orphanStreams || []),
             ];
-            const videoStream = allStreams.find((s) => s.codecType === "video");
+            const videoStream = pickPreferredVideoStream(allStreams);
             // Keep audio rows stable across probe cycles to avoid perceived "rotation".
             const audioStreams = allStreams
               .filter((s) => s.codecType === "audio")
@@ -1219,8 +1288,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             const svc = selectedResult?.dvb?.services?.[0];
             const videoFps = fpsNumber(videoStream?.fps);
             const transportRate = resolveTransportBitrate(selectedResult);
-            const tsInputRateBps = Number(transportRate.bps || 0);
-            const tsRateSource = transportRate.source || latestTsRate?.tsRateSource || "-";
+            const instantTsInputRateBps = Number(transportRate.bps || 0);
+            const averagedTsInputRateBps = computeWindowAveragedBps(tsRateSeries, 10000);
+            const tsInputRateBps = Number(averagedTsInputRateBps || instantTsInputRateBps || 0);
+            const tsRateSource = dominantRateSource(tsRateSeries, 10000) || transportRate.source || latestTsRate?.tsRateSource || "-";
 
             return (
               <>
@@ -1285,7 +1356,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
                       <StatBox label="Service Name" value={svc?.serviceName || "-"} color={svc?.serviceName ? C.cyan : C.muted} />
                       <StatBox label="Provider" value={svc?.serviceProvider || "-"} color={C.text} />
-                      <StatBox label="TS Input Rate" value={bpsFmt(tsInputRateBps)} color={tsInputRateBps ? C.ok : C.muted} />
+                      <StatBox label="TS Input Rate (10s avg)" value={bpsFmt(tsInputRateBps)} color={tsInputRateBps ? C.ok : C.muted} />
                       <StatBox label="Services" value={String(selectedResult?.dvb?.serviceCount ?? selectedResult?.programs?.length ?? "-")} color={C.text} />
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>

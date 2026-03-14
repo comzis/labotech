@@ -24,14 +24,13 @@ const LANE_ACTIVITY_STALE_MS = 30 * 1000; // auto-expire no-heartbeat runtime la
 const STARTED_RECENTLY_MS = 90 * 1000;
 const LIVE_TICK_MS = 2000;
 const MAX_FUTURE_SKEW_MS = 5000;
-const ACTIVE_ANALYSER_SEED_MS = 2000;
+const ACTIVE_ANALYSER_SEED_MS = 5000;
 const EVENT_BLOCK_DURATION_MS = {
   etr290_alarm: 14000,
   etr290_incident: 18000,
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
   runtime_started: 22000,
-  runtime_heartbeat: 5000,
   runtime_stopped: 14000,
   failover: 16000,
   analyse_result: 7000,
@@ -43,7 +42,6 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
   runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
   runtime_started: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '99' },
-  runtime_heartbeat: { alpha: '82', borderAlpha: '74', glowAlpha: '3a' },
   runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
   analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
@@ -454,7 +452,6 @@ function buildLaneGradient(events, timeStart, windowMs) {
   if (!hasEtrStateEvents) {
     const activityEvents = sorted.filter((e) =>
       e.category === 'runtime_started' ||
-      e.category === 'runtime_heartbeat' ||
       e.category === 'analyse_result'
     );
     const nonBootstrapActivityEvents = activityEvents.filter((e) => !e?.evidence?.bootstrap);
@@ -463,18 +460,14 @@ function buildLaneGradient(events, timeStart, windowMs) {
       return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
     }
     const firstActiveTs = activitySource[0].ts;
-    const hadActivityBeforeWindow = activitySource.some((e) => e.ts <= timeStart);
     const stopAfterActive = sorted.find((e) =>
       (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
     );
     const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
-    // Only paint full-window active baseline when we have evidence the lane
-    // was already active before the visible window. Otherwise, a fresh start
-    // in live mode incorrectly looks like activity existed earlier.
-    const isActiveNow = !stopAfterActive
-      && staleStopTs >= (timeStart + windowMs)
-      && hadActivityBeforeWindow;
+    // If the lane is currently active (no stop and freshness extends to window end),
+    // render a continuous baseline over the selected window.
+    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs);
     const effectiveStartTs = isActiveNow ? timeStart : Math.max(timeStart, firstActiveTs);
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
@@ -745,29 +738,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        const heartbeat = list
-          .filter((a) => a && a.isRunning && a.id)
-          .map((a) => {
-            const laneId = normalizeLaneId(a.id);
-            return {
-              key: `bootstrap-${laneId}-heartbeat`,
-              ts: Date.now(),
-              id: laneId,
-              rawId: a.id,
-              category: 'runtime_heartbeat',
-              severity: 'ok',
-              title: 'Analyser heartbeat',
-              description: a.url || `${a.id} active`,
-              evidence: { bootstrap: true },
-            };
-          });
-        const syntheticEvents = [...synthetic, ...heartbeat];
-        if (syntheticEvents.length === 0) return;
+        if (synthetic.length === 0) return;
         setEvents((prev) => {
           // Only inject when the lane has no events yet in local timeline state.
           const seen = new Set(prev.map((e) => e.id));
           const missing = synthetic.filter((e) => !seen.has(e.id));
-          return mergeTimelineEvents(prev, [...missing, ...heartbeat]);
+          return missing.length ? mergeTimelineEvents(prev, missing) : prev;
         });
       } catch (_) {}
     };
