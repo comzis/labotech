@@ -75,3 +75,19 @@ input[type="number"] { -moz-appearance: textfield; }
 .broadcast-legacy .border-neon-cyan\/50 { border-color: #00e5ff66 !important; }
 .broadcast-legacy .border-neon-purple\/35,
 .broadcast-legacy .border-neon-purple\/50 { border-color: #9d6fff66 !important; }
+
+@keyframes rackButtonPulse {
+  0% {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 8px rgba(74,134,220,0.22);
+  }
+  50% {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 16px rgba(74,134,220,0.35);
+  }
+  100% {
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 0 8px rgba(74,134,220,0.22);
+  }
+}
+
+.rack-button-glow {
+  animation: rackButtonPulse 2.4s ease-in-out infinite;
+}
