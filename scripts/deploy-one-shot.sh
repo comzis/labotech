@@ -6,6 +6,7 @@ API_PORT="${2:-4000}"
 SERVICE="${3:-labotech}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
 RECREATE_ALL="${RECREATE_ALL:-0}"
+COMPOSE_BIN=""
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -39,23 +40,31 @@ run_stage() {
 require_cmds() {
   local missing=0
   local c
-  for c in docker-compose curl jq bash; do
+  for c in docker curl jq bash; do
     if ! command -v "${c}" >/dev/null 2>&1; then
       echo "[deploy] missing command: ${c}"
       missing=1
     fi
   done
+  if docker compose version >/dev/null 2>&1; then
+    COMPOSE_BIN="docker compose"
+  elif command -v docker-compose >/dev/null 2>&1; then
+    COMPOSE_BIN="docker-compose"
+  else
+    echo "[deploy] missing command: docker compose (v2) or docker-compose (v1)"
+    missing=1
+  fi
   return "${missing}"
 }
 
 rebuild_and_restart() {
   if [[ "${RECREATE_ALL}" == "1" ]]; then
-    docker-compose down --remove-orphans
-    docker-compose build --no-cache
-    docker-compose up -d --force-recreate
+    ${COMPOSE_BIN} down --remove-orphans
+    ${COMPOSE_BIN} build --no-cache
+    ${COMPOSE_BIN} up -d --force-recreate
   else
-    docker-compose build --no-cache "${SERVICE}"
-    docker-compose up -d --force-recreate "${SERVICE}"
+    ${COMPOSE_BIN} build --no-cache "${SERVICE}"
+    ${COMPOSE_BIN} up -d --force-recreate "${SERVICE}"
   fi
 }
 
@@ -77,7 +86,7 @@ container_tool_parity() {
   local missing=()
   local t
   for t in ffmpeg ffprobe tshark tcpdump tsanalyze; do
-    if ! docker-compose exec -T "${SERVICE}" sh -lc "command -v ${t} >/dev/null 2>&1"; then
+    if ! ${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc "command -v ${t} >/dev/null 2>&1"; then
       missing+=("${t}")
     fi
   done
@@ -87,7 +96,7 @@ container_tool_parity() {
     return 1
   fi
 
-  docker-compose exec -T "${SERVICE}" sh -lc \
+  ${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
     'ffmpeg -version | sed -n "1p"; ffprobe -version | sed -n "1p"; tshark -v | sed -n "1p"; tcpdump --version | sed -n "1p"; tsanalyze --version | sed -n "1p"'
 }
 
@@ -102,6 +111,7 @@ health_assertions() {
 
 main() {
   run_stage "require commands" require_cmds
+  log "compose command: ${COMPOSE_BIN}"
   run_stage "rebuild and restart containers" rebuild_and_restart
   run_stage "wait for health endpoint" wait_for_health
   run_stage "container tooling parity" container_tool_parity
