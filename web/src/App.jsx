@@ -155,7 +155,7 @@ function LandingAuth({ onLogin, punchline }) {
         />
         {/* Rack screws */}
         {[
-          { t: 10, l: 10 }, { t: 10, r: 10 }, { b: 10, l: 10 }, { b: 10, r: 10 },
+          { t: 10, r: 10 }, { b: 10, l: 10 }, { b: 10, r: 10 },
         ].map((p, idx) => (
           <span
             key={`screw-${idx}`}
@@ -171,14 +171,16 @@ function LandingAuth({ onLogin, punchline }) {
         ))}
         {[84, 196, 308, 420, 532, 644].map((top, i) => (
           <React.Fragment key={`ear-bolts-${i}`}>
-            <span
-              className="absolute rounded-full"
-              style={{
-                width: 8, height: 8, left: 7, top,
-                background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
-                boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
-              }}
-            />
+            {i !== 0 && (
+              <span
+                className="absolute rounded-full"
+                style={{
+                  width: 8, height: 8, left: 7, top,
+                  background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
+                  boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
+                }}
+              />
+            )}
             <span
               className="absolute rounded-full"
               style={{
