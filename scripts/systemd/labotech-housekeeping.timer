@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Labotech housekeeping weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=900
+Unit=labotech-housekeeping.service
+
+[Install]
+WantedBy=timers.target
