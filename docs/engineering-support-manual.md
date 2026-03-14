@@ -62,6 +62,42 @@ If health fails:
 sudo journalctl -u labotech -n 200 --no-pager
 ```
 
+### Deploy fail-fast disk guard
+
+`scripts/deploy-one-shot.sh` now fails early when disk/inode headroom is too low to safely run `git fetch` or Docker rebuild.
+
+Defaults:
+
+- `MIN_FREE_MB=8192` (8 GB minimum on repo FS and Docker root FS)
+- `MIN_FREE_INODE_PCT=10` (minimum free inode percentage)
+
+Override example:
+
+```bash
+MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/deploy-one-shot.sh 10.67.18.29 4000
+```
+
+### Automated housekeeping (systemd timer example)
+
+Use the provided unit templates to run weekly cleanup and reduce "no space left on device" incidents.
+
+Install:
+
+```bash
+sudo cp scripts/systemd/labotech-housekeeping.service /etc/systemd/system/
+sudo cp scripts/systemd/labotech-housekeeping.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now labotech-housekeeping.timer
+```
+
+Check:
+
+```bash
+systemctl status labotech-housekeeping.timer --no-pager
+systemctl list-timers --all | rg labotech-housekeeping
+journalctl -u labotech-housekeeping.service -n 100 --no-pager
+```
+
 ---
 
 ## 2) TS Analysis Accuracy Strategy
