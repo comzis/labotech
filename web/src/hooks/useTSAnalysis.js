@@ -3,6 +3,28 @@ import { probeUrl, getAnalysers, startAnalyser, stopAnalyser } from '../api';
 
 const STOP_SUPPRESS_MS = 12000;
 
+function hasUsableAudioSample(audioLevels) {
+  if (!audioLevels || typeof audioLevels !== 'object') return false;
+  const channels = Array.isArray(audioLevels.channels) ? audioLevels.channels : [];
+  if (channels.length > 0) return true;
+  const meanDb = Number(audioLevels.meanDb);
+  if (Number.isFinite(meanDb)) return true;
+  const maxDb = Number(audioLevels.maxDb);
+  return Number.isFinite(maxDb);
+}
+
+function mergeWithAudioCarry(previousResult, incomingResult) {
+  const previousAudio = previousResult && previousResult.audioLevels;
+  const incomingAudio = incomingResult && incomingResult.audioLevels;
+  if (hasUsableAudioSample(incomingAudio) || !hasUsableAudioSample(previousAudio)) {
+    return incomingResult;
+  }
+  return {
+    ...incomingResult,
+    audioLevels: previousAudio,
+  };
+}
+
 export default function useTSAnalysis() {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -63,7 +85,13 @@ export default function useTSAnalysis() {
         });
         setDecoderMeta(meta);
         if (Object.keys(restored).length > 0) {
-          setResultsById(prev => ({ ...prev, ...restored }));
+          setResultsById((prev) => {
+            const next = { ...prev };
+            Object.entries(restored).forEach(([id, restoredResult]) => {
+              next[id] = mergeWithAudioCarry(prev[id], restoredResult);
+            });
+            return next;
+          });
         }
       } catch (_) {}
       finally {
@@ -114,7 +142,10 @@ export default function useTSAnalysis() {
     if (!msg || !msg.type || !msg.id) return;
     if (msg.type === 'analyse_result') {
       if (isSuppressed(msg.id)) return;
-      setResultsById(prev => ({ ...prev, [msg.id]: msg }));
+      setResultsById((prev) => ({
+        ...prev,
+        [msg.id]: mergeWithAudioCarry(prev[msg.id], msg),
+      }));
       // Do NOT call setResult(msg) here — that global state is only for one-shot
       // probe() calls. Unconditionally updating it from any WS message causes
       // cross-contamination when multiple decoders are active simultaneously.

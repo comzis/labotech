@@ -208,8 +208,11 @@ function LandingAuth({ onLogin, punchline }) {
               <div className="text-[13px] font-black uppercase tracking-[0.3em] leading-none mb-2" style={{ color: '#e0e0e0' }}>
                 LABOTECH
               </div>
-              <div className="text-[9px] uppercase tracking-[0.24em]" style={{ color: '#6f86aa' }}>
-                Broadcast Engine Control Room
+              <div
+                className="text-[9px] uppercase tracking-[0.22em]"
+                style={{ color: '#8ea9d1', textShadow: '0 1px 0 rgba(0,0,0,0.35)' }}
+              >
+                Team Work · Engineering · Operations · SLA
               </div>
               <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#4f5f78' }}>
                 Secure operator access
@@ -501,6 +504,7 @@ export default function App() {
       : 0;
     return formatUptime(serverUptimeSec + elapsedSec);
   }, [serverUptimeSec, uptimeSampledAtMs, uptimeNowMs]);
+  const activePunchline = RACK_LOBBY_PUNCHLINES[lobbyLineIdx] || RACK_LOBBY_PUNCHLINES[0];
 
   useEffect(() => {
     if (!visibleTabs.some((t) => t.id === tab)) {
@@ -642,7 +646,7 @@ export default function App() {
   };
 
   if (!authUser || !role) {
-    return <LandingAuth onLogin={handleLogin} punchline={RACK_LOBBY_PUNCHLINES[lobbyLineIdx]} />;
+    return <LandingAuth onLogin={handleLogin} punchline={activePunchline} />;
   }
 
   return (
@@ -685,8 +689,11 @@ export default function App() {
               >
                 LABOTECH
               </div>
-              <div className="text-[8px] uppercase tracking-[0.28em] engraved leading-none mt-0.5">
-                Broadcast Engine
+              <div
+                className="text-[8px] uppercase tracking-[0.24em] leading-none mt-0.5"
+                style={{ color: '#7f99bf', textShadow: '0 1px 0 rgba(0,0,0,0.4)' }}
+              >
+                Team Work · Engineering · Operations · SLA
               </div>
               <div className="text-[8px] leading-none mt-1 text-gray-500">
                 HPE DL360 · Powered by Docker
@@ -833,14 +840,14 @@ export default function App() {
               background: 'linear-gradient(180deg, #0d1520, #0a1018)',
               boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04), 0 0 8px rgba(80,120,180,0.15)',
             }}
-            title={`Log out and return to landing page (${RACK_LOBBY_PUNCHLINES[lobbyLineIdx]})`}
+            title={`Log out and return to landing page (${activePunchline})`}
           >
             <span className="shrink-0">↩ Logout ({authUser})</span>
             <span
               className="hidden 2xl:inline truncate text-right ml-2"
               style={{ color: '#6f86aa' }}
             >
-              · {RACK_LOBBY_PUNCHLINES[lobbyLineIdx]}
+              · {activePunchline}
             </span>
           </button>
 

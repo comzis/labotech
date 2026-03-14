@@ -138,13 +138,32 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   // Per-channel audio levels from astats probe
   const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
   const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
+  const [audioSnapshot, setAudioSnapshot] = useState(null);
+  useEffect(() => {
+    const hasChannels = currentChannels.length > 0;
+    const hasMean = Number.isFinite(currentMeanDb);
+    if (!hasChannels && !hasMean) return;
+    setAudioSnapshot({
+      channels: hasChannels ? currentChannels : [],
+      meanDb: hasMean ? currentMeanDb : null,
+      maxDb: Number.isFinite(result?.audioLevels?.maxDb) ? result.audioLevels.maxDb : null,
+      atMs: Date.now(),
+    });
+  }, [currentChannels, currentMeanDb, result?.audioLevels?.maxDb]);
+  const displayChannels = currentChannels.length > 0 ? currentChannels : (audioSnapshot?.channels || []);
+  const displayMeanDb = Number.isFinite(currentMeanDb)
+    ? currentMeanDb
+    : (Number.isFinite(audioSnapshot?.meanDb) ? audioSnapshot.meanDb : null);
+  const displayMaxDb = Number.isFinite(result?.audioLevels?.maxDb)
+    ? result.audioLevels.maxDb
+    : (Number.isFinite(audioSnapshot?.maxDb) ? audioSnapshot.maxDb : null);
   // Peak hold: { ch: number, peakDb: number, heldAt: number }[]
   const peakHoldRef = useRef({});
   const PEAK_HOLD_MS = 3000;
   // Update peak hold on new level data
-  if (currentChannels.length > 0) {
+  if (displayChannels.length > 0) {
     const now = Date.now();
-    currentChannels.forEach((ch) => {
+    displayChannels.forEach((ch) => {
       const key = ch.ch;
       const existing = peakHoldRef.current[key];
       const peakDb = ch.peakDb ?? ch.rmsDb;
@@ -281,11 +300,11 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         <div>
           <div className="flex items-center justify-between text-[10px] mb-1.5">
             <span className="engraved uppercase tracking-widest">Audio Levels</span>
-            <span className="font-mono text-[9px]" style={{ color: Number.isFinite(currentMeanDb) ? meterColor(currentMeanDb) : '#555' }}>
-              {Number.isFinite(currentMeanDb) ? `${currentMeanDb.toFixed(1)} dBFS` : 'n/a'}
+            <span className="font-mono text-[9px]" style={{ color: Number.isFinite(displayMeanDb) ? meterColor(displayMeanDb) : '#555' }}>
+              {Number.isFinite(displayMeanDb) ? `${displayMeanDb.toFixed(1)} dBFS` : 'n/a'}
             </span>
           </div>
-          {currentChannels.length > 0 ? (
+          {displayChannels.length > 0 ? (
             <div className="space-y-1">
               {/* Scale markers */}
               <div className="grid items-center gap-1 text-[8px] font-mono text-gray-600" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
@@ -297,7 +316,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
                 </div>
                 <span />
               </div>
-              {currentChannels.map((ch) => {
+              {displayChannels.map((ch) => {
                 const held = peakHoldRef.current[ch.ch];
                 const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
                 return (
@@ -311,9 +330,9 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
                 );
               })}
             </div>
-          ) : currentMeanDb != null ? (
+          ) : displayMeanDb != null ? (
             // Fallback: only aggregate available (mono or older probe)
-            <VuBar label="Mix" rmsDb={currentMeanDb} peakDb={result?.audioLevels?.maxDb} showPeak />
+            <VuBar label="Mix" rmsDb={displayMeanDb} peakDb={displayMaxDb} showPeak />
           ) : (
             <div className="text-[9px] font-mono" style={{ color: '#555' }}>Awaiting audio probe…</div>
           )}

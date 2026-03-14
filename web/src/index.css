@@ -90,4 +90,27 @@ input[type="number"] { -moz-appearance: textfield; }
 
 .rack-button-glow {
   animation: rackButtonPulse 2.4s ease-in-out infinite;
+  cursor: pointer;
+  transition: transform 120ms ease, box-shadow 180ms ease, filter 180ms ease;
+}
+
+.rack-button-glow:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 0 18px rgba(86,152,245,0.45);
+  filter: brightness(1.04);
+}
+
+.rack-button-glow:active {
+  transform: translateY(0);
+}
+
+.rack-button-glow:focus-visible {
+  outline: 1px solid rgba(128, 177, 255, 0.75);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rack-button-glow {
+    animation: none;
+  }
 }
