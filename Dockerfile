@@ -20,11 +20,16 @@ RUN apt-get update && \
       iproute2 \
       wget \
       curl && \
-    if apt-cache show tsduck >/dev/null 2>&1; then \
-      apt-get install -y --no-install-recommends tsduck; \
-    else \
-      echo "tsduck package not available in base apt repo; runtime falls back without tsanalyze"; \
+    TSDUCK_DEB_URL="$(curl -fsSL https://api.github.com/repos/tsduck/tsduck/releases?per_page=40 | grep -o 'https://[^"]*tsduck_[^"]*debian12_amd64\.deb' | head -n1)" && \
+    if [ -z "$TSDUCK_DEB_URL" ]; then \
+      echo "Unable to resolve a Debian 12 TSDuck package from GitHub releases" >&2; \
+      exit 1; \
     fi && \
+    echo "Installing TSDuck from: $TSDUCK_DEB_URL" && \
+    curl -fsSL "$TSDUCK_DEB_URL" -o /tmp/tsduck.deb && \
+    apt-get install -y --no-install-recommends /tmp/tsduck.deb && \
+    rm -f /tmp/tsduck.deb && \
+    tsanalyze --version >/dev/null 2>&1 && \
     rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY package*.json ./
