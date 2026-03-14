@@ -268,6 +268,46 @@ describe('TSAnalyser', () => {
       expect(enriched.dvb.pidCount).toBe(base.dvb.pidCount);
     });
 
+    test('_extractTSDuckPidRows prefers entry with bitrate when same PID appears in PMT and pid-list', () => {
+      // tsanalyze JSON can have PID references inside service/PMT sections (no bitrate)
+      // BEFORE the main pid-list section (with bitrate). Best-entry logic must win.
+      const payload = {
+        services: [
+          {
+            id: 1,
+            name: 'Test Service',
+            pids: [
+              { pid: 256, stream_type: 27 },   // PMT reference — no bitrate
+              { pid: 257, stream_type: 3 },
+            ],
+          },
+        ],
+        pid_list: [
+          { pid: 256, bitrate: 5000000, codec_type: 'video' },  // measurement — has bitrate
+          { pid: 257, bitrate: 192000,  codec_type: 'audio' },
+        ],
+      };
+      const rows = analyser._extractTSDuckPidRows(payload);
+      const v = rows.find((r) => r.pid === 256);
+      expect(v).toBeDefined();
+      expect(v.bitrate).toBe(5000000);
+      const a = rows.find((r) => r.pid === 257);
+      expect(a).toBeDefined();
+      expect(a.bitrate).toBe(192000);
+    });
+
+    test('_extractTSDuckPidRows excludes PID 0 (PAT)', () => {
+      const payload = {
+        pid_list: [
+          { pid: 0,   bitrate: 500,     codec_type: 'data' },   // PAT — must be excluded
+          { pid: 256, bitrate: 8000000, codec_type: 'video' },
+        ],
+      };
+      const rows = analyser._extractTSDuckPidRows(payload);
+      expect(rows.find((r) => r.pid === 0)).toBeUndefined();
+      expect(rows.find((r) => r.pid === 256)).toBeDefined();
+    });
+
     test('prefers injected sniffer arrival metrics with capture method', () => {
       const base = analyser.parseStructure({
         programs: [],
@@ -442,6 +482,74 @@ describe('TSAnalyser', () => {
       expect(s.checked).toBe(true);
       expect(s.compliant).toBe(true);
       expect(s.state).toBe('compliant');
+    });
+
+    // ── Hysteresis tests ──────────────────────────────────────────────────────
+    // These tests exercise _attachHealthAssessment directly by stubbing
+    // _buildHealthAssessment so we can control the raw severity sequence.
+
+    function makeMinimalResult(analyserInst) {
+      return analyserInst.parseStructure({ programs: [], streams: [] });
+    }
+
+    function stubHealth(analyserInst, rawSeverity) {
+      jest.spyOn(analyserInst, '_buildHealthAssessment').mockReturnValueOnce({
+        score: rawSeverity === 'ok' ? 95 : rawSeverity === 'warning' ? 72 : 40,
+        severity: rawSeverity,
+        reasons: [],
+        hysteresis: null,
+      });
+    }
+
+    test('single warning probe does not escalate — stays ok (hysteresis gate)', () => {
+      const base = makeMinimalResult(analyser);
+      stubHealth(analyser, 'warning');
+      const r = analyser._attachHealthAssessment(base);
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.raw).toBe('warning');
+      expect(r.dvb.health.hysteresis.warnCount).toBe(1);
+    });
+
+    test('two consecutive warning probes escalate to warning', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      stubHealth(analyser, 'warning');
+      analyser._attachHealthAssessment(base);           // probe 1 — suppressed
+      stubHealth(analyser, 'warning');
+      const r = analyser._attachHealthAssessment(base); // probe 2 — escalates
+      expect(r.dvb.health.severity).toBe('warning');
+      expect(r.dvb.health.hysteresis.warnCount).toBe(2);
+    });
+
+    test('critical escalates immediately on first probe', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      stubHealth(analyser, 'critical');
+      const r = analyser._attachHealthAssessment(base);
+      expect(r.dvb.health.severity).toBe('critical');
+      expect(r.dvb.health.hysteresis.critCount).toBe(1);
+    });
+
+    test('ok probe after warning streak recovers immediately', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 2, critCount: 0, lastReported: 'warning' };
+      stubHealth(analyser, 'ok');
+      const r = analyser._attachHealthAssessment(base);
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.warnCount).toBe(0);
+    });
+
+    test('warn counter resets to zero on ok, preventing stale escalation', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      stubHealth(analyser, 'warning');
+      analyser._attachHealthAssessment(base); // warnCount = 1
+      stubHealth(analyser, 'ok');
+      analyser._attachHealthAssessment(base); // warnCount reset to 0
+      stubHealth(analyser, 'warning');
+      const r = analyser._attachHealthAssessment(base); // warnCount = 1, still suppressed
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.warnCount).toBe(1);
     });
 
     test('penalizes health when 2022-7 is non-compliant', () => {

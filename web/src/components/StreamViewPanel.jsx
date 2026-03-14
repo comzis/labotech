@@ -311,7 +311,11 @@ function toEvent(msg) {
     const compliance = si.compliance || {};
     const hasSiViolation = ['nit', 'sdt', 'eitPf', 'tdt'].some((k) => compliance[k] === false);
     const healthSeverity = dvb?.health?.severity;
-    const severity = healthSeverity === 'critical' || healthSeverity === 'warning'
+    // health.severity is the authoritative, hysteresis-gated value from the backend.
+    // hasSiViolation is only used as a fallback for results that predate the health
+    // assessment (no health object present). Never let a raw single-cycle SI flag
+    // bypass the backend hysteresis gate.
+    const severity = healthSeverity === 'critical' || healthSeverity === 'warning' || healthSeverity === 'ok'
       ? healthSeverity
       : (hasSiViolation ? 'warning' : 'ok');
     const healthScore = Number.isFinite(dvb?.health?.score) ? dvb.health.score : null;

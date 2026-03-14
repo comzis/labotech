@@ -58,6 +58,10 @@ class TSAnalyser extends EventEmitter {
     this._nextProbeAt = 0;
     this.nicName = options.nicName || _getNicName();
     this._iatSniffer = null;
+    // Alarm hysteresis: require HYSTERESIS_N consecutive warning-or-worse probes before
+    // escalating to 'warning'. 'critical' escalates immediately (already gated by higher
+    // thresholds). 'ok' recovers immediately to clear alarms without delay.
+    this._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
   }
 
   probe(options = {}) {
@@ -1154,8 +1158,11 @@ class TSAnalyser extends EventEmitter {
   }
 
   _extractTSDuckPidRows(raw) {
-    const out = [];
-    const seen = new Set();
+    // Collect ALL candidate entries, then dedup keeping the best one per PID.
+    // "First-encounter wins" breaks when tsanalyze JSON nests PID references inside
+    // service/PMT objects (no bitrate there) before the main pid-list entries (which
+    // do have bitrate). By collecting all and merging, we always surface the bitrate.
+    const candidates = new Map(); // pid → best entry
     const walk = (obj) => {
       if (!obj || typeof obj !== 'object') return;
       if (Array.isArray(obj)) {
@@ -1163,23 +1170,29 @@ class TSAnalyser extends EventEmitter {
         return;
       }
       const maybePid = this._parseInteger(obj.pid ?? obj.PID ?? obj.id);
-      if (maybePid != null && maybePid >= 0 && maybePid <= 8191) {
-        if (!seen.has(maybePid)) {
-          seen.add(maybePid);
-          out.push({
-            pid: maybePid,
-            streamType: obj.stream_type || obj.streamType || obj.type || null,
-            codecType: obj.codec_type || obj.codecType || null,
-            codecName: obj.codec_name || obj.codecName || null,
-            language: obj.language || obj.lang || null,
-            bitrate: this._parseBitrateValue(obj.bitrate ?? obj.bitrate_bps ?? obj.bit_rate),
-          });
+      if (maybePid != null && maybePid > 0 && maybePid <= 8191) {
+        const bitrate = this._parseBitrateValue(
+          obj.bitrate ?? obj.bitrate_bps ?? obj.bit_rate ?? obj.bandwidth
+        );
+        const entry = {
+          pid: maybePid,
+          streamType: obj.stream_type || obj.streamType || obj.type || null,
+          codecType: obj.codec_type || obj.codecType || null,
+          codecName: obj.codec_name || obj.codecName || null,
+          language: obj.language || obj.lang || null,
+          bitrate,
+        };
+        const prev = candidates.get(maybePid);
+        // Prefer entries that have more information — bitrate > stream type > anything.
+        const score = (e) => (e.bitrate > 0 ? 4 : 0) + (e.streamType ? 2 : 0) + (e.codecType ? 1 : 0);
+        if (!prev || score(entry) > score(prev)) {
+          candidates.set(maybePid, entry);
         }
       }
       Object.values(obj).forEach(walk);
     };
     walk(raw);
-    return out;
+    return Array.from(candidates.values());
   }
 
   _extractTSDuckSIIntervalsSec(raw) {
@@ -1755,11 +1768,42 @@ class TSAnalyser extends EventEmitter {
   _attachHealthAssessment(result) {
     if (!result || !result.dvb) return result;
     const assessment = this._buildHealthAssessment(result);
+
+    // Hysteresis: suppress single-probe transient warnings (common on multicast mid-stream
+    // join — tsanalyze has no CC baseline for the first packets it captures).
+    // Rules:
+    //   critical → escalate immediately (already gated by ccCriticalCount ≥ 3)
+    //   warning  → escalate only after HYSTERESIS_N consecutive warning/worse probes
+    //   ok       → recover immediately to clear alarms without delay
+    const HYSTERESIS_N = 2;
+    const raw = assessment.severity;
+    const h = this._healthHysteresis;
+    if (raw === 'critical') {
+      h.critCount++;
+      h.warnCount = 0;
+    } else if (raw === 'warning') {
+      h.warnCount++;
+      h.critCount = 0;
+    } else {
+      h.warnCount = 0;
+      h.critCount = 0;
+    }
+
+    let reported;
+    if (h.critCount >= 1) {
+      reported = 'critical';
+    } else if (h.warnCount >= HYSTERESIS_N) {
+      reported = 'warning';
+    } else {
+      reported = 'ok';
+    }
+    h.lastReported = reported;
+
     return {
       ...result,
       dvb: {
         ...result.dvb,
-        health: assessment,
+        health: { ...assessment, severity: reported, hysteresis: { raw, warnCount: h.warnCount, critCount: h.critCount } },
       },
     };
   }
