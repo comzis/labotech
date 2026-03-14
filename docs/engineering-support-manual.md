@@ -35,6 +35,8 @@ bash scripts/upgrade-prod.sh <tag-or-commit>
 ```bash
 systemctl is-active labotech
 curl -fsS http://10.67.18.29:4000/health
+bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
+bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
 ```
 
 ### Fast production recovery (UI/features missing after deploy)
@@ -90,8 +92,19 @@ To reduce multiview lag:
 - Continuous probes run on fixed target cadence.
 - Heavy transport and SI sampling are executed every few cycles.
 - Lightweight cycles continue to update service/audio/thumbnail data.
+- Scheduler cadence is exposed in analyser diagnostics (`dvb.probeDiagnostics.scheduler`).
 
 This reduces perceived UI lag while preserving periodic ground-truth sampling.
+
+### Phase 4 operator clarity indicators
+
+Operator dashboards now expose:
+
+- `Rate confidence` (`TRUSTED` / `FALLBACK` / `UNKNOWN`)
+- `Probe method` (`NIC-tshark`, `NIC-tcpdump`, `ANALYSER`, `UNAVAILABLE`)
+- Active policy profile and heavy-probe cadence summary
+
+This allows quick triage of whether bitrate/arrival values come from wire capture or fallback estimators.
 
 ---
 
@@ -438,6 +451,13 @@ For production support:
 
 - Prefer `upgrade-prod.sh` for deterministic upgrades.
 - Verify health endpoint after every deployment.
+- Run preflight and smoke scripts after deployment:
+
+```bash
+bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
+bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+```
+
 - Keep this manual updated whenever probe cadence, timelines, or TS analysis paths change.
 
 ---

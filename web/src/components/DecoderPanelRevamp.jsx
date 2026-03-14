@@ -1292,6 +1292,13 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             const averagedTsInputRateBps = computeWindowAveragedBps(tsRateSeries, 10000);
             const tsInputRateBps = Number(averagedTsInputRateBps || instantTsInputRateBps || 0);
             const tsRateSource = dominantRateSource(tsRateSeries, 10000) || transportRate.source || latestTsRate?.tsRateSource || "-";
+            const rateConfidence = transportRate.trusted ? "TRUSTED" : (transportRate.bps ? "FALLBACK" : "UNKNOWN");
+            const captureMethodRaw = String(selectedResult?.dvb?.arrival?.captureMethod || selectedResult?.dvb?.probeDiagnostics?.iatSniffer?.captureMethod || "").toLowerCase();
+            const captureMethod = captureMethodRaw === "tshark" || captureMethodRaw === "tcpdump"
+              ? `NIC-${captureMethodRaw}`
+              : (captureMethodRaw === "tsduck" ? "ANALYSER" : "UNAVAILABLE");
+            const policyProfile = selectedResult?.dvb?.monitoringPolicy?.profile || "-";
+            const schedulerCadence = selectedResult?.dvb?.probeDiagnostics?.scheduler?.cadence || null;
 
             return (
               <>
@@ -1363,6 +1370,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       <StatBox label="Video Bitrate" value={bpsFmt(videoStream?.bitrate)} color={toFiniteNumber(videoStream?.bitrate) ? C.purple : C.muted} />
                       <StatBox label="TS Input Source" value={String(tsRateSource).toUpperCase()} color={transportRate.trusted ? C.ok : C.warn} />
                       <StatBox label="Rate Hold" value={selectedResult?.dvb?.bitrateHeldFromPrevious ? "ON" : "OFF"} color={selectedResult?.dvb?.bitrateHeldFromPrevious ? C.info : C.muted} />
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                      <StatBox label="Rate Confidence" value={rateConfidence} color={rateConfidence === "TRUSTED" ? C.ok : rateConfidence === "FALLBACK" ? C.warn : C.muted} />
+                      <StatBox label="Probe Method" value={captureMethod} color={captureMethod.startsWith("NIC-") ? C.cyan : captureMethod === "ANALYSER" ? C.warn : C.muted} />
+                      <StatBox label="Policy" value={String(policyProfile).toUpperCase()} color={policyProfile !== "-" ? C.info : C.muted} />
+                      <StatBox
+                        label="Heavy Probe"
+                        value={schedulerCadence?.heavyProbeIntervalMs ? `${Math.round(Number(schedulerCadence.heavyProbeIntervalMs) / 1000)}s` : "-"}
+                        color={schedulerCadence?.heavyProbeIntervalMs ? C.text : C.muted}
+                      />
                     </div>
 
                     {/* Video profile */}

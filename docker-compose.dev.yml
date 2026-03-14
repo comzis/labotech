@@ -30,6 +30,11 @@ services:
       - ENCAPSULATOR_API_URL=http://127.0.0.1:4100
     command: npx nodemon src/index.js
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- \"http://$${API_HOST:-10.67.18.29}:$${API_PORT:-4000}/health\" >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
   labotech-encapsulator:
     build:
@@ -61,3 +66,8 @@ services:
       - ENCAPSULATOR_PORT=4100
     command: npx nodemon src/encapsulator-index.js
     restart: unless-stopped
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- \"http://127.0.0.1:4100/health\" >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3

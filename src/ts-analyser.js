@@ -7,6 +7,7 @@ const path = require('path');
 const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
 const DolbyEAdapter = require('./dolbye-adapter');
+const { getMonitoringPolicy } = require('./monitoring-policy');
 let _multicastConfig = null;
 
 function _envNumber(name, fallback) {
@@ -16,30 +17,9 @@ function _envNumber(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const HEALTH_THRESHOLDS = {
-  scoreWarning: _envNumber('TS_HEALTH_SCORE_WARNING', 65),
-  scoreOk: _envNumber('TS_HEALTH_SCORE_OK', 85),
-  lossWarnPct: _envNumber('TS_HEALTH_LOSS_WARN_PCT', 0.1),
-  lossCriticalPct: _envNumber('TS_HEALTH_LOSS_CRITICAL_PCT', 1.0),
-  jitterWarnMs: _envNumber('TS_HEALTH_JITTER_WARN_MS', 5),
-  jitterCriticalMs: _envNumber('TS_HEALTH_JITTER_CRITICAL_MS', 15),
-  iatP95WarnMs: _envNumber('TS_HEALTH_IAT_P95_WARN_MS', 50),
-  iatP95CriticalMs: _envNumber('TS_HEALTH_IAT_P95_CRITICAL_MS', 150),
-  tsDiscWarnCount: _envNumber('TS_HEALTH_TS_DISC_WARN_COUNT', 1),
-  tsDiscCriticalCount: _envNumber('TS_HEALTH_TS_DISC_CRITICAL_COUNT', 3),
-  ccWarnCount: _envNumber('TS_HEALTH_CC_WARN_COUNT', 1),
-  ccCriticalCount: _envNumber('TS_HEALTH_CC_CRITICAL_COUNT', 3),
-  dolbyEMissingPenalty: _envNumber('TS_HEALTH_DOLBYE_MISSING_PENALTY', 10),
-  dolbyEDecodeFailurePenalty: _envNumber('TS_HEALTH_DOLBYE_DECODE_FAIL_PENALTY', 18),
-};
-const SMPTE_2022_7_THRESHOLDS = {
-  minSamples: _envNumber('TS_20227_MIN_SAMPLES', 50),
-  maxLossPct: _envNumber('TS_20227_MAX_LOSS_PCT', 0.0),
-  maxGapEvents: _envNumber('TS_20227_MAX_GAP_EVENTS', 0),
-  maxDuplicateEvents: _envNumber('TS_20227_MAX_DUPLICATE_EVENTS', 0),
-  maxReorderedEvents: _envNumber('TS_20227_MAX_REORDER_EVENTS', 0),
-  requireNicCapture: String(process.env.TS_20227_REQUIRE_NIC_CAPTURE || 'true').toLowerCase() !== 'false',
-};
+function _getPolicySnapshot() {
+  return getMonitoringPolicy();
+}
 const AUDIO_LEVEL_HOLD_MS = Math.max(1000, Math.floor(_envNumber('AUDIO_LEVEL_HOLD_MS', 15000)));
 const LIVE_INPUT_HINTS = {
   // Conservative defaults avoid ENOMEM on constrained hosts.
@@ -60,9 +40,11 @@ function _getNicName() {
 class TSAnalyser extends EventEmitter {
   constructor(options = {}) {
     super();
+    const policy = _getPolicySnapshot();
     this.id = options.id || `analyser-${Date.now()}`;
     this.url = options.url;
-    this.interval = options.interval || 5000; // ms between continuous probes
+    this.interval = options.interval || policy?.probeCadence?.baseIntervalMs || 5000; // ms between continuous probes
+    this.monitoringPolicy = policy;
 
     this._timer = null;
     this._thumbnailTimer = null;
@@ -72,6 +54,8 @@ class TSAnalyser extends EventEmitter {
     this.lastResult = null;
     this._continuousProbeCount = 0;
     this._lastThumbnailAt = 0;
+    this._nextHeavyProbeAt = 0;
+    this._nextProbeAt = 0;
     this.nicName = options.nicName || _getNicName();
     this._iatSniffer = null;
   }
@@ -79,9 +63,7 @@ class TSAnalyser extends EventEmitter {
   probe(options = {}) {
     const isContinuous = Boolean(options.continuous);
     if (isContinuous) this._continuousProbeCount += 1;
-    // Heavy transport/tsduck probing is expensive on live multicast.
-    // In continuous mode, run it every 3rd cycle to keep UI responsive.
-    const runHeavyProbe = !isContinuous || (this._continuousProbeCount % 3 === 1);
+    const runHeavyProbe = this._shouldRunHeavyProbe(isContinuous, Date.now());
     // In continuous mode thumbnails are managed by a separate timer (startContinuous).
     // For one-shot probes only, capture synchronously here.
     const runThumbnailCapture = !isContinuous;
@@ -173,6 +155,7 @@ class TSAnalyser extends EventEmitter {
           result.dvb.smpte20227 = this._buildSmpte20227Assessment(result);
           result.dvb.probeDiagnostics = {
             ...(result.dvb.probeDiagnostics || {}),
+            scheduler: this._schedulerDiagnostics(runHeavyProbe),
             tsduck: {
               attempted: runHeavyProbe,
               available: tsduckProbe?.available === true,
@@ -321,6 +304,7 @@ class TSAnalyser extends EventEmitter {
             }
           }
           result = this._normalizeAndSortResult(result);
+          result.dvb.monitoringPolicy = this._monitoringPolicySummary();
           result = this._attachHealthAssessment(result);
           this.lastResult = result;
           this.emit('result', result);
@@ -1526,7 +1510,93 @@ class TSAnalyser extends EventEmitter {
     }
   }
 
+  _monitoringPolicySummary() {
+    const policy = this.monitoringPolicy || _getPolicySnapshot();
+    return {
+      profile: policy?.profile || 'broadcast-balanced-v1',
+      source: policy?.source || 'defaults',
+      probeCadence: policy?.probeCadence || null,
+      bitrate: policy?.bitrate || null,
+      loadedAt: policy?.loadedAt || null,
+    };
+  }
+
+  _cadencePolicy() {
+    const probeCadence = this.monitoringPolicy?.probeCadence || {};
+    const baseIntervalMs = Math.max(500, Number(probeCadence.baseIntervalMs || this.interval || 5000));
+    const heavyProbeEvery = Math.max(1, Math.floor(Number(probeCadence.heavyProbeEvery || 3)));
+    const heavyProbeIntervalMs = Math.max(
+      baseIntervalMs,
+      Number(probeCadence.heavyProbeIntervalMs || (baseIntervalMs * heavyProbeEvery))
+    );
+    const minLoopDelayMs = Math.max(150, Number(probeCadence.minLoopDelayMs || 250));
+    const startupJitterMaxMs = Math.max(0, Number(probeCadence.startupJitterMaxMs || 2000));
+    return {
+      baseIntervalMs,
+      heavyProbeEvery,
+      heavyProbeIntervalMs,
+      minLoopDelayMs,
+      startupJitterMaxMs,
+    };
+  }
+
+  _shouldRunHeavyProbe(isContinuous, nowTs) {
+    if (!isContinuous) return true;
+    const cadence = this._cadencePolicy();
+    if (!Number.isFinite(this._nextHeavyProbeAt) || this._nextHeavyProbeAt <= 0) {
+      this._nextHeavyProbeAt = nowTs;
+    }
+    if (nowTs >= this._nextHeavyProbeAt) {
+      this._nextHeavyProbeAt = nowTs + cadence.heavyProbeIntervalMs;
+      return true;
+    }
+    return false;
+  }
+
+  _schedulerDiagnostics(runHeavyProbe) {
+    const cadence = this._cadencePolicy();
+    return {
+      cadence,
+      runHeavyProbe,
+      nextHeavyProbeAt: Number.isFinite(this._nextHeavyProbeAt) ? this._nextHeavyProbeAt : null,
+      nextProbeAt: Number.isFinite(this._nextProbeAt) ? this._nextProbeAt : null,
+    };
+  }
+
+  _healthThresholds() {
+    return (this.monitoringPolicy && this.monitoringPolicy.health) || _getPolicySnapshot().health;
+  }
+
+  _smpteThresholds() {
+    return (this.monitoringPolicy && this.monitoringPolicy.smpte20227) || _getPolicySnapshot().smpte20227;
+  }
+
+  _computeBitrateStability(result) {
+    const currentBps = Number(result?.dvb?.bitrateBps || 0);
+    const previousBps = Number(this.lastResult?.dvb?.bitrateBps || 0);
+    if (!Number.isFinite(currentBps) || currentBps <= 0 || !Number.isFinite(previousBps) || previousBps <= 0) {
+      return { checked: false, deltaPct: null, state: 'insufficient_data' };
+    }
+    const deltaPct = Math.abs(((currentBps - previousBps) / previousBps) * 100);
+    const bitratePolicy = this.monitoringPolicy?.bitrate || {};
+    const warnDeltaPct = Number(bitratePolicy.warnDeltaPct || 3);
+    const criticalDeltaPct = Number(bitratePolicy.criticalDeltaPct || 6);
+    let state = 'stable';
+    if (deltaPct >= criticalDeltaPct) state = 'critical';
+    else if (deltaPct >= warnDeltaPct) state = 'warning';
+    return {
+      checked: true,
+      deltaPct: Number(deltaPct.toFixed(2)),
+      warnDeltaPct,
+      criticalDeltaPct,
+      currentBps,
+      previousBps,
+      state,
+    };
+  }
+
   _buildSmpte20227Assessment(result) {
+    const smpteThresholds = this._smpteThresholds();
     const arrival = result?.dvb?.arrival || null;
     const seq = arrival?.rtpSequence || null;
     const packetLossPct = Number(arrival?.packetLossPct);
@@ -1551,18 +1621,18 @@ class TSAnalyser extends EventEmitter {
         captureMethod: arrival?.captureMethod || null,
       },
       thresholds: {
-        minSamples: SMPTE_2022_7_THRESHOLDS.minSamples,
-        maxLossPct: SMPTE_2022_7_THRESHOLDS.maxLossPct,
-        maxGapEvents: SMPTE_2022_7_THRESHOLDS.maxGapEvents,
-        maxDuplicateEvents: SMPTE_2022_7_THRESHOLDS.maxDuplicateEvents,
-        maxReorderedEvents: SMPTE_2022_7_THRESHOLDS.maxReorderedEvents,
-        requireNicCapture: SMPTE_2022_7_THRESHOLDS.requireNicCapture,
+        minSamples: smpteThresholds.minSamples,
+        maxLossPct: smpteThresholds.maxLossPct,
+        maxGapEvents: smpteThresholds.maxGapEvents,
+        maxDuplicateEvents: smpteThresholds.maxDuplicateEvents,
+        maxReorderedEvents: smpteThresholds.maxReorderedEvents,
+        requireNicCapture: smpteThresholds.requireNicCapture,
       },
     };
 
     if (!isRtpInput) return assessment;
     if (!seq || !seq.observed) return assessment;
-    if (SMPTE_2022_7_THRESHOLDS.requireNicCapture && captureMethod !== 'tshark') {
+    if (smpteThresholds.requireNicCapture && captureMethod !== 'tshark') {
       return {
         ...assessment,
         checked: true,
@@ -1571,13 +1641,13 @@ class TSAnalyser extends EventEmitter {
         reason: 'NIC RTP-sequence capture not available (tshark required)',
       };
     }
-    if (!Number.isFinite(sampleCount) || sampleCount < SMPTE_2022_7_THRESHOLDS.minSamples) {
+    if (!Number.isFinite(sampleCount) || sampleCount < smpteThresholds.minSamples) {
       return {
         ...assessment,
         checked: true,
         compliant: null,
         state: 'insufficient_data',
-        reason: `Insufficient RTP sample window (${sampleCount || 0} < ${SMPTE_2022_7_THRESHOLDS.minSamples})`,
+        reason: `Insufficient RTP sample window (${sampleCount || 0} < ${smpteThresholds.minSamples})`,
       };
     }
 
@@ -1586,10 +1656,10 @@ class TSAnalyser extends EventEmitter {
     const duplicateEvents = Number(seq.duplicateEvents || 0);
     const reorderedEvents = Number(seq.reorderedEvents || 0);
     const compliant = (
-      loss <= SMPTE_2022_7_THRESHOLDS.maxLossPct &&
-      gapEvents <= SMPTE_2022_7_THRESHOLDS.maxGapEvents &&
-      duplicateEvents <= SMPTE_2022_7_THRESHOLDS.maxDuplicateEvents &&
-      reorderedEvents <= SMPTE_2022_7_THRESHOLDS.maxReorderedEvents
+      loss <= smpteThresholds.maxLossPct &&
+      gapEvents <= smpteThresholds.maxGapEvents &&
+      duplicateEvents <= smpteThresholds.maxDuplicateEvents &&
+      reorderedEvents <= smpteThresholds.maxReorderedEvents
     );
 
     return {
@@ -1616,6 +1686,7 @@ class TSAnalyser extends EventEmitter {
   }
 
   _buildHealthAssessment(result) {
+    const healthThresholds = this._healthThresholds();
     const dvb = result?.dvb || {};
     const audio = result?.audioLevels || null;
     const dolbyRequiredWhenDetected = String(process.env.DOLBYE_REQUIRED_WHEN_DETECTED || 'false').toLowerCase() === 'true';
@@ -1668,18 +1739,18 @@ class TSAnalyser extends EventEmitter {
     if (arrival) {
       const lossPct = Number(arrival.packetLossPct);
       if (Number.isFinite(lossPct)) {
-        if (lossPct >= HEALTH_THRESHOLDS.lossCriticalPct) pushPenalty(28, `Packet loss ${lossPct}% exceeds critical threshold`);
-        else if (lossPct > HEALTH_THRESHOLDS.lossWarnPct) pushPenalty(12, `Packet loss ${lossPct}% exceeds warning threshold`);
+        if (lossPct >= healthThresholds.lossCriticalPct) pushPenalty(28, `Packet loss ${lossPct}% exceeds critical threshold`);
+        else if (lossPct > healthThresholds.lossWarnPct) pushPenalty(12, `Packet loss ${lossPct}% exceeds warning threshold`);
       }
       const jitterMs = Number(arrival.jitterMs);
       if (Number.isFinite(jitterMs)) {
-        if (jitterMs >= HEALTH_THRESHOLDS.jitterCriticalMs) pushPenalty(20, `Jitter ${jitterMs} ms exceeds critical threshold`);
-        else if (jitterMs >= HEALTH_THRESHOLDS.jitterWarnMs) pushPenalty(8, `Jitter ${jitterMs} ms exceeds warning threshold`);
+        if (jitterMs >= healthThresholds.jitterCriticalMs) pushPenalty(20, `Jitter ${jitterMs} ms exceeds critical threshold`);
+        else if (jitterMs >= healthThresholds.jitterWarnMs) pushPenalty(8, `Jitter ${jitterMs} ms exceeds warning threshold`);
       }
       const iatP95 = Number(arrival?.iatMs?.p95);
       if (Number.isFinite(iatP95)) {
-        if (iatP95 >= HEALTH_THRESHOLDS.iatP95CriticalMs) pushPenalty(18, `IAT p95 ${iatP95} ms exceeds critical threshold`);
-        else if (iatP95 >= HEALTH_THRESHOLDS.iatP95WarnMs) pushPenalty(8, `IAT p95 ${iatP95} ms exceeds warning threshold`);
+        if (iatP95 >= healthThresholds.iatP95CriticalMs) pushPenalty(18, `IAT p95 ${iatP95} ms exceeds critical threshold`);
+        else if (iatP95 >= healthThresholds.iatP95WarnMs) pushPenalty(8, `IAT p95 ${iatP95} ms exceeds warning threshold`);
       }
       const captureMethod = String(arrival.captureMethod || '').toLowerCase();
       if (captureMethod !== 'tshark' && captureMethod !== 'tcpdump') {
@@ -1697,17 +1768,17 @@ class TSAnalyser extends EventEmitter {
 
     const tsDisc = dvb.timestampDiscontinuity || null;
     const tsDiscCount = Number(tsDisc?.count || 0);
-    if (Number.isFinite(tsDiscCount) && tsDiscCount >= HEALTH_THRESHOLDS.tsDiscCriticalCount) {
+    if (Number.isFinite(tsDiscCount) && tsDiscCount >= healthThresholds.tsDiscCriticalCount) {
       pushPenalty(24, `Timestamp discontinuities ${tsDiscCount} exceed critical threshold`);
-    } else if (Number.isFinite(tsDiscCount) && tsDiscCount >= HEALTH_THRESHOLDS.tsDiscWarnCount) {
+    } else if (Number.isFinite(tsDiscCount) && tsDiscCount >= healthThresholds.tsDiscWarnCount) {
       pushPenalty(10, `Timestamp discontinuities ${tsDiscCount} exceed warning threshold`);
     }
 
     const cc = dvb.continuityCounterErrors || null;
     const ccCount = Number(cc?.count || 0);
-    if (Number.isFinite(ccCount) && ccCount >= HEALTH_THRESHOLDS.ccCriticalCount) {
+    if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccCriticalCount) {
       pushPenalty(24, `CC errors ${ccCount} exceed critical threshold`);
-    } else if (Number.isFinite(ccCount) && ccCount >= HEALTH_THRESHOLDS.ccWarnCount) {
+    } else if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccWarnCount) {
       pushPenalty(10, `CC errors ${ccCount} exceed warning threshold`);
     }
 
@@ -1725,11 +1796,20 @@ class TSAnalyser extends EventEmitter {
     const dolbyAvailable = Boolean(dolbyE?.available);
     if (dolbyEnabled && dolbyDetected) {
       if (dolbyRequiredWhenDetected && !dolbyAvailable) {
-        pushPenalty(HEALTH_THRESHOLDS.dolbyEMissingPenalty, 'Dolby E detected but external decoder is unavailable');
+        pushPenalty(healthThresholds.dolbyEMissingPenalty, 'Dolby E detected but external decoder is unavailable');
       } else if (!dolbyDecoded) {
-        pushPenalty(HEALTH_THRESHOLDS.dolbyEDecodeFailurePenalty, 'Dolby E detected but decode failed');
+        pushPenalty(healthThresholds.dolbyEDecodeFailurePenalty, 'Dolby E detected but decode failed');
       } else {
         pushBonus(2);
+      }
+    }
+
+    const bitrateStability = this._computeBitrateStability(result);
+    if (bitrateStability.checked) {
+      if (bitrateStability.state === 'critical') {
+        pushPenalty(10, `Bitrate drift ${bitrateStability.deltaPct}% exceeds critical envelope`);
+      } else if (bitrateStability.state === 'warning') {
+        pushPenalty(4, `Bitrate drift ${bitrateStability.deltaPct}% exceeds warning envelope`);
       }
     }
 
@@ -1739,9 +1819,9 @@ class TSAnalyser extends EventEmitter {
       if (part.type === 'bonus') score += part.points;
     }
     score = Math.max(0, Math.min(100, Math.round(score)));
-    const severity = score >= HEALTH_THRESHOLDS.scoreOk
+    const severity = score >= healthThresholds.scoreOk
       ? 'ok'
-      : score >= HEALTH_THRESHOLDS.scoreWarning
+      : score >= healthThresholds.scoreWarning
         ? 'warning'
         : 'critical';
 
@@ -1764,21 +1844,22 @@ class TSAnalyser extends EventEmitter {
         detected: dolbyDetected,
         decoded: dolbyDecoded,
       },
+      bitrateStability,
       thresholds: {
-        scoreWarning: HEALTH_THRESHOLDS.scoreWarning,
-        scoreOk: HEALTH_THRESHOLDS.scoreOk,
-        lossWarnPct: HEALTH_THRESHOLDS.lossWarnPct,
-        lossCriticalPct: HEALTH_THRESHOLDS.lossCriticalPct,
-        jitterWarnMs: HEALTH_THRESHOLDS.jitterWarnMs,
-        jitterCriticalMs: HEALTH_THRESHOLDS.jitterCriticalMs,
-        iatP95WarnMs: HEALTH_THRESHOLDS.iatP95WarnMs,
-        iatP95CriticalMs: HEALTH_THRESHOLDS.iatP95CriticalMs,
-        tsDiscWarnCount: HEALTH_THRESHOLDS.tsDiscWarnCount,
-        tsDiscCriticalCount: HEALTH_THRESHOLDS.tsDiscCriticalCount,
-        ccWarnCount: HEALTH_THRESHOLDS.ccWarnCount,
-        ccCriticalCount: HEALTH_THRESHOLDS.ccCriticalCount,
-        dolbyEMissingPenalty: HEALTH_THRESHOLDS.dolbyEMissingPenalty,
-        dolbyEDecodeFailurePenalty: HEALTH_THRESHOLDS.dolbyEDecodeFailurePenalty,
+        scoreWarning: healthThresholds.scoreWarning,
+        scoreOk: healthThresholds.scoreOk,
+        lossWarnPct: healthThresholds.lossWarnPct,
+        lossCriticalPct: healthThresholds.lossCriticalPct,
+        jitterWarnMs: healthThresholds.jitterWarnMs,
+        jitterCriticalMs: healthThresholds.jitterCriticalMs,
+        iatP95WarnMs: healthThresholds.iatP95WarnMs,
+        iatP95CriticalMs: healthThresholds.iatP95CriticalMs,
+        tsDiscWarnCount: healthThresholds.tsDiscWarnCount,
+        tsDiscCriticalCount: healthThresholds.tsDiscCriticalCount,
+        ccWarnCount: healthThresholds.ccWarnCount,
+        ccCriticalCount: healthThresholds.ccCriticalCount,
+        dolbyEMissingPenalty: healthThresholds.dolbyEMissingPenalty,
+        dolbyEDecodeFailurePenalty: healthThresholds.dolbyEDecodeFailurePenalty,
       },
       assessedAt: Date.now(),
     };
@@ -1787,6 +1868,11 @@ class TSAnalyser extends EventEmitter {
   startContinuous() {
     if (this.isRunning) return;
     this.isRunning = true;
+    this.monitoringPolicy = _getPolicySnapshot();
+    const cadence = this._cadencePolicy();
+    this.interval = cadence.baseIntervalMs;
+    this._nextHeavyProbeAt = 0;
+    this._nextProbeAt = 0;
     if (!this._iatSniffer) {
       this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: this.nicName });
       // Safety net: absorb any 'error' events so Node.js doesn't throw them as
@@ -1825,11 +1911,12 @@ class TSAnalyser extends EventEmitter {
     const phaseHash = phaseSeed.split('').reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 0);
     // Stagger startup across analysers to avoid ffprobe/ffmpeg thundering herd
     // when many decoders are started in batch.
-    const probeStartJitterMs = Math.min(
-      Math.max(200, Math.floor(this.interval * 0.6)),
-      2000
-    ) > 0
-      ? (phaseHash % Math.min(Math.max(200, Math.floor(this.interval * 0.6)), 2000))
+    const jitterWindowMs = Math.min(
+      Math.max(200, Math.floor(cadence.baseIntervalMs * 0.6)),
+      cadence.startupJitterMaxMs
+    );
+    const probeStartJitterMs = jitterWindowMs > 0
+      ? (phaseHash % jitterWindowMs)
       : 0;
     const thumbStartJitterMs = thumbIntervalMs > 0 ? (phaseHash % Math.min(thumbIntervalMs, 1500)) : 0;
 
@@ -1838,20 +1925,23 @@ class TSAnalyser extends EventEmitter {
     this._thumbnailTimer = setTimeout(runThumbnail, thumbStartJitterMs);
 
     const run = async () => {
-      const startedAt = Date.now();
+      const scheduledAt = Number.isFinite(this._nextProbeAt) && this._nextProbeAt > 0 ? this._nextProbeAt : Date.now();
       try {
         await this.probe({ continuous: true });
       } catch (err) {
         this.emit('error', err);
       }
       if (this.isRunning) {
-        const elapsed = Date.now() - startedAt;
-        const delay = Math.max(250, this.interval - elapsed);
+        const now = Date.now();
+        const targetNextAt = scheduledAt + cadence.baseIntervalMs;
+        this._nextProbeAt = Math.max(targetNextAt, now + cadence.minLoopDelayMs);
+        const delay = Math.max(cadence.minLoopDelayMs, this._nextProbeAt - now);
         this._timer = setTimeout(run, delay);
       }
     };
 
     if (this._timer) clearTimeout(this._timer);
+    this._nextProbeAt = Date.now() + probeStartJitterMs;
     this._timer = setTimeout(run, probeStartJitterMs);
     this.emit('started', { id: this.id });
     return this;
@@ -1859,6 +1949,8 @@ class TSAnalyser extends EventEmitter {
 
   stop() {
     this.isRunning = false;
+    this._nextProbeAt = 0;
+    this._nextHeavyProbeAt = 0;
     if (this._timer) {
       clearTimeout(this._timer);
       this._timer = null;

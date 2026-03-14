@@ -27,6 +27,47 @@ describe('TSAnalyser', () => {
     });
   });
 
+  describe('phase3 scheduler cadence', () => {
+    test('runs heavy probe immediately then by heavy interval', () => {
+      analyser.monitoringPolicy = {
+        profile: 'test',
+        probeCadence: {
+          baseIntervalMs: 1000,
+          heavyProbeEvery: 3,
+          heavyProbeIntervalMs: 3000,
+          minLoopDelayMs: 200,
+          startupJitterMaxMs: 1000,
+        },
+      };
+      analyser._nextHeavyProbeAt = 0;
+      expect(analyser._shouldRunHeavyProbe(true, 1000)).toBe(true);
+      expect(analyser._shouldRunHeavyProbe(true, 2000)).toBe(false);
+      expect(analyser._shouldRunHeavyProbe(true, 3999)).toBe(false);
+      expect(analyser._shouldRunHeavyProbe(true, 4000)).toBe(true);
+    });
+
+    test('exposes cadence diagnostics in scheduler payload', () => {
+      analyser.monitoringPolicy = {
+        profile: 'test',
+        probeCadence: {
+          baseIntervalMs: 2000,
+          heavyProbeEvery: 2,
+          heavyProbeIntervalMs: 4000,
+          minLoopDelayMs: 300,
+          startupJitterMaxMs: 1200,
+        },
+      };
+      analyser._nextHeavyProbeAt = 12345;
+      analyser._nextProbeAt = 12555;
+      const d = analyser._schedulerDiagnostics(false);
+      expect(d.runHeavyProbe).toBe(false);
+      expect(d.nextHeavyProbeAt).toBe(12345);
+      expect(d.nextProbeAt).toBe(12555);
+      expect(d.cadence.baseIntervalMs).toBe(2000);
+      expect(d.cadence.heavyProbeIntervalMs).toBe(4000);
+    });
+  });
+
   describe('parseStructure', () => {
     const mockRaw = {
       programs: [

@@ -35,6 +35,14 @@ function cpuColor(pct) {
   return '#00dd55';
 }
 
+function preflightColor(state) {
+  const s = String(state || '').toLowerCase();
+  if (s === 'ready' || s === 'ok') return '#00f06f';
+  if (s === 'degraded' || s === 'warning') return '#ffd84d';
+  if (s === 'missing_permissions' || s === 'critical' || s === 'unavailable') return '#ff4d5f';
+  return '#7f99bf';
+}
+
 function formatUptime(seconds) {
   const s = Number(seconds);
   if (!Number.isFinite(s) || s < 0) return 'n/a';
@@ -197,7 +205,7 @@ function LandingAuth({ onLogin, punchline }) {
               }}
             />
           ))}
-          <span className="ml-auto text-[8px] uppercase tracking-[0.16em] text-gray-500">Rack Interface MkII</span>
+          <span className="ml-auto text-[8px] uppercase tracking-[0.16em] text-gray-500">Rack Interface MkIII</span>
           <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>{RELEASE_VERSION}</span>
         </div>
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1f27, #3a4656 20%, #3a4656 80%, #1a1f27)' }} />
@@ -457,6 +465,8 @@ export default function App() {
   const [decoderSelectionRequest, setDecoderSelectionRequest] = useState(null);
   const { connected, lastMessage } = useWebSocket();
   const [telemetry, setTelemetry] = useState(null);
+  const [preflight, setPreflight] = useState(null);
+  const [monitoringPolicy, setMonitoringPolicy] = useState(null);
   const [serverUptimeSec, setServerUptimeSec] = useState(null);
   const [uptimeSampledAtMs, setUptimeSampledAtMs] = useState(null);
   const [uptimeNowMs, setUptimeNowMs] = useState(Date.now());
@@ -628,6 +638,8 @@ export default function App() {
         const h = await getHealth();
         if (mounted) {
           setTelemetry(h.telemetry || null);
+          setPreflight(h.tooling || null);
+          setMonitoringPolicy(h.monitoringPolicy || null);
           setServerUptimeSec(Number.isFinite(Number(h?.uptime)) ? Number(h.uptime) : null);
           setUptimeSampledAtMs(Date.now());
         }
@@ -796,6 +808,31 @@ export default function App() {
             <span className="text-[9px] font-bold" style={{ color: '#cfe2ff' }}>{RELEASE_VERSION}</span>
             <span className="text-[8px]" style={{ color: '#6f86aa' }}>Uptime {uptimeDisplay}</span>
           </div>
+
+          {(preflight || monitoringPolicy) && (
+            <div
+              className="hidden xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
+              style={{
+                background: '#10151d',
+                border: '1px solid #2a3342',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+              }}
+              title={preflight?.nicCapture?.reason || 'Tooling preflight'}
+            >
+              <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Probe</span>
+              <span className="text-[9px] font-bold" style={{ color: preflightColor(preflight?.status) }}>
+                {String(preflight?.status || 'pending').toUpperCase()}
+              </span>
+              <span className="text-[8px]" style={{ color: '#6f86aa' }}>
+                {preflight?.nicCapture?.tool || 'no-capture-tool'}
+              </span>
+              <span style={{ color: '#222' }}>|</span>
+              <span className="text-[8px] uppercase tracking-[0.12em]" style={{ color: '#7f99bf' }}>Policy</span>
+              <span className="text-[9px] font-bold" style={{ color: '#9ed0ff' }}>
+                {monitoringPolicy?.profile || 'default'}
+              </span>
+            </div>
+          )}
 
           {/* ── Connection status LED ───────────────────────────────────── */}
           <div
