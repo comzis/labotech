@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Monitor, Plus } from 'lucide-react';
+import { Monitor, Plus, Pencil } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
@@ -8,7 +8,7 @@ import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'MCR-WALL-A';
-const DEFAULT_ENGINEER_MODE_LABEL = 'Engineer Mode';
+const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
 const MULTIVIEW_REFRESH_MS = 12000;
 const MULTIVIEW_CLOCK_TICK_MS = 3000;
 
@@ -566,27 +566,40 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                   }}
                   maxLength={32}
                   autoFocus
-                  className="text-xs px-2 py-1 rounded border border-neon-cyan/50 text-neon-cyan bg-black/30 min-w-[130px]"
+                  className="text-xs px-2 py-1 rounded border border-neon-cyan/50 text-gray-200 bg-black/40 min-w-[96px]"
                   title="Enter to save, Esc to cancel"
                 />
               </div>
             ) : (
-              <button
-                onClick={() => setEngineerMode((v) => !v)}
-                onDoubleClick={beginEngineerModeLabelEdit}
-                className={`text-xs px-2 py-1 rounded border ${
-                  engineerMode
-                    ? 'border-neon-cyan/50 text-neon-cyan bg-neon-cyan/10'
-                    : 'border-white/10 text-gray-400 bg-black/20'
-                }`}
-                title="Click to toggle. Double-click label to edit."
-              >
-                {engineerModeLabel}: {engineerMode ? 'ON' : 'OFF'}
-              </button>
+              <div className="inline-flex items-center gap-1">
+                <button
+                  onClick={() => setEngineerMode((v) => !v)}
+                  onDoubleClick={beginEngineerModeLabelEdit}
+                  className={`text-xs px-2 py-1 rounded border inline-flex items-center gap-1 ${
+                    engineerMode
+                      ? 'border-neon-cyan/50 bg-neon-cyan/10'
+                      : 'border-white/10 bg-black/20'
+                  }`}
+                  title="Click to toggle mode. Double-click text to edit label."
+                >
+                  <span className="text-gray-400">{engineerModeLabel}</span>
+                  <span className="text-gray-500">:</span>
+                  <span className={engineerMode ? 'text-neon-cyan' : 'text-gray-400'}>
+                    {engineerMode ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+                <button
+                  onClick={beginEngineerModeLabelEdit}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded border border-white/15 text-gray-300 bg-black/20 hover:bg-black/35"
+                  title="Edit mode label"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </div>
             )}
             <button
               onClick={() => setOpenPanelCommission((v) => !v)}
-              className="inline-flex items-center gap-1 text-xs bg-neon-purple/20 hover:bg-neon-purple/30 text-neon-purple border border-neon-purple/40 px-2 py-1 rounded"
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] rack-button-glow bg-fuchsia-500/25 hover:bg-fuchsia-500/35 text-fuchsia-100 border border-fuchsia-300/65 shadow-[0_0_12px_rgba(217,70,239,0.35)] px-2.5 py-1 rounded"
             >
               <Plus className="w-3 h-3" />
               Panel

@@ -8,6 +8,9 @@ alwaysApply: true
 - For every new release, create a **new unique git tag**. Never reuse an existing tag for different code.
 - Release tags must follow semantic versioning format: `MAJOR.MINOR.PATCH` (for example: `3.4.5`).
 - Every release change must update the GUI-visible release identifier so operators can confirm deployed version from the interface.
+- Before **every commit**, verify and update release metadata when needed so the UI banner does not stay on an old value (for example `v2.0.0`).
+- The value shown in Rack Interface/Release UI labels must match the intended release/tag for that commit.
+- Use `LABOTECH_RELEASE` (mapped to `VITE_RELEASE_VERSION`) as the authoritative GUI release value during build/deploy.
 - If version/release work is requested and no new tag is specified, prompt for the next semantic version tag before finalizing.
 - Keep backend/frontend release metadata aligned so API/UI report the same release value.
 - For any new development, preserve existing working logic and avoid regressions.
