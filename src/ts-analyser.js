@@ -998,7 +998,7 @@ class TSAnalyser extends EventEmitter {
       // tsduck bitrate onto existing streams that ffprobe left with null bitrate.
       const tsduckBitrateByPid = new Map();
       for (const row of tsduckData.pids) {
-        if (row && row.pid != null && Number(row.bitrate) > 0) {
+        if (row && row.pid != null && row.pid > 0 && Number(row.bitrate) > 0) {
           tsduckBitrateByPid.set(row.pid, Number(row.bitrate));
         }
       }
@@ -1022,7 +1022,7 @@ class TSAnalyser extends EventEmitter {
 
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
-      const available = tsduckData.pids.filter((r) => r && r.pid != null && !existingPidSet.has(r.pid));
+      const available = tsduckData.pids.filter((r) => r && r.pid != null && r.pid > 0 && !existingPidSet.has(r.pid));
       // Do not "guess-assign" tsduck PID rows onto PID-less streams by codec type.
       // That heuristic can mis-bind video/audio between cycles under unstable probes.
       // Keep existing rows untouched and append only verified PID rows as orphans.
@@ -1452,7 +1452,7 @@ class TSAnalyser extends EventEmitter {
     const orphanStreams = [...(result.orphanStreams || [])];
     const allExisting = programs.flatMap((p) => p.streams).concat(orphanStreams);
     const used = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
-    const candidates = fallbackRows.filter((r) => r && r.pid != null && !used.has(r.pid));
+    const candidates = fallbackRows.filter((r) => r && r.pid != null && r.pid > 0 && !used.has(r.pid));
     // Keep fallback rows non-destructive: append verified PID rows instead of
     // rebinding unknown streams with codec-based heuristics.
     for (const row of candidates) {
