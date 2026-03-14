@@ -283,6 +283,27 @@ sudo systemctl restart labotech
 - Cursor mode:
   - `Freeze Cursor` to lock current UTC inspection point
 
+### Timeline retention policy (recommended)
+
+`Stream View` should use a **26-hour retention horizon** for UI hydration and API backlog fetch.
+
+Why `26h`:
+
+- The largest operator window is `24h`.
+- `+2h` safety buffer covers clock skew, refresh delays, and brief service interruptions.
+
+Expected behavior:
+
+- Browser state restore keeps only events newer than `now - 26h`.
+- Event API hydration uses `GET /api/events?since=<now-26h>` to avoid loading older ring entries.
+- Real-time WebSocket flow is unchanged.
+- A stream is considered running/stopped by lifecycle events (`runtime_started` / `runtime_stopped`), **not** by retention age alone.
+
+Operational note:
+
+- `26h` is a memory horizon for timeline evidence, not a forced "stream still running" duration.
+- If stale context is suspected during troubleshooting, clear browser storage or run `DELETE /api/events` in controlled maintenance windows.
+
 ### Interpreting IAT/Jitter panels
 
 - IAT/jitter/loss values come from `dvb.arrival`.
