@@ -708,10 +708,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     } catch (err) {
       const msg = err?.message || "Failed to start ETR monitor.";
       if (String(msg).toLowerCase().includes("already exists")) {
-        await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
-        await etr.refreshActives();
-        setEtrActionNote({ type: "info", text: `ETR already existed for ${selectedId}. Config updated.` });
-        return;
+        try {
+          await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
+          await etr.refreshActives();
+          setEtrActionNote({ type: "info", text: `ETR already existed for ${selectedId}. Config updated.` });
+          return;
+        } catch (cfgErr) {
+          setEtrActionNote({ type: "err", text: cfgErr?.message || "ETR exists but config update failed." });
+          return;
+        }
       }
       setEtrActionNote({ type: "err", text: msg });
     } finally { setBusy(false); }
@@ -725,9 +730,25 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     if (!selectedEtrExists || busy) return;
     setBusy(true);
     try {
-      await etr.stop(selectedEtrMonitorId);
+      let stopped = false;
+      const candidates = [selectedEtrMonitorId, selectedId].filter(Boolean);
+      for (const id of candidates) {
+        try {
+          await etr.stop(id);
+          stopped = true;
+          break;
+        } catch (_) {
+          // try next id form for compatibility with older monitor naming
+        }
+      }
+      if (!stopped) {
+        throw new Error("Unable to stop ETR monitor (id mismatch or monitor not found).");
+      }
       await etr.refreshActives();
       setEtrActionNote({ type: "ok", text: `ETR stopped for ${selectedId}.` });
+    } catch (err) {
+      setEtrActionNote({ type: "err", text: err?.message || "Failed to stop ETR monitor." });
+      try { await etr.refreshActives(); } catch (_) {}
     } finally { setBusy(false); }
   };
 
