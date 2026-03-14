@@ -7,12 +7,15 @@ const http = require('http');
 const WebSocket = require('ws');
 const path = require('path');
 const os = require('os');
+const pkg = require('../package.json');
 
 const persistence = require('./state-persistence');
 const eventLog = require('./event-log');
 
 const API_HOST = process.env.API_HOST || '10.67.18.29';
 const API_PORT = parseInt(process.env.API_PORT, 10) || 4000;
+const APP_VERSION = pkg.version || '0.0.0';
+const RELEASE_VERSION = process.env.LABOTECH_RELEASE || `v${APP_VERSION}`;
 
 // Shared state maps
 const streams = new Map();       // id → SRTEncoder
@@ -58,6 +61,8 @@ function getHealthPayload() {
 
   return {
     status: 'ok',
+    version: APP_VERSION,
+    release: RELEASE_VERSION,
     uptime: process.uptime(),
     streams: streams.size + transcoders.size,
     telemetry: {

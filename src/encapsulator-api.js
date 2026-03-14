@@ -8,9 +8,12 @@ const WebSocket = require('ws');
 const os = require('os');
 const { spawn } = require('child_process');
 const SRTEncapsulatorChannel = require('./encapsulator-channel');
+const pkg = require('../package.json');
 
 const ENCAPSULATOR_HOST = process.env.ENCAPSULATOR_HOST || '127.0.0.1';
 const ENCAPSULATOR_PORT = parseInt(process.env.ENCAPSULATOR_PORT, 10) || 4100;
+const APP_VERSION = pkg.version || '0.0.0';
+const RELEASE_VERSION = process.env.LABOTECH_RELEASE || `v${APP_VERSION}`;
 const GUARDRAIL_ENABLED = String(process.env.ENCAP_CPU_GUARDRAIL_ENABLED || 'true').toLowerCase() !== 'false';
 const GUARDRAIL_WARN_CPU_PCT = Number.isFinite(Number(process.env.ENCAP_CPU_WARN_PCT))
   ? Number(process.env.ENCAP_CPU_WARN_PCT)
@@ -134,6 +137,8 @@ function createHealthPayload(capability) {
   return {
     status: capability.libsrt ? 'ok' : 'degraded',
     service: 'labotech-encapsulator',
+    version: APP_VERSION,
+    release: RELEASE_VERSION,
     uptime: process.uptime(),
     channels: channels.size,
     host: ENCAPSULATOR_HOST,
