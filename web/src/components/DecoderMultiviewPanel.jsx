@@ -484,6 +484,20 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   }, [panels, activePanelId]);
 
   useEffect(() => {
+    // Runtime migration: force legacy default labels to BES even when state is already loaded.
+    const hasLegacyName = panels.some((p) => {
+      const n = normalizePanelName(p?.name || '');
+      return n === 'MCR-WALL-A' || n === 'WALL-A';
+    });
+    if (!hasLegacyName) return;
+    setPanels((prev) => prev.map((p) => {
+      const n = normalizePanelName(p?.name || '');
+      if (n === 'MCR-WALL-A' || n === 'WALL-A') return { ...p, name: DEFAULT_PANEL_NAME };
+      return p;
+    }));
+  }, [panels]);
+
+  useEffect(() => {
     setPanels((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
       const assignedCount = prev.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
@@ -608,7 +622,13 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             )}
             <button
               onClick={() => setOpenPanelCommission((v) => !v)}
-              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] rack-button-glow bg-fuchsia-500/25 hover:bg-fuchsia-500/35 text-fuchsia-100 border border-fuchsia-300/65 shadow-[0_0_12px_rgba(217,70,239,0.35)] px-2.5 py-1 rounded"
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.1em] px-3 py-1.5 rounded border transition-all duration-150"
+              style={{
+                color: '#fff6c7',
+                borderColor: 'rgba(250, 204, 21, 0.95)',
+                background: 'linear-gradient(180deg, rgba(250,204,21,0.42), rgba(217,119,6,0.38))',
+                boxShadow: '0 0 18px rgba(250,204,21,0.55), inset 0 1px 0 rgba(255,255,255,0.25)',
+              }}
             >
               <Plus className="w-3 h-3" />
               Panel
@@ -673,7 +693,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                 label="Panel Callsign"
                 value={newPanelName}
                 onChange={(v) => setNewPanelName(v)}
-                placeholder="e.g. WALL-A"
+                placeholder="e.g. BES"
               />
               <button
                 onClick={createPanel}
