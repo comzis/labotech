@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Activity } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import Sparkline from './Sparkline';
-import { getEvents, getAnalysers } from '../api';
+import { getEvents, getAnalysers, getETR290Monitors } from '../api';
 import { C } from './BroadcastUI';
 
 const STREAMVIEW_STATE_KEY = 'labotech:streamview:state:v2';
@@ -779,9 +779,21 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     let mounted = true;
     const seedFromActiveAnalysers = async () => {
       try {
-        const list = await getAnalysers();
-        if (!mounted || !Array.isArray(list)) return;
-        const synthetic = list
+        const [list, etrList] = await Promise.all([
+          getAnalysers().catch(() => []),
+          getETR290Monitors().catch(() => []),
+        ]);
+        if (!mounted) return;
+        const analysers = Array.isArray(list) ? list : [];
+        const etrs = Array.isArray(etrList) ? etrList : [];
+
+        // Normalised IDs of everything currently alive on the server.
+        const serverActiveIds = new Set([
+          ...analysers.filter((a) => a?.isRunning && a.id).map((a) => normalizeLaneId(a.id)),
+          ...etrs.filter((m) => m?.id).map((m) => normalizeLaneId(m.id)),
+        ]);
+
+        const synthetic = analysers
           .filter((a) => a && a.isRunning && a.id)
           .map((a) => {
             const laneId = normalizeLaneId(a.id);
@@ -798,7 +810,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        const heartbeat = list
+        const heartbeat = analysers
           .filter((a) => a && a.isRunning && a.id)
           .map((a) => {
             const laneId = normalizeLaneId(a.id);
@@ -815,13 +827,44 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        const merged = [...synthetic, ...heartbeat];
-        if (merged.length === 0) return;
+
         setEvents((prev) => {
-          // Only inject when the lane has no events yet in local timeline state.
+          // Only inject bootstrap for lanes not yet present.
           const seen = new Set(prev.map((e) => e.id));
           const missing = synthetic.filter((e) => !seen.has(e.id));
-          return mergeTimelineEvents(prev, [...missing, ...heartbeat]);
+
+          // Tombstone: any lane with an explicit start but no stop that is NOT
+          // in the current active server list gets a synthetic runtime_stopped.
+          // This recovers from server restarts where analyse_stopped was never
+          // broadcast — preventing ghost lanes accumulating in localStorage.
+          const tombstones = [];
+          for (const id of seen) {
+            if (serverActiveIds.has(id)) continue;
+            const laneEvts = prev.filter((e) => e.id === id).sort((a, b) => a.ts - b.ts);
+            const lastExplicit = [...laneEvts].reverse().find(
+              (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
+            );
+            if (!lastExplicit) continue;
+            const lastStop = laneEvts.filter(
+              (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicit.ts
+            ).pop();
+            if (lastStop) continue;
+            // Set tombstone at the last known event time so the lane closes at
+            // the point we last heard from it, not at an arbitrary future time.
+            const lastEvt = laneEvts[laneEvts.length - 1];
+            tombstones.push({
+              key: `tombstone-${id}-${lastExplicit.ts}`,
+              ts: (lastEvt?.ts || lastExplicit.ts) + 1000,
+              id,
+              rawId: id,
+              category: 'runtime_stopped',
+              severity: 'unknown',
+              title: 'Session ended',
+              description: `${id} — not in active server list`,
+            });
+          }
+
+          return mergeTimelineEvents(prev, [...missing, ...heartbeat, ...tombstones]);
         });
       } catch (_) {}
     };
@@ -867,27 +910,23 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return m;
   }, [events]);
 
-  // laneIds: union of in-window lanes AND lanes that have pre-window events
-  // but no explicit runtime_stopped after the last explicit start (still running).
+  // laneIds: union of in-window lanes AND lanes that have pre-window EXPLICIT
+  // starts but no matching stop (stream running longer than the current window).
+  // Bootstrap-only starts are intentionally excluded — they are seeding hints
+  // for the current session, not historical run markers. Tombstone injection in
+  // seedFromActiveAnalysers handles lanes whose server process has ended.
   const laneIds = useMemo(() => {
     const idSet = new Set(timelineEvents.map((e) => e.id));
-    // Add lanes that have history before the window and appear to still be running.
     for (const [id, evts] of Object.entries(fullLaneMap)) {
       if (idSet.has(id)) continue;
       const sorted = [...evts].sort((a, b) => a.ts - b.ts);
-      // Prefer explicit start; fall back to bootstrap start (analyser seeded on page load)
       const lastExplicitStart = [...sorted].reverse().find(
         (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
       );
-      const lastBootstrapStart = [...sorted].reverse().find(
-        (e) => e.category === 'runtime_started' && e?.evidence?.bootstrap
-      );
-      const lastStart = lastExplicitStart || lastBootstrapStart;
-      if (!lastStart) continue;
+      if (!lastExplicitStart) continue;
       const lastStop = sorted.filter(
-        (e) => e.category === 'runtime_stopped' && e.ts >= lastStart.ts
+        (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStart.ts
       ).pop();
-      // No stop after last known start → lane is still running, show it
       if (!lastStop) idSet.add(id);
     }
     return Array.from(idSet).sort();
