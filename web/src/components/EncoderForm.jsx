@@ -124,7 +124,7 @@ export default function EncoderForm({ onStarted }) {
             whileHover={{ scale: 1.02 }}
             whileTap={{ scale: 0.98 }}
             onClick={() => setOpen(true)}
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-[0.1em] transition-all"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-[0.1em] transition-all rack-button-glow"
             style={{
               border: `1px solid ${C.ok}`,
               background: `${C.ok}14`,

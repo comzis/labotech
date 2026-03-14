@@ -68,9 +68,40 @@ const RACK_LOBBY_PUNCHLINES = [
   'blame cables only after coffee',
   'if in doubt, inspect CC',
   'first fix timing, then feelings',
+  'engineering starts with clean timing',
+  'operations win with calm dashboards',
+  'teamwork is the shortest path to green',
+  'SLA is a promise measured every minute',
+  'measure once, alert once, recover fast',
+  'good handovers save great broadcasts',
+  'if alarms are loud, make runbooks louder',
+  'stable clocks build stable trust',
+  'packets do not lie, logs do not guess',
+  'great ops is boring for the right reasons',
+  'test failover before failover tests you',
+  'clear ownership beats heroic firefighting',
+  'latency is a budget, spend it wisely',
+  'every dropped packet is a customer story',
+  'watch trends, not just incidents',
+  'quality starts at ingest and ends at viewer',
+  'no blame, just better telemetry',
+  'resilience is a team sport',
+  'SLA lives in every shift handoff',
+  'document today to save tomorrow',
+  'fast recovery beats perfect prediction',
+  'precision in config prevents chaos on air',
+  'one dashboard, one truth, one team',
+  'alerts should guide, not surprise',
+  'broadcast confidence is engineered daily',
+  'consistency scales better than urgency',
+  'when in doubt, verify on wire',
+  'calm operations are built, not wished',
+  'team first, signal first, viewer first',
+  'better RCA means fewer 3am calls',
+  'strong SLAs are earned in quiet hours',
 ];
 
-function LandingAuth({ onLogin }) {
+function LandingAuth({ onLogin, punchline }) {
   const [showForm, setShowForm] = useState(false);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -208,7 +239,7 @@ function LandingAuth({ onLogin }) {
                 </div>
                 <button
                   onClick={() => setShowForm(true)}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-sm text-[10px] uppercase tracking-[0.14em] font-bold border"
+                  className="inline-flex items-center gap-2 px-4 py-2 rounded-sm text-[10px] uppercase tracking-[0.14em] font-bold border rack-button-glow"
                   style={{
                     color: '#d4e5ff',
                     borderColor: '#3a5a86',
@@ -278,7 +309,7 @@ function LandingAuth({ onLogin }) {
             className="mt-auto rounded-sm border px-4 py-3 text-[10px] uppercase tracking-[0.12em]"
             style={{ borderColor: '#2a3448', background: '#0a0f17', color: '#7fa1d8', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)' }}
           >
-            Punchline: Keep calm, check PCR, and blame the cable only after coffee.
+            Punchline: {punchline || RACK_LOBBY_PUNCHLINES[0]}.
           </div>
         </div>
       </div>
@@ -611,7 +642,7 @@ export default function App() {
   };
 
   if (!authUser || !role) {
-    return <LandingAuth onLogin={handleLogin} />;
+    return <LandingAuth onLogin={handleLogin} punchline={RACK_LOBBY_PUNCHLINES[lobbyLineIdx]} />;
   }
 
   return (
