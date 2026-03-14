@@ -31,6 +31,7 @@ const EVENT_BLOCK_DURATION_MS = {
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
   runtime_started: 22000,
+  runtime_heartbeat: 5000,
   runtime_stopped: 14000,
   failover: 16000,
   analyse_result: 7000,
@@ -40,11 +41,12 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_alarm: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '88' },
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
-  runtime_error: { alpha: 'f2', borderAlpha: 'd6', glowAlpha: '99' },
+  runtime_error: { alpha: 'ff', borderAlpha: 'ea', glowAlpha: 'cc' },
   runtime_started: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '99' },
+  runtime_heartbeat: { alpha: '94', borderAlpha: '84', glowAlpha: '3c' },
   runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
-  analyse_result: { alpha: 'b8', borderAlpha: '99', glowAlpha: '55' },
+  analyse_result: { alpha: 'cf', borderAlpha: 'b2', glowAlpha: '6e' },
   etr290_status: { alpha: '94', borderAlpha: '82', glowAlpha: '44' },
 };
 const LEGEND_TYPE_ITEMS = [
@@ -401,9 +403,9 @@ function toEvent(msg) {
 }
 
 function colorForSeverity(severity) {
-  if (severity === 'critical') return '#ff6b6b';
-  if (severity === 'warning') return '#ffe680';
-  if (severity === 'ok') return '#00dd55';
+  if (severity === 'critical') return '#ff4d5f';
+  if (severity === 'warning') return '#ffd84d';
+  if (severity === 'ok') return '#00f06f';
   return '#00ddff';
 }
 
@@ -425,23 +427,30 @@ function laneColorForEvent(event) {
   if (!event) return '#ffffff26';
   const sev = laneStateSeverity(event);
   if (!sev) return '#44556666';
-  if (sev === 'critical') return '#ff6b6baa';
-  if (sev === 'warning') return '#ffe680aa';
-  if (sev === 'ok') return '#00dd5566';
+  if (sev === 'critical') return '#ff4d5fcc';
+  if (sev === 'warning') return '#ffd84dcc';
+  if (sev === 'ok') return '#00f06fb8';
   return '#44556666';
 }
 
 function colorForLaneSeverity(severity) {
-  if (severity === 'critical') return '#ff6b6b';
-  if (severity === 'warning') return '#ffe680';
-  if (severity === 'ok') return '#00dd55';
+  if (severity === 'critical') return '#ff4d5f';
+  if (severity === 'warning') return '#ffd84d';
+  if (severity === 'ok') return '#00f06f';
   return '#445566'; // unknown / no data — neutral blue-gray
+}
+
+function laneTintForSeverity(severity) {
+  if (severity === 'critical') return `${colorForLaneSeverity(severity)}c4`;
+  if (severity === 'warning') return `${colorForLaneSeverity(severity)}bc`;
+  if (severity === 'ok') return `${colorForLaneSeverity(severity)}b8`;
+  return '#44556644';
 }
 
 function buildLaneGradient(events, timeStart, windowMs) {
   // No events at all → unknown (gray), never green by default
   if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) {
-    return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
+    return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
   const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
@@ -452,12 +461,13 @@ function buildLaneGradient(events, timeStart, windowMs) {
   if (!hasEtrStateEvents) {
     const activityEvents = sorted.filter((e) =>
       e.category === 'runtime_started' ||
+      e.category === 'runtime_heartbeat' ||
       e.category === 'analyse_result'
     );
     const nonBootstrapActivityEvents = activityEvents.filter((e) => !e?.evidence?.bootstrap);
     const activitySource = nonBootstrapActivityEvents.length > 0 ? nonBootstrapActivityEvents : activityEvents;
     if (activitySource.length === 0) {
-      return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
+      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
     const firstActiveTs = activitySource[0].ts;
     const stopAfterActive = sorted.find((e) =>
@@ -473,12 +483,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
     const stopX = Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100));
     if (stopX <= startX) {
-      return 'linear-gradient(90deg, #44556622 0%, #44556622 100%)';
+      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
     if (stopX == null) {
-      return `linear-gradient(90deg, #44556622 0%, #44556622 ${startX}%, #00dd5555 ${startX}%, #00dd5555 100%)`;
+      return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00f06fb8 ${startX}%, #00f06fb8 100%)`;
     }
-    return `linear-gradient(90deg, #44556622 0%, #44556622 ${startX}%, #00dd5555 ${startX}%, #00dd5555 ${stopX}%, #44556622 ${stopX}%, #44556622 100%)`;
+    return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00f06fb8 ${startX}%, #00f06fb8 ${stopX}%, #44556644 ${stopX}%, #44556644 100%)`;
   }
 
   // Determine initial severity: last known state BEFORE the window.
@@ -489,17 +499,17 @@ function buildLaneGradient(events, timeStart, windowMs) {
     if (e.ts <= timeStart && state) currentSeverity = state || currentSeverity;
     else break;
   }
-  const parts = [`${colorForLaneSeverity(currentSeverity)}55 0%`];
+  const parts = [`${laneTintForSeverity(currentSeverity)} 0%`];
   for (const e of sorted) {
     if (e.ts < timeStart || e.ts > timeStart + windowMs) continue;
     const nextSeverity = laneStateSeverity(e);
     if (!nextSeverity) continue;
     const x = Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100));
-    parts.push(`${colorForLaneSeverity(currentSeverity)}55 ${x}%`);
-    parts.push(`${colorForLaneSeverity(nextSeverity)}55 ${x}%`);
+    parts.push(`${laneTintForSeverity(currentSeverity)} ${x}%`);
+    parts.push(`${laneTintForSeverity(nextSeverity)} ${x}%`);
     currentSeverity = nextSeverity;
   }
-  parts.push(`${colorForLaneSeverity(currentSeverity)}55 100%`);
+  parts.push(`${laneTintForSeverity(currentSeverity)} 100%`);
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 
@@ -738,12 +748,30 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
-        if (synthetic.length === 0) return;
+        const heartbeat = list
+          .filter((a) => a && a.isRunning && a.id)
+          .map((a) => {
+            const laneId = normalizeLaneId(a.id);
+            const probeTs = Number(a?.lastResult?.probeTime);
+            return {
+              key: `heartbeat-${laneId}`,
+              ts: Number.isFinite(probeTs) ? probeTs : Date.now(),
+              id: laneId,
+              rawId: a.id,
+              category: 'runtime_heartbeat',
+              severity: 'ok',
+              title: 'Analyser heartbeat',
+              description: a.url || `${a.id} active`,
+              evidence: { bootstrap: true },
+            };
+          });
+        const merged = [...synthetic, ...heartbeat];
+        if (merged.length === 0) return;
         setEvents((prev) => {
           // Only inject when the lane has no events yet in local timeline state.
           const seen = new Set(prev.map((e) => e.id));
           const missing = synthetic.filter((e) => !seen.has(e.id));
-          return missing.length ? mergeTimelineEvents(prev, missing) : prev;
+          return mergeTimelineEvents(prev, [...missing, ...heartbeat]);
         });
       } catch (_) {}
     };

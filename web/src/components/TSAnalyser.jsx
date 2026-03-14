@@ -203,6 +203,21 @@ function fmtNumber(value, digits = 2) {
   return n != null ? n.toFixed(digits) : null;
 }
 
+function monitorMethodLabel(result) {
+  const arrivalMethod = String(result?.dvb?.arrival?.captureMethod || "").toLowerCase();
+  const probeMethod = String(result?.dvb?.probeDiagnostics?.iatSniffer?.captureMethod || "").toLowerCase();
+  const method = arrivalMethod || probeMethod || "unavailable";
+  if (method === "tshark" || method === "tcpdump") return `NIC-${method}`;
+  if (method === "tsduck") return "ANALYSER";
+  return "UNAVAILABLE";
+}
+
+function confidenceLabel(rate) {
+  if (rate?.trusted) return "TRUSTED";
+  if (rate?.bps) return "FALLBACK";
+  return "UNKNOWN";
+}
+
 function arrivalHealth(row) {
   if (!row || !row.hasMetrics) return { label: "NO DATA", color: C.muted };
   const critical =
@@ -377,6 +392,12 @@ export default function TSAnalyser({ lastMessage }) {
   const servicesCount = Number(activeResult?.dvb?.serviceCount ?? activeResult?.programs?.length ?? 0);
   const pidsCount = Number(activeResult?.dvb?.pidCount ?? countPids(activeResult));
   const score = activeResult?.dvb?.health?.score;
+  const confidence = confidenceLabel(transportRate);
+  const captureMethod = monitorMethodLabel(activeResult);
+  const policyProfile = activeResult?.dvb?.monitoringPolicy?.profile || "-";
+  const schedulerCadence = activeResult?.dvb?.probeDiagnostics?.scheduler?.cadence || null;
+  const heavyEvery = schedulerCadence?.heavyProbeEvery;
+  const heavyIntervalMs = schedulerCadence?.heavyProbeIntervalMs;
 
   const etrStatus = useMemo(() => {
     const byMain = activeId ? (etr.statusById[`etr-${activeId}`] || etr.statusById[activeId]) : null;
@@ -793,6 +814,22 @@ export default function TSAnalyser({ lastMessage }) {
           <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
             <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
             <div style={{ fontSize: 12, color: s.c, fontWeight: 700 }}>{s.v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 5, marginBottom: 8 }}>
+        {[
+          { l: "CONFIDENCE", v: confidence, c: confidence === "TRUSTED" ? C.ok : confidence === "FALLBACK" ? C.warn : C.muted },
+          { l: "METHOD", v: captureMethod, c: captureMethod.startsWith("NIC-") ? C.cyan : captureMethod === "ANALYSER" ? C.warn : C.muted },
+          { l: "POLICY", v: String(policyProfile).toUpperCase(), c: policyProfile !== "-" ? C.info : C.muted },
+          { l: "HEAVY EVERY", v: Number.isFinite(Number(heavyEvery)) ? `${Number(heavyEvery)} cycles` : "-", c: C.text },
+          { l: "HEAVY PERIOD", v: Number.isFinite(Number(heavyIntervalMs)) ? `${Math.round(Number(heavyIntervalMs) / 1000)} s` : "-", c: C.text },
+          { l: "PREFLIGHT", v: captureMethod === "UNAVAILABLE" ? "DEGRADED" : "READY", c: captureMethod === "UNAVAILABLE" ? C.warn : C.ok },
+        ].map((s) => (
+          <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
+            <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
+            <div style={{ fontSize: 11, color: s.c, fontWeight: 700 }}>{s.v}</div>
           </div>
         ))}
       </div>

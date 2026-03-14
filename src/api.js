@@ -8,6 +8,8 @@ const WebSocket = require('ws');
 const path = require('path');
 const os = require('os');
 const pkg = require('../package.json');
+const { getMonitoringPolicySummary } = require('./monitoring-policy');
+const { getToolingPreflightSnapshot, startToolingPreflightAutoRefresh } = require('./tooling-preflight');
 
 const persistence = require('./state-persistence');
 const eventLog = require('./event-log');
@@ -74,6 +76,8 @@ function getHealthPayload() {
       processRssMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
       heapUsedMB: Math.round(process.memoryUsage().heapUsed / (1024 * 1024)),
     },
+    tooling: getToolingPreflightSnapshot(),
+    monitoringPolicy: getMonitoringPolicySummary(),
   };
 }
 
@@ -311,6 +315,7 @@ function start() {
 
   server.listen(API_PORT, API_HOST, () => {
     console.log(`Labotech API listening on http://${API_HOST}:${API_PORT}`);
+    startToolingPreflightAutoRefresh();
     startEtrOrphanWatchdog();
     // Restore engines after a short delay to let the event loop settle
     setTimeout(() => restoreState(broadcast), 2000);
