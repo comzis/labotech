@@ -1,0 +1,16 @@
+---
+description: Enforce release tag and GUI version updates for each new version
+alwaysApply: true
+---
+
+# Release Versioning and Change Safety Policy
+
+- For every new release, create a **new unique git tag**. Never reuse an existing tag for different code.
+- Release tags must follow semantic versioning format: `MAJOR.MINOR.PATCH` (for example: `3.4.5`).
+- Every release change must update the GUI-visible release identifier so operators can confirm deployed version from the interface.
+- If version/release work is requested and no new tag is specified, prompt for the next semantic version tag before finalizing.
+- Keep backend/frontend release metadata aligned so API/UI report the same release value.
+- For any new development, preserve existing working logic and avoid regressions.
+- Before implementing non-trivial changes, perform a short impact assessment covering affected modules, behavior changes, and risk level.
+- Communicate the impact assessment clearly and obtain user approval before proceeding with changes that could alter existing behavior.
+- After implementation, report what changed, potential side effects, and validation performed.
