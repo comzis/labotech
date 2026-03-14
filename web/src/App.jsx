@@ -693,7 +693,7 @@ export default function App() {
                 <button
                   key={t.id}
                   onClick={() => setTab(t.id)}
-                  className="flex flex-col items-center gap-0.5 px-2 xl:px-2.5 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
+                  className="flex flex-col items-center justify-center gap-0.5 w-[88px] xl:w-[96px] h-[44px] px-1 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
                   style={isActive ? {
                     background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
                     border: `1px solid ${t.led}44`,
@@ -721,7 +721,7 @@ export default function App() {
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   />
                   <span
-                    className="text-[8px] font-bold uppercase tracking-[0.1em] leading-none whitespace-nowrap"
+                    className="text-[8px] font-bold uppercase tracking-[0.08em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
                     style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
                   >
                     {t.label}
@@ -736,35 +736,9 @@ export default function App() {
             })}
           </nav>
 
-          {/* ── Connection status LED ───────────────────────────────────── */}
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-sm shrink-0"
-            style={connected ? {
-              background: '#0a1a0a',
-              border: '1px solid #1a3a1a',
-              boxShadow: '0 0 8px rgba(0,221,85,0.15)',
-            } : {
-              background: '#1a0a0a',
-              border: '1px solid #3a1a1a',
-            }}
-          >
-            <div
-              className="w-2 h-2 rounded-full"
-              style={connected ? {
-                background: 'radial-gradient(circle at 38% 32%, #ffffff44, #00dd55)',
-                boxShadow: '0 0 5px #00dd55, 0 0 10px rgba(0,221,85,0.5)',
-                animation: 'ledPulse 2s ease-in-out infinite alternate',
-              } : {
-                background: '#ff2233',
-                boxShadow: '0 0 5px #ff2233',
-              }}
-            />
-            <ServiceStatusBadge connected={connected} />
-          </div>
-
           <div className="ml-1 shrink-0 flex flex-col items-end gap-1">
             <div
-              className="text-[8px] leading-none text-right max-w-[360px] 2xl:max-w-[520px]"
+              className="text-[9px] leading-none text-right max-w-[360px] 2xl:max-w-[520px]"
               style={{ color: '#6f86aa' }}
               title={activePunchline}
             >
@@ -773,7 +747,7 @@ export default function App() {
             <div className="flex items-center justify-end gap-1.5">
               {telemetry && (
                 <div
-                  className="hidden xl:flex items-center gap-1.5 px-1.5 py-1 font-mono rounded-sm shrink-0"
+                  className="hidden xl:flex items-center h-7 gap-1.5 px-2 font-mono rounded-sm shrink-0"
                   style={{
                     background: '#0a0a0a',
                     border: '1px solid #1a1a1a',
@@ -793,9 +767,23 @@ export default function App() {
                   />
                 </div>
               )}
+              {Number.isFinite(serverUptimeSec) && (
+                <div
+                  className="hidden xl:flex items-center h-7 gap-1.5 px-2 rounded-sm shrink-0"
+                  style={{
+                    background: '#101723',
+                    border: '1px solid #2a3950',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)',
+                  }}
+                  title={BUILD_TIME_UTC ? `Build: ${BUILD_TIME_UTC}` : 'Server uptime'}
+                >
+                  <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#7f99bf' }}>UPTIME</span>
+                  <span className="text-[8px] font-bold" style={{ color: '#cfe2ff' }}>{uptimeDisplay}</span>
+                </div>
+              )}
               {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
                 <div
-                  className="hidden 2xl:flex items-center gap-1 px-1.5 py-1 rounded-sm shrink-0"
+                  className="hidden 2xl:flex items-center h-7 gap-1 px-1.5 rounded-sm shrink-0"
                   style={{
                     background: '#10151d',
                     border: '1px solid #2a3342',
@@ -812,9 +800,33 @@ export default function App() {
                   </span>
                 </div>
               )}
+              <div
+                className="hidden xl:flex items-center h-7 gap-1.5 px-2 rounded-sm shrink-0"
+                style={connected ? {
+                  background: '#0a1a0a',
+                  border: '1px solid #1a3a1a',
+                  boxShadow: '0 0 8px rgba(0,221,85,0.15)',
+                } : {
+                  background: '#1a0a0a',
+                  border: '1px solid #3a1a1a',
+                }}
+              >
+                <div
+                  className="w-2 h-2 rounded-full"
+                  style={connected ? {
+                    background: 'radial-gradient(circle at 38% 32%, #ffffff44, #00dd55)',
+                    boxShadow: '0 0 5px #00dd55, 0 0 10px rgba(0,221,85,0.5)',
+                    animation: 'ledPulse 2s ease-in-out infinite alternate',
+                  } : {
+                    background: '#ff2233',
+                    boxShadow: '0 0 5px #ff2233',
+                  }}
+                />
+                <ServiceStatusBadge connected={connected} />
+              </div>
               <button
                 onClick={handleResetRole}
-                className="px-2.5 py-1 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
+                className="h-7 px-2.5 rounded-sm text-[8px] uppercase tracking-[0.08em] shrink-0 inline-flex items-center gap-1 transition-all duration-150"
                 style={{
                   color: '#ffe8bf',
                   border: '1px solid #8a6534',
