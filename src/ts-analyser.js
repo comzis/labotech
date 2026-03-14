@@ -817,7 +817,11 @@ class TSAnalyser extends EventEmitter {
   }
 
   _mapStream(s) {
-    const pid = this._normalizePid(s.id);
+    const normalizedPid = this._normalizePid(s.id);
+    // PID 0x0000 is PAT and never a valid elementary stream PID.
+    // Keep it null here so downstream PID reconciliation can backfill
+    // the actual ES PID from TSduck/ffprobe cross-reference.
+    const pid = normalizedPid === 0 ? null : normalizedPid;
     let streamType = null;
     if (s.codec_tag_string && /^0x[0-9a-f]+$/i.test(s.codec_tag_string)) {
       streamType = s.codec_tag_string;

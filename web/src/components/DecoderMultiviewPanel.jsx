@@ -7,7 +7,7 @@ import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 const DEFAULT_PANEL_ID = 'panel-default';
-const DEFAULT_PANEL_NAME = 'MCR-WALL-A';
+const DEFAULT_PANEL_NAME = 'BES';
 const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
 const MULTIVIEW_REFRESH_MS = 12000;
 const MULTIVIEW_CLOCK_TICK_MS = 3000;
@@ -19,6 +19,13 @@ function normalizePanelName(raw) {
     .replace(/-{2,}/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 24);
+}
+
+function normalizePersistedPanelName(raw, fallback) {
+  const normalized = normalizePanelName(raw || fallback);
+  // Session compatibility: migrate legacy default label automatically.
+  if (normalized === 'MCR-WALL-A' || normalized === 'WALL-A') return DEFAULT_PANEL_NAME;
+  return normalized;
 }
 
 function countPids(result) {
@@ -397,7 +404,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
         const sanitized = parsed.panels
           .map((p, idx) => ({
             id: String(p?.id || `panel-${idx + 1}`),
-            name: normalizePanelName(p?.name || `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
+            name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
             decoderIds: Array.isArray(p?.decoderIds) ? p.decoderIds.map((id) => String(id)) : [],
           }))
           .filter((p) => p.id);
@@ -518,12 +525,14 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   };
 
   const removePanel = (id) => {
-    if (id === DEFAULT_PANEL_ID) return;
     setPanels((prev) => {
       const next = prev.filter((p) => p.id !== id);
       return next.length > 0 ? next : [{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }];
     });
-    if (activePanelId === id) setActivePanelId(DEFAULT_PANEL_ID);
+    if (activePanelId === id) {
+      const remaining = panels.filter((p) => p.id !== id);
+      setActivePanelId(remaining[0]?.id || DEFAULT_PANEL_ID);
+    }
   };
 
   const handleCreate = async () => {
@@ -628,7 +637,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               >
                 {panel.name}
               </button>
-              {panel.id !== DEFAULT_PANEL_ID && (
+              {panels.length > 1 && (
                 <button
                   onClick={() => removePanel(panel.id)}
                   className="text-[9px] px-1.5 py-1 rounded-r border border-l-0 transition-colors"
@@ -664,7 +673,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                 label="Panel Callsign"
                 value={newPanelName}
                 onChange={(v) => setNewPanelName(v)}
-                placeholder="e.g. MCR-WALL-A"
+                placeholder="e.g. WALL-A"
               />
               <button
                 onClick={createPanel}
