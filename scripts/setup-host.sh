@@ -12,9 +12,16 @@ echo "    Multicast NIC:    $MULTICAST_NIC"
 echo "    Multicast subnet: $MULTICAST_SUBNET"
 
 # ── 1. Install host dependencies ────────────────────────────────────────────
-echo "==> Installing host dependencies (smcroute, tcpdump, libcap2-bin)..."
+echo "==> Installing host dependencies (smcroute, tcpdump, tshark, libcap2-bin)..."
 apt-get update -qq
-apt-get install -y --no-install-recommends smcroute tcpdump libcap2-bin
+apt-get install -y --no-install-recommends smcroute tcpdump tshark libcap2-bin
+
+# Optional tsduck install (best-effort, package availability depends on distro repos)
+if apt-cache show tsduck >/dev/null 2>&1; then
+  apt-get install -y --no-install-recommends tsduck
+else
+  echo "==> tsduck package not found in current apt repos (optional, fallback remains enabled)."
+fi
 
 # Packet capture capability for IAT sniffer (non-root service runtime)
 TCPDUMP_BIN="$(command -v tcpdump || true)"

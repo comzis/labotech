@@ -127,6 +127,17 @@ which tshark || which tcpdump
 
 If neither tool is installed, LABOTECH remains operational and marks arrival telemetry as analyser-derived/unavailable in diagnostics.
 
+### Container parity check (host vs runtime)
+
+When running with Docker, verify tools inside the running service container, not only on host:
+
+```bash
+docker compose exec labotech sh -lc 'which ffmpeg ffprobe tsanalyze tshark tcpdump || true'
+docker compose exec labotech sh -lc 'ffmpeg -version | sed -n "1p"; ffprobe -version | sed -n "1p"'
+```
+
+Host and container can differ. `/health` reports what the service process sees at runtime.
+
 ### `tsduck` installation
 
 ### APT package available

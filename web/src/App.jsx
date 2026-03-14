@@ -796,7 +796,7 @@ export default function App() {
           )}
 
           <div
-            className="hidden xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
+            className="hidden 2xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
             style={{
               background: '#101723',
               border: '1px solid #2a3950',
@@ -811,7 +811,7 @@ export default function App() {
 
           {(preflight || monitoringPolicy) && (
             <div
-              className="hidden xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
+              className="hidden 2xl:flex items-center gap-2 px-2 py-1 rounded-sm shrink-0"
               style={{
                 background: '#10151d',
                 border: '1px solid #2a3342',
