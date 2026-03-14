@@ -76,5 +76,11 @@ export const getHealth = () => request('GET', '/health');
 export const apiRequestDetailed = (method, path, body) => requestDetailed(method, path, body);
 
 // Event Log
-export const getEvents = () => request('GET', '/api/events');
+// Pass since= so the server ring (14-day retention) doesn't rehydrate
+// events older than the timeline's own 26h window.
+const EVENT_LOG_RETENTION_MS = 26 * 60 * 60 * 1000;
+export const getEvents = () => {
+  const since = Date.now() - EVENT_LOG_RETENTION_MS;
+  return request('GET', `/api/events?since=${since}`);
+};
 export const clearEvents = () => request('DELETE', '/api/events');

@@ -7,9 +7,9 @@ import { ShieldAlert, Activity } from 'lucide-react';
 import { probeUrl } from '../api';
 
 const PRIORITY_META = {
-  p1: { label: 'Priority 1', desc: 'Service not receivable', color: 'red',    border: 'border-red-500/30',    bg: 'bg-red-900/20',    text: 'text-red-400',    dot: 'bg-red-400'    },
-  p2: { label: 'Priority 2', desc: 'Quality impaired',       color: 'amber',  border: 'border-amber-500/30',  bg: 'bg-amber-900/20',  text: 'text-amber-400',  dot: 'bg-amber-400'  },
-  p3: { label: 'Priority 3', desc: 'Informational',          color: 'sky',    border: 'border-sky-500/30',    bg: 'bg-sky-900/20',    text: 'text-sky-400',    dot: 'bg-sky-400'    },
+  p1: { label: 'Priority 1', desc: 'Service not receivable', color: 'red',   border: 'border-led-red/30',   bg: 'bg-led-red/10',   text: 'text-led-red',   dot: 'bg-led-red'   },
+  p2: { label: 'Priority 2', desc: 'Quality impaired',       color: 'amber', border: 'border-led-amber/30', bg: 'bg-led-amber/10', text: 'text-led-amber', dot: 'bg-led-amber' },
+  p3: { label: 'Priority 3', desc: 'Informational',          color: 'cyan',  border: 'border-led-cyan/30',  bg: 'bg-led-cyan/10',  text: 'text-led-cyan',  dot: 'bg-led-cyan'  },
 };
 
 const ETR_CHECKS = {
@@ -43,8 +43,8 @@ const ETR_CHECKS = {
 function TrafficLight({ ok }) {
   return (
     <div className="flex gap-1 items-center">
-      <span className={`w-3 h-3 rounded-full ${ok ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-gray-700'}`} />
-      <span className={`w-3 h-3 rounded-full ${!ok ? 'bg-red-500 shadow-[0_0_6px_#ef4444] animate-pulse' : 'bg-gray-700'}`} />
+      <span className={`w-3 h-3 rounded-full ${ok ? 'bg-led-green led-green' : 'bg-led-off'}`} />
+      <span className={`w-3 h-3 rounded-full ${!ok ? 'bg-led-red led-red animate-led-blink' : 'bg-led-off'}`} />
     </div>
   );
 }
@@ -52,15 +52,15 @@ function TrafficLight({ ok }) {
 function CheckRow({ check, status, count }) {
   const ok = status !== 'error';
   return (
-    <div className={`flex items-center justify-between py-1.5 px-3 rounded-lg mb-1 ${ok ? 'bg-white/[0.02]' : 'bg-red-900/20 border border-red-500/20'}`}>
+    <div className={`flex items-center justify-between py-1.5 px-3 rounded-lg mb-1 ${ok ? 'bg-white/[0.02]' : 'bg-led-red/10 border border-led-red/20'}`}>
       <div className="flex items-center gap-3">
         <TrafficLight ok={ok} />
-        <span className={`text-xs font-mono ${ok ? 'text-gray-400' : 'text-red-300 font-semibold'}`}>
+        <span className={`text-xs font-mono ${ok ? 'text-gray-400' : 'text-led-red font-semibold'}`}>
           {check.label}
         </span>
       </div>
       {count > 0 && (
-        <span className="text-[10px] font-mono text-red-400 bg-red-900/40 px-1.5 py-0.5 rounded">
+        <span className="text-[10px] font-mono text-led-red bg-led-red/20 px-1.5 py-0.5 rounded">
           {count}
         </span>
       )}
@@ -74,12 +74,12 @@ function PriorityBlock({ priorityKey, meta, checks, status, counts }) {
     <div className={`rounded-2xl border p-4 ${hasError ? meta.border + ' ' + meta.bg : 'border-white/5 bg-midnight-glass'}`}>
       <div className="flex items-center justify-between mb-3">
         <div>
-          <span className={`text-xs font-bold uppercase tracking-widest ${hasError ? meta.text : 'text-gray-400'}`}>
+          <span className={`text-[10px] font-mono font-bold uppercase tracking-[0.18em] ${hasError ? meta.text : 'text-gray-400'}`}>
             {meta.label}
           </span>
           <span className="text-[10px] text-gray-600 ml-2">{meta.desc}</span>
         </div>
-        <div className={`w-2.5 h-2.5 rounded-full ${hasError ? meta.dot + ' animate-pulse shadow-lg' : 'bg-green-500'}`} />
+        <div className={`w-2.5 h-2.5 rounded-full ${hasError ? meta.dot + ' animate-led-pulse led-' + meta.color : 'bg-led-green led-green'}`} />
       </div>
       <div>
         {checks.map(c => (
@@ -97,7 +97,7 @@ function PriorityBlock({ priorityKey, meta, checks, status, counts }) {
 
 function AlarmTable({ alarms }) {
   if (!alarms?.length) {
-    return <p className="text-gray-600 text-xs text-center py-6">No alarms — stream nominal</p>;
+    return <p className="text-gray-600 text-[11px] font-mono text-center py-6 uppercase tracking-widest">No alarms — stream nominal</p>;
   }
   return (
     <div className="overflow-auto max-h-64 rounded-xl border border-white/5">
@@ -116,7 +116,7 @@ function AlarmTable({ alarms }) {
             return (
               <tr key={i} className="border-b border-white/[0.03] hover:bg-white/[0.02]">
                 <td className="px-3 py-1.5 text-gray-500">{new Date(a.time).toLocaleTimeString()}</td>
-                <td className={`px-3 py-1.5 font-bold ${meta?.text || 'text-gray-400'}`}>
+                <td className={`px-3 py-1.5 font-bold font-mono ${meta?.text || 'text-gray-400'}`}>
                   {a.priority?.toUpperCase()}
                 </td>
                 <td className="px-3 py-1.5 text-gray-300">{a.label}</td>
@@ -158,10 +158,10 @@ function AlarmTimeline({ alarms }) {
         {sorted.map((alarm, idx) => {
           const pri = (alarm.priority || '-').toUpperCase();
           const priClass = pri === 'P1'
-            ? 'text-red-300 border-red-500/30 bg-red-900/20'
+            ? 'text-led-red border-led-red/30 bg-led-red/10'
             : pri === 'P2'
-              ? 'text-amber-300 border-amber-500/30 bg-amber-900/20'
-              : 'text-sky-300 border-sky-500/30 bg-sky-900/20';
+              ? 'text-led-amber border-led-amber/30 bg-led-amber/10'
+              : 'text-led-cyan border-led-cyan/30 bg-led-cyan/10';
           return (
             <div key={`${alarm.time}-${idx}`} className="relative pl-4">
               <span className="absolute left-0 top-2 h-2 w-2 rounded-full bg-neon-cyan/70" />
@@ -554,7 +554,7 @@ export default function ETR290Panel({ lastMessage }) {
             type="button"
             onClick={handleStopActive}
             disabled={!activeId}
-            className="ml-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-red-900/40 hover:bg-red-800/60 text-red-300 border border-red-500/30 disabled:opacity-50"
+            className="ml-2 px-6 py-2.5 rounded-xl font-bold text-sm transition-all bg-led-red/15 hover:bg-led-red/25 text-led-red border border-led-red/30 disabled:opacity-50"
           >
             Stop Selected
           </button>
@@ -597,7 +597,7 @@ export default function ETR290Panel({ lastMessage }) {
           }
         </div>
       )}
-        {error && <p className="text-red-400 text-sm mt-2">{error}</p>}
+        {error && <p className="text-led-red text-[11px] font-mono mt-2">{error}</p>}
       </BentoCard>
 
       {activeId && dvbByMonitorId[activeId]?.dvb && (
@@ -626,7 +626,7 @@ export default function ETR290Panel({ lastMessage }) {
             </div>
           )}
           {unresolvedPidGap && (
-            <div className="mt-1 text-[10px] text-amber-300">
+            <div className="mt-1 text-[10px] text-led-amber font-mono">
               PID sample is partial ({resolvedPidCount}/{expectedPidCount} resolved). Background re-probe is running.
             </div>
           )}
@@ -689,7 +689,7 @@ export default function ETR290Panel({ lastMessage }) {
                               {(row.bitrate / 1e6).toFixed(2)} Mbps
                               {row.bitrateEstimated && (
                                 <span
-                                  className="ml-1 text-[9px] text-amber-400 font-mono"
+                                  className="ml-1 text-[9px] text-led-amber font-mono"
                                   title="Estimated: TS container bitrate minus sum of resolved PID bitrates"
                                 >
                                   (est.)
@@ -712,7 +712,7 @@ export default function ETR290Panel({ lastMessage }) {
                 {`${videoBitrateMbps.toFixed(3)} Mbps`}
                 {selectedRows.some(r => r.codecType === 'video' && r.bitrateEstimated) && (
                   <span
-                    className="ml-1 text-[9px] text-amber-400 font-mono"
+                    className="ml-1 text-[9px] text-led-amber font-mono"
                     title="Video bitrate includes remainder allocation - not a per-PID measured value"
                   >
                     (est.)
@@ -742,10 +742,10 @@ export default function ETR290Panel({ lastMessage }) {
       {status && (
         <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border text-sm font-semibold ${
           p1Error
-            ? 'bg-red-900/30 border-red-500/40 text-red-300'
+            ? 'bg-led-red/10 border-led-red/40 text-led-red'
             : p2Error
-              ? 'bg-amber-900/30 border-amber-500/40 text-amber-300'
-              : 'bg-green-900/20 border-green-500/30 text-green-400'
+              ? 'bg-led-amber/10 border-led-amber/40 text-led-amber'
+              : 'bg-led-green/5 border-led-green/30 text-led-green'
         }`}>
           <Activity className="w-4 h-4" />
           {p1Error ? 'CRITICAL — Priority 1 errors detected' : p2Error ? 'WARNING — Priority 2 errors' : 'NOMINAL — All checks passing'}
@@ -759,17 +759,17 @@ export default function ETR290Panel({ lastMessage }) {
             <div className="text-[10px] uppercase tracking-wider text-gray-500">Total Alarms</div>
             <div className="text-gray-200 font-mono mt-1">{totalAlarms}</div>
           </div>
-          <div className="rounded-lg border border-red-500/20 bg-red-900/10 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-red-300">P1</div>
-            <div className="text-red-200 font-mono mt-1">{p1AlarmCount}</div>
+          <div className="rounded-lg border border-led-red/20 bg-led-red/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-led-red">P1</div>
+            <div className="text-led-red font-mono mt-1">{p1AlarmCount}</div>
           </div>
-          <div className="rounded-lg border border-amber-500/20 bg-amber-900/10 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-amber-300">P2</div>
-            <div className="text-amber-200 font-mono mt-1">{p2AlarmCount}</div>
+          <div className="rounded-lg border border-led-amber/20 bg-led-amber/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-led-amber">P2</div>
+            <div className="text-led-amber font-mono mt-1">{p2AlarmCount}</div>
           </div>
-          <div className="rounded-lg border border-sky-500/20 bg-sky-900/10 px-3 py-2">
-            <div className="text-[10px] uppercase tracking-wider text-sky-300">P3</div>
-            <div className="text-sky-200 font-mono mt-1">{p3AlarmCount}</div>
+          <div className="rounded-lg border border-led-cyan/20 bg-led-cyan/10 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wider text-led-cyan">P3</div>
+            <div className="text-led-cyan font-mono mt-1">{p3AlarmCount}</div>
           </div>
           <div className="rounded-lg border border-white/10 bg-black/20 px-3 py-2">
             <div className="text-[10px] uppercase tracking-wider text-gray-500">CC Errors</div>
@@ -791,9 +791,9 @@ export default function ETR290Panel({ lastMessage }) {
               onClick={handleCopySnapshot}
               className={`text-[10px] px-2 py-1 rounded border font-mono ${
                 copyState === 'copied'
-                  ? 'border-green-500/40 text-green-300 bg-green-900/20'
+                  ? 'border-led-green/40 text-led-green bg-led-green/10'
                   : copyState === 'error'
-                    ? 'border-red-500/40 text-red-300 bg-red-900/20'
+                    ? 'border-led-red/40 text-led-red bg-led-red/10'
                     : 'border-white/15 text-gray-300 bg-black/30 hover:bg-black/40'
               }`}
             >
@@ -809,17 +809,17 @@ export default function ETR290Panel({ lastMessage }) {
               <div className="text-[10px] text-gray-500 uppercase">Alarms 5m</div>
               <div className="font-mono text-gray-200">{troubleshooting.alarmsLast5m}</div>
             </div>
-            <div className="rounded border border-red-500/20 bg-red-900/10 px-2 py-1.5">
-              <div className="text-[10px] text-red-300 uppercase">Active P1 checks</div>
-              <div className="font-mono text-red-200">{troubleshooting.activeP1Checks}</div>
+            <div className="rounded border border-led-red/20 bg-led-red/10 px-2 py-1.5">
+              <div className="text-[10px] text-led-red uppercase">Active P1 checks</div>
+              <div className="font-mono text-led-red">{troubleshooting.activeP1Checks}</div>
             </div>
-            <div className="rounded border border-amber-500/20 bg-amber-900/10 px-2 py-1.5">
-              <div className="text-[10px] text-amber-300 uppercase">Active P2 checks</div>
-              <div className="font-mono text-amber-200">{troubleshooting.activeP2Checks}</div>
+            <div className="rounded border border-led-amber/20 bg-led-amber/10 px-2 py-1.5">
+              <div className="text-[10px] text-led-amber uppercase">Active P2 checks</div>
+              <div className="font-mono text-led-amber">{troubleshooting.activeP2Checks}</div>
             </div>
-            <div className="rounded border border-sky-500/20 bg-sky-900/10 px-2 py-1.5">
-              <div className="text-[10px] text-sky-300 uppercase">Active P3 checks</div>
-              <div className="font-mono text-sky-200">{troubleshooting.activeP3Checks}</div>
+            <div className="rounded border border-led-cyan/20 bg-led-cyan/10 px-2 py-1.5">
+              <div className="text-[10px] text-led-cyan uppercase">Active P3 checks</div>
+              <div className="font-mono text-led-cyan">{troubleshooting.activeP3Checks}</div>
             </div>
             <div className="rounded border border-white/10 bg-black/30 px-2 py-1.5">
               <div className="text-[10px] text-gray-500 uppercase">CC rate/min</div>
@@ -846,7 +846,7 @@ export default function ETR290Panel({ lastMessage }) {
                 {troubleshooting.topChecks.map((row) => (
                   <div key={row.check} className="flex items-center justify-between text-[11px] rounded border border-white/10 bg-black/30 px-2 py-1">
                     <span className="text-gray-300 font-mono">{row.check}</span>
-                    <span className="text-red-300 font-mono">{row.count}</span>
+                    <span className="text-led-red font-mono">{row.count}</span>
                   </div>
                 ))}
               </div>

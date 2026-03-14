@@ -131,15 +131,30 @@ function qualityMetrics(etrStatus, tsResult) {
 
 const PID_TYPE_ORDER = { video: 0, audio: 1, data: 2, subtitle: 3, unknown: 9 };
 
+// Specificity score for codecType: video > audio > subtitle > data > unknown.
+// tsduck PID rows often have codecType null/'data' fallback while ffprobe correctly
+// identifies the same PID as 'video'/'audio'. Higher score wins when deduplicating
+// the same PID from multiple probe sources.
+function codecTypeScore(t) {
+  if (t === "video")    return 4;
+  if (t === "audio")    return 3;
+  if (t === "subtitle") return 2;
+  if (t === "data")     return 1;
+  return 0; // "unknown" or anything else
+}
+
 function preferredPidRow(a, b) {
-  const score = (row) => (row.codec && row.codec !== "-" ? 1 : 0);
-  const scoreA = score(a);
-  const scoreB = score(b);
-  if (scoreA !== scoreB) return scoreA > scoreB ? a : b;
+  // Prefer the more specific codec type — ffprobe over tsduck/fallback.
+  const ctA = codecTypeScore(a.codecType);
+  const ctB = codecTypeScore(b.codecType);
+  if (ctA !== ctB) return ctA > ctB ? a : b;
 
-  // Deterministic tie-breakers must avoid live bitrate to prevent cycle-to-cycle flips.
-  // Bitrate is volatile and can reorder equivalent candidates each refresh.
+  // Prefer entries with a named codec string.
+  const hasCodecA = a.codec && a.codec !== "-" ? 1 : 0;
+  const hasCodecB = b.codec && b.codec !== "-" ? 1 : 0;
+  if (hasCodecA !== hasCodecB) return hasCodecA > hasCodecB ? a : b;
 
+  // Deterministic tie-breaker — avoid bitrate: it is volatile across probe cycles.
   const codecA = String(a.codec || "").toLowerCase();
   const codecB = String(b.codec || "").toLowerCase();
   if (codecA !== codecB) return codecA.localeCompare(codecB) <= 0 ? a : b;
@@ -155,32 +170,32 @@ function extractPidRows(selectedResult) {
   const rows = [];
   (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
   (selectedResult?.orphanStreams || []).forEach((s) => rows.push(s));
-  const normalized = rows
-    .map((s) => ({
-      pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
-      pidHex: s.pidHex,
-      codecType: s.codecType || s.type || "unknown",
-      codec: s.codecName || s.codec || s.description || "-",
-      bitrate: Number(s.bitrate || 0),
-    }));
+  const normalized = rows.map((s, i) => ({
+    pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+    pidHex: s.pidHex,
+    codecType: s.codecType || s.type || "unknown",
+    codec: s.codecName || s.codec || s.description || "-",
+    bitrate: Number(s.bitrate || 0),
+    _idx: i, // used only as tiebreaker for PID-less entries
+  }));
 
-  // Deduplicate to keep one stable row per PID + codec type.
-  // Prefer entries with richer metadata (codec text, bitrate).
-  const byPidType = new Map();
+  // Deduplicate by PID only — not by pid+codecType.
+  // The same physical PID can arrive from multiple probe sources (ffprobe program
+  // streams, tsduck orphans, fallback rows) with different or missing codecType.
+  // Keying by pid+codecType kept both, causing the same PID to appear twice and
+  // rotate positions as heavy/light probe cycles alternated.
+  const byPid = new Map();
   normalized.forEach((row) => {
     const pidKey = row.pid != null
       ? String(row.pid)
-      : (row.pidHex ? String(row.pidHex).toUpperCase() : "unknown");
-    const key = `${pidKey}|${row.codecType || "unknown"}`;
-    const prev = byPidType.get(key);
-    if (!prev) {
-      byPidType.set(key, row);
-      return;
-    }
-    byPidType.set(key, preferredPidRow(prev, row));
+      : (row.pidHex ? String(row.pidHex).toUpperCase()
+        // PID-less entries: use index so multiple null-PID streams don't collapse.
+        : `unknown-${row._idx}`);
+    const prev = byPid.get(pidKey);
+    byPid.set(pidKey, prev ? preferredPidRow(prev, row) : row);
   });
 
-  return Array.from(byPidType.values())
+  return Array.from(byPid.values())
     .sort((a, b) => {
       const ta = PID_TYPE_ORDER[a.codecType] ?? 9;
       const tb = PID_TYPE_ORDER[b.codecType] ?? 9;
@@ -190,8 +205,8 @@ function extractPidRows(selectedResult) {
     .map((row) => {
       const pidKey = row.pid != null
         ? String(row.pid)
-        : (row.pidHex ? String(row.pidHex).toUpperCase() : "unknown");
-      return { ...row, rowKey: `${pidKey}|${row.codecType || "unknown"}` };
+        : (row.pidHex ? String(row.pidHex).toUpperCase() : `unknown-${row._idx}`);
+      return { ...row, rowKey: pidKey };
     })
     .slice(0, 20);
 }
@@ -1291,6 +1306,36 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               return pixFmt;
             };
 
+            // H.264/H.265 level: integer 40 → "4.0", 41 → "4.1"
+            const levelFmt = (l) => {
+              const n = Number(l);
+              if (!Number.isFinite(n) || n <= 0) return "-";
+              return `${Math.floor(n / 10)}.${n % 10}`;
+            };
+
+            // Color gamut / HDR label from colorTrc + colorSpace + colorPrimaries
+            const colorLabel = (trc, space, primaries) => {
+              const t = String(trc || "").toLowerCase();
+              const s = String(space || "").toLowerCase();
+              const p = String(primaries || "").toLowerCase();
+              if (t === "smpte2084" || t === "smpte st 2084") return "HDR10";
+              if (t === "hlg" || t === "arib-std-b67") return "HLG";
+              if (t === "smpte428" || t === "smpte428_1") return "DCI-P3";
+              if (p.includes("bt2020") || s.includes("bt2020")) return "BT.2020";
+              if (p.includes("bt709") || s.includes("bt709") || t.includes("bt709")) return "BT.709";
+              if (trc || space || primaries) return String(trc || space || primaries).toUpperCase();
+              return "-";
+            };
+
+            // Color range: 'tv' → "Limited", 'pc' → "Full"
+            const rangeLabel = (r) => {
+              if (!r) return "-";
+              const s = String(r).toLowerCase();
+              if (s === "tv" || s === "limited" || s === "mpeg") return "Limited";
+              if (s === "pc" || s === "full" || s === "jpeg") return "Full";
+              return String(r).toUpperCase();
+            };
+
             const scanLabel = (fieldOrder) => {
               if (!fieldOrder) return "-";
               const f = String(fieldOrder).toLowerCase();
@@ -1424,6 +1469,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         <div style={{ fontSize: 8, color: C.purple, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>Video</div>
                         <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6 }}>
                           <StatBox label="Codec" value={videoStream.codecName || "-"} color={C.purple} />
+                          <StatBox label="Profile" value={videoStream.profile || "-"} color={videoStream.profile ? C.purple : C.muted} />
+                          <StatBox label="Level" value={levelFmt(videoStream.level)} color={videoStream.level != null ? C.text : C.muted} />
                           <StatBox
                             label="Resolution"
                             value={videoStream.width && videoStream.height ? `${videoStream.width}×${videoStream.height}` : "-"}
@@ -1431,8 +1478,14 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           />
                           <StatBox label="Frame Rate" value={videoFps != null ? `${videoFps.toFixed(2)} fps` : "-"} color={C.text} />
                           <StatBox label="Scan" value={scanLabel(videoStream.scanType || videoStream.fieldOrder)} color={C.text} />
+                        </div>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 6, marginTop: 4 }}>
                           <StatBox label="Chroma" value={chromaLabel(videoStream.pixFmt)} color={C.text} />
-                          <StatBox label="ES Bitrate" value={bpsFmt(videoStream.bitrate)} color={C.text} />
+                          <StatBox label="Colour" value={colorLabel(videoStream.colorTrc, videoStream.colorSpace, videoStream.colorPrimaries)} color={videoStream.colorTrc === "smpte2084" || videoStream.colorTrc === "hlg" ? C.warn : C.text} />
+                          <StatBox label="Range" value={rangeLabel(videoStream.colorRange)} color={videoStream.colorRange ? C.text : C.muted} />
+                          <StatBox label="ES Bitrate" value={bpsFmt(videoStream.bitrate)} color={videoStream.bitrate ? C.text : C.muted} />
+                          <StatBox label="PID" value={renderPidRef(videoStream.pid, videoStream.pidHex)} color={C.accent} />
+                          <StatBox label="Stream Type" value={videoStream.streamType || "-"} color={videoStream.streamType ? C.text : C.muted} />
                         </div>
                       </div>
                     )}

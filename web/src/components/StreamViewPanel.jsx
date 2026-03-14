@@ -189,6 +189,8 @@ function toEvent(msg) {
   if (msg.type === 'etr290_alarm') {
     const laneId = normalizeLaneId(msg.id || 'etr');
     const etr = buildEtrMeta(msg);
+    // Timeline uses 'p1' (→ cyan) to distinguish service-affecting from generic red alarms.
+    // EventLogPanel uses 'critical' (red) separately — the two panels intentionally differ.
     const severity = etr.priority === 'p1' ? 'p1' : etr.priority === 'p2' ? 'warning' : 'info';
     return {
       key: `${ts}-${msg.id || 'unknown'}-${msg.label || 'alarm'}`,
@@ -386,6 +388,19 @@ function toEvent(msg) {
       description: msg.message || `${msg.id} ${isAnalyser ? 'analyser started' : 'started'}`,
     };
   }
+  if (msg.type === 'etr290_stopped') {
+    const laneId = normalizeLaneId(msg.id || 'etr');
+    return {
+      key: `${ts}-${msg.id || 'etr'}-etr290_stopped`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'etr',
+      category: 'runtime_stopped',
+      severity: 'unknown',
+      title: 'ETR monitor stopped',
+      description: `${msg.id} ETR 290 monitor stopped`,
+    };
+  }
   if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped' || msg.type === 'analyse_stopped') {
     const laneId = normalizeLaneId(msg.id || 'system');
     const isAnalyser = msg.type === 'analyse_stopped';
@@ -404,10 +419,10 @@ function toEvent(msg) {
 }
 
 function colorForSeverity(severity) {
-  if (severity === 'p1') return '#00ddff';
-  if (severity === 'critical') return '#ff4d5f';
-  if (severity === 'warning') return '#ffd84d';
-  if (severity === 'ok') return '#00f06f';
+  if (severity === 'p1') return '#00ddff';   // neon-cyan
+  if (severity === 'critical') return '#ff2233'; // led-red
+  if (severity === 'warning') return '#ffaa00';  // led-amber
+  if (severity === 'ok') return '#00dd55';   // led-green
   return '#00ddff';
 }
 
@@ -432,16 +447,16 @@ function laneColorForEvent(event) {
   if (sev === 'p1') return '#00ddffcc';
   if (sev === 'critical') return '#ff4d5fcc';
   if (sev === 'warning') return '#ffd84dcc';
-  if (sev === 'ok') return '#00f06fb8';
+  if (sev === 'ok') return '#00dd55b8';
   return '#44556666';
 }
 
 function colorForLaneSeverity(severity) {
   if (severity === 'p1') return '#00ddff';
-  if (severity === 'critical') return '#ff4d5f';
-  if (severity === 'warning') return '#ffd84d';
-  if (severity === 'ok') return '#00f06f';
-  return '#445566'; // unknown / no data — neutral blue-gray
+  if (severity === 'critical') return '#ff2233';
+  if (severity === 'warning') return '#ffaa00';
+  if (severity === 'ok') return '#00dd55';
+  return '#445566';
 }
 
 function laneTintForSeverity(severity) {
@@ -460,9 +475,10 @@ function buildLaneGradient(events, timeStart, windowMs) {
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
   const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
 
-  // Fallback when ETR heartbeat is not present:
-  // keep lane steady green from first observed runtime/analyse activity,
-  // and return to gray only after explicit stop.
+  // Fallback when ETR heartbeat is not present.
+  // Rule: an explicit runtime_started with no subsequent runtime_stopped means
+  // the stream IS live — extend the green bar to the right edge (now) with no
+  // stale timeout. Only bootstrap/heartbeat-only lanes use the stale timeout.
   if (!hasEtrStateEvents) {
     const activityEvents = sorted.filter((e) =>
       e.category === 'runtime_started' ||
@@ -476,38 +492,49 @@ function buildLaneGradient(events, timeStart, windowMs) {
     }
     const firstActiveTs = activitySource[0].ts;
     const stopAfterActive = sorted.find((e) =>
-      (e.category === 'runtime_stopped') && e.ts >= firstActiveTs
+      e.category === 'runtime_stopped' && e.ts >= firstActiveTs
     );
+    // Explicit start (not bootstrap) → stream is live until explicit stop, no stale cutoff.
+    const hasExplicitStart = nonBootstrapActivityEvents.some((e) => e.category === 'runtime_started');
     const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
+    const isLive = !stopAfterActive && (hasExplicitStart || staleStopTs >= (timeStart + windowMs));
     const hadActivityBeforeWindow = activitySource.some((e) => e.ts <= timeStart);
-    // If the lane is currently active (no stop and freshness extends to window end),
-    // render full-window baseline only when activity is known before current window.
-    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs) && hadActivityBeforeWindow;
-    const effectiveStartTs = isActiveNow ? timeStart : Math.max(timeStart, firstActiveTs);
+    const effectiveStartTs = (isLive && hadActivityBeforeWindow) ? timeStart : Math.max(timeStart, firstActiveTs);
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
-    const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
-    const stopX = Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100));
+    // Live streams extend to 100% (right edge = now). Stopped streams end at stop event.
+    const effectiveStopTs = stopAfterActive ? stopAfterActive.ts : (timeStart + windowMs);
+    const stopX = stopAfterActive
+      ? Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100))
+      : 100;
     if (stopX <= startX) {
       return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
-    if (stopX == null) {
-      return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00f06fb8 ${startX}%, #00f06fb8 100%)`;
+    if (stopX >= 100) {
+      return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00dd55b8 ${startX}%, #00dd55b8 100%)`;
     }
-    return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00f06fb8 ${startX}%, #00f06fb8 ${stopX}%, #44556644 ${stopX}%, #44556644 100%)`;
+    return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00dd55b8 ${startX}%, #00dd55b8 ${stopX}%, #44556644 ${stopX}%, #44556644 100%)`;
   }
 
-  // Determine initial severity: last known state BEFORE the window.
-  // If no events precede the window, use 'unknown' (gray) — not 'ok'.
+  // Determine initial severity: scan ALL pre-window events (not just leading ones)
+  // so a runtime_started before the window doesn't short-circuit finding etr290_status.
   let currentSeverity = 'unknown';
   for (const e of sorted) {
+    if (e.ts > timeStart) break;
     const state = laneStateSeverity(e);
-    if (e.ts <= timeStart && state) currentSeverity = state || currentSeverity;
-    else break;
+    if (state) currentSeverity = state;
   }
+
+  // Respect runtime_stopped — find the earliest stop after the first ETR status event.
+  const firstEtrTs = sorted.find((e) => laneStateSeverity(e) != null)?.ts ?? -Infinity;
+  const stopEvent = sorted.find((e) => e.category === 'runtime_stopped' && e.ts >= firstEtrTs);
+  const timeEnd = timeStart + windowMs;
+  // ETR gradient ends at stop event (if within window), otherwise extends to window edge.
+  const gradientEnd = (stopEvent && stopEvent.ts < timeEnd) ? stopEvent.ts : timeEnd;
+
   const parts = [`${laneTintForSeverity(currentSeverity)} 0%`];
   for (const e of sorted) {
-    if (e.ts < timeStart || e.ts > timeStart + windowMs) continue;
+    if (e.ts < timeStart || e.ts > gradientEnd) continue;
     const nextSeverity = laneStateSeverity(e);
     if (!nextSeverity) continue;
     const x = Math.min(100, Math.max(0, ((e.ts - timeStart) / windowMs) * 100));
@@ -515,7 +542,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
     parts.push(`${laneTintForSeverity(nextSeverity)} ${x}%`);
     currentSeverity = nextSeverity;
   }
-  parts.push(`${laneTintForSeverity(currentSeverity)} 100%`);
+
+  if (stopEvent && stopEvent.ts < timeEnd) {
+    // Transition to gray at stop point then hold gray to window edge.
+    const stopX = Math.min(100, Math.max(0, ((stopEvent.ts - timeStart) / windowMs) * 100));
+    parts.push(`${laneTintForSeverity(currentSeverity)} ${stopX}%`);
+    parts.push(`#44556644 ${stopX}%`);
+    parts.push(`#44556644 100%`);
+  } else {
+    parts.push(`${laneTintForSeverity(currentSeverity)} 100%`);
+  }
   return `linear-gradient(90deg, ${parts.join(', ')})`;
 }
 
@@ -568,13 +604,20 @@ function getEventVisualDurationMs(event) {
 function getEventVisualStyle(category, severity) {
   const style = EVENT_STYLE_BY_CATEGORY[category] || { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' };
   let color = colorForSeverity(severity);
-  if (category === 'etr290_incident' || category === 'etr290_incident_cleared') color = '#b784ff';
+  if (category === 'etr290_incident' || category === 'etr290_incident_cleared') color = '#cc44ff'; // neon-purple
   return {
     color,
     bg: `${color}${style.alpha}`,
     border: `${color}${style.borderAlpha}`,
     glow: `${color}${style.glowAlpha}`,
   };
+}
+
+// Events that exist only for lane-seeding / lifecycle bookkeeping — never
+// surface as the "nearest event" in the cursor readout.
+function isInternalEvent(e) {
+  return e.category === 'runtime_heartbeat' ||
+    (e.category === 'runtime_started' && e?.evidence?.bootstrap);
 }
 
 function canonicalizeEventLane(event) {
@@ -610,15 +653,17 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(STREAMVIEW_STATE_KEY);
+      const raw = localStorage.getItem(STREAMVIEW_STATE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Number.isFinite(Number(parsed.windowMs))) setWindowMs(Number(parsed.windowMs));
         if (Array.isArray(parsed.events)) {
+          const cutoff = Date.now() - EVENT_RETENTION_MS;
           setEvents(
             parsed.events
               .map(canonicalizeEventLane)
               .filter(Boolean)
+              .filter((e) => e.ts >= cutoff)  // drop events older than 26h on load
               .slice(-MAX_EVENTS)
           );
         }
@@ -647,7 +692,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   useEffect(() => {
     if (!uiRestored) return;
     try {
-      sessionStorage.setItem(
+      localStorage.setItem(
         STREAMVIEW_STATE_KEY,
         JSON.stringify({
           windowMs,
@@ -810,10 +855,43 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     }));
   }, [visibleEvents, timeStart, effectiveWindowMs]);
 
+  // fullLaneMap indexes ALL events (full localStorage history, not windowed).
+  // Used by buildLaneGradient so that pre-window ETR/runtime status events
+  // correctly set the initial lane colour when returning after hours away.
+  const fullLaneMap = useMemo(() => {
+    const m = {};
+    for (const e of events) {
+      if (!m[e.id]) m[e.id] = [];
+      m[e.id].push(e);
+    }
+    return m;
+  }, [events]);
+
+  // laneIds: union of in-window lanes AND lanes that have pre-window events
+  // but no explicit runtime_stopped after the last explicit start (still running).
   const laneIds = useMemo(() => {
-    const ids = Array.from(new Set(timelineEvents.map((e) => e.id)));
-    return ids.sort();
-  }, [timelineEvents]);
+    const idSet = new Set(timelineEvents.map((e) => e.id));
+    // Add lanes that have history before the window and appear to still be running.
+    for (const [id, evts] of Object.entries(fullLaneMap)) {
+      if (idSet.has(id)) continue;
+      const sorted = [...evts].sort((a, b) => a.ts - b.ts);
+      // Prefer explicit start; fall back to bootstrap start (analyser seeded on page load)
+      const lastExplicitStart = [...sorted].reverse().find(
+        (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
+      );
+      const lastBootstrapStart = [...sorted].reverse().find(
+        (e) => e.category === 'runtime_started' && e?.evidence?.bootstrap
+      );
+      const lastStart = lastExplicitStart || lastBootstrapStart;
+      if (!lastStart) continue;
+      const lastStop = sorted.filter(
+        (e) => e.category === 'runtime_stopped' && e.ts >= lastStart.ts
+      ).pop();
+      // No stop after last known start → lane is still running, show it
+      if (!lastStop) idSet.add(id);
+    }
+    return Array.from(idSet).sort();
+  }, [timelineEvents, fullLaneMap]);
 
   const laneMap = useMemo(() => {
     const m = {};
@@ -830,7 +908,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const lanePointerStatus = useMemo(() => {
     if (mouseX == null || laneIds.length === 0) return [];
     return laneIds.map((id) => {
-      const laneEvents = laneMap[id] || [];
+      const laneEvents = (laneMap[id] || []).filter((e) => !isInternalEvent(e));
       if (laneEvents.length === 0) return { id, event: null };
       let best = null;
       let bestDist = Infinity;
@@ -853,6 +931,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const selectedLaneExactEvents = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
     return (laneMap[selectedLaneId] || [])
+      .filter((e) => !isInternalEvent(e))
       .filter((e) => {
         const tsMatch = Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs;
         const durationMs = getEventVisualDurationMs(e);
@@ -864,7 +943,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs]);
   const selectedLaneNearestEvent = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return null;
-    const laneEvents = laneMap[selectedLaneId] || [];
+    const laneEvents = (laneMap[selectedLaneId] || []).filter((e) => !isInternalEvent(e));
     if (laneEvents.length === 0) return null;
     let best = null;
     let bestDist = Infinity;
@@ -932,10 +1011,11 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const laneLineById = useMemo(() => {
     const out = {};
     for (const id of laneIds) {
-      out[id] = buildLaneGradient(laneMap[id] || [], timeStart, effectiveWindowMs);
+      // Use full history so pre-window ETR/runtime events set initial lane colour
+      out[id] = buildLaneGradient(fullLaneMap[id] || [], timeStart, effectiveWindowMs);
     }
     return out;
-  }, [laneIds, laneMap, timeStart, effectiveWindowMs]);
+  }, [laneIds, fullLaneMap, timeStart, effectiveWindowMs]);
 
   const laneBlocksById = useMemo(() => {
     const out = {};
@@ -1024,7 +1104,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               onClick={() => setScaleMode((m) => (m === 'normalized' ? 'absolute' : 'normalized'))}
               className={`text-[11px] px-2 py-0.5 rounded border ${
                 scaleMode === 'absolute'
-                  ? 'border-amber-500/50 text-amber-300 bg-amber-900/20'
+                  ? 'border-led-amber/50 text-led-amber bg-led-amber/10'
                   : 'border-white/10 text-gray-400 bg-black/20'
               }`}
             >
@@ -1044,7 +1124,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               onClick={resetToLiveWindow}
               className={`text-[11px] px-2 py-0.5 rounded border ${
                 rangeMode === 'relative'
-                  ? 'border-green-500/50 text-green-300 bg-green-900/20'
+                  ? 'border-led-green/50 text-led-green bg-led-green/10'
                   : 'border-white/10 text-gray-400 bg-black/20'
               }`}
             >
@@ -1077,17 +1157,17 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           >
             Apply
           </button>
-          {rangeError && <span className="text-red-300">{rangeError}</span>}
+          {rangeError && <span className="text-led-red font-mono">{rangeError}</span>}
         </div>
         <div className="mb-1.5 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono">
           <span className="inline-flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#ffb266' }} />
             alarm
           </span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px bg-green-500" /> nominal</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ffe680' }} /> warning</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ff6b6b' }} /> critical</span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#b784ff' }} /> incident</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#00dd55' }} /> nominal</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ffaa00' }} /> warning</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ff2233' }} /> critical</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#cc44ff' }} /> incident</span>
         </div>
         <div className="mb-2 flex items-center gap-2.5 text-[9px] text-gray-500 font-mono flex-wrap">
           <span className="text-gray-600 uppercase tracking-wider">type</span>
@@ -1264,13 +1344,13 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                         key={e.key}
                         className={`rounded border px-2 py-1 ${
                           e.severity === 'critical'
-                            ? 'border-red-500/25 bg-red-900/15'
+                            ? 'border-led-red/25 bg-led-red/10'
                             : e.severity === 'warning'
-                              ? 'border-amber-500/25 bg-amber-900/15'
+                              ? 'border-led-amber/25 bg-led-amber/10'
                               : 'border-white/15 bg-black/30'
                         }`}
                       >
-                        <div className={`${e.severity === 'critical' ? 'text-red-300' : e.severity === 'warning' ? 'text-amber-300' : 'text-gray-300'} font-mono`}>{e.title}</div>
+                        <div className={`${e.severity === 'critical' ? 'text-led-red' : e.severity === 'warning' ? 'text-led-amber' : 'text-gray-300'} font-mono`}>{e.title}</div>
                         <div className="text-gray-400">{toUtc(e.ts)}</div>
                         <div className="text-gray-500 truncate">{e.description || '-'}</div>
                       </div>
@@ -1389,7 +1469,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                           className={`inline-block mb-1 text-[9px] font-mono px-1.5 py-0.5 rounded border ${
                             isNic
                               ? 'text-neon-cyan border-neon-cyan/30 bg-neon-cyan/10'
-                              : 'text-amber-400 border-amber-500/30 bg-amber-900/20'
+                              : 'text-led-amber border-led-amber/30 bg-led-amber/10'
                           }`}
                           title={isNic
                             ? `Packet capture via ${cm} - NIC-level IAT`
