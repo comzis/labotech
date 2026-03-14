@@ -68,7 +68,6 @@ const LOGIN_PROFILES = {
 };
 const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
-const BRAND_MARK_SRC = '/labotech-mark.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
 const BUILD_TIME_UTC = import.meta.env.VITE_BUILD_TIME_UTC || null;
@@ -212,81 +211,123 @@ function LandingAuth({ onLogin, punchline }) {
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1f27, #3a4656 20%, #3a4656 80%, #1a1f27)' }} />
 
         <div className="p-6 md:p-8 flex-1 flex flex-col relative">
-          <div className="mb-2">
+          <div className="mb-2 flex items-start justify-between gap-4">
             <div>
               <div
-                className="inline-flex items-center h-16 px-4 rounded-sm gap-3 relative mb-2"
+                className="inline-flex items-center h-16 px-5 rounded-sm relative mb-2"
                 style={{
-                  background: 'linear-gradient(180deg, #1a1f27 0%, #11161d 62%, #0b0f14 100%), repeating-linear-gradient(90deg, rgba(120,140,170,0.06) 0, rgba(120,140,170,0.06) 2px, transparent 2px, transparent 8px)',
-                  border: '1px solid #3a4453',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08), inset 0 -1px 0 rgba(0,0,0,0.5), 0 0 16px rgba(0,0,0,0.38)',
+                  background: 'radial-gradient(120% 100% at 8% 15%, rgba(160,175,200,0.08), transparent 45%), radial-gradient(120% 100% at 92% 88%, rgba(95,110,130,0.14), transparent 42%), radial-gradient(90% 70% at 50% 30%, rgba(60,74,95,0.16), transparent 55%), linear-gradient(180deg, #1f252f 0%, #141a22 60%, #0c1016 100%), repeating-linear-gradient(90deg, rgba(120,140,170,0.07) 0, rgba(120,140,170,0.07) 2px, transparent 2px, transparent 8px), repeating-linear-gradient(180deg, rgba(20,28,38,0.16) 0, rgba(20,28,38,0.16) 1px, transparent 1px, transparent 6px)',
+                  border: '1px solid #49586d',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12), inset 0 -1px 0 rgba(0,0,0,0.55), 0 0 20px rgba(10,18,30,0.55)',
                 }}
                 title="Labotech identity"
               >
-                <span className="absolute left-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
-                <span className="absolute right-1 top-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
-                <span className="absolute left-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
-                <span className="absolute right-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
+                <span className="absolute left-1 top-1 w-[9px] h-[9px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #95a3b6, #5d6878 58%, #333c4a)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 2px rgba(0,0,0,0.6)' }}>
+                  <span className="absolute left-1/2 top-[1px] w-[1px] h-[6px] -translate-x-1/2" style={{ background: '#2d3442' }} />
+                  <span className="absolute top-1/2 left-[1px] h-[1px] w-[6px] -translate-y-1/2" style={{ background: '#2d3442' }} />
+                </span>
+                <span className="absolute right-1 top-1 w-[9px] h-[9px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #95a3b6, #5d6878 58%, #333c4a)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 2px rgba(0,0,0,0.6)' }}>
+                  <span className="absolute left-1/2 top-[1px] w-[1px] h-[6px] -translate-x-1/2" style={{ background: '#2d3442' }} />
+                  <span className="absolute top-1/2 left-[1px] h-[1px] w-[6px] -translate-y-1/2" style={{ background: '#2d3442' }} />
+                </span>
+                <span className="absolute left-1 bottom-1 w-[9px] h-[9px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #95a3b6, #5d6878 58%, #333c4a)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 2px rgba(0,0,0,0.6)' }}>
+                  <span className="absolute left-1/2 top-[1px] w-[1px] h-[6px] -translate-x-1/2" style={{ background: '#2d3442' }} />
+                  <span className="absolute top-1/2 left-[1px] h-[1px] w-[6px] -translate-y-1/2" style={{ background: '#2d3442' }} />
+                </span>
+                <span className="absolute right-1 bottom-1 w-[9px] h-[9px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #95a3b6, #5d6878 58%, #333c4a)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.26), 0 0 2px rgba(0,0,0,0.6)' }}>
+                  <span className="absolute left-1/2 top-[1px] w-[1px] h-[6px] -translate-x-1/2" style={{ background: '#2d3442' }} />
+                  <span className="absolute top-1/2 left-[1px] h-[1px] w-[6px] -translate-y-1/2" style={{ background: '#2d3442' }} />
+                </span>
                 <span
-                  className="w-[30px] h-[30px] rounded-sm shrink-0 overflow-hidden flex items-center justify-center"
+                  className="w-[30px] h-[30px] rounded-sm shrink-0 relative overflow-hidden mr-2"
                   style={{
-                    background: 'linear-gradient(180deg, #1a2230, #111722)',
-                    border: '1px solid #5f6f87',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
+                    background: 'linear-gradient(180deg, #121821, #0c1017)',
+                    border: '1px solid #4e5e76',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.45)',
                   }}
                 >
-                  <img
-                    src={BRAND_MARK_SRC}
-                    alt="Labotech mark"
-                    className="w-full h-full object-contain scale-[1.22]"
-                    onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                  />
+                  {/* Mini synthetic composite bars + waveform (reference-inspired, not image copy) */}
+                  <span className="absolute left-[7px] top-[7px] w-[2px] h-[8px]" style={{ background: '#f2f6ff', opacity: 0.92 }} />
+                  <span className="absolute left-[10px] top-[7px] w-[2px] h-[8px]" style={{ background: '#ffd84d', opacity: 0.9 }} />
+                  <span className="absolute left-[13px] top-[7px] w-[2px] h-[8px]" style={{ background: '#33d3ff', opacity: 0.9 }} />
+                  <span className="absolute left-[16px] top-[7px] w-[2px] h-[8px]" style={{ background: '#28d96f', opacity: 0.9 }} />
+                  <span className="absolute left-[19px] top-[7px] w-[2px] h-[8px]" style={{ background: '#e66cd6', opacity: 0.9 }} />
+                  <span className="absolute left-[22px] top-[7px] w-[2px] h-[8px]" style={{ background: '#ff5f6f', opacity: 0.9 }} />
+                  <svg
+                    className="absolute left-[7px] bottom-[6px]"
+                    width="18"
+                    height="7"
+                    viewBox="0 0 18 7"
+                    aria-hidden="true"
+                  >
+                    <polyline
+                      points="0,4 2,2 4,6 6,2 8,6 10,2 12,5 14,2 16,4 18,3"
+                      fill="none"
+                      stroke="#9ebce0"
+                      strokeWidth="0.8"
+                      opacity="0.8"
+                    />
+                  </svg>
+                  <span
+                    className="absolute left-[2px] top-[2px] w-[4px] h-[4px] rounded-full"
+                    style={{
+                      background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
+                    <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
+                  </span>
+                  <span
+                    className="absolute right-[2px] bottom-[2px] w-[4px] h-[4px] rounded-full"
+                    style={{
+                      background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
+                    <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
+                  </span>
                 </span>
                 <span className="flex flex-col leading-none">
                   <span
-                    className="text-[15px] font-black uppercase tracking-[0.2em]"
-                    style={{ color: '#e2eaf6', textShadow: '0 0 10px rgba(140,165,200,0.22)' }}
+                    className="text-[14px] font-black uppercase tracking-[0.18em]"
+                    style={{ color: '#7b879a', textShadow: '0 1px 0 rgba(0,0,0,0.5)' }}
                   >
                     LABOTECH
                   </span>
-                  <span className="text-[6px] uppercase tracking-[0.12em] mt-0.5" style={{ color: '#75839a' }}>
+                  <span
+                    className="text-[5px] tracking-[0.05em] mt-0.5"
+                    style={{ color: '#738199', fontStyle: 'italic', fontFamily: '"Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif' }}
+                  >
                     Powered by Docker
                   </span>
                 </span>
               </div>
-              <div
-                className="text-[9px] uppercase tracking-[0.22em]"
-                style={{ color: '#8ea9d1', textShadow: '0 1px 0 rgba(0,0,0,0.35)' }}
-              >
-                Team Work · Engineering · Operations · SLA
-              </div>
-              <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#4f5f78' }}>
-                Secure operator access
-              </div>
             </div>
+            <img
+              src={PARTNER_LOGO_SRC}
+              alt="Eurovision Services"
+              className="shrink-0"
+              style={{
+                height: 34,
+                width: 'auto',
+                opacity: 0.92,
+                filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))',
+              }}
+              onError={(e) => { e.currentTarget.style.display = 'none'; }}
+            />
           </div>
-          <img
-            src={PARTNER_LOGO_SRC}
-            alt="Eurovision Services"
-            className="shrink-0"
-            style={{
-              position: 'absolute',
-              top: 22,
-              right: 28,
-              height: 34,
-              width: 'auto',
-              opacity: 0.92,
-              filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))',
-            }}
-            onError={(e) => { e.currentTarget.style.display = 'none'; }}
-          />
+          <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#8ea9d1', textShadow: '0 1px 0 rgba(0,0,0,0.35)' }}>
+            Team Work · Engineering · Operations · SLA
+          </div>
           <div className="mb-10 border-t" style={{ borderColor: '#212c3d' }} />
 
           <div className="my-6 rounded-sm border p-5" style={{ borderColor: '#2c3b52', background: 'linear-gradient(180deg, #162233, #101a29)' }}>
             {!showForm ? (
               <div className="flex flex-col items-start gap-4">
                 <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: '#8ba3c7' }}>
-                  Secure access gate
+                  Secure operator access
                 </div>
                 <div className="text-[20px] font-black uppercase tracking-[0.12em] leading-none" style={{ color: '#c8dcff' }}>
                   Control Room Access
@@ -720,18 +761,18 @@ export default function App() {
       <header
         className="fixed top-0 w-full z-50"
         style={{
-          background: 'linear-gradient(180deg, #1e1e1e 0%, #141414 60%, #101010 100%)',
-          borderBottom: '1px solid #0a0a0a',
-          boxShadow: '0 4px 24px rgba(0,0,0,0.8), inset 0 1px 0 rgba(255,255,255,0.05)',
+          background: 'radial-gradient(120% 100% at 8% 15%, rgba(160,175,200,0.08), transparent 45%), radial-gradient(120% 95% at 92% 82%, rgba(95,110,130,0.13), transparent 42%), linear-gradient(180deg, #1f252f 0%, #141a22 62%, #0c1016 100%), repeating-linear-gradient(90deg, rgba(120,140,170,0.06) 0, rgba(120,140,170,0.06) 2px, transparent 2px, transparent 9px)',
+          borderBottom: '1px solid #2c3848',
+          boxShadow: '0 4px 24px rgba(6,12,20,0.78), inset 0 1px 0 rgba(235,242,255,0.08)',
         }}
       >
         {/* Rack rail top-edge line */}
-        <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a1a1a, #303030 20%, #303030 80%, #1a1a1a)' }} />
+        <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a2230, #3c4f67 20%, #3c4f67 80%, #1a2230)' }} />
 
         <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[96px] flex flex-col justify-center gap-1.5">
           <div className="flex items-center gap-1 xl:gap-2">
             <div
-              className="hidden xl:flex items-center h-12 px-3 rounded-sm shrink-0 gap-2.5 relative"
+              className="hidden xl:flex items-center h-12 px-3 rounded-sm shrink-0 gap-1.5 relative"
               style={{
                 background: 'linear-gradient(180deg, #161a21 0%, #0f1319 62%, #0b0f14 100%)',
                 border: '1px solid #2b313c',
@@ -744,28 +785,52 @@ export default function App() {
               <span className="absolute left-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
               <span className="absolute right-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
               <span
-                className="w-[18px] h-[18px] rounded-sm shrink-0 overflow-hidden"
+                className="w-[18px] h-[18px] rounded-sm shrink-0 relative overflow-hidden"
                 style={{
-                  background: '#161c26',
+                  background: 'linear-gradient(180deg, #121821, #0c1017)',
                   border: '1px solid #4e5e76',
-                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18)',
+                  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.45)',
                 }}
               >
-                <img
-                  src={BRAND_MARK_SRC}
-                  alt="Labotech mark"
-                  className="w-full h-full object-contain"
-                  onError={(e) => { e.currentTarget.style.display = 'none'; }}
-                />
+                <span className="absolute left-[5px] top-[4px] w-[1px] h-[4px]" style={{ background: '#f2f6ff', opacity: 0.9 }} />
+                <span className="absolute left-[7px] top-[4px] w-[1px] h-[4px]" style={{ background: '#ffd84d', opacity: 0.88 }} />
+                <span className="absolute left-[9px] top-[4px] w-[1px] h-[4px]" style={{ background: '#33d3ff', opacity: 0.88 }} />
+                <span className="absolute left-[11px] top-[4px] w-[1px] h-[4px]" style={{ background: '#28d96f', opacity: 0.88 }} />
+                <svg className="absolute left-[5px] bottom-[3px]" width="8" height="4" viewBox="0 0 8 4" aria-hidden="true">
+                  <polyline points="0,3 1,1 2,3 3,1 4,3 5,1 6,3 7,2 8,3" fill="none" stroke="#9ebce0" strokeWidth="0.6" opacity="0.8" />
+                </svg>
+                <span
+                  className="absolute left-[2px] top-[2px] w-[4px] h-[4px] rounded-full"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
+                  <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
+                </span>
+                <span
+                  className="absolute right-[2px] bottom-[2px] w-[4px] h-[4px] rounded-full"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
+                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
+                  }}
+                >
+                  <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
+                  <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
+                </span>
               </span>
               <span className="flex flex-col leading-none">
                 <span
                   className="text-[12px] font-black uppercase tracking-[0.18em]"
-                  style={{ color: '#d8e0ec', textShadow: '0 0 10px rgba(140,165,200,0.2)' }}
+                  style={{ color: '#7b879a', textShadow: '0 1px 0 rgba(0,0,0,0.5)' }}
                 >
                   LABOTECH
                 </span>
-                <span className="text-[7px] uppercase tracking-[0.1em]" style={{ color: '#8895a8' }}>
+                <span
+                  className="text-[5px] tracking-[0.05em]"
+                  style={{ color: '#738199', fontStyle: 'italic', fontFamily: '"Palatino Linotype", "Book Antiqua", Palatino, Georgia, serif' }}
+                >
                   Powered by Docker
                 </span>
               </span>
@@ -782,15 +847,32 @@ export default function App() {
                     onClick={() => setTab(t.id)}
                     className="flex flex-col items-center justify-center gap-0.5 w-[88px] xl:w-[96px] h-[44px] px-1 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
                     style={isActive ? {
-                      background: `linear-gradient(180deg, #222 0%, #181818 100%)`,
-                      border: `1px solid ${t.led}44`,
-                      boxShadow: `0 0 10px ${t.led}33, inset 0 1px 0 rgba(255,255,255,0.04)`,
+                      background: 'radial-gradient(120% 95% at 10% 18%, rgba(164,184,212,0.12), transparent 45%), linear-gradient(180deg, #2a3340 0%, #1b2430 62%, #111822 100%), repeating-linear-gradient(90deg, rgba(175,194,220,0.06) 0, rgba(175,194,220,0.06) 2px, transparent 2px, transparent 9px)',
+                      border: `1px solid ${t.led}77`,
+                      boxShadow: `0 0 10px ${t.led}33, inset 0 1px 0 rgba(255,255,255,0.18), inset 0 -1px 0 rgba(0,0,0,0.55)`,
                     } : {
-                      background: 'linear-gradient(180deg, #1c1c1c 0%, #141414 100%)',
-                      border: '1px solid #222',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), inset 0 -1px 0 rgba(0,0,0,0.4)',
+                      background: 'radial-gradient(110% 90% at 12% 20%, rgba(130,150,180,0.08), transparent 42%), linear-gradient(180deg, #202933 0%, #151d27 62%, #10161f 100%), repeating-linear-gradient(90deg, rgba(150,168,192,0.04) 0, rgba(150,168,192,0.04) 2px, transparent 2px, transparent 9px)',
+                      border: '1px solid #4d5f78',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(0,0,0,0.5)',
                     }}
                   >
+                    {/* Mini Phillips screws (x4) */}
+                    <span className="absolute left-[3px] top-[3px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)' }}>
+                      <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
+                      <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
+                    </span>
+                    <span className="absolute right-[3px] top-[3px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)' }}>
+                      <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
+                      <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
+                    </span>
+                    <span className="absolute left-[3px] bottom-[3px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)' }}>
+                      <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
+                      <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
+                    </span>
+                    <span className="absolute right-[3px] bottom-[3px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)' }}>
+                      <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
+                      <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
+                    </span>
                     {/* LED indicator above icon */}
                     <div
                       className="w-2 h-2 rounded-full"
@@ -805,11 +887,11 @@ export default function App() {
                     <Icon
                       className="w-3 h-3"
                       strokeWidth={isActive ? 2 : 1.5}
-                      style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
+                      style={{ color: isActive ? t.led : '#eef4ff' }}
                     />
                     <span
                       className="text-[8px] font-bold uppercase tracking-[0.08em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
-                      style={{ color: isActive ? t.led : INACTIVE_TAB_COLOR }}
+                      style={{ color: isActive ? t.led : '#eef4ff' }}
                     >
                       {t.label}
                     </span>
@@ -935,7 +1017,7 @@ export default function App() {
         </div>
 
         {/* Rack rail bottom-edge line */}
-        <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, #1a1a1a 10%, #1a1a1a 90%, transparent)' }} />
+        <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, #243245 10%, #243245 90%, transparent)' }} />
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
