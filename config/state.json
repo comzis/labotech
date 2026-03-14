@@ -1,39 +1,5 @@
 {
-  "streams": [
-    {
-      "id": "thumbtest",
-      "input": "udp://127.0.0.1:5000",
-      "inputLocalAddr": null,
-      "host": null,
-      "port": 9999,
-      "latency": 2000,
-      "rateMode": "cbr",
-      "videoBitrate": "8M",
-      "videoCodec": "libx264",
-      "preset": "medium",
-      "profile": "high",
-      "gopSize": 50,
-      "pixFmt": "yuv420p",
-      "passphrase": null,
-      "pbkeylen": 16,
-      "streamId": null,
-      "adapter": null,
-      "outputMode": null,
-      "ttl": 16,
-      "localAddr": null,
-      "serviceId": 1,
-      "transportStreamId": 1,
-      "originalNetworkId": 1,
-      "pmtPid": 4096,
-      "videoPid": 256,
-      "serviceName": "",
-      "serviceProvider": "",
-      "audioPairs": null,
-      "audioBitrate": "256k",
-      "audioCodec": "aac",
-      "audioChannels": 2
-    }
-  ],
+  "streams": [],
   "transcoders": [],
   "forwarders": []
 }
