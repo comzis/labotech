@@ -189,13 +189,14 @@ function toEvent(msg) {
   if (msg.type === 'etr290_alarm') {
     const laneId = normalizeLaneId(msg.id || 'etr');
     const etr = buildEtrMeta(msg);
+    const severity = etr.priority === 'p1' ? 'p1' : etr.priority === 'p2' ? 'warning' : 'info';
     return {
       key: `${ts}-${msg.id || 'unknown'}-${msg.label || 'alarm'}`,
       ts,
       id: laneId,
       rawId: msg.id || 'etr',
       category: 'etr290_alarm',
-      severity: etr.severity,
+      severity,
       title: `ETR 290 ${etr.priorityLabel} alarm: ${etr.checkLabel}`,
       description: msg.message || '',
       evidence: {
@@ -233,7 +234,7 @@ function toEvent(msg) {
       // Keep status heartbeats informational to avoid conflicting with alarm/incident views.
       severity: 'info',
       // But retain true ETR state for lane-level timeline coloring.
-      stateSeverity: hasP1 ? 'critical' : hasP2 ? 'warning' : 'ok',
+      stateSeverity: hasP1 ? 'p1' : hasP2 ? 'warning' : 'ok',
       title: hasP1 ? 'ETR 290 status heartbeat: Priority 1 active' : hasP2 ? 'ETR 290 status heartbeat: Priority 2 active' : 'ETR 290 status heartbeat: nominal',
       description: activeChecks.length > 0
         ? `Active checks: ${activeChecks.map((c) => c.checkLabel).join(', ')}`
@@ -353,7 +354,7 @@ function toEvent(msg) {
       id: laneId,
       rawId: msg.id || 'system',
       category: 'runtime_error',
-      severity: isNoSignal ? 'warning' : 'critical',
+      severity: 'critical',
       title: isNoSignal ? 'Input signal missing' : 'Engine error',
       description: msg.message || 'Unknown runtime error',
     };
@@ -403,6 +404,7 @@ function toEvent(msg) {
 }
 
 function colorForSeverity(severity) {
+  if (severity === 'p1') return '#00ddff';
   if (severity === 'critical') return '#ff4d5f';
   if (severity === 'warning') return '#ffd84d';
   if (severity === 'ok') return '#00f06f';
@@ -427,6 +429,7 @@ function laneColorForEvent(event) {
   if (!event) return '#ffffff26';
   const sev = laneStateSeverity(event);
   if (!sev) return '#44556666';
+  if (sev === 'p1') return '#00ddffcc';
   if (sev === 'critical') return '#ff4d5fcc';
   if (sev === 'warning') return '#ffd84dcc';
   if (sev === 'ok') return '#00f06fb8';
@@ -434,6 +437,7 @@ function laneColorForEvent(event) {
 }
 
 function colorForLaneSeverity(severity) {
+  if (severity === 'p1') return '#00ddff';
   if (severity === 'critical') return '#ff4d5f';
   if (severity === 'warning') return '#ffd84d';
   if (severity === 'ok') return '#00f06f';
@@ -441,6 +445,7 @@ function colorForLaneSeverity(severity) {
 }
 
 function laneTintForSeverity(severity) {
+  if (severity === 'p1') return `${colorForLaneSeverity(severity)}c8`;
   if (severity === 'critical') return `${colorForLaneSeverity(severity)}c4`;
   if (severity === 'warning') return `${colorForLaneSeverity(severity)}bc`;
   if (severity === 'ok') return `${colorForLaneSeverity(severity)}b8`;
@@ -475,9 +480,10 @@ function buildLaneGradient(events, timeStart, windowMs) {
     );
     const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
+    const hadActivityBeforeWindow = activitySource.some((e) => e.ts <= timeStart);
     // If the lane is currently active (no stop and freshness extends to window end),
-    // render a continuous baseline over the selected window.
-    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs);
+    // render full-window baseline only when activity is known before current window.
+    const isActiveNow = !stopAfterActive && staleStopTs >= (timeStart + windowMs) && hadActivityBeforeWindow;
     const effectiveStartTs = isActiveNow ? timeStart : Math.max(timeStart, firstActiveTs);
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const effectiveStopTs = stopAfterActive ? Math.min(stopAfterActive.ts, staleStopTs) : staleStopTs;
@@ -555,14 +561,13 @@ function getEventVisualDurationMs(event) {
   if (!event) return 6000;
   const baseDur = EVENT_BLOCK_DURATION_MS[event.category] || 6000;
   const sev = laneSeverity(event);
-  const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
+  const severityFactor = (sev === 'critical' || sev === 'p1') ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
   return Math.round(baseDur * severityFactor);
 }
 
 function getEventVisualStyle(category, severity) {
   const style = EVENT_STYLE_BY_CATEGORY[category] || { alpha: 'cc', borderAlpha: 'aa', glowAlpha: '66' };
   let color = colorForSeverity(severity);
-  if (category === 'etr290_alarm') color = '#ffb266';
   if (category === 'etr290_incident' || category === 'etr290_incident_cleared') color = '#b784ff';
   return {
     color,
