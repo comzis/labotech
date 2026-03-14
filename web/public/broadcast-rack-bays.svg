@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0d1320"/>
+      <stop offset="55%" stop-color="#0a1018"/>
+      <stop offset="100%" stop-color="#070b12"/>
+    </linearGradient>
+    <linearGradient id="rackFace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1c2533"/>
+      <stop offset="100%" stop-color="#131a25"/>
+    </linearGradient>
+    <pattern id="rackRow" width="380" height="140" patternUnits="userSpaceOnUse">
+      <rect x="10" y="18" width="360" height="104" rx="6" fill="url(#rackFace)" stroke="#2f3a4d" stroke-width="1"/>
+      <circle cx="28" cy="70" r="4.2" fill="#00c8ff" opacity="0.65"/>
+      <circle cx="42" cy="70" r="3.8" fill="#00dd55" opacity="0.62"/>
+      <rect x="62" y="61" width="140" height="18" rx="3" fill="#0d141f" stroke="#243045" stroke-width="1"/>
+      <rect x="228" y="58" width="48" height="24" rx="2" fill="#121b29" stroke="#31405a" stroke-width="1"/>
+      <rect x="282" y="58" width="48" height="24" rx="2" fill="#121b29" stroke="#31405a" stroke-width="1"/>
+      <rect x="336" y="58" width="20" height="24" rx="2" fill="#101724" stroke="#2b3648" stroke-width="1"/>
+    </pattern>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#bg)"/>
+  <g opacity="0.9">
+    <rect x="120" y="70" width="520" height="940" rx="8" fill="#111928" stroke="#263247" stroke-width="1.2"/>
+    <rect x="700" y="70" width="520" height="940" rx="8" fill="#101827" stroke="#253145" stroke-width="1.2"/>
+    <rect x="1280" y="70" width="520" height="940" rx="8" fill="#0f1725" stroke="#243044" stroke-width="1.2"/>
+  </g>
+  <g opacity="0.94">
+    <rect x="140" y="86" width="480" height="908" fill="url(#rackRow)"/>
+    <rect x="720" y="86" width="480" height="908" fill="url(#rackRow)"/>
+    <rect x="1300" y="86" width="480" height="908" fill="url(#rackRow)"/>
+  </g>
+  <rect width="1920" height="1080" fill="url(#bg)" opacity="0.35"/>
+</svg>

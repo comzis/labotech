@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
@@ -48,28 +48,45 @@ const PidRef = ({ pid }) => (
 export default function StreamsPanel({ lastMessage }) {
   const { streams, loading, error, refresh } = useStreams();
   const [encapHealth, setEncapHealth] = useState(null);
+  const [encapHealthError, setEncapHealthError] = useState(null);
+  const [encapHealthLoading, setEncapHealthLoading] = useState(false);
+  const [encapLastCheckMs, setEncapLastCheckMs] = useState(null);
 
   useEffect(() => {
     if (lastMessage?.type === 'stopped') refresh();
   }, [lastMessage, refresh]);
 
+  const loadEncapHealth = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) setEncapHealthLoading(true);
+    try {
+      const h = await getEncapsulatorHealth();
+      setEncapHealth(h);
+      setEncapHealthError(null);
+      setEncapLastCheckMs(Date.now());
+      return true;
+    } catch (err) {
+      setEncapHealth(null);
+      setEncapHealthError(err?.message || 'service unavailable');
+      setEncapLastCheckMs(Date.now());
+      return false;
+    } finally {
+      if (!silent) setEncapHealthLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     let mounted = true;
-    const loadHealth = async () => {
-      try {
-        const h = await getEncapsulatorHealth();
-        if (mounted) setEncapHealth(h);
-      } catch (_) {
-        if (mounted) setEncapHealth(null);
-      }
+    const tick = async () => {
+      if (!mounted) return;
+      await loadEncapHealth({ silent: true });
     };
-    loadHealth();
-    const timer = setInterval(loadHealth, 15000);
+    tick();
+    const timer = setInterval(tick, 15000);
     return () => {
       mounted = false;
       clearInterval(timer);
     };
-  }, []);
+  }, [loadEncapHealth]);
 
   const handleStop = async (id) => {
     try {
@@ -148,10 +165,38 @@ export default function StreamsPanel({ lastMessage }) {
 
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
         {error && <p className="text-red-400  text-sm">{error}</p>}
+        {!encapHealth && encapHealthError && (
+          <div className="mb-3 rounded border border-red-700/40 bg-red-950/20 px-3 py-2 text-[11px] font-mono text-red-200">
+            <div className="flex items-center justify-between gap-3">
+              <span>
+                SRT sidecar unreachable: {encapHealthError}
+                {encapLastCheckMs ? ` · last check ${new Date(encapLastCheckMs).toLocaleTimeString()}` : ''}
+              </span>
+              <button
+                onClick={() => loadEncapHealth()}
+                disabled={encapHealthLoading}
+                className="shrink-0 rounded border border-red-600/60 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:bg-red-900/30 disabled:opacity-50"
+              >
+                {encapHealthLoading ? 'Retrying...' : 'Retry'}
+              </button>
+            </div>
+            <div className="mt-1 text-[10px] text-red-300/90">
+              Diagnostics: check `labotech-encapsulator` container and `curl http://127.0.0.1:4100/health`.
+            </div>
+          </div>
+        )}
         {encapHealth && (
           <div className="mb-3 rounded border border-cyan-700/30 bg-cyan-950/20 px-3 py-2 text-[11px] font-mono text-cyan-200">
             SRT service: {encapHealth.status} · libsrt {encapHealth?.capabilities?.libsrt ? 'enabled' : 'missing'} · {encapHealth?.capabilities?.details || 'unknown'}
             {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) ? ` · CPU ${encapHealth.telemetry.cpuPercent}%` : ''}
+            {encapHealth?.guardrail?.enabled ? ` · Guardrail ${encapHealth.guardrail.warn ? 'warn' : 'normal'}` : ''}
+            {Number.isFinite(Number(encapHealth?.guardrail?.estimatedMaxStreams)) ? ` · Cap ${encapHealth.guardrail.estimatedMaxStreams} streams @ ${encapHealth?.guardrail?.streamMbpsBaseline || 22}Mbps` : ''}
+          </div>
+        )}
+        {encapHealth?.guardrail?.warn && !encapHealth?.guardrail?.block && (
+          <div className="mb-3 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[11px] font-mono text-amber-200">
+            Guardrail warning: {(encapHealth.guardrail.reasons || []).join(' | ') || 'approaching configured threshold'}.
+            New channels may be blocked soon.
           </div>
         )}
 
