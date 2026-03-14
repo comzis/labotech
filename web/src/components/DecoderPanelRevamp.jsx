@@ -3,6 +3,7 @@ import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
 import { resolveTransportBitrate } from "../utils/transportBitrate";
+import { getAnalyser } from "../api";
 
 const PROBE_MODES = [
   { value: "rtp", label: "RTP" },
@@ -372,6 +373,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     error,
     activeIds,
     resultsById,
+    decoderMeta,
     probe,
     refreshActives,
     startContinuous,
@@ -518,9 +520,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     if (!selectedId) return "";
     const fromResult = (resultsById[selectedId] || selectedResult)?.url;
     if (fromResult) return fromResult;
+    const fromMeta = decoderMeta?.[selectedId]?.url;
+    if (fromMeta) return fromMeta;
     const fromRow = rowPlans.find((r) => r.decoderId?.trim() === selectedId)?.url;
     return fromRow || "";
-  }, [selectedId, resultsById, selectedResult, rowPlans]);
+  }, [selectedId, resultsById, selectedResult, decoderMeta, rowPlans]);
   const startBatchHint = busy
     ? "Decoder operation in progress..."
     : validRowPlans.length === 0
@@ -536,7 +540,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     : !selectedId
       ? "Select a decoder first."
       : !selectedDecoderUrl
-        ? "Start decoder first so ETR can attach to a live URL."
+        ? "Decoder URL is still syncing. You can press Enable ETR and it will retry API resolution."
         : "";
   const applyEtrHint = busy
     ? "Decoder operation in progress..."
@@ -678,13 +682,24 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       } finally { setBusy(false); }
       return;
     }
-    if (!selectedDecoderUrl) {
-      setEtrActionNote({ type: "warn", text: "Start decoder first so ETR can attach to a live URL." });
-      return;
-    }
     setBusy(true);
     try {
-      await etr.start(selectedEtrMonitorId, selectedDecoderUrl, captureNic || undefined, {
+      let attachUrl = selectedDecoderUrl;
+      if (!attachUrl) {
+        // Running analysers can exist before first analyse_result websocket payload.
+        // Resolve URL from API directly so ETR enable action is not blocked by UI timing.
+        try {
+          const analyser = await getAnalyser(selectedId);
+          attachUrl = analyser?.url || "";
+        } catch (_) {
+          attachUrl = "";
+        }
+      }
+      if (!attachUrl) {
+        setEtrActionNote({ type: "warn", text: "Decoder URL not available yet. Keep decoder running and retry Enable ETR." });
+        return;
+      }
+      await etr.start(selectedEtrMonitorId, attachUrl, captureNic || undefined, {
         profileName: selectedProfileName || undefined,
         config: etrConfig,
       });
@@ -975,7 +990,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         {activeIds.map((id) => <option key={id} value={id}>{id}</option>)}
                       </select>
                     </Field>
-                    <button onClick={startEtrForSelected} disabled={!selectedId || !selectedDecoderUrl || busy}
+    <button onClick={startEtrForSelected} disabled={!selectedId || busy}
                       style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedId && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
                         border: `1px solid ${selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
                         color: selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.muted,
