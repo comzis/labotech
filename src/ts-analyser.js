@@ -237,6 +237,54 @@ class TSAnalyser extends EventEmitter {
             result.dvb.bitrateSource = this.lastResult.dvb.bitrateSource;
             result.dvb.bitrateHeldFromPrevious = true;
           }
+
+          // Carry forward per-stream metadata from the last result.
+          //
+          // Two categories of fields need carrying:
+          //   1. Bitrate — ffprobe reports N/A for live MPEG-TS; tsduck provides
+          //      PCR-derived values but only on heavy probe cycles.
+          //   2. Structural fields (codec profile/level, resolution, fps, color
+          //      metadata, channel layout) — occasionally missing in a specific
+          //      ffprobe invocation if the stream header wasn't fully parsed.
+          //      Hold last known values so the UI never shows spurious blanks.
+          if (this.lastResult) {
+            // Structural fields to carry when current value is null/empty.
+            const STRUCT_FIELDS = [
+              'width', 'height', 'fps', 'fieldOrder', 'scanType',
+              'pixFmt', 'colorSpace', 'colorTrc', 'colorPrimaries', 'colorRange',
+              'profile', 'level',
+              'sampleRate', 'channels', 'channelLayout',
+            ];
+            const lastByPid = new Map();
+            const collectLast = (streams) => {
+              for (const s of streams || []) {
+                if (s.pid != null) lastByPid.set(s.pid, s);
+              }
+            };
+            (this.lastResult.programs || []).forEach((p) => collectLast(p.streams));
+            collectLast(this.lastResult.orphanStreams);
+
+            if (lastByPid.size > 0) {
+              const holdFields = (s) => {
+                if (s.pid == null || !lastByPid.has(s.pid)) return s;
+                const prev = lastByPid.get(s.pid);
+                const patch = {};
+                // Bitrate: carry when null/zero (tsduck-derived value from heavy cycle)
+                if ((s.bitrate == null || s.bitrate === 0) && Number(prev.bitrate) > 0) {
+                  patch.bitrate = Number(prev.bitrate);
+                }
+                // Structural fields: carry when null
+                for (const f of STRUCT_FIELDS) {
+                  if (s[f] == null && prev[f] != null) patch[f] = prev[f];
+                }
+                return Object.keys(patch).length ? { ...s, ...patch } : s;
+              };
+              result.programs = (result.programs || []).map((prog) => ({
+                ...prog, streams: (prog.streams || []).map(holdFields),
+              }));
+              result.orphanStreams = (result.orphanStreams || []).map(holdFields);
+            }
+          }
           const hasFreshAudioLevels = Boolean(
             audioLevels && (
               (Array.isArray(audioLevels.channels) && audioLevels.channels.length > 0) ||
@@ -831,6 +879,10 @@ class TSAnalyser extends EventEmitter {
       colorSpace: s.color_space || null,
       colorTrc: s.color_transfer || null,
       colorPrimaries: s.color_primaries || null,
+      colorRange: s.color_range || null,          // 'tv' (limited) | 'pc' (full)
+      profile: s.profile || null,                 // e.g. 'High', 'Main 10'
+      level: s.level != null ? Number(s.level) : null, // integer: 40=4.0, 41=4.1, 50=5.0
+      channelLayout: s.channel_layout || null,    // audio: 'stereo','5.1','7.1' etc.
     };
   }
 
@@ -941,6 +993,33 @@ class TSAnalyser extends EventEmitter {
     }
 
     if (tsduckData && Array.isArray(tsduckData.pids) && tsduckData.pids.length > 0) {
+      // tsanalyze reports accurate PCR-derived per-PID bitrates. ffprobe identifies
+      // PIDs correctly but reports bit_rate=N/A for live MPEG-TS streams. Backfill
+      // tsduck bitrate onto existing streams that ffprobe left with null bitrate.
+      const tsduckBitrateByPid = new Map();
+      for (const row of tsduckData.pids) {
+        if (row && row.pid != null && Number(row.bitrate) > 0) {
+          tsduckBitrateByPid.set(row.pid, Number(row.bitrate));
+        }
+      }
+      if (tsduckBitrateByPid.size > 0) {
+        next.programs = next.programs.map((prog) => ({
+          ...prog,
+          streams: (prog.streams || []).map((s) => {
+            if ((s.bitrate == null || s.bitrate === 0) && s.pid != null && tsduckBitrateByPid.has(s.pid)) {
+              return { ...s, bitrate: tsduckBitrateByPid.get(s.pid) };
+            }
+            return s;
+          }),
+        }));
+        next.orphanStreams = (next.orphanStreams || []).map((s) => {
+          if ((s.bitrate == null || s.bitrate === 0) && s.pid != null && tsduckBitrateByPid.has(s.pid)) {
+            return { ...s, bitrate: tsduckBitrateByPid.get(s.pid) };
+          }
+          return s;
+        });
+      }
+
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
       const available = tsduckData.pids.filter((r) => r && r.pid != null && !existingPidSet.has(r.pid));

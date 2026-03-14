@@ -153,34 +153,16 @@ function LandingAuth({ onLogin, punchline }) {
           className="absolute right-0 top-0 bottom-0"
           style={{ width: 22, background: 'linear-gradient(180deg, #202833, #161c26)', borderLeft: '1px solid #2a3340' }}
         />
-        {/* Rack screws */}
-        {[
-          { t: 10, r: 10 }, { b: 10, l: 10 }, { b: 10, r: 10 },
-        ].map((p, idx) => (
-          <span
-            key={`screw-${idx}`}
-            className="absolute rounded-full"
-            style={{
-              width: 9,
-              height: 9,
-              background: 'radial-gradient(circle at 35% 30%, #9aa3b3, #505968 55%, #2b3240)',
-              boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.2), 0 0 2px rgba(0,0,0,0.5)',
-              ...p,
-            }}
-          />
-        ))}
         {[84, 196, 308, 420, 532, 644].map((top, i) => (
           <React.Fragment key={`ear-bolts-${i}`}>
-            {i !== 0 && (
-              <span
-                className="absolute rounded-full"
-                style={{
-                  width: 8, height: 8, left: 7, top,
-                  background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
-                  boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
-                }}
-              />
-            )}
+            <span
+              className="absolute rounded-full"
+              style={{
+                width: 8, height: 8, left: 7, top,
+                background: 'radial-gradient(circle at 35% 30%, #a5adbb, #5a6270 55%, #303845)',
+                boxShadow: 'inset 0 1px 1px rgba(255,255,255,0.18), 0 0 2px rgba(0,0,0,0.45)',
+              }}
+            />
             <span
               className="absolute rounded-full"
               style={{
@@ -447,6 +429,7 @@ function classifySeverity(msg) {
     return isExpectedNoSignalError(msg.message) ? 'warning' : 'critical';
   }
   if (msg.type === 'switched') return 'warning';
+  if (msg.type === 'etr290_stopped' || msg.type === 'analyse_stopped') return 'info';
   if (msg.type === 'info') return 'info';
   return 'info';
 }
@@ -482,10 +465,18 @@ function toLogEntry(msg) {
     status = 'started';
     title = 'Stream started';
     details = `${id} is running`;
-  } else if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped') {
+  } else if (msg.type === 'analyse_started') {
+    status = 'started';
+    title = 'Analyser started';
+    details = msg.message || `${id} analyser started`;
+  } else if (msg.type === 'stopped' || msg.type === 'transcode_stopped' || msg.type === 'multicast_stopped' || msg.type === 'analyse_stopped') {
     status = 'stopped';
-    title = 'Instance stopped';
-    details = `${id} stopped`;
+    title = msg.type === 'analyse_stopped' ? 'Analyser stopped' : 'Instance stopped';
+    details = msg.message || `${id} stopped`;
+  } else if (msg.type === 'etr290_stopped') {
+    status = 'stopped';
+    title = 'ETR monitor stopped';
+    details = `${id} ETR 290 monitor stopped`;
   } else if (msg.type === 'error') {
     status = isExpectedNoSignalError(msg.message) ? 'no-signal' : 'error';
     title = isExpectedNoSignalError(msg.message) ? 'Input signal missing' : 'Engine error';
