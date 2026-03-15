@@ -203,6 +203,7 @@ Expected operator outcomes:
 
 - **Success path:** script prints git HEAD, then `deploy-one-shot` stages and health checks pass.
 - **Encapsulator readiness nuance:** a successful deploy means the encapsulator health gate passed within deploy checks; this greatly reduces restart-time false alarms but does not guarantee zero race window for the first UI poll.
+- **Encapsulator readiness mode:** by default, encapsulator readiness is warning-only (non-fatal) to avoid blocking deploy on sidecar startup turbulence. Set `ENCAP_HEALTH_REQUIRED=1` to enforce fail-fast behavior.
 - **Disk guard stop:** script exits early with explicit low-disk message before mutating git state.
 - **Deploy stop:** preflight/smoke/health assertions fail with stage name; investigate service logs.
 
@@ -220,6 +221,13 @@ MIN_FREE_MB=12288 AUTO_CLEAN_AGGRESSIVE=1 bash scripts/update-and-deploy-safe.sh
 # 3) if still failing, run normal deploy diagnostics
 bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
 bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+```
+
+Strict encapsulator gate (optional):
+
+```bash
+ENCAP_HEALTH_REQUIRED=1 ENCAP_HEALTH_RETRIES=24 ENCAP_HEALTH_DELAY_SEC=5 \
+  bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
 ```
 
 ### Incident playbook: encapsulator unreachable on `127.0.0.1:4100`
