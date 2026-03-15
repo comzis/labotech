@@ -762,7 +762,7 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a2230, #3c4f67 20%, #3c4f67 80%, #1a2230)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[96px] flex flex-col justify-center gap-1.5">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[80px] flex flex-col justify-center gap-1.5">
           <div className="flex items-center gap-1 xl:gap-2">
             <div
               className="hidden xl:flex items-center h-12 px-3 rounded-sm shrink-0 gap-1.5 relative"
@@ -778,44 +778,34 @@ export default function App() {
               <span className="absolute left-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
               <span className="absolute right-1 bottom-1 w-1.5 h-1.5 rounded-full" style={{ background: '#5d6878', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.3), 0 0 2px rgba(0,0,0,0.6)' }} />
               <span
-                className="w-[18px] h-[18px] rounded-sm shrink-0 relative overflow-hidden"
+                className="w-[30px] h-[30px] rounded-sm shrink-0 relative overflow-hidden"
                 style={{
                   background: 'linear-gradient(180deg, #121821, #0c1017)',
                   border: '1px solid #4e5e76',
                   boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.1), inset 0 -1px 0 rgba(0,0,0,0.45)',
                 }}
               >
-                <span className="absolute left-[5px] top-[4px] w-[1px] h-[4px]" style={{ background: '#f2f6ff', opacity: 0.9 }} />
-                <span className="absolute left-[7px] top-[4px] w-[1px] h-[4px]" style={{ background: '#ffd84d', opacity: 0.88 }} />
-                <span className="absolute left-[9px] top-[4px] w-[1px] h-[4px]" style={{ background: '#33d3ff', opacity: 0.88 }} />
-                <span className="absolute left-[11px] top-[4px] w-[1px] h-[4px]" style={{ background: '#28d96f', opacity: 0.88 }} />
-                <svg className="absolute left-[5px] bottom-[3px]" width="8" height="4" viewBox="0 0 8 4" aria-hidden="true">
-                  <polyline points="0,3 1,1 2,3 3,1 4,3 5,1 6,3 7,2 8,3" fill="none" stroke="#9ebce0" strokeWidth="0.6" opacity="0.8" />
+                <span className="absolute left-[7px] top-[7px] w-[2px] h-[8px]" style={{ background: '#f2f6ff', opacity: 0.92 }} />
+                <span className="absolute left-[10px] top-[7px] w-[2px] h-[8px]" style={{ background: '#ffd84d', opacity: 0.9 }} />
+                <span className="absolute left-[13px] top-[7px] w-[2px] h-[8px]" style={{ background: '#33d3ff', opacity: 0.9 }} />
+                <span className="absolute left-[16px] top-[7px] w-[2px] h-[8px]" style={{ background: '#28d96f', opacity: 0.9 }} />
+                <span className="absolute left-[19px] top-[7px] w-[2px] h-[8px]" style={{ background: '#e66cd6', opacity: 0.9 }} />
+                <span className="absolute left-[22px] top-[7px] w-[2px] h-[8px]" style={{ background: '#ff5f6f', opacity: 0.9 }} />
+                <svg className="absolute left-[7px] bottom-[6px]" width="18" height="7" viewBox="0 0 18 7" aria-hidden="true">
+                  <polyline points="0,4 2,2 4,6 6,2 8,6 10,2 12,5 14,2 16,4 18,3" fill="none" stroke="#9ebce0" strokeWidth="0.8" opacity="0.8" />
                 </svg>
-                <span
-                  className="absolute left-[2px] top-[2px] w-[4px] h-[4px] rounded-full"
-                  style={{
-                    background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
-                  }}
-                >
+                <span className="absolute left-[2px] top-[2px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)' }}>
                   <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
                   <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
                 </span>
-                <span
-                  className="absolute right-[2px] bottom-[2px] w-[4px] h-[4px] rounded-full"
-                  style={{
-                    background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)',
-                    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)',
-                  }}
-                >
+                <span className="absolute right-[2px] bottom-[2px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #8d99aa, #556275 60%, #313a48)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.22), 0 0 1px rgba(0,0,0,0.5)' }}>
                   <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#293140' }} />
                   <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#293140' }} />
                 </span>
               </span>
               <span className="flex flex-col leading-none">
                 <span
-                  className="text-[12px] font-black uppercase tracking-[0.18em]"
+                  className="text-[14px] font-black uppercase tracking-[0.18em]"
                   style={{ color: '#7b879a', textShadow: '0 1px 0 rgba(0,0,0,0.5)' }}
                 >
                   LABOTECH
@@ -838,7 +828,7 @@ export default function App() {
                   <button
                     key={t.id}
                     onClick={() => setTab(t.id)}
-                    className="flex flex-col items-center justify-center gap-0.5 w-[88px] xl:w-[96px] h-[44px] px-1 py-1 rounded-sm transition-all duration-100 shrink-0 relative"
+                    className="flex flex-col items-center justify-center gap-1 w-[96px] xl:w-[116px] h-[64px] px-1 py-2 rounded-sm transition-all duration-100 shrink-0 relative"
                     style={isActive ? {
                       background: 'radial-gradient(120% 95% at 10% 18%, rgba(164,184,212,0.12), transparent 45%), linear-gradient(180deg, #2a3340 0%, #1b2430 62%, #111822 100%), repeating-linear-gradient(90deg, rgba(175,194,220,0.06) 0, rgba(175,194,220,0.06) 2px, transparent 2px, transparent 9px)',
                       border: `1px solid ${t.led}77`,
@@ -849,7 +839,7 @@ export default function App() {
                       boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.14), inset 0 -1px 0 rgba(0,0,0,0.5)',
                     }}
                   >
-                    {/* Mini Phillips screws (x4) */}
+                    {/* Corner bolts (x4) */}
                     <span className="absolute left-[3px] top-[3px] w-[4px] h-[4px] rounded-full" style={{ background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)' }}>
                       <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
                       <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
@@ -866,25 +856,14 @@ export default function App() {
                       <span className="absolute left-1/2 top-0.5 w-[1px] h-[2px] -translate-x-1/2" style={{ background: '#2f3948' }} />
                       <span className="absolute top-1/2 left-0.5 h-[1px] w-[2px] -translate-y-1/2" style={{ background: '#2f3948' }} />
                     </span>
-                    {/* LED indicator above icon */}
-                    <div
-                      className="w-2 h-2 rounded-full"
-                      style={isActive ? {
-                        background: `radial-gradient(circle at 40% 30%, #ffffff55, ${t.led})`,
-                        boxShadow: `0 0 4px ${t.led}, 0 0 8px ${t.led}88`,
-                      } : {
-                        background: '#1a1a1a',
-                        boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)',
-                      }}
-                    />
                     <Icon
-                      className="w-3 h-3"
+                      className="w-5 h-5"
                       strokeWidth={isActive ? 2 : 1.5}
-                      style={{ color: isActive ? t.led : '#eef4ff' }}
+                      style={{ color: isActive ? t.led : '#c8d4e8' }}
                     />
                     <span
-                      className="text-[8px] font-bold uppercase tracking-[0.08em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
-                      style={{ color: isActive ? t.led : '#eef4ff' }}
+                      className="text-[10px] font-bold uppercase tracking-[0.07em] leading-none whitespace-nowrap w-full text-center overflow-hidden text-ellipsis px-1"
+                      style={{ color: isActive ? t.led : '#c8d4e8' }}
                     >
                       {t.label}
                     </span>
@@ -1014,7 +993,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-28 mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
+      <main className="flex-1 mt-[86px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
         {/* Subtle rack-rail side lines */}
         <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
           style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
