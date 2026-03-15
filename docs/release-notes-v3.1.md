@@ -1,14 +1,47 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-15
+Date: 2026-03-16 (latest: v3.1.19)
 
 ## Overview
 
-v3.1 is a broadcast-operator readiness release focused on three areas:
+v3.1 is a broadcast-operator readiness release focused on four areas:
 
-1. **Timeline Confidence Monitor** — MCR-grade lane visualisation with per-protocol alarm accuracy, stable live-lane rendering, and operator status labels.
-2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette.
-3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds to eliminate false alarms on multicast stream join.
+1. **Timeline Confidence Monitor** — MCR-grade lane visualisation with per-protocol alarm accuracy, stable live-lane rendering, operator status labels, and smooth 60fps now-line.
+2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
+3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
+4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.19 — 2026-03-16
+
+### Perf: Smooth 60fps now-line; reduce live tick to 250ms
+
+**Problem:** The cyan current-time line moved in 2-second jumps because `LIVE_TICK_MS=2000` caused `nowMs` state (and thus the entire timeline content) to update every 2 seconds.
+
+**Fix:**
+- `LIVE_TICK_MS` reduced 2000 → **250ms**: content jump is now 0.08% (~1px) at 5m window — imperceptible.
+- Now-line driven by `requestAnimationFrame` loop via `nowLineRef` DOM ref — updates at 60fps with zero React re-renders. Same pattern as the crosshair cursor.
+- `timeStartRef` / `effectiveWindowMsRef` hold latest values without restarting the rAF loop on every 250ms tick.
+- Works correctly in both live and custom range modes: hides when current time is outside the visible window.
+
+---
+
+## v3.1.18 — 2026-03-15
+
+### Fix: Probe timeouts show as narrow amber ticks, not red blocks
+
+**Root cause:** `ffprobe returned empty probe payload (no input packets observed during probe window)` is a ffprobe capture-window miss — ffprobe joined the multicast group but the capture window closed before any packets arrived. The service was delivering video fine. These were classified as `noSignal=true` → 15s critical red blocks, and with multiple occurrences every 12–28 seconds, created a solid false-positive red band.
+
+**Changes:**
+- `isProbeTimeoutError()` — new function, identifies capture-window timeouts as a distinct class from genuine signal loss.
+- `isExpectedNoSignalError()` — probe-timeout strings removed; returns false if `isProbeTimeoutError` matches.
+- `toEvent()` for `'error'` — uses `msg.details` as fallback for API-hydrated events; probe timeouts get `category: 'runtime_probe_timeout'`, `severity: 'warning'`, `title: 'Probe timeout'`.
+- `decEvtSev()` — `runtime_probe_timeout` returns null (never affects gradient); `runtime_error` also checks `description` for probe-timeout text to suppress old localStorage events.
+- `EVENT_BLOCK_DURATION_MS['runtime_probe_timeout'] = 2000ms` — narrow tick.
+- `EVENT_STYLE_BY_CATEGORY['runtime_probe_timeout']` — semi-transparent amber.
+
+**Result:** Lanes stay green throughout probe capture failures. Probe timeouts appear as thin amber tick marks at their exact timestamp. Only genuine LOS (`connection refused`, `input disappeared`, etc.) still drives the gradient red.
 
 ---
 
@@ -195,34 +228,3 @@ Result: a brief signal glitch now shows as ~one probe interval of red (~5–15s 
 - Frontend production build: 0 warnings.
 - Health endpoint: `status=ok`, `tsanalyze.available=true`.
 
----
-
-## v3.1.18 — 2026-03-15
-
-### Fix: Probe timeouts show as narrow amber ticks, not red blocks
-
-**Root cause:** `ffprobe returned empty probe payload (no input packets observed during probe window)` is a ffprobe capture-window miss — ffprobe joined the multicast group but the capture window closed before any packets arrived. The service was delivering video fine. These were classified as `noSignal=true` → 15s critical red blocks, and with multiple occurrences every 12–28 seconds, created a solid false-positive red band.
-
-**Changes:**
-- `isProbeTimeoutError()` — new function, identifies capture-window timeouts as a distinct class from genuine signal loss
-- `isExpectedNoSignalError()` — probe-timeout strings removed; returns false if `isProbeTimeoutError` matches
-- `toEvent()` for `'error'` — uses `msg.details` as fallback for API-hydrated events (previously `msg.message` was undefined for hydrated events); probe timeouts get `category: 'runtime_probe_timeout'`, `severity: 'warning'`, `title: 'Probe timeout'`
-- `decEvtSev()` — `runtime_probe_timeout` returns null (never affects gradient); `runtime_error` also checks `description` for probe-timeout text to suppress old localStorage events already stored as `runtime_error` with `noSignal=true`
-- `EVENT_BLOCK_DURATION_MS['runtime_probe_timeout'] = 2000ms` — narrow tick
-- `EVENT_STYLE_BY_CATEGORY['runtime_probe_timeout']` — semi-transparent amber
-
-**Result:** Lanes stay green throughout probe capture failures. Probe timeouts appear as thin amber tick marks at their exact timestamp. Only genuine LOS (`connection refused`, `input disappeared`, etc.) still drives the gradient red.
-
----
-
-## v3.1.19 — 2026-03-16
-
-### Perf: Smooth 60fps now-line; reduce live tick to 250ms
-
-**Problem:** The cyan current-time line moved in 2-second jumps because `LIVE_TICK_MS=2000` caused `nowMs` state (and thus the entire timeline content) to update every 2 seconds.
-
-**Fix:**
-- `LIVE_TICK_MS` reduced 2000 → **250ms**: content jump is now 0.08% (~1px) at 5m window — imperceptible.
-- Now-line driven by `requestAnimationFrame` loop via `nowLineRef` DOM ref — updates at 60fps with zero React re-renders. Same pattern as the crosshair cursor.
-- `timeStartRef` / `effectiveWindowMsRef` hold latest values without restarting the rAF loop on every 250ms tick.
-- Works correctly in both live and custom range modes: hides when current time is outside the visible window.
