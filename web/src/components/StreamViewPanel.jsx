@@ -602,7 +602,18 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const lastActivityTs = Math.max(lastSevEvtTs, lastHeartbeatTs);
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     const timeEnd = timeStart + windowMs;
-    const isLive = !stopAfterActive && (hasExplicitStart || staleStopTs >= timeEnd);
+    // isLive conditions (any one is sufficient):
+    //  1. hasExplicitStart — a real (non-bootstrap) runtime_started exists with no stop
+    //  2. staleStopTs >= timeEnd — recent severity event within stale threshold (historical windows)
+    //  3. lastHeartbeatTs >= timeStart — heartbeat received during the current window.
+    //     This is the primary condition for live windows: seed heartbeats fire every 5s
+    //     at Date.now(), so for any 5-minute live window now >= timeStart always holds.
+    //     Without this, staleStopTs = now+30s vs timeEnd = now+5min → always false.
+    const isLive = !stopAfterActive && (
+      hasExplicitStart ||
+      staleStopTs >= timeEnd ||
+      lastHeartbeatTs >= timeStart
+    );
     // Apply stale cutoff for non-live lanes even when no explicit stop event exists.
     const effectiveEndTs = stopAfterActive
       ? Math.min(timeEnd, stopAfterActive.ts)
