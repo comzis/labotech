@@ -15,7 +15,14 @@ See `WORKFLOW.md` for the full multi-tool process. Cursor's responsibilities:
 ## Before pushing
 1. Run `npm test -- --runInBand` — all tests must pass.
 2. Run `npm run build --prefix web` — build must produce 0 warnings.
-3. The pre-commit hook at `.git/hooks/pre-commit` scans staged source files for AI telemetry injection patterns (localhost debug ports, agent-log regions, injector markers). Any such pattern blocks the commit — see the hook for the exact list.
+3. The pre-commit hook at `.git/hooks/pre-commit` enforces two rules — both block the commit:
+   - **AI telemetry**: staged source files must not contain localhost debug ports, agent-log regions, or injector markers.
+   - **Version bump**: if any file under `src/`, `web/src/`, or `routes/` is staged, `web/package.json` version must differ from `origin/main`. Bump it first:
+     ```
+     npm version patch --prefix web --no-git-tag-version
+     git add web/package.json
+     ```
+     Use `minor` for new features, `patch` for fixes.
 
 ## Opening a PR
 - Push the branch and open a PR against `main`.
