@@ -194,3 +194,21 @@ Result: a brief signal glitch now shows as ~one probe interval of red (~5–15s 
 - Backend tests: 107 passing.
 - Frontend production build: 0 warnings.
 - Health endpoint: `status=ok`, `tsanalyze.available=true`.
+
+---
+
+## v3.1.18 — 2026-03-15
+
+### Fix: Probe timeouts show as narrow amber ticks, not red blocks
+
+**Root cause:** `ffprobe returned empty probe payload (no input packets observed during probe window)` is a ffprobe capture-window miss — ffprobe joined the multicast group but the capture window closed before any packets arrived. The service was delivering video fine. These were classified as `noSignal=true` → 15s critical red blocks, and with multiple occurrences every 12–28 seconds, created a solid false-positive red band.
+
+**Changes:**
+- `isProbeTimeoutError()` — new function, identifies capture-window timeouts as a distinct class from genuine signal loss
+- `isExpectedNoSignalError()` — probe-timeout strings removed; returns false if `isProbeTimeoutError` matches
+- `toEvent()` for `'error'` — uses `msg.details` as fallback for API-hydrated events (previously `msg.message` was undefined for hydrated events); probe timeouts get `category: 'runtime_probe_timeout'`, `severity: 'warning'`, `title: 'Probe timeout'`
+- `decEvtSev()` — `runtime_probe_timeout` returns null (never affects gradient); `runtime_error` also checks `description` for probe-timeout text to suppress old localStorage events already stored as `runtime_error` with `noSignal=true`
+- `EVENT_BLOCK_DURATION_MS['runtime_probe_timeout'] = 2000ms` — narrow tick
+- `EVENT_STYLE_BY_CATEGORY['runtime_probe_timeout']` — semi-transparent amber
+
+**Result:** Lanes stay green throughout probe capture failures. Probe timeouts appear as thin amber tick marks at their exact timestamp. Only genuine LOS (`connection refused`, `input disappeared`, etc.) still drives the gradient red.
