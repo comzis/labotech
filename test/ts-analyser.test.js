@@ -193,7 +193,7 @@ describe('TSAnalyser', () => {
       expect(enriched.orphanStreams.some((s) => s.pid === 0x0110)).toBe(true);
     });
 
-    test('keeps unresolved program rows and appends tsduck PID rows as orphan streams', () => {
+    test('merges tsduck PID into null-PID program stream for unambiguous 1:1 case', () => {
       const base = analyser.parseStructure({
         programs: [
           {
@@ -211,15 +211,49 @@ describe('TSAnalyser', () => {
       });
       const enriched = analyser._applyTSDuckData(base, {
         pids: [
-          { pid: 0x0100, codecType: 'video', codecName: 'h264' },
-          { pid: 0x0101, codecType: 'audio', codecName: 'mp2' },
+          { pid: 0x0100, codecType: 'video', codecName: 'h264', bitrate: 8000000 },
+          { pid: 0x0101, codecType: 'audio', codecName: 'mp2', bitrate: 256000 },
         ],
       });
+      // With 1:1 unambiguous match, PIDs should be patched into the existing program streams
+      const rows = enriched.programs[0].streams;
+      expect(rows[0].pid).toBe(0x0100);
+      expect(rows[0].bitrate).toBe(8000000);
+      expect(rows[1].pid).toBe(0x0101);
+      expect(rows[1].bitrate).toBe(256000);
+      // No duplicate orphan entries since the streams were merged in-place
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0100)).toBe(false);
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0101)).toBe(false);
+    });
+
+    test('keeps unresolved program rows as orphans when ambiguous (multiple null-PID streams of same type)', () => {
+      const base = analyser.parseStructure({
+        programs: [
+          {
+            program_id: 1,
+            streams: [
+              { index: 0, codec_type: 'audio', codec_name: 'mp2', id: null },
+              { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+            ],
+          },
+        ],
+        streams: [
+          { index: 0, codec_type: 'audio', codec_name: 'mp2', id: null },
+          { index: 1, codec_type: 'audio', codec_name: 'mp2', id: null },
+        ],
+      });
+      const enriched = analyser._applyTSDuckData(base, {
+        pids: [
+          { pid: 0x0101, codecType: 'audio', codecName: 'mp2' },
+          { pid: 0x0102, codecType: 'audio', codecName: 'mp2' },
+        ],
+      });
+      // Ambiguous: 2 null-PID audio streams + 2 TSDuck audio PIDs → orphan path
       const rows = enriched.programs[0].streams;
       expect(rows[0].pid).toBe(null);
       expect(rows[1].pid).toBe(null);
-      expect(enriched.orphanStreams.some((s) => s.pid === 0x0100 && s.codecType === 'video')).toBe(true);
-      expect(enriched.orphanStreams.some((s) => s.pid === 0x0101 && s.codecType === 'audio')).toBe(true);
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0101)).toBe(true);
+      expect(enriched.orphanStreams.some((s) => s.pid === 0x0102)).toBe(true);
     });
   });
 

@@ -989,19 +989,21 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             const dvb = a.lastResult?.dvb || {};
             const probeTs = Number(a.lastResult?.probeTime);
             const ts = Number.isFinite(probeTs) && probeTs > 0 ? probeTs : Date.now();
-            const healthSeverity = dvb?.health?.severity;
-            const severity = healthSeverity === 'critical' || healthSeverity === 'warning' ? healthSeverity : 'ok';
+            // Seed is always 'ok': its purpose is to anchor the timeline as green after a
+            // page reload (preventing the full window showing teal/pending). Real alarm states
+            // arrive via WebSocket within one probe cycle and override this seed.
+            // Injecting warning/critical from lastResult caused persistent phantom alarms
+            // when a probe-join artefact had set severity on a single decoder.
             const bitrateBps = Number(dvb.bitrateBps);
             const bitrateMbps = Number.isFinite(bitrateBps) && bitrateBps > 0 ? Number((bitrateBps / 1e6).toFixed(3)) : null;
-            const title = severity === 'critical' ? 'TS Analysis (critical)' : severity === 'warning' ? 'TS Analysis (warning)' : 'TS Analysis (OK)';
             return {
               key: `seed-analyse-${laneId}`,
               ts,
               id: laneId,
               rawId: a.id,
               category: 'analyse_result',
-              severity,
-              title,
+              severity: 'ok',
+              title: 'TS Analysis (OK)',
               description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${bitrateMbps != null ? bitrateMbps.toFixed(2) : '0.00'} Mbps (seed)`,
               evidence: { health: dvb.health || null, bootstrap: true },
             };

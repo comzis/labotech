@@ -87,3 +87,6 @@ export const getEvents = () => {
   return request('GET', `/api/events?since=${since}`);
 };
 export const clearEvents = () => request('DELETE', '/api/events');
+
+export const getMonitoringPolicy = () => request('GET', '/monitoring-policy');
+export const setMonitoringProfile = (profile) => request('PUT', '/monitoring-policy/profile', { profile });
