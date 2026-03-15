@@ -858,16 +858,20 @@ class TSAnalyser extends EventEmitter {
       });
       proc.on('exit', (code) => {
         clearTimeout(timeout);
-        if (code !== 0 || !stdout.trim()) {
+        // tsanalyze writes its JSON report to stdout when terminated by SIGTERM
+        // (our kill timer), but exits with a non-zero code.  Attempt to parse
+        // stdout whenever it has content — do not gate on exit code alone.
+        const trimmed = stdout.trim();
+        if (!trimmed) {
           return resolve({
             available: true,
             ok: false,
             data: null,
-            error: stderr.trim() || `tsanalyze exited ${code}`,
+            error: stderr.trim() || `tsanalyze exited ${code} with no output`,
           });
         }
         try {
-          const raw = JSON.parse(stdout);
+          const raw = JSON.parse(trimmed);
           const bitrateBps = this._extractTSDuckBitrateBps(raw);
           const services = this._extractTSDuckServices(raw);
           const pids = this._extractTSDuckPidRows(raw);
@@ -891,7 +895,7 @@ class TSAnalyser extends EventEmitter {
             available: true,
             ok: false,
             data: null,
-            error: 'tsanalyze returned invalid JSON',
+            error: `tsanalyze exited ${code}; invalid JSON (${trimmed.length} bytes)`,
           });
         }
       });
