@@ -204,6 +204,8 @@ Expected operator outcomes:
 - **Success path:** script prints git HEAD, then `deploy-one-shot` stages and health checks pass.
 - **Encapsulator readiness nuance:** a successful deploy means the encapsulator health gate passed within deploy checks; this greatly reduces restart-time false alarms but does not guarantee zero race window for the first UI poll.
 - **Encapsulator readiness mode:** by default, encapsulator readiness is warning-only (non-fatal) to avoid blocking deploy on sidecar startup turbulence. Set `ENCAP_HEALTH_REQUIRED=1` to enforce fail-fast behavior.
+- **Auto triage on sidecar miss:** when encapsulator readiness fails, deploy now prints triage output (`compose ps`, `:4100` listener, host curl probe, and service logs). Disable with `ENCAP_TRIAGE_ON_FAIL=0`.
+- **Interactive offender handling:** if `:4100` is occupied during triage, deploy can prompt to terminate detected listener PID(s). Enabled by default in interactive shells; disable with `ENCAP_PROMPT_KILL_ON_4100=0`.
 - **Disk guard stop:** script exits early with explicit low-disk message before mutating git state.
 - **Deploy stop:** preflight/smoke/health assertions fail with stage name; investigate service logs.
 
@@ -228,6 +230,18 @@ Strict encapsulator gate (optional):
 ```bash
 ENCAP_HEALTH_REQUIRED=1 ENCAP_HEALTH_RETRIES=24 ENCAP_HEALTH_DELAY_SEC=5 \
   bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+```
+
+Disable deploy triage output (optional):
+
+```bash
+ENCAP_TRIAGE_ON_FAIL=0 bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+```
+
+Disable interactive kill prompt (optional):
+
+```bash
+ENCAP_PROMPT_KILL_ON_4100=0 bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
 ```
 
 ### Incident playbook: encapsulator unreachable on `127.0.0.1:4100`
