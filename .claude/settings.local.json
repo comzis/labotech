@@ -21,7 +21,9 @@
       "Bash(find /Users/comzis/GitHub/LaboTech -name \"*.json\" -path \"*marketplace*\" 2>/dev/null | head -5; cat /Users/comzis/GitHub/LaboTech/.claude/settings.local.json)",
       "Bash(gh issue:*)",
       "Bash(gh label:*)",
-      "Bash(gh auth:*)"
+      "Bash(gh auth:*)",
+      "Bash(find /Users/comzis/GitHub/LaboTech/web -name \"tailwind.config.*\" -o -name \"tailwind.config.ts\" 2>/dev/null | head -5)",
+      "Bash(find /Users/comzis/GitHub/LaboTech -name \"*transportBitrate*\" -o -name \"*bitrate*\" | grep -E \"\\\\.\\(js|jsx\\)$\")"
     ]
   }
 }
