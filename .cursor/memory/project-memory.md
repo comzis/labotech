@@ -43,6 +43,9 @@
 ### Timeline teal after page reload
 `analyse_result` in `TELEMETRY_TYPES` → not persisted → after reload `firstAnalyseResultTs = Infinity` → all history shows teal/pending. Fix: `seedFromActiveAnalysers` synthesises a seed `analyse_result` at `lastResult.probeTime` with actual health severity.
 
+### Pending/teal startup state removed (2026-03-15)
+`runtime_started` previously returned `'pending'` (teal) until first `analyse_result`. With 0–4500 ms startup jitter + 7 s probe time, this showed 5–12 s of teal on every decoder start — looked like a stall+recovery to operators. Removed: `decEvtSev` now returns `'ok'` for `runtime_started` immediately. First `analyse_result` within one probe cycle confirms or changes state. Do not reintroduce pending state for startup — use error events for genuine signal loss.
+
 ### health_alarm lane block pollution
 `health_alarm` events (severity transition markers) must not render as timeline blocks — `analyse_result` already drives the gradient. `buildEventBlocks` must filter `e.category !== 'health_alarm'`. Removing this filter causes duplicate red/amber tinting on every transition.
 

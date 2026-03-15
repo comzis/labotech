@@ -38,6 +38,11 @@ alwaysApply: true
 - `health_alarm` is NOT in `TELEMETRY_TYPES` → persisted to event log → visible in EventLogPanel.
 - **`buildEventBlocks()` must filter `e.category !== 'health_alarm'`** — `analyse_result` already drives the lane gradient; a separate health_alarm block creates duplicate tinting.
 
+## No pending/teal on decoder startup
+- `runtime_started` in `decEvtSev()` returns `'ok'` (green) — not `'pending'`.
+- The teal startup period (jitter 0–4.5 s + probe 7 s = up to 12 s) looked like a stall+recovery to MCR operators.
+- Do not reintroduce `'pending'` for startup. First `analyse_result` within one probe cycle confirms or changes colour.
+
 ## Timeline seed on page reload
 - `analyse_result` is in `TELEMETRY_TYPES` and is never persisted. After a page reload `firstAnalyseResultTs = Infinity` → entire historical window shows teal/pending.
 - Fix: `seedFromActiveAnalysers` synthesises one `analyse_result` event per active analyser from `lastResult` at `probeTime`. Key: `seed-analyse-${laneId}` (deduplicated on re-seed).
