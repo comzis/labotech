@@ -709,6 +709,10 @@ function buildEventBlocks(events, timeStart, windowMs) {
     // gray/green segmentation when lane baseline already indicates state.
     .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
     .filter((e) => e.category !== 'runtime_heartbeat')
+    // health_alarm is a transition marker for the alarm log only — the gradient
+    // already reflects severity via analyse_result events, so rendering a separate
+    // block here creates duplicate/overlapping tinting on the lane.
+    .filter((e) => e.category !== 'health_alarm')
     // Synthetic "bootstrap started" markers are only lane-seeding helpers
     // and should not render as visible event blocks.
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
