@@ -521,13 +521,46 @@ describe('TSAnalyser', () => {
       expect(r.dvb.health.hysteresis.warnCount).toBe(2);
     });
 
-    test('critical escalates immediately on first probe', () => {
+    test('single critical probe does not escalate — requires 2 consecutive (same gate as warning)', () => {
       const base = makeMinimalResult(analyser);
       analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
       stubHealth(analyser, 'critical');
       const r = analyser._attachHealthAssessment(base);
-      expect(r.dvb.health.severity).toBe('critical');
+      expect(r.dvb.health.severity).toBe('ok');   // critCount=1 < HYSTERESIS_N=2
       expect(r.dvb.health.hysteresis.critCount).toBe(1);
+    });
+
+    test('two consecutive critical probes escalate to critical', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      stubHealth(analyser, 'critical');
+      analyser._attachHealthAssessment(base);      // probe 1 — suppressed
+      stubHealth(analyser, 'critical');
+      const r = analyser._attachHealthAssessment(base); // probe 2 — escalates
+      expect(r.dvb.health.severity).toBe('critical');
+      expect(r.dvb.health.hysteresis.critCount).toBe(2);
+    });
+
+    test('inconclusive heavy probe (0 pids + 0 services + 0 bitrate) holds last reported value', () => {
+      const base = makeMinimalResult(analyser);
+      // Seed with a known good state
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      // Build a result that looks like a failed PSI capture on a heavy probe
+      const inconclusiveResult = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 0,
+          serviceCount: 0,
+          pidCount: 0,
+          probeDiagnostics: { scheduler: { runHeavyProbe: true } },
+        },
+      };
+      stubHealth(analyser, 'critical'); // would be critical based on score
+      const r = analyser._attachHealthAssessment(inconclusiveResult);
+      // Hysteresis counters must not advance; severity must hold at 'ok'
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.critCount).toBe(0);
     });
 
     test('ok probe after warning streak recovers immediately', () => {
