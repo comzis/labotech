@@ -65,8 +65,8 @@ Each route file maps to a feature domain: `streams.js`, `transcode.js`, `multica
 React SPA. `App.jsx` handles tab routing to feature panels. Custom hooks in `hooks/` manage WS connection (`useWebSocket.js`), REST polling (`useStreams.js`), and TS probing (`useTSAnalysis.js`). `api.js` contains all `fetch()` wrappers.
 
 Key frontend components:
-- **`StreamViewPanel.jsx`** — UTC timeline across analyser/ETR lanes. Lane bars rendered via `LaneCanvas` component using `HTMLCanvasElement` `fillRect()` calls (v3.1.5). `buildLaneGradient()` logic is unchanged; `parseGradientSegments()` converts gradient strings to `{leftPct, widthPct, color}[]` for canvas draw calls.
-- **`DecoderPanelRevamp.jsx`** — Decoder tab. Left column layout (top→bottom): Decoder Provisioning → **Confidence Monitor** (full-width 16:9 thumbnail, service name label, no audio bars) → ETR 290 Alarm Configuration.
+- **`StreamViewPanel.jsx`** — UTC timeline across analyser/ETR lanes. Lane bars rendered via `LaneCanvas` (`HTMLCanvasElement fillRect`). Mouse crosshair updated via DOM ref (zero React re-renders); React state throttled to rAF for 60fps popup. `buildLaneGradient()` drives lane color; `parseGradientSegments()` converts the output for canvas draw. **Stop All** button in Active Decoders header.
+- **`DecoderPanelRevamp.jsx`** — Decoder tab. Left column: Decoder Provisioning → **Confidence Monitor** (full-width 16:9 thumbnail) → ETR 290 Alarm Configuration. Active Decoders section has per-row STOP and a header-level **STOP ALL** button.
 - **`DecoderMultiviewPanel.jsx`** — Multiview tiles, thumbnail display. Auto-seeding checks `anyActive` to avoid short-circuiting on stale server-restart IDs.
 
 ## Coding Rules
@@ -91,6 +91,24 @@ See `labotech-project.md` for the full phased build sequence (Phases 1–5). Sta
 
 ### `matchAll` requires a global regex — derive with `new RegExp(rx.source, rx.flags + 'g')`
 `String.prototype.matchAll()` throws `TypeError` when called with a non-global regex (missing `g` flag). In `_extractSrtStatsFromLog()` (`ts-analyser.js`) the regex literals in the stats-field table do not carry `g`. Always derive a global copy before calling `matchAll`: `new RegExp(rx.source, rx.flags.includes('g') ? rx.flags : rx.flags + 'g')`. Failure to do so keeps `lastResult: null` permanently and tiles show "Awaiting Frame" indefinitely.
+
+### Per-protocol health thresholds — RTP/UDP vs SRT
+`_healthThresholds()` in `ts-analyser.js` auto-selects CC and tsDisc tolerance by URL protocol:
+- `srt://` — relaxed IAT/jitter (ARQ retransmission windows); strict CC (ARQ prevents errors)
+- `rtp://` or `udp://` — `broadcast-balanced-v1` CC/tsDisc floor (`ccWarnCount≥3`, `ccCriticalCount≥8`) to absorb ffprobe multicast-join artefacts (ffprobe always joins mid-stream and generates 1–10 CC errors while syncing). Do **not** apply `srt-contribution` CC thresholds globally — RTP streams will permanently alarm red.
+
+### Timeline lane color semantics — MCR operator contract
+Lane color in `StreamViewPanel.jsx` means:
+- **Green** — last probe ok; process confirmed running
+- **Amber** — last probe warning
+- **Red** — last probe critical or LOS
+- **Grey** — process stopped (`runtime_stopped` received) or 30 s of total silence
+
+**Live lanes fill from the left edge of the window** (`isLive = true` → `effectiveStartTs = timeStart`). Do not revert this — grey-left-while-running is confusing at MCR distance.
+
+**Heartbeat seed must use `Date.now()`**, not `probeTime`. The `seedFromActiveAnalysers` bootstrap heartbeat refreshes every 5 s via `mergeTimelineEvents` (dedupes by key). Using `probeTime` makes `staleStopTs` immediately expired and the lane goes grey even though the process is running.
+
+The stale detection uses `Math.max(lastSevEvtTs, lastHeartbeatTs)` so heartbeats (every ~5 s) keep lanes live between slow probe cycles (30–60 s).
 
 ### health_alarm must not render timeline blocks
 `health_alarm` events are alarm-log-only. `buildEventBlocks()` in `StreamViewPanel.jsx` must filter `e.category !== 'health_alarm'`. The gradient is already driven by `analyse_result`; a separate block causes duplicate red/amber tinting on every severity transition.
