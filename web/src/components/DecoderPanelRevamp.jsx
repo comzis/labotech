@@ -1136,8 +1136,49 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </div>
               )}
 
-              <PanelBox style={{ borderColor: C.borderHi }}>
-                <SectionHead icon="📡" title="ETR 290 Alarm Configuration"
+              {provisionSummary && (
+                <div style={{ fontSize: 10, color: C.muted }}>
+                  Started: <span style={{ color: C.ok }}>{provisionSummary.started.length}</span> · Failed:{" "}
+                  <span style={{ color: C.err }}>{provisionSummary.failed.length}</span>
+                  {provisionSummary.etrStarted?.length ? (
+                    <>
+                      {" "}· ETR: <span style={{ color: C.info }}>{provisionSummary.etrStarted.length}</span>
+                    </>
+                  ) : null}
+                </div>
+              )}
+              {error && <div style={{ fontSize: 10, color: C.err }}>Decoder analyser error: {error}</div>}
+            </div>
+          </PanelBox>
+
+          {/* ── Confidence Monitor ─────────────────────────────── */}
+          <PanelBox>
+            <SectionHead icon="🎬" title="Confidence Monitor" />
+            <div style={{ padding: 8 }}>
+              {selectedResult?.thumbnailUrl ? (
+                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
+                  <img
+                    src={selectedResult.thumbnailUrl}
+                    alt="Confidence monitor"
+                    style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                    onError={(e) => { e.target.style.display = "none"; }}
+                  />
+                </div>
+              ) : (
+                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
+                  <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                </div>
+              )}
+              {selectedResult?.programs?.[0]?.serviceName && (
+                <div style={{ fontSize: 9, color: C.cyan, padding: "4px 0 0", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                  {selectedResult.programs[0].serviceName}
+                </div>
+              )}
+            </div>
+          </PanelBox>
+
+          <PanelBox style={{ borderColor: C.borderHi }}>
+            <SectionHead icon="📡" title="ETR 290 Alarm Configuration"
                   right={selectedEtrExists
                     ? <Badge label={`LIVE · ${selectedId}`} color={C.ok} small />
                     : <Badge label="NOT RUNNING" color={C.muted} small />}
@@ -1359,23 +1400,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     </div>
                   </details>
                 </div>
+              {etr.error && <div style={{ fontSize: 10, color: C.warn, padding: "4px 12px" }}>ETR monitor warning: {etr.error}</div>}
               </PanelBox>
-
-              {provisionSummary && (
-                <div style={{ fontSize: 10, color: C.muted }}>
-                  Started: <span style={{ color: C.ok }}>{provisionSummary.started.length}</span> · Failed:{" "}
-                  <span style={{ color: C.err }}>{provisionSummary.failed.length}</span>
-                  {provisionSummary.etrStarted?.length ? (
-                    <>
-                      {" "}· ETR: <span style={{ color: C.info }}>{provisionSummary.etrStarted.length}</span>
-                    </>
-                  ) : null}
-                </div>
-              )}
-              {error && <div style={{ fontSize: 10, color: C.err }}>Decoder analyser error: {error}</div>}
-              {etr.error && <div style={{ fontSize: 10, color: C.warn }}>ETR monitor warning: {etr.error}</div>}
-            </div>
-          </PanelBox>
         </div>
 
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -1583,48 +1609,31 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   <StatBox label="Monitored" value={String(activeIds.length)} color={activeIds.length ? C.ok : C.muted} />
                 </div>
 
-                {/* ── Top row: ETR counters + thumbnail ───────────────── */}
-                <div style={{ display: "grid", gridTemplateColumns: selectedResult?.thumbnailUrl ? "minmax(0,1fr) clamp(300px, 34vw, 520px)" : "1fr", gap: 8, alignItems: "start" }}>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
-                      <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
-                      <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
-                      <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
-                      <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
-                    </div>
-                    {/* IAT / Network */}
-                    {selectedResult?.dvb?.arrival && (() => {
-                      const arr = selectedResult.dvb.arrival;
-                      const iat = arr.iatMs || {};
-                      const iatAvg = toFiniteNumber(iat.avg);
-                      const iatP95 = toFiniteNumber(iat.p95);
-                      const netJitter = toFiniteNumber(arr.jitterMs);
-                      const lossPct = toFiniteNumber(arr.packetLossPct);
-                      return (
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
-                          <StatBox label="IAT avg" value={iatAvg != null ? `${iatAvg.toFixed(2)} ms` : "-"} color={iatAvg != null && iatAvg > 50 ? C.warn : C.ok} />
-                          <StatBox label="IAT p95" value={iatP95 != null ? `${iatP95.toFixed(2)} ms` : "-"} color={iatP95 != null && iatP95 > 150 ? C.err : C.ok} />
-                          <StatBox label="Net Jitter" value={netJitter != null ? `${netJitter.toFixed(2)} ms` : "-"} color={netJitter != null && netJitter > 5 ? C.warn : C.ok} />
-                          <StatBox label="Pkt Loss %" value={lossPct != null ? `${lossPct.toFixed(3)}%` : "-"} color={lossPct != null && lossPct > 0.01 ? C.err : C.ok} />
-                        </div>
-                      );
-                    })()}
+                {/* ── ETR counters + IAT ──────────────────────────────── */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
+                    <StatBox label="Packet Loss" value={m.packetLoss} color={m.packetLoss > 0 ? C.warn : C.ok} />
+                    <StatBox label="Jitter" value={m.jitter} color={m.jitter > 0 ? C.warn : C.ok} />
+                    <StatBox label="PCR Errors" value={m.pcrErrors} color={m.pcrErrors > 0 ? C.warn : C.ok} />
+                    <StatBox label="CC Errors" value={m.ccErrors} color={m.ccErrors > 0 ? C.err : C.ok} />
                   </div>
-
-                  {/* Live thumbnail */}
-                  {selectedResult?.thumbnailUrl && (
-                    <div style={{ background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
-                      <div style={{ fontSize: 8, color: C.muted, padding: "4px 6px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>Live Frame</div>
-                      <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a" }}>
-                        <img src={selectedResult.thumbnailUrl} alt="Stream frame" style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }} onError={(e) => { e.target.parentElement.parentElement.style.display = "none"; }} />
+                  {/* IAT / Network */}
+                  {selectedResult?.dvb?.arrival && (() => {
+                    const arr = selectedResult.dvb.arrival;
+                    const iat = arr.iatMs || {};
+                    const iatAvg = toFiniteNumber(iat.avg);
+                    const iatP95 = toFiniteNumber(iat.p95);
+                    const netJitter = toFiniteNumber(arr.jitterMs);
+                    const lossPct = toFiniteNumber(arr.packetLossPct);
+                    return (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 6 }}>
+                        <StatBox label="IAT avg" value={iatAvg != null ? `${iatAvg.toFixed(2)} ms` : "-"} color={iatAvg != null && iatAvg > 50 ? C.warn : C.ok} />
+                        <StatBox label="IAT p95" value={iatP95 != null ? `${iatP95.toFixed(2)} ms` : "-"} color={iatP95 != null && iatP95 > 150 ? C.err : C.ok} />
+                        <StatBox label="Net Jitter" value={netJitter != null ? `${netJitter.toFixed(2)} ms` : "-"} color={netJitter != null && netJitter > 5 ? C.warn : C.ok} />
+                        <StatBox label="Pkt Loss %" value={lossPct != null ? `${lossPct.toFixed(3)}%` : "-"} color={lossPct != null && lossPct > 0.01 ? C.err : C.ok} />
                       </div>
-                      {selectedResult?.programs?.[0]?.serviceName && (
-                        <div style={{ fontSize: 9, color: C.cyan, padding: "3px 6px", background: C.dim, textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }} title={selectedResult.programs[0].serviceName}>
-                          {selectedResult.programs[0].serviceName}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
 
                 {/* ── Stream Profile ───────────────────────────────────── */}
