@@ -1778,7 +1778,22 @@ class TSAnalyser extends EventEmitter {
   }
 
   _healthThresholds() {
-    return (this.monitoringPolicy && this.monitoringPolicy.health) || _getPolicySnapshot().health;
+    const base = (this.monitoringPolicy && this.monitoringPolicy.health) || _getPolicySnapshot().health;
+    // SRT streams: ARQ retransmission windows produce higher IAT/jitter than
+    // UDP multicast. Automatically take the more generous of the active profile
+    // vs srt-contribution thresholds for those two metrics so normal ARQ
+    // activity does not score as critical.  All other metrics (CC, loss,
+    // tsDisc) use the active profile unchanged.
+    if (this.url && this.url.startsWith('srt://')) {
+      return {
+        ...base,
+        iatP95CriticalMs: Math.max(base.iatP95CriticalMs, 400),
+        iatP95WarnMs:     Math.max(base.iatP95WarnMs,     120),
+        jitterCriticalMs: Math.max(base.jitterCriticalMs,  40),
+        jitterWarnMs:     Math.max(base.jitterWarnMs,      10),
+      };
+    }
+    return base;
   }
 
   _smpteThresholds() {
