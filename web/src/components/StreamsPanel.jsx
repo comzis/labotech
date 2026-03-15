@@ -47,32 +47,47 @@ const PidRef = ({ pid }) => (
 
 export default function StreamsPanel({ lastMessage }) {
   const { streams, loading, error, refresh } = useStreams();
-  const [encapHealth, setEncapHealth] = useState(null);
+  const [encapHealth, setEncapHealth] = useState(null);       // last known good (never cleared on failure)
+  const [encapStaleSince, setEncapStaleSince] = useState(null); // ms timestamp, set on first failure
   const [encapHealthError, setEncapHealthError] = useState(null);
   const [encapHealthLoading, setEncapHealthLoading] = useState(false);
   const [encapLastCheckMs, setEncapLastCheckMs] = useState(null);
+  const encapFailCount = React.useRef(0);
+  const encapStaleSinceRef = React.useRef(null); // same value as encapStaleSince but ref-stable for logic
 
   useEffect(() => {
     if (lastMessage?.type === 'stopped') refresh();
   }, [lastMessage, refresh]);
 
-  const loadEncapHealth = useCallback(async ({ silent = false } = {}) => {
+  const loadEncapHealth = useCallback(async ({ silent = false, forceError = false } = {}) => {
     if (!silent) setEncapHealthLoading(true);
     try {
       const h = await getEncapsulatorHealth();
+      encapFailCount.current = 0;
+      encapStaleSinceRef.current = null;
       setEncapHealth(h);
+      setEncapStaleSince(null);
       setEncapHealthError(null);
       setEncapLastCheckMs(Date.now());
       return true;
     } catch (err) {
-      setEncapHealth(null);
-      setEncapHealthError(err?.message || 'service unavailable');
-      setEncapLastCheckMs(Date.now());
+      encapFailCount.current += 1;
+      const now = Date.now();
+      if (!encapStaleSinceRef.current) encapStaleSinceRef.current = now;
+      setEncapStaleSince(encapStaleSinceRef.current);
+      setEncapLastCheckMs(now);
+      // encapHealth is intentionally NOT cleared — keep the last known good
+      // snapshot so operators see a stale card rather than a blank.
+      const staleDurationMs = now - encapStaleSinceRef.current;
+      const hadPriorHealth = !!encapHealth; // closure over current state
+      const escalate = forceError
+        || (hadPriorHealth ? staleDurationMs >= 45000 : encapFailCount.current >= 2);
+      if (escalate) setEncapHealthError(err?.message || 'service unavailable');
       return false;
     } finally {
       if (!silent) setEncapHealthLoading(false);
     }
-  }, []);
+  }, [encapHealth]);
 
   useEffect(() => {
     let mounted = true;
@@ -165,7 +180,25 @@ export default function StreamsPanel({ lastMessage }) {
 
         {loading && <p className="text-gray-600 text-sm">Loading…</p>}
         {error && <p className="text-red-400  text-sm">{error}</p>}
-        {!encapHealth && encapHealthError && (
+
+        {/* Stale: had health, now unreachable within SLA — show last known data with amber border */}
+        {encapHealth && encapStaleSince && !encapHealthError && (
+          <div className="mb-3 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[11px] font-mono text-amber-200">
+            SRT service: {encapHealth.status} · libsrt {encapHealth?.capabilities?.libsrt ? 'enabled' : 'missing'} · {encapHealth?.capabilities?.details || 'unknown'}
+            {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) ? ` · CPU ${encapHealth.telemetry.cpuPercent}%` : ''}
+            {' '}· <span className="text-amber-300/80">stale since {new Date(encapStaleSince).toLocaleTimeString()} — reconnecting</span>
+          </div>
+        )}
+
+        {/* Reconnecting: never had health data, 1st failure — brief amber chip */}
+        {!encapHealth && encapStaleSince && !encapHealthError && (
+          <div className="mb-3 rounded border border-amber-700/40 bg-amber-950/20 px-3 py-2 text-[11px] font-mono text-amber-200">
+            SRT sidecar reconnecting…
+          </div>
+        )}
+
+        {/* Hard error: stale beyond SLA (45s) or never had health + 2+ failures */}
+        {encapHealthError && (
           <div className="mb-3 rounded border border-red-700/40 bg-red-950/20 px-3 py-2 text-[11px] font-mono text-red-200">
             <div className="flex items-center justify-between gap-3">
               <span>
@@ -173,7 +206,7 @@ export default function StreamsPanel({ lastMessage }) {
                 {encapLastCheckMs ? ` · last check ${new Date(encapLastCheckMs).toLocaleTimeString()}` : ''}
               </span>
               <button
-                onClick={() => loadEncapHealth()}
+                onClick={() => { encapFailCount.current = 2; loadEncapHealth({ forceError: true }); }}
                 disabled={encapHealthLoading}
                 className="shrink-0 rounded border border-red-600/60 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:bg-red-900/30 disabled:opacity-50"
               >
@@ -185,7 +218,9 @@ export default function StreamsPanel({ lastMessage }) {
             </div>
           </div>
         )}
-        {encapHealth && (
+
+        {/* Healthy: last known good, not stale */}
+        {encapHealth && !encapStaleSince && (
           <div className="mb-3 rounded border border-cyan-700/30 bg-cyan-950/20 px-3 py-2 text-[11px] font-mono text-cyan-200">
             SRT service: {encapHealth.status} · libsrt {encapHealth?.capabilities?.libsrt ? 'enabled' : 'missing'} · {encapHealth?.capabilities?.details || 'unknown'}
             {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) ? ` · CPU ${encapHealth.telemetry.cpuPercent}%` : ''}

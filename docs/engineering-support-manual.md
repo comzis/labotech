@@ -155,6 +155,73 @@ sudo apt-get clean
 bash scripts/deploy-one-shot.sh
 ```
 
+### One-command safe update + deploy
+
+Use this wrapper when frequent disk pressure causes `git fetch` failures before deployment.
+It performs:
+
+1. disk/inode precheck (repo FS + Docker root)
+2. auto-cleanup if below threshold
+3. `git fetch/pull` on target branch
+4. `deploy-one-shot` execution
+
+```bash
+cd ~/LaboTech/labotech
+bash scripts/update-and-deploy-safe.sh 10.67.18.29 4000 labotech
+```
+
+Engineer notes:
+
+- Run from any directory; the script self-resolves repo root and executes there.
+- Branch/remote defaults are `origin/main` and can be overridden with `GIT_REMOTE` and `GIT_BRANCH`.
+- It removes stale `.git/index.lock` before fetch to recover common interrupted pulls.
+- It aborts before `git fetch` if disk remains under threshold after cleanup.
+
+Optional environment flags:
+
+```bash
+# stricter thresholds
+MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/update-and-deploy-safe.sh
+
+# alternate git target (hotfix / staging branches)
+GIT_REMOTE=origin GIT_BRANCH=release/3.0.0-hotfix bash scripts/update-and-deploy-safe.sh
+
+# disable auto-clean and fail immediately on low disk
+AUTO_CLEAN_ON_LOW_DISK=0 bash scripts/update-and-deploy-safe.sh
+
+# aggressive cleanup mode (includes compose down + prune volumes)
+AUTO_CLEAN_AGGRESSIVE=1 bash scripts/update-and-deploy-safe.sh
+```
+
+Recommended execution policy:
+
+1. Normal operation: use defaults (`AUTO_CLEAN_ON_LOW_DISK=1`, aggressive off).
+2. If repeated low-disk incidents persist: enable `AUTO_CLEAN_AGGRESSIVE=1` during a planned maintenance window.
+3. For compliance-sensitive windows: set `AUTO_CLEAN_ON_LOW_DISK=0` and handle cleanup manually with change approval.
+
+Expected operator outcomes:
+
+- **Success path:** script prints git HEAD, then `deploy-one-shot` stages and health checks pass.
+- **Encapsulator readiness nuance:** a successful deploy means the encapsulator health gate passed within deploy checks; this greatly reduces restart-time false alarms but does not guarantee zero race window for the first UI poll.
+- **Disk guard stop:** script exits early with explicit low-disk message before mutating git state.
+- **Deploy stop:** preflight/smoke/health assertions fail with stage name; investigate service logs.
+
+Fast troubleshooting:
+
+```bash
+# 1) inspect pressure quickly
+df -h /
+df -i /
+docker system df
+
+# 2) rerun with stricter floor and aggressive cleanup
+MIN_FREE_MB=12288 AUTO_CLEAN_AGGRESSIVE=1 bash scripts/update-and-deploy-safe.sh
+
+# 3) if still failing, run normal deploy diagnostics
+bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
+bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+```
+
 ---
 
 ## 2) TS Analysis Accuracy Strategy
