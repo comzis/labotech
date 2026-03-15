@@ -222,6 +222,57 @@ bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
 bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
 ```
 
+### Incident playbook: encapsulator unreachable on `127.0.0.1:4100`
+
+Symptom during deploy:
+
+- `encapsulator not ready yet (N/24)` keeps increasing
+- `curl http://127.0.0.1:4100/health` fails from host
+
+Immediate recovery:
+
+```bash
+cd ~/LaboTech/labotech
+
+# 1) stop stuck deploy loop
+# Ctrl+C
+
+# 2) inspect runtime state
+docker compose ps || docker-compose ps
+docker compose logs --tail=200 labotech-encapsulator || docker-compose logs --tail=200 labotech-encapsulator
+curl -v --max-time 5 http://127.0.0.1:4100/health
+sudo ss -ltnp | awk 'NR==1 || /:4100/'
+
+# 3) restart sidecar only
+docker compose restart labotech-encapsulator || docker-compose restart labotech-encapsulator
+sleep 5
+curl -fsS --max-time 5 http://127.0.0.1:4100/health
+```
+
+If still failing:
+
+```bash
+# force recreate encapsulator service
+docker compose up -d --build --force-recreate labotech-encapsulator || \
+docker-compose up -d --build --force-recreate labotech-encapsulator
+
+docker compose logs --tail=200 labotech-encapsulator || docker-compose logs --tail=200 labotech-encapsulator
+curl -fsS --max-time 5 http://127.0.0.1:4100/health
+```
+
+After sidecar health recovers:
+
+```bash
+RECREATE_ALL=1 bash scripts/update-and-deploy-safe.sh 10.67.18.29 4000 labotech
+```
+
+Interpretation guide:
+
+- Listener present + health OK: startup race, safe to continue deploy.
+- No listener on `:4100`: sidecar did not start; logs contain root cause.
+- Listener exists but curl fails: process unhealthy or blocked on startup path.
+- Wrong process owns `:4100`: stop conflicting service and redeploy.
+
 ---
 
 ## 2) TS Analysis Accuracy Strategy
