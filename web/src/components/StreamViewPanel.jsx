@@ -25,7 +25,7 @@ const MAX_EVENTS = 1500;
 const EVENT_RETENTION_MS = 26 * 60 * 60 * 1000; // keep slightly above max 24h window
 const LANE_ACTIVITY_STALE_MS = 30 * 1000; // auto-expire no-heartbeat runtime lanes
 const STARTED_RECENTLY_MS = 90 * 1000;
-const LIVE_TICK_MS = 2000;
+const LIVE_TICK_MS = 250;
 const MAX_FUTURE_SKEW_MS = 5000;
 const ACTIVE_ANALYSER_SEED_MS = 5000;
 const EVENT_BLOCK_DURATION_MS = {
@@ -942,6 +942,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   // Pending mouse position for rAF-throttled state update
   const pendingMouseRef = useRef(null);
   const mouseRafRef = useRef(null);
+  // Now-line DOM ref — driven by rAF loop for smooth 60fps movement
+  const nowLineRef = useRef(null);
+  const nowLineRafRef = useRef(null);
+  // Stable refs so the rAF loop always reads the latest values without restarting
+  const timeStartRef = useRef(0);
+  const effectiveWindowMsRef = useRef(1);
 
   useEffect(() => {
     try {
@@ -1232,6 +1238,32 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const timeEnd = rangeMode === 'custom' && customRange ? customRange.endMs : nowMs;
   const timeStart = rangeMode === 'custom' && customRange ? customRange.startMs : (timeEnd - windowMs);
   const effectiveWindowMs = Math.max(1, timeEnd - timeStart);
+
+  // Keep stable refs in sync so the now-line rAF loop always reads latest values.
+  timeStartRef.current = timeStart;
+  effectiveWindowMsRef.current = effectiveWindowMs;
+
+  // rAF loop: drive now-line position at 60fps without React re-renders.
+  // Reads timeStartRef/effectiveWindowMsRef so it never needs to restart on tick.
+  useEffect(() => {
+    const tick = () => {
+      if (nowLineRef.current) {
+        const pct = ((Date.now() - timeStartRef.current) / effectiveWindowMsRef.current) * 100;
+        if (pct >= 0 && pct <= 100.5) {
+          nowLineRef.current.style.display = 'block';
+          nowLineRef.current.style.left = `${Math.min(100, pct)}%`;
+        } else {
+          nowLineRef.current.style.display = 'none';
+        }
+      }
+      nowLineRafRef.current = requestAnimationFrame(tick);
+    };
+    nowLineRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      if (nowLineRafRef.current) cancelAnimationFrame(nowLineRafRef.current);
+    };
+  }, []); // runs once — reads refs each frame, never needs to restart
+
   const visibleEvents = useMemo(
     () => events.filter((e) => e.ts >= timeStart && e.ts <= timeEnd),
     [events, timeStart, timeEnd]
@@ -1638,8 +1670,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           <div className="absolute left-2 top-1.5 text-[9px] text-gray-500 font-mono">{toUtc(timeStart)}</div>
           <div className="absolute right-2 top-1.5 text-[9px] text-gray-500 font-mono">{toUtc(timeEnd)}</div>
 
-          {/* Current UTC position line */}
-          <div className="absolute top-0 bottom-0 border-l border-neon-cyan/70" style={{ left: '100%' }} />
+          {/* Current UTC position line — driven by rAF loop for smooth 60fps movement */}
+          <div
+            ref={nowLineRef}
+            className="absolute top-0 bottom-0 border-l border-neon-cyan/70 pointer-events-none"
+            style={{ display: 'none', left: '100%' }}
+          />
 
           {/* Mouse crosshair line — position driven directly via DOM ref for zero-lag rendering */}
           <div
