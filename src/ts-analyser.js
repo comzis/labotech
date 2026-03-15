@@ -1084,15 +1084,79 @@ class TSAnalyser extends EventEmitter {
       const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
       const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
       const available = tsduckData.pids.filter((r) => r && r.pid != null && r.pid > 0 && !existingPidSet.has(r.pid));
-      // Do not "guess-assign" tsduck PID rows onto PID-less streams by codec type.
-      // That heuristic can mis-bind video/audio between cycles under unstable probes.
-      // Keep existing rows untouched and append only verified PID rows as orphans.
+
+      // Unambiguous 1:1 PID merge: when ffprobe consistently reports null/0 PID for a
+      // program stream (e.g. certain encoders output id=0 for video), but TSDuck cleanly
+      // identifies exactly one PID of the same codec family, patch the existing stream
+      // rather than adding an orphan.  Only activates for 1:1 matches — ambiguous cases
+      // (multiple null-PID streams of the same type) fall through to the orphan path.
+      const _TS_VIDEO_ST = new Set([0x01, 0x02, 0x10, 0x1b, 0x1c, 0x24, 0x27, 0xd1]);
+      const _TS_AUDIO_ST = new Set([0x03, 0x04, 0x06, 0x0f, 0x11, 0x81, 0x82, 0x83, 0x84, 0x85, 0x87]);
+      const _inferCT = (row) => {
+        if (row.codecType) return row.codecType;
+        if (!row.streamType) return 'data';
+        const rawSt = String(row.streamType);
+        const st = /^0x/i.test(rawSt)
+          ? parseInt(rawSt.slice(2), 16)
+          : (parseInt(rawSt, 10) || parseInt(rawSt, 16) || 0);
+        return _TS_VIDEO_ST.has(st) ? 'video' : _TS_AUDIO_ST.has(st) ? 'audio' : 'data';
+      };
+
+      const nullPidByType = new Map();
+      for (const prog of next.programs) {
+        for (const s of (prog.streams || [])) {
+          if (s.pid != null) continue;
+          const ct = s.codecType || 'unknown';
+          if (!nullPidByType.has(ct)) nullPidByType.set(ct, []);
+          nullPidByType.get(ct).push(s);
+        }
+      }
+
+      const mergedPids = new Set();
+      if (nullPidByType.size > 0 && available.length > 0) {
+        const availByType = new Map();
+        for (const row of available) {
+          const ct = _inferCT(row);
+          if (!availByType.has(ct)) availByType.set(ct, []);
+          availByType.get(ct).push(row);
+        }
+        for (const [codecType, nullStreams] of nullPidByType) {
+          const candidates = availByType.get(codecType) || [];
+          if (nullStreams.length !== 1 || candidates.length !== 1) continue;
+          const targetRef = nullStreams[0];
+          const source = candidates[0];
+          const pid = source.pid;
+          const pidHex = `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`;
+          next.programs = next.programs.map((prog) => ({
+            ...prog,
+            streams: (prog.streams || []).map((s) =>
+              s === targetRef
+                ? {
+                    ...s,
+                    pid,
+                    pidHex,
+                    bitrate: (s.bitrate == null || s.bitrate === 0) && Number(source.bitrate) > 0 ? Number(source.bitrate) : s.bitrate,
+                    streamType: s.streamType || source.streamType || null,
+                  }
+                : s
+            ),
+          }));
+          mergedPids.add(pid);
+          existingPidSet.add(pid);
+          console.log(`[ts-analyser] TSDuck 1:1 PID merge: ${codecType} null-PID stream → PID ${pid} (0x${pid.toString(16).toUpperCase().padStart(4, '0')})`);
+        }
+      }
+
+      // Only append TSDuck PID rows that weren't merged above.
+      // Avoid "guess-assign" by codec type for ambiguous multi-stream cases — that
+      // heuristic can mis-bind streams between probe cycles under unstable feeds.
       for (const row of available) {
+        if (mergedPids.has(row.pid)) continue;
         if (existingPidSet.has(row.pid)) continue;
         existingPidSet.add(row.pid);
         next.orphanStreams.push({
           index: `tsduck-${row.pid}`,
-          codecType: row.codecType || 'data',
+          codecType: _inferCT(row),
           codecName: row.codecName || 'unknown',
           pid: row.pid,
           pidHex: `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`,
@@ -1663,6 +1727,7 @@ class TSAnalyser extends EventEmitter {
     const policy = this.monitoringPolicy || _getPolicySnapshot();
     return {
       profile: policy?.profile || 'broadcast-balanced-v1',
+      profileMeta: policy?.profileMeta || null,
       source: policy?.source || 'defaults',
       probeCadence: policy?.probeCadence || null,
       bitrate: policy?.bitrate || null,

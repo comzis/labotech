@@ -293,6 +293,7 @@ function start() {
   app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast));
   app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));
   app.use('/scte35',    require('../routes/scte35')());
+  app.use('/monitoring-policy', require('../routes/monitoring-policy')());
   app.use('/api/events', require('../routes/events')(eventLog));
 
   app.get('/health', (req, res) => {

@@ -3,7 +3,7 @@ import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
 import { resolveTransportBitrate } from "../utils/transportBitrate";
-import { getAnalyser } from "../api";
+import { getAnalyser, getMonitoringPolicy, setMonitoringProfile } from "../api";
 
 const PROBE_MODES = [
   { value: "rtp", label: "RTP" },
@@ -283,6 +283,86 @@ function StatBox({ label, value, color = C.text }) {
   );
 }
 
+function PolicyChip({ policyProfile, profileMeta, policyData, policyPickerOpen, setPolicyPickerOpen, policyBusy, onSelectProfile }) {
+  const label = profileMeta?.label || String(policyProfile).toUpperCase();
+  const standard = profileMeta?.standard || "";
+  const description = profileMeta?.description || "";
+  const profiles = policyData?.profiles || [];
+  const tooltipText = [standard, description].filter(Boolean).join(" — ");
+
+  return (
+    <div style={{ position: "relative" }}>
+      <div
+        style={{
+          background: C.dim,
+          border: `1px solid ${policyPickerOpen ? C.info : C.border}`,
+          borderRadius: 2,
+          padding: "4px 8px",
+          cursor: "pointer",
+          userSelect: "none",
+        }}
+        title={tooltipText || undefined}
+        onClick={() => !policyBusy && setPolicyPickerOpen((v) => !v)}
+      >
+        <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Policy</div>
+        <div style={{ fontFamily: "'Courier New',monospace", fontSize: 11, color: policyProfile !== "-" ? C.info : C.muted, fontWeight: 700, display: "flex", alignItems: "center", gap: 4 }}>
+          {label}
+          <span style={{ fontSize: 8, color: C.muted, fontWeight: 400 }}>▾</span>
+        </div>
+        {standard && (
+          <div style={{ fontSize: 7, color: C.muted, marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 120 }}>{standard}</div>
+        )}
+      </div>
+
+      {policyPickerOpen && profiles.length > 0 && (
+        <div
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            zIndex: 200,
+            background: "#0d1220",
+            border: `1px solid ${C.info}`,
+            borderRadius: 3,
+            minWidth: 280,
+            boxShadow: "0 4px 16px rgba(0,0,0,0.6)",
+            overflow: "hidden",
+          }}
+        >
+          <div style={{ fontSize: 8, color: C.muted, padding: "4px 8px", borderBottom: `1px solid ${C.border}`, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+            Monitoring Policy
+          </div>
+          {profiles.map((p) => (
+            <div
+              key={p.id}
+              style={{
+                padding: "6px 10px",
+                cursor: policyBusy ? "wait" : "pointer",
+                borderBottom: `1px solid ${C.border}`,
+                background: p.active ? "rgba(56,189,248,0.08)" : "transparent",
+              }}
+              onClick={() => !policyBusy && onSelectProfile(p.id)}
+            >
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <div style={{ fontFamily: "'Courier New',monospace", fontSize: 10, color: p.active ? C.info : C.text, fontWeight: 700 }}>{p.label}</div>
+                {p.active && <div style={{ fontSize: 7, color: C.info, background: "rgba(56,189,248,0.15)", borderRadius: 2, padding: "0 4px" }}>ACTIVE</div>}
+              </div>
+              <div style={{ fontSize: 8, color: C.muted, marginTop: 1 }}>{p.standard}</div>
+              <div style={{ fontSize: 8, color: C.muted, marginTop: 1, opacity: 0.75 }}>{p.description}</div>
+            </div>
+          ))}
+          <div
+            style={{ padding: "4px 8px", fontSize: 8, color: C.muted, cursor: "pointer", textAlign: "right" }}
+            onClick={() => setPolicyPickerOpen(false)}
+          >
+            Close
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function toFiniteNumber(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
@@ -390,6 +470,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [excludePidsText, setExcludePidsText] = useState("");
   const [selectedServiceIds, setSelectedServiceIds] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [policyData, setPolicyData] = useState(null);
+  const [policyPickerOpen, setPolicyPickerOpen] = useState(false);
+  const [policyBusy, setPolicyBusy] = useState(false);
 
   const {
     result,
@@ -410,6 +493,22 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     etr.refreshActives();
     etr.loadProfiles();
   }, [refreshActives, etr.refreshActives, etr.loadProfiles]);
+
+  useEffect(() => {
+    getMonitoringPolicy().then(setPolicyData).catch(() => {});
+  }, []);
+
+  const handleSelectProfile = (profileId) => {
+    setPolicyBusy(true);
+    setMonitoringProfile(profileId)
+      .then(() => getMonitoringPolicy())
+      .then((data) => {
+        setPolicyData(data);
+        setPolicyPickerOpen(false);
+      })
+      .catch(() => {})
+      .finally(() => setPolicyBusy(false));
+  };
 
   useEffect(() => {
     if (!lastMessage) return;
@@ -1388,6 +1487,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               ? `NIC-${captureMethodRaw}`
               : (captureMethodRaw === "tsduck" ? "ANALYSER" : "UNAVAILABLE");
             const policyProfile = selectedResult?.dvb?.monitoringPolicy?.profile || "-";
+            const policyProfileMeta = selectedResult?.dvb?.monitoringPolicy?.profileMeta || policyData?.current?.profileMeta || null;
             const schedulerCadence = selectedResult?.dvb?.probeDiagnostics?.scheduler?.cadence || null;
 
             return (
@@ -1464,7 +1564,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
                       <StatBox label="Rate Confidence" value={rateConfidence} color={rateConfidence === "TRUSTED" ? C.ok : rateConfidence === "FALLBACK" ? C.warn : C.muted} />
                       <StatBox label="Probe Method" value={captureMethod} color={captureMethod.startsWith("NIC-") ? C.cyan : captureMethod === "ANALYSER" ? C.warn : C.muted} />
-                      <StatBox label="Policy" value={String(policyProfile).toUpperCase()} color={policyProfile !== "-" ? C.info : C.muted} />
+                      <PolicyChip
+                        policyProfile={policyProfile}
+                        profileMeta={policyProfileMeta}
+                        policyData={policyData}
+                        policyPickerOpen={policyPickerOpen}
+                        setPolicyPickerOpen={setPolicyPickerOpen}
+                        policyBusy={policyBusy}
+                        onSelectProfile={handleSelectProfile}
+                      />
                       <StatBox
                         label="Heavy Probe"
                         value={schedulerCadence?.heavyProbeIntervalMs ? `${Math.round(Number(schedulerCadence.heavyProbeIntervalMs) / 1000)}s` : "-"}
