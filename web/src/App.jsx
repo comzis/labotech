@@ -927,10 +927,26 @@ export default function App() {
             </div>
           </div>
 
-          <div className="flex items-center justify-end gap-1.5">
+          {/* ── Punchline + CPU metrics — same row so they stay together ── */}
+          <div className="hidden lg:flex items-center gap-2 min-w-0">
+            {/* Punchline: takes all remaining space, text right-aligned */}
+            <div
+              className="flex-1 min-w-0 truncate text-right"
+              style={{
+                fontSize: 12,
+                fontStyle: 'italic',
+                letterSpacing: '0.06em',
+                color: '#8fb8e8',
+                textShadow: '0 0 18px rgba(100,170,255,0.22)',
+                opacity: 0.82,
+              }}
+              title={activePunchline}
+            >
+              {activePunchline}
+            </div>
             {(telemetry || Number.isFinite(serverUptimeSec)) && (
               <div
-                className="hidden xl:flex items-center h-7 gap-2 px-2.5 rounded-sm shrink-0"
+                className="flex items-center h-7 gap-2 px-2.5 rounded-sm shrink-0"
                 style={{
                   background: 'linear-gradient(180deg, #132338, #0f1b2b)',
                   border: '1px solid #5e8fce',
@@ -964,7 +980,7 @@ export default function App() {
             )}
             {(preflight || monitoringPolicy || Number.isFinite(serverUptimeSec)) && (
               <div
-                className="hidden 2xl:flex items-center h-7 gap-1 px-1.5 rounded-sm shrink-0"
+                className="flex items-center h-7 gap-1 px-1.5 rounded-sm shrink-0"
                 style={{
                   background: '#10151d',
                   border: '1px solid #2a3342',
@@ -978,22 +994,6 @@ export default function App() {
                 </span>
               </div>
             )}
-          </div>
-
-          {/* ── Punchline — own row so it never fights the nav tabs ── */}
-          <div
-            className="hidden xl:block text-right truncate"
-            style={{
-              fontSize: 12,
-              fontStyle: 'italic',
-              letterSpacing: '0.06em',
-              color: '#8fb8e8',
-              textShadow: '0 0 18px rgba(100,170,255,0.22)',
-              opacity: 0.82,
-            }}
-            title={activePunchline}
-          >
-            {activePunchline}
           </div>
 
         </div>
