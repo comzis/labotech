@@ -179,13 +179,20 @@ function extractPidRows(selectedResult) {
     _idx: i, // used only as tiebreaker for PID-less entries
   }));
 
+  // If any stream of a given codecType has a valid PID, suppress null-PID rows
+  // of that same type — they are ghosts (ffprobe sometimes emits the same
+  // elementary stream twice: once in the program list with a PID and once in
+  // the global stream list without one).
+  const typesWithRealPid = new Set(normalized.filter((r) => r.pid != null).map((r) => r.codecType));
+  const filtered = normalized.filter((r) => r.pid != null || !typesWithRealPid.has(r.codecType));
+
   // Deduplicate by PID only — not by pid+codecType.
   // The same physical PID can arrive from multiple probe sources (ffprobe program
   // streams, tsduck orphans, fallback rows) with different or missing codecType.
   // Keying by pid+codecType kept both, causing the same PID to appear twice and
   // rotate positions as heavy/light probe cycles alternated.
   const byPid = new Map();
-  normalized.forEach((row) => {
+  filtered.forEach((row) => {
     const pidKey = row.pid != null
       ? String(row.pid)
       : (row.pidHex ? String(row.pidHex).toUpperCase()
@@ -343,8 +350,9 @@ function pickPreferredVideoStream(streams) {
     .sort((a, b) => {
       const scoreDiff = score(b) - score(a);
       if (scoreDiff !== 0) return scoreDiff;
-      const pidA = Number.isFinite(Number(a?.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
-      const pidB = Number.isFinite(Number(b?.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+      // Prefer streams with a valid PID; null PID sorts last (not first).
+      const pidA = a?.pid != null && Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+      const pidB = b?.pid != null && Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
       if (pidA !== pidB) return pidA - pidB;
       return String(a?.codecName || "").localeCompare(String(b?.codecName || ""));
     })[0];
@@ -1282,8 +1290,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               .filter((s) => s.codecType === "audio")
               .slice()
               .sort((a, b) => {
-                const pidA = Number.isFinite(Number(a?.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
-                const pidB = Number.isFinite(Number(b?.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
+                // Prefer streams with a valid PID; null PID sorts last (not first).
+                const pidA = a?.pid != null && Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
+                const pidB = b?.pid != null && Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
                 if (pidA !== pidB) return pidA - pidB;
                 const codecA = String(a?.codecName || a?.codec || "");
                 const codecB = String(b?.codecName || b?.codec || "");
