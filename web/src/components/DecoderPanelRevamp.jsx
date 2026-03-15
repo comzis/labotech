@@ -1486,9 +1486,24 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             const captureMethod = captureMethodRaw === "tshark" || captureMethodRaw === "tcpdump"
               ? `NIC-${captureMethodRaw}`
               : (captureMethodRaw === "tsduck" ? "ANALYSER" : "UNAVAILABLE");
-            const policyProfile = selectedResult?.dvb?.monitoringPolicy?.profile || "-";
+            const policyProfile = selectedResult?.dvb?.monitoringPolicy?.profile || policyData?.current?.profile || "-";
             const policyProfileMeta = selectedResult?.dvb?.monitoringPolicy?.profileMeta || policyData?.current?.profileMeta || null;
             const schedulerCadence = selectedResult?.dvb?.probeDiagnostics?.scheduler?.cadence || null;
+
+            // Estimate video bitrate from total TS rate minus known audio bitrates when
+            // per-PID bitrate is unavailable (tsanalyze window too short for NIC capture).
+            const videoStreamBitrate = (() => {
+              const direct = toFiniteNumber(videoStream?.bitrate);
+              if (direct > 0) return direct;
+              const audioTotalBps = audioStreams.reduce((acc, s) => acc + (toFiniteNumber(s.bitrate) || 0), 0);
+              if (instantTsInputRateBps > 0 && audioTotalBps > 0) {
+                const est = instantTsInputRateBps - audioTotalBps;
+                return est > 0 ? -est : null; // negative sentinel = estimated
+              }
+              return null;
+            })();
+            const videoStreamBitrateIsEstimated = videoStreamBitrate !== null && videoStreamBitrate < 0;
+            const videoStreamBitrateAbs = videoStreamBitrate !== null ? Math.abs(videoStreamBitrate) : null;
 
             return (
               <>
@@ -1557,7 +1572,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       <StatBox label="Services" value={String(selectedResult?.dvb?.serviceCount ?? selectedResult?.programs?.length ?? "-")} color={C.text} />
                     </div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6 }}>
-                      <StatBox label="Video Bitrate" value={bpsFmt(videoStream?.bitrate)} color={toFiniteNumber(videoStream?.bitrate) ? C.purple : C.muted} />
+                      <StatBox
+                        label={videoStreamBitrateIsEstimated ? "Video Bitrate (est)" : "Video Bitrate"}
+                        value={videoStreamBitrateAbs != null ? bpsFmt(videoStreamBitrateAbs) : "-"}
+                        color={videoStreamBitrateAbs != null ? (videoStreamBitrateIsEstimated ? C.warn : C.purple) : C.muted}
+                      />
                       <StatBox label="TS Input Source" value={String(tsRateSource).toUpperCase()} color={transportRate.trusted ? C.ok : C.warn} />
                       <StatBox label="Rate Hold" value={selectedResult?.dvb?.bitrateHeldFromPrevious ? "ON" : "OFF"} color={selectedResult?.dvb?.bitrateHeldFromPrevious ? C.info : C.muted} />
                     </div>
@@ -1600,7 +1619,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           <StatBox label="Chroma" value={chromaLabel(videoStream.pixFmt)} color={C.text} />
                           <StatBox label="Colour" value={colorLabel(videoStream.colorTrc, videoStream.colorSpace, videoStream.colorPrimaries)} color={videoStream.colorTrc === "smpte2084" || videoStream.colorTrc === "hlg" ? C.warn : C.text} />
                           <StatBox label="Range" value={rangeLabel(videoStream.colorRange)} color={videoStream.colorRange ? C.text : C.muted} />
-                          <StatBox label="ES Bitrate" value={bpsFmt(videoStream.bitrate)} color={videoStream.bitrate ? C.text : C.muted} />
+                          <StatBox
+                            label={videoStreamBitrateIsEstimated ? "ES Bitrate (est)" : "ES Bitrate"}
+                            value={videoStreamBitrateAbs != null ? bpsFmt(videoStreamBitrateAbs) : "-"}
+                            color={videoStreamBitrateAbs != null ? (videoStreamBitrateIsEstimated ? C.warn : C.text) : C.muted}
+                          />
                           <StatBox label="PID" value={renderPidRef(videoStream.pid, videoStream.pidHex)} color={C.accent} />
                           <StatBox label="Stream Type" value={videoStream.streamType || "-"} color={videoStream.streamType ? C.text : C.muted} />
                         </div>
