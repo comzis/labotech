@@ -218,6 +218,7 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **IAT sniffer diagnostics** (attempted, capture method, sample count, error) for NIC-capture visibility
 - **Transport integrity checks** for timestamp discontinuities and continuity counter (CC) errors
 - **Composite health model** (`dvb.health`) including score, severity, and reasons for operator triage
+- **Health assessment accuracy** (v3.1.4): SMPTE ST 2022-7 `insufficient_data` no longer penalises score (only `non_compliant` deducts); bitrate drift scoring applies only when `bitrateSource === 'tsduck'` to avoid false alarms from short ffprobe measurement windows
 
 ### Recent broadcast-grade monitoring improvements
 
@@ -283,6 +284,7 @@ For the latest UI hardening + SMPTE 2022-7 implementation details and validation
 - **Dynamic pointer popup**: follows cursor quadrants to reduce lane occlusion while inspecting nearby evidence
 - **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
 - **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
+- **Canvas lane renderer** (v3.1.5): lane bars use `HTMLCanvasElement` `fillRect()` drawing via `LaneCanvas` component, replacing CSS `linear-gradient` strings. Eliminates sub-pixel gap artefacts and slow browser recalculation on dense event lanes. `buildLaneGradient()` logic is unchanged.
 
 ---
 

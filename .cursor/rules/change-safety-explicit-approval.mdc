@@ -22,6 +22,7 @@ This rule exists because several UI refactors introduced silent regressions in M
 - Modifying colour values, badge styles, LED-dot indicators, or branding elements
 - Any structural change to `DecoderMultiviewPanel.jsx`, `DecoderPanelRevamp.jsx`, `TSAnalyser.jsx`, or `App.jsx`
 - Changing header layout, nav tab sizing, or spacing
+- Any modification to `LaneCanvas`, `parseGradientSegments`, or the canvas drawing logic in `StreamViewPanel.jsx` — visual regressions (gaps, wrong colours, missing segments) in the timeline are high-impact for MCR operators
 
 ### Changes that do NOT require consultation
 
