@@ -1783,7 +1783,28 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
                 {/* ── Active Decoders ──────────────────────────────────── */}
                 <PanelBox>
-                  <SectionHead icon="📋" title="Active Decoders" right={<Badge label={`${activeIds.length} running`} color={activeIds.length ? C.ok : C.muted} small />} />
+                  <SectionHead icon="📋" title="Active Decoders" right={
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <Badge label={`${activeIds.length} running`} color={activeIds.length ? C.ok : C.muted} small />
+                      {activeIds.length > 0 && (
+                        <button
+                          onClick={async () => {
+                            for (const id of activeIds) {
+                              try { await stop(id); } catch (_) {}
+                            }
+                            try { await refreshActives(); } catch (_) {}
+                          }}
+                          style={{
+                            borderRadius: 2, border: `1px solid ${C.err}`, color: C.err,
+                            background: "transparent", fontSize: 9, fontWeight: 700,
+                            fontFamily: "'Courier New',monospace", padding: "2px 7px", cursor: "pointer",
+                          }}
+                        >
+                          STOP ALL
+                        </button>
+                      )}
+                    </div>
+                  } />
                   <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
                     {activeIds.length === 0 ? (
                       <div style={{ color: C.muted, fontSize: 10 }}>No active decoders yet.</div>
