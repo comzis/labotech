@@ -363,6 +363,7 @@ function toEvent(msg) {
       severity: 'critical',
       title: isNoSignal ? 'Input signal missing' : 'Engine error',
       description: msg.message || 'Unknown runtime error',
+      evidence: { noSignal: isNoSignal },
     };
   }
   if (msg.type === 'switched') {
@@ -487,7 +488,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const OKS_TO_CLEAR = 2;
 
     function decEvtSev(e) {
-      if (e.category === 'runtime_error') return 'critical';
+      if (e.category === 'runtime_error') {
+        // Only genuine LOS errors (no input signal) drive the gradient red.
+        // Engine/process errors (probe hiccups, config faults) are not signal
+        // quality indicators — they must not override the analyse_result truth.
+        return e.evidence?.noSignal ? 'critical' : null;
+      }
       if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) return 'ok';
       if (e.category === 'analyse_result') return e.severity || 'ok';
       return null;
@@ -498,21 +504,36 @@ function buildLaneGradient(events, timeStart, windowMs) {
       return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
 
+    const sevLevel = (s) => s === 'critical' ? 2 : s === 'warning' ? 1 : 0;
+    const isBad = (s) => s === 'critical' || s === 'warning';
+
     // Build de-noised state-change list with hysteresis.
+    // Rules:
+    //   - Escalation (ok→bad or warn→critical): immediate, resets okStreak.
+    //   - Downgrade (critical→warning): immediate transition, preserves okStreak.
+    //   - Recovery (bad→ok): requires OKS_TO_CLEAR consecutive ok events.
+    //   - Repeated same-severity bad events do NOT reset okStreak — prevents
+    //     alternating warn/ok patterns from locking the lane permanently red.
     let stateSev = null;
     let okStreak = 0;
     const stateChanges = []; // { ts, sev }
-    const isBad = (s) => s === 'critical' || s === 'warning';
 
     for (const e of sevEvts) {
       const raw = decEvtSev(e);
       if (!raw) continue;
       if (isBad(raw)) {
-        okStreak = 0;
-        if (stateSev !== raw) {
+        if (sevLevel(raw) > sevLevel(stateSev)) {
+          // Escalation: reset streak, record transition.
+          okStreak = 0;
+          stateChanges.push({ ts: e.ts, sev: raw });
+          stateSev = raw;
+        } else if (sevLevel(raw) < sevLevel(stateSev)) {
+          // Downgrade (e.g. critical→warning): transition immediately,
+          // keep okStreak so recovery can continue counting.
           stateChanges.push({ ts: e.ts, sev: raw });
           stateSev = raw;
         }
+        // Same severity: no change, no streak reset.
       } else { // ok
         if (isBad(stateSev)) {
           okStreak++;
@@ -521,7 +542,6 @@ function buildLaneGradient(events, timeStart, windowMs) {
             stateChanges.push({ ts: e.ts, sev: 'ok' });
             stateSev = 'ok';
           }
-          // else: still in bad state — suppress this brief ok
         } else {
           okStreak = 0;
           if (stateSev !== 'ok') {
