@@ -450,7 +450,7 @@ function colorForSeverity(severity) {
   if (severity === 'p1') return '#00ddff';   // neon-cyan
   if (severity === 'critical') return '#ff2233'; // led-red
   if (severity === 'warning') return '#ffaa00';  // led-amber
-  if (severity === 'ok') return '#00dd55';   // led-green
+  if (severity === 'ok') return '#3db86a';   // soft monitoring green
   return '#00ddff';
 }
 
@@ -475,7 +475,7 @@ function laneColorForEvent(event) {
   if (sev === 'p1') return '#00ddffcc';
   if (sev === 'critical') return '#ff4d5fcc';
   if (sev === 'warning') return '#ffd84dcc';
-  if (sev === 'ok') return '#00dd55b8';
+  if (sev === 'ok') return '#3db86ab8';
   return '#44556666';
 }
 
@@ -483,7 +483,7 @@ function colorForLaneSeverity(severity) {
   if (severity === 'p1') return '#00ddff';
   if (severity === 'critical') return '#ff2233';
   if (severity === 'warning') return '#ffaa00';
-  if (severity === 'ok') return '#00ee66';
+  if (severity === 'ok') return '#3db86a';
   if (severity === 'pending') return '#00bbcc'; // stream active, awaiting first analysis probe
   return '#445566';
 }
@@ -877,9 +877,9 @@ function num(v, digits = 3) {
 }
 
 export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
-  const LANE_TOP_PX = 48;
-  const LANE_STEP_PX = 34;
-  const LANE_LINE_THICKNESS_PX = 8;
+  const LANE_TOP_PX = 52;
+  const LANE_STEP_PX = 44;
+  const LANE_LINE_THICKNESS_PX = 12;
   const [windowMs, setWindowMs] = useState(WINDOW_OPTIONS[1].value);
   const [events, setEvents] = useState([]);
   const [nowMs, setNowMs] = useState(Date.now());
@@ -1548,7 +1548,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             <span className="inline-block w-2 h-2 rounded-full" style={{ background: '#ffb266' }} />
             alarm
           </span>
-          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#00dd55' }} /> nominal</span>
+          <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#3db86a' }} /> nominal</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ffaa00' }} /> warning</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#ff2233' }} /> critical</span>
           <span className="inline-flex items-center gap-1"><span className="inline-block w-3 h-px" style={{ background: '#cc44ff' }} /> incident</span>
@@ -1683,8 +1683,8 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
                       aria-hidden="true"
                       style={{
-                        width: '14px',
-                        height: '10px',
+                        width: '26px',
+                        height: '18px',
                         border: '1px solid rgba(255,255,255,0.16)',
                         background: '#0a0a0a',
                         boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
@@ -1747,7 +1747,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                         ? { label: 'CRIT', color: '#ff2233', bg: 'rgba(255,34,51,0.12)',  border: 'rgba(255,34,51,0.35)' }
                         : st === 'warning'
                           ? { label: 'WARN', color: '#ffaa00', bg: 'rgba(255,170,0,0.12)', border: 'rgba(255,170,0,0.35)' }
-                          : { label: 'OK',   color: '#00dd55', bg: 'rgba(0,221,85,0.10)',  border: 'rgba(0,221,85,0.30)' };
+                          : { label: 'OK',   color: '#3db86a', bg: 'rgba(61,184,106,0.12)', border: 'rgba(61,184,106,0.32)' };
                     return (
                       <div
                         className="absolute -translate-y-1/2"
