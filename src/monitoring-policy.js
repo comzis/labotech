@@ -83,10 +83,15 @@ function _buildPolicy() {
       jitterCriticalMs: _envNumber('TS_HEALTH_JITTER_CRITICAL_MS', Number(filePolicy?.health?.jitterCriticalMs || 15)),
       iatP95WarnMs: _envNumber('TS_HEALTH_IAT_P95_WARN_MS', Number(filePolicy?.health?.iatP95WarnMs || 50)),
       iatP95CriticalMs: _envNumber('TS_HEALTH_IAT_P95_CRITICAL_MS', Number(filePolicy?.health?.iatP95CriticalMs || 150)),
-      tsDiscWarnCount: _envNumber('TS_HEALTH_TS_DISC_WARN_COUNT', Number(filePolicy?.health?.tsDiscWarnCount || 1)),
-      tsDiscCriticalCount: _envNumber('TS_HEALTH_TS_DISC_CRITICAL_COUNT', Number(filePolicy?.health?.tsDiscCriticalCount || 3)),
-      ccWarnCount: _envNumber('TS_HEALTH_CC_WARN_COUNT', Number(filePolicy?.health?.ccWarnCount || 1)),
-      ccCriticalCount: _envNumber('TS_HEALTH_CC_CRITICAL_COUNT', Number(filePolicy?.health?.ccCriticalCount || 3)),
+      // Thresholds of 3 match the ETR 290 burst-window default for pcr_disc/transport_error.
+      // The heavy probe opens a 2.5s UDP capture mid-flight; the join startup routinely
+      // produces 1-2 spurious timestamp discontinuities and CC errors that are processing
+      // artifacts, not signal faults.  Requiring 3+ events in a single 2.5s window
+      // before penalising prevents these probe-join artifacts from driving false warnings.
+      tsDiscWarnCount: _envNumber('TS_HEALTH_TS_DISC_WARN_COUNT', Number(filePolicy?.health?.tsDiscWarnCount || 3)),
+      tsDiscCriticalCount: _envNumber('TS_HEALTH_TS_DISC_CRITICAL_COUNT', Number(filePolicy?.health?.tsDiscCriticalCount || 8)),
+      ccWarnCount: _envNumber('TS_HEALTH_CC_WARN_COUNT', Number(filePolicy?.health?.ccWarnCount || 3)),
+      ccCriticalCount: _envNumber('TS_HEALTH_CC_CRITICAL_COUNT', Number(filePolicy?.health?.ccCriticalCount || 8)),
       dolbyEMissingPenalty: _envNumber(
         'TS_HEALTH_DOLBYE_MISSING_PENALTY',
         Number(filePolicy?.health?.dolbyEMissingPenalty || 10)
