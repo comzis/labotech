@@ -663,7 +663,9 @@ class TSAnalyser extends EventEmitter {
   _extractSrtStatsFromLog(stderr) {
     if (!stderr) return null;
     const last = (rx) => {
-      const matches = Array.from(String(stderr).matchAll(rx));
+      // matchAll requires a global regex; ensure g flag is set regardless of caller.
+      const grx = rx.global ? rx : new RegExp(rx.source, rx.flags + 'g');
+      const matches = Array.from(String(stderr).matchAll(grx));
       if (!matches.length) return null;
       return matches[matches.length - 1][1];
     };
