@@ -878,8 +878,15 @@ export default function App() {
             </nav>
 
             <div
-              className="hidden 2xl:block text-[9px] leading-none text-right max-w-[420px] truncate"
-              style={{ color: '#6f86aa' }}
+              className="hidden 2xl:block text-right max-w-[460px] truncate"
+              style={{
+                fontSize: 12,
+                fontStyle: 'italic',
+                letterSpacing: '0.06em',
+                color: '#8fb8e8',
+                textShadow: '0 0 18px rgba(100,170,255,0.22)',
+                opacity: 0.82,
+              }}
               title={activePunchline}
             >
               {activePunchline}
