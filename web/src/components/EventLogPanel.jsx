@@ -48,8 +48,10 @@ function PidDisplay({ pid, pidHex }) {
 function extractPidEvidence(selected) {
   const ev = selected?.evidence || {};
   const etr = ev.etr || {};
-  const directPid = Number.isFinite(Number(ev.pid)) ? Number(ev.pid) : null;
-  const nestedPid = Number.isFinite(Number(etr.pid)) ? Number(etr.pid) : null;
+  // Number(null) === 0, so guard with != null before coercing — otherwise a null
+  // pid (unknown PID) silently becomes 0 and renders as "0  0x0000".
+  const directPid = ev.pid != null && Number.isFinite(Number(ev.pid)) ? Number(ev.pid) : null;
+  const nestedPid = etr.pid != null && Number.isFinite(Number(etr.pid)) ? Number(etr.pid) : null;
   const normalizedHex = typeof ev.pidHex === 'string' ? ev.pidHex.toUpperCase() : null;
   const fromHex = normalizedHex && /^0X[0-9A-F]+$/.test(normalizedHex)
     ? parseInt(normalizedHex, 16)
