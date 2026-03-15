@@ -8,7 +8,10 @@ SERVICE="${3:-labotech}"
 GIT_REMOTE="${GIT_REMOTE:-origin}"
 GIT_BRANCH="${GIT_BRANCH:-main}"
 
-MIN_FREE_MB="${MIN_FREE_MB:-8192}"
+# 4 GB is sufficient for a Docker build + image layers on this server.
+# The previous 8 GB default blocked deploys on a disk that legitimately
+# never has 8 GB free (broadcast appliance, ~40 GB disk, always busy).
+MIN_FREE_MB="${MIN_FREE_MB:-4096}"
 MIN_FREE_INODE_PCT="${MIN_FREE_INODE_PCT:-10}"
 DISK_CHECK_PATH="${DISK_CHECK_PATH:-.}"
 
@@ -116,6 +119,21 @@ container_log_cleanup() {
 auto_cleanup() {
   log "auto cleanup: truncating app logs and pruning docker artifacts"
   container_log_cleanup
+
+  # Truncate Docker container JSON logs — these are NOT removed by docker system
+  # prune and are the most common cause of silent disk exhaustion on this server.
+  # Each running container accumulates stdout/stderr here without bound unless
+  # log rotation is configured in /etc/docker/daemon.json.
+  if [[ -d /var/lib/docker/containers ]]; then
+    local before_kb after_kb reclaimed_mb
+    before_kb=$(du -sk /var/lib/docker/containers 2>/dev/null | awk '{print $1}')
+    find /var/lib/docker/containers -maxdepth 2 -name '*-json.log' \
+      -exec truncate -s 0 {} \; 2>/dev/null || true
+    after_kb=$(du -sk /var/lib/docker/containers 2>/dev/null | awk '{print $1}')
+    reclaimed_mb=$(( (before_kb - after_kb) / 1024 ))
+    log "docker json logs truncated: reclaimed ~${reclaimed_mb} MB"
+  fi
+
   docker builder prune -af || true
   docker image prune -af || true
   docker container prune -f || true
@@ -130,7 +148,8 @@ auto_cleanup() {
   # Optional host cleanup (best-effort, non-blocking)
   if command -v sudo >/dev/null 2>&1; then
     sudo -n apt-get clean >/dev/null 2>&1 || true
-    sudo -n journalctl --vacuum-time=7d >/dev/null 2>&1 || true
+    sudo -n journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+    sudo -n journalctl --vacuum-time=14d >/dev/null 2>&1 || true
   fi
 }
 
