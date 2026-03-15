@@ -1196,7 +1196,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                             background: hasAlarm ? `${color}14` : enabled ? "rgba(255,255,255,0.04)" : "transparent",
                           }}>
                             <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: hasAlarm ? color : enabled ? "rgba(255,255,255,0.45)" : C.dim, display: "inline-block", boxShadow: hasAlarm ? `0 0 5px ${color}` : "none" }} />
+                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block", flexShrink: 0, boxShadow: enabled ? `0 0 5px ${color}99` : "none" }} />
                               <span style={{ fontSize: 10, fontWeight: 700, color: hasAlarm ? color : enabled ? C.text : C.muted }}>{label}</span>
                             </div>
                             <div style={{ fontSize: 9, color: enabled ? C.muted : C.dim }}>{enabled ? desc : "DISABLED"}</div>
