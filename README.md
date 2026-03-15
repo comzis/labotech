@@ -65,17 +65,16 @@ cp .env.example .env
 docker-compose up -d
 ```
 
-### 3b. Standardized upgrade (git/systemd flow)
+### 3b. Standardized production update
 
 ```bash
-git fetch --all --tags --prune
-bash scripts/upgrade-prod.sh <tag-or-ref>
+bash scripts/update-and-deploy-safe.sh
 ```
 
-Rollback:
+Deterministic recovery to a known ref:
 
 ```bash
-bash scripts/rollback-last-tag.sh
+bash scripts/recover-prod-fast.sh <ref>
 ```
 
 Fast recover (if UI tabs/features are missing after deployment):
@@ -409,11 +408,11 @@ npm test
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
 - Engineering operations runbook: `docs/engineering-support-manual.md`
 - Disk recovery and log-rotation runbook: `docs/ops-disk-recovery.md`
+- Full operations scripts usage reference: `docs/ops-scripts-reference.md`
 - UI hardening and SMPTE 2022-7 worklog: `docs/ui-hardening-and-20227-worklog.md`
 - Day-1 post-change operations checklist: `docs/day1-monitoring-checklist.md`
 - Ubuntu host tuning scripts: `scripts/optimize-host-v2.sh` and `scripts/rollback-host-optimization-v2.sh`
 - Docker log rotation install/check scripts: `scripts/install-docker-log-rotation.sh` and `scripts/check-docker-log-rotation.sh`
 - Fast disk reclaim helper (aggressive): `scripts/reclaim-disk-fast.sh --yes`
-- Standardized production upgrade: `bash scripts/upgrade-prod.sh [tag-or-ref]`
-- Deploy a fixed version tag/ref: `bash scripts/deploy-ref.sh <tag-or-ref>`
-- Roll back quickly to prior tag: `bash scripts/rollback-last-tag.sh`
+- Standardized production update: `bash scripts/update-and-deploy-safe.sh`
+- Deterministic rollback/recovery: `bash scripts/recover-prod-fast.sh <ref>`
