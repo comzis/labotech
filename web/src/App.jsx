@@ -55,7 +55,6 @@ function formatUptime(seconds) {
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 }
 
-const INACTIVE_TAB_COLOR = '#7a7a7a';
 const ROLE_STORAGE_KEY = 'labotech:role:v1';
 const AUTH_STORAGE_KEY = 'labotech:auth-user:v1';
 const ROLES = {
@@ -71,6 +70,14 @@ const PARTNER_LOGO_SRC = '/eurovision-services.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
 const BUILD_TIME_UTC = import.meta.env.VITE_BUILD_TIME_UTC || null;
+const RACK_BACKGROUND_STYLE = {
+  backgroundColor: '#070b14',
+  backgroundImage:
+    'radial-gradient(140% 110% at 50% 0%, rgba(70,102,148,0.2), transparent 52%), linear-gradient(180deg, rgba(8,12,18,0.26), rgba(7,10,16,0.6)), url("/broadcast-rack-bays.svg")',
+  backgroundSize: '100% 100%, 100% 100%, cover',
+  backgroundPosition: 'center, center, center',
+  backgroundRepeat: 'no-repeat, no-repeat, no-repeat',
+};
 const RACK_LOBBY_PUNCHLINES = [
   'check PCR before panic',
   'blame cables only after coffee',
@@ -128,13 +135,7 @@ function LandingAuth({ onLogin, punchline }) {
   return (
     <div
       className="min-h-screen flex items-center justify-center px-3 xl:px-6"
-      style={{
-        backgroundImage:
-          'linear-gradient(180deg, rgba(8,12,18,0.45), rgba(7,10,16,0.78)), url("/broadcast-rack-bays.svg")',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
-        backgroundRepeat: 'no-repeat',
-      }}
+      style={RACK_BACKGROUND_STYLE}
     >
       <div
         className="w-full max-w-[1800px] min-h-[700px] rounded-md border relative overflow-hidden flex flex-col"
@@ -742,7 +743,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col font-mono" style={{ background: 'transparent' }}>
+    <div className="min-h-screen flex flex-col font-mono" style={RACK_BACKGROUND_STYLE}>
       <Toaster
         position="top-right"
         theme="dark"
@@ -1001,11 +1002,32 @@ export default function App() {
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
       <main className="flex-1 mt-[120px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
-        {/* Subtle rack-rail side lines */}
-        <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
-          style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
-        <div className="absolute right-0 top-0 bottom-0 w-1 pointer-events-none"
-          style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
+        {/* Rack rails with 1U (44px) mounting holes */}
+        <div className="absolute left-0 top-0 bottom-0 pointer-events-none" style={{
+          width: 14,
+          background: 'linear-gradient(90deg, #0d121a, #161e2a 55%, #10161f)',
+          backgroundImage: [
+            'linear-gradient(90deg, #0d121a, #161e2a 55%, #10161f)',
+            // Oval U-hole cutouts repeating every 44px
+            'radial-gradient(ellipse 6px 13px at 7px 0px, #06090e 78%, transparent 100%)',
+          ].join(', '),
+          backgroundRepeat: 'no-repeat, repeat-y',
+          backgroundSize: '100% 100%, 14px 44px',
+          backgroundPosition: '0 0, 0 18px',
+          borderRight: '1px solid #1e2a3a',
+        }} />
+        <div className="absolute right-0 top-0 bottom-0 pointer-events-none" style={{
+          width: 14,
+          background: 'linear-gradient(90deg, #10161f, #161e2a 45%, #0d121a)',
+          backgroundImage: [
+            'linear-gradient(90deg, #10161f, #161e2a 45%, #0d121a)',
+            'radial-gradient(ellipse 6px 13px at 7px 0px, #06090e 78%, transparent 100%)',
+          ].join(', '),
+          backgroundRepeat: 'no-repeat, repeat-y',
+          backgroundSize: '100% 100%, 14px 44px',
+          backgroundPosition: '0 0, 0 18px',
+          borderLeft: '1px solid #1e2a3a',
+        }} />
 
         <motion.div
           key={tab}

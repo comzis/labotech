@@ -1,5 +1,18 @@
 import React from "react";
 
+// Rack-hardware detail: Phillips screw head used on panel faceplates and enclosures
+const PhillipsScrew = ({ size = 6 }) => (
+  <span style={{
+    width: size, height: size, borderRadius: '50%', flexShrink: 0,
+    display: 'inline-block', position: 'relative',
+    background: 'radial-gradient(circle at 35% 30%, #96a6bc, #5f6f86 60%, #364355)',
+    boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.18), 0 0 1px rgba(0,0,0,0.6)',
+  }}>
+    <span style={{ position: 'absolute', left: '50%', top: 1, width: 1, height: size - 2, transform: 'translateX(-50%)', background: '#2a3040' }} />
+    <span style={{ position: 'absolute', top: '50%', left: 1, height: 1, width: size - 2, transform: 'translateY(-50%)', background: '#2a3040' }} />
+  </span>
+);
+
 export const C = {
   bg: "#06080c",
   surface: "#0b0e15",
@@ -257,8 +270,10 @@ export const PanelBox = ({ children, style }) => (
     style={{
       background: C.panel,
       border: `1px solid ${C.border}`,
+      borderLeft: '2px solid #2a3a52',   // rack mounting-rail lip
       borderRadius: 3,
       overflow: "hidden",
+      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03), 0 2px 8px rgba(0,0,0,0.35)',
       ...style,
     }}
   >
@@ -283,13 +298,16 @@ export const SectionHead = ({
       display: "flex",
       alignItems: "center",
       justifyContent: "space-between",
-      padding: "7px 12px",
-      background: C.panelAlt,
+      padding: "6px 8px",
+      background: 'linear-gradient(180deg, #151d2a 0%, #0f1420 100%)',
       borderBottom: `1px solid ${C.borderHi}`,
+      borderTop: '1px solid rgba(180,210,255,0.07)',  // metallic top edge (rack faceplate)
       borderRadius: "3px 3px 0 0",
     }}
   >
+    {/* Left faceplate screw + content */}
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+      <PhillipsScrew size={6} />
       {num ? (
         <span
           style={{
@@ -320,10 +338,11 @@ export const SectionHead = ({
       </span>
       {badge}
     </div>
+    {/* Right content + faceplate screw */}
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {right}
       <Dot color={active ? activeDotColor : C.muted} />
-      <span style={{ fontSize: 8, color: C.muted }}>▲</span>
+      <PhillipsScrew size={6} />
     </div>
   </div>
 );
