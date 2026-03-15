@@ -93,6 +93,24 @@ ffprobe emits the same elementary stream twice in some cases: once inside the pr
 ### Thundering herd on batch decoder start
 Multiple decoders started simultaneously synchronise their probe cycles. Mitigated by startup jitter (0–4500 ms) and a module-level heavy probe semaphore (default max 3 concurrent, `TS_HEAVY_PROBE_MAX_CONCURRENT`). Do not bypass either.
 
+## UI Change Policy
+
+**No UI changes may be made without consulting the operator first.**
+
+This applies to:
+- Layout, grid/flex structure, overflow/clip behaviour in any component
+- Adding, removing, or reordering tabs or sub-tabs
+- Tailwind responsive breakpoints (`xl:`, `lg:`, `hidden`, `block`)
+- Colour values, badge styles, LED dots, branding, or header structure
+- Any structural change to `DecoderMultiviewPanel.jsx`, `DecoderPanelRevamp.jsx`, `TSAnalyser.jsx`, or `App.jsx`
+
+Acceptable without consultation:
+- Backend-only fixes with no frontend impact
+- Targeted single-element bug fixes that do not alter surrounding layout
+- Test additions, build tooling, docs
+
+See `docs/engineering-support-manual.md §13` and `.cursor/rules/change-safety-explicit-approval.mdc` for detail.
+
 ## Development Workflow
 
 **Three AI tools are active on this repo. Read this section before making any changes.**

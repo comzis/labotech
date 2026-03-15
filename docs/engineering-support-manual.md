@@ -927,6 +927,54 @@ fi
 
 ---
 
+### INC-004 — Multiview tiles permanently "AWAITING TELEMETRY" (2026-03-15)
+
+**Symptom**
+
+All Decoder Multiview tiles showed "AWAITING TELEMETRY", Programs: 0, PIDs: 0 after tab switch, even when decoders were running and producing data visible in the Decoder tab.
+
+**Root causes**
+
+Two independent issues combined:
+
+1. **React 18 auto-batching** — When `stats` messages (emitted every 1–2 s by active encoders) and `analyse_result` messages (emitted every 5 s per analyser) arrived close together in the same JavaScript event loop tick, React 18 batched all `setLastMessage()` calls within the WS `onmessage` handler into a single state update. Only the last value survived. If `stats` was last, the `analyse_result` was silently dropped and `resultsById` was never updated.
+
+2. **Slow fallback poll** — The `refreshActives()` REST poll interval was 12 000 ms. If `lastResult` was null on the server at mount time (probe in progress), tiles had to wait up to 12 s for the fallback to catch the first completed probe — or indefinitely if the WS was batching the results away.
+
+**Fix applied** — commit `72b496d`
+
+- `useWebSocket.js`: replaced direct `setLastMessage(value)` with a `setTimeout(0)` drain queue. Messages are pushed to a ref-based queue and dequeued one-per-event-loop-tick, preventing React from batching multiple messages into one render.
+- `DecoderMultiviewPanel.jsx`: reduced `MULTIVIEW_REFRESH_MS` from 12 000 → 5 000 ms. Added mount-phase rapid-retry loop: if `activeIds` is non-empty but no tile has `probeTime` data, `refreshActives()` is re-called every 2 s up to 6 times (12 s window).
+- `useTSAnalysis.js`: `type: 'error'` WS messages for analyser IDs now write a `probeError` field into `resultsById` so tiles show `probe error: <reason>` in red rather than waiting indefinitely. Also added `setActiveIds` on `analyse_started` events.
+
+**Verification**
+
+After switching to the Multiview tab:
+- Tiles should populate within 5 s if probes are healthy.
+- If probes fail, the red `probe error:` label appears (stream offline or wrong URL).
+- Switching tabs rapidly no longer causes permanent blank tiles.
+
+---
+
+### INC-005 — SRT false CRITICAL on stream connect (2026-03-15)
+
+**Symptom**
+
+When a new SRT decoder was started the health chip in the Decoder panel and timeline turned CRITICAL red for 20–40 s before recovering to OK. The source signal was clean — no real transport errors.
+
+**Root cause**
+
+During SRT key negotiation, IAT estimator warm-up, and initial ffprobe PSI lock, the first several probes returned high IAT P95 / jitter values that breached the health thresholds. The health scoring system had no grace window for this expected startup transient.
+
+**Fix applied** — commit `6b3a21d`
+
+- `TSAnalyser` constructor initialises `this._startupGraceRemaining = null`.
+- First continuous probe sets grace: 8 probes (~40 s) for `srt://`, 4 probes (~20 s) for all other protocols.
+- While grace > 0, `_attachHealthAssessment()` returns `severity: 'ok'` regardless of raw metrics. `dvb.health.startupGrace: true` is set in the result so operators can distinguish grace from genuine OK.
+- `this.lastResult` is assigned the grace-overridden result so it is correctly restored on tab switch.
+
+---
+
 ## 10) UI Improvements Log (2026-03-11)
 
 ### Alarm & Event Log panel
@@ -960,7 +1008,124 @@ New `Alarm Log` tab (`web/src/components/EventLogPanel.jsx`) aggregates all WebS
 
 ---
 
-## 11) CPU and Memory Tuning (gva-boro-probe, 2026-03-15)
+## 11) SRT Transport Monitoring (2026-03-15)
+
+### How SRT stats are collected
+
+SRT statistics are extracted from `ffmpeg`'s libsrt verbose output during the transport bitrate probe. For `srt://` URLs the probe runs with `-loglevel verbose` so libsrt writes telemetry lines to stderr. A dedicated regex parser then extracts these values.
+
+Field names in libsrt verbose output:
+
+| Field | Description |
+|---|---|
+| `mbpsRecvRate` | Receive rate (Mbps) |
+| `mbpsBandwidth` | Estimated link bandwidth (Mbps) |
+| `msRTT` | Round-trip time (ms) |
+| `pktRecvTotal` | Total packets received |
+| `pktRcvLossTotal` | Unrecovered packet loss count |
+| `pktRetransTotal` | Packets re-sent after NAK |
+| `pktSentACKTotal` | Cumulative positive acknowledgements |
+| `pktSentNAKTotal` | Cumulative negative acknowledgements |
+| `pktRcvDrop` | Packets dropped (arrived too late to recover) |
+
+These fields appear in `dvb.srtStats` on every probe result and are displayed in the **SRT Transport** subtab in both the Decoder panel and TS Analyser.
+
+### SRT health threshold auto-relaxation
+
+SRT ARQ retransmissions produce higher IAT P95 and jitter values than UDP multicast. Health thresholds for `srt://` streams are automatically raised to avoid false CRITICAL hits from normal ARQ activity:
+
+| Metric | UDP/RTP default | SRT minimum |
+|---|---|---|
+| IAT P95 warn | profile value | 120 ms |
+| IAT P95 critical | profile value | 400 ms |
+| Jitter warn | profile value | 10 ms |
+| Jitter critical | profile value | 40 ms |
+
+The larger of the active profile value and the SRT minimum is used. Other metrics (CC errors, loss %, tsDisc) use the active profile unchanged.
+
+### SRT startup grace period
+
+On a fresh `srt://` connection, libsrt performs key negotiation and the I-frame lock takes several seconds. To prevent false CRITICAL alarms during this window:
+
+- First **8 continuous probes** (~40 s) hold health at `ok` regardless of metric values.
+- UDP/RTP streams hold `ok` for **4 probes** (~20 s).
+- Grace state is visible in analyser health: `dvb.health.startupGrace: true`.
+- One-shot probes (TS Analyser tool, not continuous decoder) bypass the grace period.
+
+### PBKEYLEN mismatch (AES-128 vs AES-256)
+
+If the sender uses AES-256 (`pbkeylen=32`) and the probe URL uses the default `pbkeylen=16` (AES-128), the ffprobe handshake fails and the probe exits 1. The SRT tab will show "AWAITING STATS". Workaround: add `pbkeylen=32` to the decoder URL. Example:
+
+```
+srt://10.67.18.29:5000?stats=1&statsintvl=1&pbkeylen=32&passphrase=<key>
+```
+
+---
+
+## 12) Multiview Reliability (2026-03-15)
+
+### How multiview tiles receive data
+
+Each `DecoderMultiviewPanel` mount creates a fresh `useTSAnalysis` hook instance with empty state. Data reaches tiles via two paths:
+
+1. **REST restore** — on mount `refreshActives()` calls `GET /analyse` which returns each running analyser's `lastResult`. If the probe has already completed, tiles populate immediately.
+2. **WebSocket** — every probe cycle (default 5 s) the server emits `{ type: "analyse_result", id, ...result }`. The panel's `onWsResult` handler updates `resultsById`.
+
+### Known failure modes
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Tiles stuck at "awaiting telemetry" after tab switch | `lastResult` null on server (first probe not yet complete) | Mount-phase retry loop retries `refreshActives()` every 2 s × 6 = 12 s window |
+| Some tiles never populate | React 18 auto-batching drops intermediate `setLastMessage` calls when `stats` and `analyse_result` arrive in the same JS event loop tick | WS message queue: messages drain one-per-`setTimeout(0)` so none are lost |
+| Tile shows red "probe error:" text | ffprobe/ffmpeg cannot connect to stream URL (stream offline, wrong PBKEYLEN, firewall) | Verify stream URL is reachable from server; check `analyse_result` or `error` WS messages |
+| Tile visible but no data, analyser shows RUNNING | Server was just restarted; analyser re-registered but first probe still in flight | Wait up to 40 s for SRT (8-probe grace), 20 s for UDP/RTP (4-probe grace) |
+
+### Multiview panel routing
+
+Panel routing (`decoderIds` per panel) is stored in `sessionStorage` under key `labotech:decoder-multiview:state:v1`. After a server restart the analysers are gone from memory but the panel routing persists in the browser. The user must re-start the analysers (Decoder tab or multiview "Add Decoder") — the tiles will then auto-populate once `refreshActives()` finds running analysers.
+
+Auto-seeding: if no panel routing exists at all (first use), the first panel is seeded with all active analyser IDs when `refreshActives()` first returns results.
+
+### Refresh cadence
+
+- **REST poll:** every 5 s (matches probe cadence).
+- **Mount-phase rapid retry:** every 2 s, up to 6 retries, while `activeIds` has entries with no `probeTime` data.
+- **WS updates:** near-real-time; one per probe cycle per analyser.
+
+---
+
+## 13) UI Change-Control Policy (2026-03-15)
+
+**No UI changes — layout, component additions, styling, or tab structure — may be made without consulting the operator first.**
+
+This policy was established after several sessions where UI refactoring (thumbnail removal from quality dashboard, badge styling changes, punchline row position) introduced regressions or disrupted MCR workflows that were functioning correctly.
+
+### What requires consultation
+
+- Any change to component layout, grid structure, or overflow/clipping behaviour
+- Adding, removing, or reordering tabs or sub-tabs
+- Changing visibility breakpoints (`xl:`, `lg:`, `hidden`)
+- Modifying colour values, badge styles, or LED-dot indicators
+- Any change to `DecoderMultiviewPanel.jsx`, `DecoderPanelRevamp.jsx`, `TSAnalyser.jsx`, or `App.jsx` beyond targeted bug fixes
+
+### What does NOT require consultation
+
+- Backend-only fixes (ts-analyser.js, routes, monitoring.js)
+- Test additions or corrections
+- Build tooling and pre-commit hooks
+- Documentation updates
+
+### Prior regressions requiring extra care
+
+| Component | What broke | Root cause |
+|---|---|---|
+| `DecoderMultiviewPanel.jsx` | Tiles permanently "AWAITING TELEMETRY" | React 18 WS message batching dropped `analyse_result` payloads |
+| `DecoderPanelRevamp.jsx` | Policy dropdown unresponsive | `overflow: hidden` on parent container clipped the dropdown portal |
+| `App.jsx` | Punchline and CPU metrics disappeared at <1280 px | Both used `hidden xl:` and were on separate rows; at 110% zoom the xl breakpoint wasn't reached |
+
+---
+
+## 14) CPU and Memory Tuning (gva-boro-probe, 2026-03-15)
 
 ### Problem
 
