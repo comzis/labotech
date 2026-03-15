@@ -803,4 +803,38 @@ describe('TSAnalyser', () => {
       expect(first).toBe(second);
     });
   });
+
+  describe('_healthThresholds() SRT auto-relaxation', () => {
+    test('UDP analyser returns unmodified policy thresholds', () => {
+      const a = new TSAnalyser({ id: 'udp-test', url: 'udp://239.1.1.1:5000' });
+      a.monitoringPolicy = { health: { iatP95CriticalMs: 150, iatP95WarnMs: 50, jitterCriticalMs: 15, jitterWarnMs: 5 } };
+      const t = a._healthThresholds();
+      expect(t.iatP95CriticalMs).toBe(150);
+      expect(t.jitterCriticalMs).toBe(15);
+    });
+
+    test('SRT analyser relaxes IAT p95 critical to at least 400 ms', () => {
+      const a = new TSAnalyser({ id: 'srt-test', url: 'srt://1.2.3.4:9000?mode=caller' });
+      a.monitoringPolicy = { health: { iatP95CriticalMs: 150, iatP95WarnMs: 50, jitterCriticalMs: 15, jitterWarnMs: 5 } };
+      const t = a._healthThresholds();
+      expect(t.iatP95CriticalMs).toBe(400);
+      expect(t.iatP95WarnMs).toBe(120);
+    });
+
+    test('SRT analyser relaxes jitter critical to at least 40 ms', () => {
+      const a = new TSAnalyser({ id: 'srt-test2', url: 'srt://1.2.3.4:9000' });
+      a.monitoringPolicy = { health: { iatP95CriticalMs: 150, iatP95WarnMs: 50, jitterCriticalMs: 15, jitterWarnMs: 5 } };
+      const t = a._healthThresholds();
+      expect(t.jitterCriticalMs).toBe(40);
+      expect(t.jitterWarnMs).toBe(10);
+    });
+
+    test('SRT analyser does not lower thresholds if profile already generous', () => {
+      const a = new TSAnalyser({ id: 'srt-strict', url: 'srt://1.2.3.4:9000' });
+      a.monitoringPolicy = { health: { iatP95CriticalMs: 600, iatP95WarnMs: 200, jitterCriticalMs: 60, jitterWarnMs: 20 } };
+      const t = a._healthThresholds();
+      expect(t.iatP95CriticalMs).toBe(600);
+      expect(t.jitterCriticalMs).toBe(60);
+    });
+  });
 });
