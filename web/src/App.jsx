@@ -763,7 +763,7 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a2230, #3c4f67 20%, #3c4f67 80%, #1a2230)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 flex flex-col justify-center gap-2" style={{ height: 117 }}>
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 flex flex-col justify-center gap-2" style={{ height: 140 }}>
           <div className="flex items-center gap-1 xl:gap-2">
             <div
               className="hidden xl:flex items-center h-[64px] px-4 rounded-sm shrink-0 gap-2 relative"
@@ -1001,7 +1001,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-[120px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
+      <main className="flex-1 mt-[144px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
         {/* Rack rails with 1U (44px) mounting holes */}
         <div className="absolute left-0 top-0 bottom-0 pointer-events-none" style={{
           width: 14,
