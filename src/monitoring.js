@@ -109,24 +109,37 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     }
 
     const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
-      const vf = [
-        iFrameOnly ? 'select=eq(pict_type\\,I)' : null,
-        `thumbnail=${capture.pick}`,
-        deblock ? 'pp=de/de' : null,
-        `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
-        denoise || null,
-      ].filter(Boolean).join(',');
+      // I-frame path: select only keyframes → apply quality filters → output first matching frame.
+      // Do NOT use the thumbnail=N buffering filter here — it would buffer N I-frames before
+      // emitting, adding N×GOP seconds of latency (e.g. thumbnail=4 at 1 I-frame/sec = 4s delay).
+      // Fallback path: thumbnail=pick gives decoder a short lookahead to find the least corrupted
+      // frame when we cannot guarantee we start on a keyframe.
+      const vf = iFrameOnly
+        ? [
+            'select=eq(pict_type\\,I)',
+            deblock ? 'pp=de/de' : null,
+            `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+            denoise || null,
+          ].filter(Boolean).join(',')
+        : [
+            `thumbnail=${capture.pick}`,
+            `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+          ].filter(Boolean).join(',');
       const args = [
         '-y',
         '-hide_banner',
         '-loglevel', 'error',
         '-fflags', '+discardcorrupt+genpts',
         '-err_detect', 'ignore_err',
-        // Strict pass avoids B-frame artefacts. Fallback pass allows any decodable
-        // frame to guarantee thumbnail continuity under long/irregular GOPs.
-        ...(iFrameOnly ? ['-skip_frame', 'noref'] : []),
-        '-analyzeduration', iFrameOnly ? '4000000' : '7000000',
-        '-probesize', iFrameOnly ? '5000000' : '7000000',
+        // -skip_frame nokey: decoder skips ALL non-keyframe decoding (P and B frames).
+        // This prevents partial-GOP macroblocking when we join a live stream mid-GOP.
+        // noref (previous value) only skipped non-reference B-frames — P-frames still
+        // decoded without their reference I-frame, causing the visible macroblocking.
+        ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
+        // 2s analyze is sufficient to find the first I-frame in a live broadcast stream.
+        // Fallback gets a longer window to find any decodable frame.
+        '-analyzeduration', iFrameOnly ? '2000000' : '7000000',
+        '-probesize', iFrameOnly ? '3000000' : '7000000',
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
@@ -156,30 +169,34 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       });
     });
 
-    // Progressive fallback ladder:
-    // 1) strict I-frame + quality filters
-    // 2) strict I-frame without deblock (for ffmpeg builds missing "pp")
-    // 3) relaxed frame selection without deblock (maximize continuity)
-    // 4) minimal relaxed chain (no denoise) for very limited ffmpeg builds
+    // Progressive fallback ladder — MCR priority: image quality > speed > continuity.
+    // Attempts 1-3 enforce I-frame only to guarantee no macroblocking.
+    // Attempt 4 is the last-resort continuity fallback for streams with very long GOPs
+    // (e.g. CBR filler, test cards, static slides) — may show mild blocking artefacts
+    // but is better than a blank tile for extended periods.
     runAttempt({
+      // Attempt 1: full quality — I-frame + deblock + denoise
       iFrameOnly: true,
-      timeoutMs: 12000,
+      timeoutMs: 8000,
       deblock: capture.deblock,
       denoise: capture.denoise,
     })
       .catch(() => runAttempt({
+        // Attempt 2: I-frame, no deblock (handles ffmpeg builds without "pp" filter)
         iFrameOnly: true,
-        timeoutMs: 10000,
+        timeoutMs: 8000,
         deblock: false,
         denoise: capture.denoise,
       }))
       .catch(() => runAttempt({
-        iFrameOnly: false,
-        timeoutMs: 10000,
+        // Attempt 3: I-frame, no quality filters (bare scale only)
+        iFrameOnly: true,
+        timeoutMs: 8000,
         deblock: false,
-        denoise: capture.denoise,
+        denoise: null,
       }))
       .catch(() => runAttempt({
+        // Attempt 4: last resort — allow any decodable frame (very long GOP / no-signal streams)
         iFrameOnly: false,
         timeoutMs: 8000,
         deblock: false,
