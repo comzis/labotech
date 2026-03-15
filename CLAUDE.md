@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Labotech** is a professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu. It manages SRT streams, handles 1080p→1080i transcoding, routes multicast traffic, and analyses MPEG-TS structure.
 
 **Server target:** HPE DL360, Ubuntu Server, Docker with `network_mode: host`
-- **eno1:** Management NIC → `10.67.18.29` → Web UI + API on port `3000`
+- **eno1:** Management NIC → `10.67.18.29` → Web UI + API on port `4000`
 - **eno2:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
 - **Multicast forward subnet:** `239.100.25.0/26` (address `239.100.25.29`)
 
@@ -49,10 +49,10 @@ sudo bash scripts/check-routes.sh       # verify networking
 
 All state is **in-memory `Map()` objects** — no database, no ORM.
 
-- **`encoder.js`** — Core `SRTEncoder` class (extends `EventEmitter`). All other processing classes extend this. Key methods: `detectInputType()`, `buildInputArgs()`, `buildSRTUrl()`, `buildFFmpegArgs()`, `start()`, `stop()`, `parseStats()`.
+- **`encoder.js`** — Core `SRTEncoder` class (extends `EventEmitter`). Key methods: `detectInputType()`, `buildInputArgs()`, `buildSRTUrl()`, `buildFFmpegArgs()`, `start()`, `stop()`, `parseStats()`.
 - **`transcoder.js`** — Extends `SRTEncoder`. Implements `INTERLACE_PRESETS` map for four broadcast conversions: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT).
-- **`multicast-forward.js`** — `MulticastForwarder` class. Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
-- **`ts-analyser.js`** — `TSAnalyser` class wrapping ffprobe. Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
+- **`multicast-forward.js`** — `MulticastForwarder` extends `EventEmitter` directly (not `SRTEncoder`). Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
+- **`ts-analyser.js`** — `TSAnalyser` extends `EventEmitter` directly (not `SRTEncoder`). Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
 - **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active encoders.
 
