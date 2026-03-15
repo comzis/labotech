@@ -29,6 +29,26 @@
 - Security around shell/process invocation.
 - Stream View readability and operator ergonomics (duration blocks, low-occlusion dynamic popup).
 
+## Known Pitfalls (production-validated fixes)
+
+### Null-to-zero PID coercion
+`Number(null) === 0` and `Number.isFinite(0) === true`. Backend nulls PID 0 (PAT guard in `_mapStream`), but the frontend can re-coerce null→0 in sort comparators and display renderers. Guard all numeric coercions with `x != null &&`. Affects: `renderPidRef`, `extractPidRows`, `pickPreferredVideoStream`, `audioStreams` sort.
+
+### tsanalyze SIGTERM + exit code
+`tsanalyze` writes JSON on SIGTERM (our 9 s kill-timer) but exits non-zero. Old code checked `code !== 0` first and discarded all bitrate data — video/audio ES bitrates showed as `–`. Fix: parse stdout whenever non-empty, ignore exit code. Do not add `--input-timeout` to tsanalyze args (unsupported on production TSDuck version).
+
+### Thundering herd on batch decoder start
+9+ decoders starting simultaneously synchronise probe cycles, saturating CPU and multicast join slots. Mitigated by: startup jitter (0–4500 ms, hash-based on stream ID) + module-level semaphore (max 3 concurrent heavy probes, `TS_HEAVY_PROBE_MAX_CONCURRENT`).
+
+### Timeline teal after page reload
+`analyse_result` in `TELEMETRY_TYPES` → not persisted → after reload `firstAnalyseResultTs = Infinity` → all history shows teal/pending. Fix: `seedFromActiveAnalysers` synthesises a seed `analyse_result` at `lastResult.probeTime` with actual health severity.
+
+### health_alarm lane block pollution
+`health_alarm` events (severity transition markers) must not render as timeline blocks — `analyse_result` already drives the gradient. `buildEventBlocks` must filter `e.category !== 'health_alarm'`. Removing this filter causes duplicate red/amber tinting on every transition.
+
+### Ghost null-PID stream entries
+ffprobe emits the same ES twice: in program list (with PID) and global list (without PID). Both reach the frontend. Suppress null-PID rows in `extractPidRows` when a same-codecType row with a real PID exists. In sort comparators, null PID → `POSITIVE_INFINITY` not `0`.
+
 ## Deployment Memory
 
 - If production UI appears to lose tabs/features, first suspect deployed ref/build drift rather than component deletion.
