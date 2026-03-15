@@ -878,20 +878,6 @@ export default function App() {
               })}
             </nav>
 
-            <div
-              className="hidden 2xl:block text-right max-w-[460px] truncate"
-              style={{
-                fontSize: 12,
-                fontStyle: 'italic',
-                letterSpacing: '0.06em',
-                color: '#8fb8e8',
-                textShadow: '0 0 18px rgba(100,170,255,0.22)',
-                opacity: 0.82,
-              }}
-              title={activePunchline}
-            >
-              {activePunchline}
-            </div>
             <div className="ml-1 shrink-0 flex items-center gap-1">
               <div
                 className="hidden xl:flex items-center h-6 gap-1 px-1.5 rounded-sm shrink-0"
@@ -992,6 +978,22 @@ export default function App() {
                 </span>
               </div>
             )}
+          </div>
+
+          {/* ── Punchline — own row so it never fights the nav tabs ── */}
+          <div
+            className="hidden xl:block text-right truncate"
+            style={{
+              fontSize: 12,
+              fontStyle: 'italic',
+              letterSpacing: '0.06em',
+              color: '#8fb8e8',
+              textShadow: '0 0 18px rgba(100,170,255,0.22)',
+              opacity: 0.82,
+            }}
+            title={activePunchline}
+          >
+            {activePunchline}
           </div>
 
         </div>
