@@ -268,11 +268,97 @@ export default function StreamsPanel({ lastMessage }) {
 
         {/* Healthy: last known good, not stale */}
         {encapHealth && !encapStaleSince && (
-          <div className="mb-3 rounded border border-cyan-700/30 bg-cyan-950/20 px-3 py-2 text-[11px] font-mono text-cyan-200">
-            SRT service: {encapHealth.status} · libsrt {encapHealth?.capabilities?.libsrt ? 'enabled' : 'missing'} · {encapHealth?.capabilities?.details || 'unknown'}
-            {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) ? ` · CPU ${encapHealth.telemetry.cpuPercent}%` : ''}
-            {encapHealth?.guardrail?.enabled ? ` · Guardrail ${encapHealth.guardrail.warn ? 'warn' : 'normal'}` : ''}
-            {Number.isFinite(Number(encapHealth?.guardrail?.estimatedMaxStreams)) ? ` · Cap ${encapHealth.guardrail.estimatedMaxStreams} streams @ ${encapHealth?.guardrail?.streamMbpsBaseline || 22}Mbps` : ''}
+          <div className="mb-3 rounded border border-emerald-700/40 bg-emerald-950/10 px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
+            {/* Service status LED + label */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span
+                className="w-2 h-2 rounded-full shrink-0"
+                style={{
+                  background: encapHealth.status === 'ok' ? 'radial-gradient(circle at 38% 32%, #fff6, #00e86a)' : '#ffaa00',
+                  boxShadow: encapHealth.status === 'ok' ? '0 0 5px #00dd55, 0 0 9px rgba(0,221,85,0.45)' : '0 0 5px #ffaa00',
+                }}
+              />
+              <span className="text-[9px] uppercase tracking-[0.1em] font-bold" style={{ color: '#4ade80' }}>
+                SRT Encapsulator
+              </span>
+              <span
+                className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-[0.1em]"
+                style={{
+                  background: encapHealth.status === 'ok' ? 'rgba(0,220,100,0.12)' : 'rgba(255,170,0,0.12)',
+                  color: encapHealth.status === 'ok' ? '#00f06f' : '#ffaa00',
+                  border: `1px solid ${encapHealth.status === 'ok' ? 'rgba(0,220,100,0.3)' : 'rgba(255,170,0,0.3)'}`,
+                }}
+              >
+                {encapHealth.status === 'ok' ? 'READY' : String(encapHealth.status).toUpperCase()}
+              </span>
+            </div>
+
+            <span style={{ color: '#1e3a2e', fontSize: 8 }}>│</span>
+
+            {/* libsrt chip */}
+            <div className="flex items-center gap-1 shrink-0">
+              <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#6b8f79' }}>libsrt</span>
+              <span
+                className="px-1 py-0.5 rounded text-[8px] font-bold uppercase"
+                style={{
+                  background: encapHealth?.capabilities?.libsrt ? 'rgba(0,200,90,0.10)' : 'rgba(255,60,60,0.10)',
+                  color: encapHealth?.capabilities?.libsrt ? '#34d399' : '#f87171',
+                  border: `1px solid ${encapHealth?.capabilities?.libsrt ? 'rgba(0,200,90,0.25)' : 'rgba(255,60,60,0.25)'}`,
+                }}
+              >
+                {encapHealth?.capabilities?.libsrt ? 'OK' : 'MISSING'}
+              </span>
+            </div>
+
+            {/* CPU chip */}
+            {Number.isFinite(Number(encapHealth?.telemetry?.cpuPercent)) && (() => {
+              const cpu = Number(encapHealth.telemetry.cpuPercent);
+              const cpuColor = cpu >= 85 ? '#f87171' : cpu >= 65 ? '#fbbf24' : '#34d399';
+              const cpuBg = cpu >= 85 ? 'rgba(248,113,113,0.10)' : cpu >= 65 ? 'rgba(251,191,36,0.10)' : 'rgba(52,211,153,0.10)';
+              const cpuBorder = cpu >= 85 ? 'rgba(248,113,113,0.25)' : cpu >= 65 ? 'rgba(251,191,36,0.25)' : 'rgba(52,211,153,0.25)';
+              return (
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#6b8f79' }}>CPU</span>
+                  <span className="px-1 py-0.5 rounded text-[8px] font-bold font-mono" style={{ background: cpuBg, color: cpuColor, border: `1px solid ${cpuBorder}` }}>
+                    {cpu}%
+                  </span>
+                </div>
+              );
+            })()}
+
+            {/* Guardrail chip */}
+            {encapHealth?.guardrail?.enabled && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#6b8f79' }}>Guardrail</span>
+                <span
+                  className="px-1 py-0.5 rounded text-[8px] font-bold uppercase"
+                  style={{
+                    background: encapHealth.guardrail.warn ? 'rgba(251,191,36,0.10)' : 'rgba(52,211,153,0.10)',
+                    color: encapHealth.guardrail.warn ? '#fbbf24' : '#34d399',
+                    border: `1px solid ${encapHealth.guardrail.warn ? 'rgba(251,191,36,0.25)' : 'rgba(52,211,153,0.25)'}`,
+                  }}
+                >
+                  {encapHealth.guardrail.warn ? 'WARN' : 'NORMAL'}
+                </span>
+              </div>
+            )}
+
+            {/* Cap chip */}
+            {Number.isFinite(Number(encapHealth?.guardrail?.estimatedMaxStreams)) && (
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-[8px] uppercase tracking-[0.08em]" style={{ color: '#6b8f79' }}>Cap</span>
+                <span className="px-1 py-0.5 rounded text-[8px] font-bold font-mono" style={{ background: 'rgba(56,189,248,0.08)', color: '#7dd3fc', border: '1px solid rgba(56,189,248,0.2)' }}>
+                  {encapHealth.guardrail.estimatedMaxStreams} × {encapHealth?.guardrail?.streamMbpsBaseline || 22}Mbps
+                </span>
+              </div>
+            )}
+
+            {/* Details (protocol info) */}
+            {encapHealth?.capabilities?.details && (
+              <span className="text-[8px] font-mono ml-auto" style={{ color: '#4a6b5a' }}>
+                {encapHealth.capabilities.details}
+              </span>
+            )}
           </div>
         )}
         {encapHealth?.guardrail?.warn && !encapHealth?.guardrail?.block && (

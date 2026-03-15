@@ -84,6 +84,19 @@ Fast recover (if UI tabs/features are missing after deployment):
 bash scripts/recover-prod-fast.sh origin/main
 ```
 
+Disk pressure quick recovery (aggressive Docker cleanup for emergency deploys):
+
+```bash
+bash scripts/reclaim-disk-fast.sh --yes
+```
+
+Docker log rotation install/check (prevents `*-json.log` growth from filling root disk):
+
+```bash
+sudo bash scripts/install-docker-log-rotation.sh
+bash scripts/check-docker-log-rotation.sh
+```
+
 ### 4. Development (live reload)
 
 ```bash
@@ -395,9 +408,12 @@ npm test
 
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
 - Engineering operations runbook: `docs/engineering-support-manual.md`
+- Disk recovery and log-rotation runbook: `docs/ops-disk-recovery.md`
 - UI hardening and SMPTE 2022-7 worklog: `docs/ui-hardening-and-20227-worklog.md`
 - Day-1 post-change operations checklist: `docs/day1-monitoring-checklist.md`
 - Ubuntu host tuning scripts: `scripts/optimize-host-v2.sh` and `scripts/rollback-host-optimization-v2.sh`
+- Docker log rotation install/check scripts: `scripts/install-docker-log-rotation.sh` and `scripts/check-docker-log-rotation.sh`
+- Fast disk reclaim helper (aggressive): `scripts/reclaim-disk-fast.sh --yes`
 - Standardized production upgrade: `bash scripts/upgrade-prod.sh [tag-or-ref]`
 - Deploy a fixed version tag/ref: `bash scripts/deploy-ref.sh <tag-or-ref>`
 - Roll back quickly to prior tag: `bash scripts/rollback-last-tag.sh`
