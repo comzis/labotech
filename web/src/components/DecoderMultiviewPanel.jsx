@@ -525,11 +525,14 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   useEffect(() => {
     setPanels((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
+      if (activeIds.length === 0) return prev; // no active analysers yet — wait
       const assignedCount = prev.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
-      // Preserve workspace routing even when activeIds is temporarily empty
-      // (tab switch/remount/refresh race). This keeps parked decoder assignments.
-      if (assignedCount > 0 || activeIds.length === 0) return prev;
-      // First-time seed only when no panel routing exists at all.
+      // Check if any stored decoder ID is still in the active set.
+      // If assignedCount > 0 but ALL stored IDs are stale (server restart with new IDs),
+      // treat as empty and reseed — otherwise zero tiles would render permanently.
+      const anyActive = prev.some((p) => (p.decoderIds || []).some((id) => activeIds.includes(id)));
+      if (assignedCount > 0 && anyActive) return prev; // routing is valid, keep it
+      // No valid routing: first-time seed or full stale-ID recovery.
       return prev.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
     });
   }, [activeIds]);
