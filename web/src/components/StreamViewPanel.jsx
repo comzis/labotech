@@ -460,22 +460,24 @@ function colorForLaneSeverity(severity) {
   if (severity === 'p1') return '#00ddff';
   if (severity === 'critical') return '#ff2233';
   if (severity === 'warning') return '#ffaa00';
-  if (severity === 'ok') return '#00dd55';
+  if (severity === 'ok') return '#00ee66';
+  if (severity === 'pending') return '#00bbcc'; // stream active, awaiting first analysis probe
   return '#445566';
 }
 
 function laneTintForSeverity(severity) {
-  if (severity === 'p1') return `${colorForLaneSeverity(severity)}c8`;
-  if (severity === 'critical') return `${colorForLaneSeverity(severity)}c4`;
-  if (severity === 'warning') return `${colorForLaneSeverity(severity)}bc`;
-  if (severity === 'ok') return `${colorForLaneSeverity(severity)}b8`;
-  return '#44556644';
+  if (severity === 'p1') return `${colorForLaneSeverity(severity)}e0`;
+  if (severity === 'critical') return `${colorForLaneSeverity(severity)}e0`;
+  if (severity === 'warning') return `${colorForLaneSeverity(severity)}d8`;
+  if (severity === 'ok') return `${colorForLaneSeverity(severity)}e0`;   // bright green, clearly visible
+  if (severity === 'pending') return `${colorForLaneSeverity(severity)}90`; // muted teal, "waiting"
+  return '#44556638'; // inactive — slightly transparent dark-blue, clearly not active
 }
 
 function buildLaneGradient(events, timeStart, windowMs) {
-  // No events at all → unknown (gray), never green by default
+  // No events at all → unknown (inactive), never green by default
   if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) {
-    return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
+    return 'linear-gradient(90deg, #44556638 0%, #44556638 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
   const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
@@ -487,6 +489,11 @@ function buildLaneGradient(events, timeStart, windowMs) {
   if (!hasEtrStateEvents) {
     const OKS_TO_CLEAR = 2;
 
+    // Timestamp of the first actual analysis result — used to render the
+    // "stream started but analysis not yet arrived" window as teal/pending
+    // rather than green, giving operators a clear visual cue.
+    const firstAnalyseResultTs = sorted.find((e) => e.category === 'analyse_result')?.ts ?? Infinity;
+
     function decEvtSev(e) {
       if (e.category === 'runtime_error') {
         // Only genuine LOS errors (no input signal) drive the gradient red.
@@ -494,14 +501,19 @@ function buildLaneGradient(events, timeStart, windowMs) {
         // quality indicators — they must not override the analyse_result truth.
         return e.evidence?.noSignal ? 'critical' : null;
       }
-      if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) return 'ok';
+      if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) {
+        // Show 'pending' (teal) from stream start until the first analysis
+        // result confirms the signal is ok.  If analysis has already arrived
+        // before this start (e.g. restarted mid-window), treat as 'ok'.
+        return e.ts < firstAnalyseResultTs ? 'pending' : 'ok';
+      }
       if (e.category === 'analyse_result') return e.severity || 'ok';
       return null;
     }
 
     const sevEvts = sorted.filter((e) => decEvtSev(e) != null);
     if (sevEvts.length === 0) {
-      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
+      return 'linear-gradient(90deg, #44556638 0%, #44556638 100%)';
     }
 
     const sevLevel = (s) => s === 'critical' ? 2 : s === 'warning' ? 1 : 0;
@@ -534,26 +546,29 @@ function buildLaneGradient(events, timeStart, windowMs) {
           stateSev = raw;
         }
         // Same severity: no change, no streak reset.
-      } else { // ok
+      } else { // ok-like (ok or pending)
         if (isBad(stateSev)) {
           okStreak++;
           if (okStreak >= OKS_TO_CLEAR) {
             okStreak = 0;
-            stateChanges.push({ ts: e.ts, sev: 'ok' });
-            stateSev = 'ok';
+            stateChanges.push({ ts: e.ts, sev: raw });
+            stateSev = raw;
           }
         } else {
           okStreak = 0;
-          if (stateSev !== 'ok') {
-            stateChanges.push({ ts: e.ts, sev: 'ok' });
-            stateSev = 'ok';
+          // 'pending' → 'ok' (first analysis arrived): transition immediately.
+          // 'ok' → 'pending' after analysis: treat as no-op — confirmed ok beats pending.
+          const shouldTransition = stateSev !== raw && !(stateSev === 'ok' && raw === 'pending');
+          if (shouldTransition) {
+            stateChanges.push({ ts: e.ts, sev: raw });
+            stateSev = raw;
           }
         }
       }
     }
 
     if (stateChanges.length === 0) {
-      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
+      return 'linear-gradient(90deg, #44556638 0%, #44556638 100%)';
     }
 
     const firstActiveTs = stateChanges[0].ts;
@@ -585,8 +600,10 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const stopX = Math.min(100, Math.max(0, ((effectiveEndTs - timeStart) / windowMs) * 100));
 
+    const INACTIVE = laneTintForSeverity(null); // inactive/pre-stream dark-blue
+
     if (!isLive && stopX <= startX) {
-      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
+      return `linear-gradient(90deg, ${INACTIVE} 0%, ${INACTIVE} 100%)`;
     }
 
     // Determine starting color: use initSev if known, else use first in-window change.
@@ -595,8 +612,8 @@ function buildLaneGradient(events, timeStart, windowMs) {
 
     const parts = [];
     if (startX > 0) {
-      parts.push(`#44556644 0%`);
-      parts.push(`#44556644 ${startX}%`);
+      parts.push(`${INACTIVE} 0%`);
+      parts.push(`${INACTIVE} ${startX}%`);
     }
     parts.push(`${laneTintForSeverity(curSev)} ${startX}%`);
 
@@ -612,8 +629,8 @@ function buildLaneGradient(events, timeStart, windowMs) {
 
     if (effectiveEndTs < timeEnd) {
       parts.push(`${laneTintForSeverity(curSev)} ${stopX}%`);
-      parts.push(`#44556644 ${stopX}%`);
-      parts.push(`#44556644 100%`);
+      parts.push(`${INACTIVE} ${stopX}%`);
+      parts.push(`${INACTIVE} 100%`);
     } else {
       parts.push(`${laneTintForSeverity(curSev)} 100%`);
     }
@@ -648,12 +665,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     currentSeverity = nextSeverity;
   }
 
+  const INACTIVE_ETR = laneTintForSeverity(null);
   if (stopEvent && stopEvent.ts < timeEnd) {
-    // Transition to gray at stop point then hold gray to window edge.
     const stopX = Math.min(100, Math.max(0, ((stopEvent.ts - timeStart) / windowMs) * 100));
     parts.push(`${laneTintForSeverity(currentSeverity)} ${stopX}%`);
-    parts.push(`#44556644 ${stopX}%`);
-    parts.push(`#44556644 100%`);
+    parts.push(`${INACTIVE_ETR} ${stopX}%`);
+    parts.push(`${INACTIVE_ETR} 100%`);
   } else {
     parts.push(`${laneTintForSeverity(currentSeverity)} 100%`);
   }
@@ -1051,6 +1068,10 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
 
   const lanePointerStatus = useMemo(() => {
     if (mouseX == null || laneIds.length === 0) return [];
+    // Only snap to an event if it's within 8% of the cursor position.
+    // This prevents hovering over gray (pre-stream) areas from snapping to
+    // a distant event and showing misleading popup content like "TS Analysis OK".
+    const MAX_SNAP_PCT = 8;
     return laneIds.map((id) => {
       const laneEvents = (laneMap[id] || []).filter((e) => !isInternalEvent(e));
       if (laneEvents.length === 0) return { id, event: null };
@@ -1063,7 +1084,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           bestDist = dist;
         }
       }
-      return { id, event: best };
+      return { id, event: bestDist <= MAX_SNAP_PCT ? best : null };
     });
   }, [mouseX, laneIds, laneMap]);
 

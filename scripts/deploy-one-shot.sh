@@ -139,8 +139,14 @@ rebuild_and_restart() {
     ${COMPOSE_BIN} build --no-cache
     ${COMPOSE_BIN} up -d --force-recreate
   else
-    ${COMPOSE_BIN} build --no-cache "${SERVICE}"
+    # Build both services — they share the same Dockerfile so the cost is the same.
+    # Building only the main service would leave the encapsulator running stale code.
+    ${COMPOSE_BIN} build --no-cache "${SERVICE}" labotech-encapsulator
     ${COMPOSE_BIN} up -d --force-recreate "${SERVICE}"
+    # Start the encapsulator if it is stopped/crashed.  No --force-recreate here so we
+    # don't interrupt active SRT sessions unnecessarily.  If the image was rebuilt above,
+    # docker-compose will detect the mismatch and recreate the container automatically.
+    ${COMPOSE_BIN} up -d labotech-encapsulator
   fi
 }
 
