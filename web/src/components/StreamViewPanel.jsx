@@ -33,6 +33,9 @@ const EVENT_BLOCK_DURATION_MS = {
   etr290_incident: 18000,
   etr290_incident_cleared: 6000,
   runtime_error: 15000,
+  // Probe timeouts are narrow ticks — ffprobe capture window missed packets,
+  // not a signal-loss event. 2s gives a visible tick without filling the lane.
+  runtime_probe_timeout: 2000,
   runtime_started: 22000,
   runtime_heartbeat: 5000,
   runtime_stopped: 14000,
@@ -46,6 +49,8 @@ const EVENT_STYLE_BY_CATEGORY = {
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
   etr290_incident_cleared: { alpha: '99', borderAlpha: '88', glowAlpha: '55' },
   runtime_error: { alpha: 'ff', borderAlpha: 'ea', glowAlpha: 'cc' },
+  // Probe timeout: semi-transparent amber tick — monitoring gap, not service fault.
+  runtime_probe_timeout: { alpha: 'bb', borderAlpha: '99', glowAlpha: '55' },
   runtime_started: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '99' },
   runtime_heartbeat: { alpha: '94', borderAlpha: '84', glowAlpha: '3c' },
   runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
@@ -139,12 +144,23 @@ function buildEtrMeta(msg) {
   };
 }
 
-function isExpectedNoSignalError(message) {
+// Probe timeouts: ffprobe joined the stream but the capture window closed before
+// any packets arrived. This is a monitoring gap, NOT a signal-loss event — the
+// service may be delivering video fine. These must NOT drive the gradient red.
+function isProbeTimeoutError(message) {
   const m = String(message || '').toLowerCase();
   return (
-    m.includes('ffprobe exited 1') ||
     m.includes('empty probe payload') ||
-    m.includes('no input packets observed during probe window') ||
+    m.includes('no input packets observed during probe window')
+  );
+}
+
+function isExpectedNoSignalError(message) {
+  const m = String(message || '').toLowerCase();
+  // Probe timeouts are excluded — they are classified separately as runtime_probe_timeout.
+  if (isProbeTimeoutError(m)) return false;
+  return (
+    m.includes('ffprobe exited 1') ||
     m.includes('connection refused') ||
     m.includes('input/output error') ||
     m.includes('server returned 404') ||
@@ -379,17 +395,21 @@ function toEvent(msg) {
   }
   if (msg.type === 'error') {
     const laneId = normalizeLaneId(msg.id || 'system');
-    const isNoSignal = isExpectedNoSignalError(msg.message);
+    // Use msg.details as fallback for API-hydrated events (WS events use msg.message).
+    const rawMsg = msg.message || msg.details || '';
+    const isTimeout = isProbeTimeoutError(rawMsg);
+    const isNoSignal = !isTimeout && isExpectedNoSignalError(rawMsg);
     return {
-      key: `${ts}-${msg.id || 'system'}-error-${msg.message || ''}`,
+      key: `${ts}-${msg.id || 'system'}-error-${rawMsg}`,
       ts,
       id: laneId,
       rawId: msg.id || 'system',
-      category: 'runtime_error',
-      severity: 'critical',
-      title: isNoSignal ? 'Input signal missing' : 'Engine error',
-      description: msg.message || 'Unknown runtime error',
-      evidence: { noSignal: isNoSignal },
+      // Probe timeouts get their own category so the gradient is never affected.
+      category: isTimeout ? 'runtime_probe_timeout' : 'runtime_error',
+      severity: isTimeout ? 'warning' : 'critical',
+      title: isTimeout ? 'Probe timeout' : (isNoSignal ? 'Input signal missing' : 'Engine error'),
+      description: rawMsg || 'Unknown runtime error',
+      evidence: { noSignal: isNoSignal, probeTimeout: isTimeout },
     };
   }
   if (msg.type === 'switched') {
@@ -516,10 +536,14 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const OKS_TO_CLEAR = 2;
 
     function decEvtSev(e) {
+      if (e.category === 'runtime_probe_timeout') return null; // never affects gradient
       if (e.category === 'runtime_error') {
         // Only genuine LOS errors (no input signal) drive the gradient red.
         // Engine/process errors (probe hiccups, config faults) are not signal
         // quality indicators — they must not override the analyse_result truth.
+        // Guard: old localStorage events may still have noSignal=true but carry
+        // a probe-timeout description — detect and suppress them here too.
+        if (isProbeTimeoutError(e.description)) return null;
         return e.evidence?.noSignal ? 'critical' : null;
       }
       if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) {
