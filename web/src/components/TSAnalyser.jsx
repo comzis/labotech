@@ -834,12 +834,34 @@ export default function TSAnalyser({ lastMessage }) {
         ))}
       </div>
 
-      <div style={{ display: "flex", gap: 2, borderBottom: `1px solid ${C.borderHi}`, marginBottom: 8 }}>
-        {TABS.map((t) => (
-          <button key={t} onClick={() => setTab(t)} style={{ background: tab === t ? C.borderHi : "transparent", border: "none", borderBottom: tab === t ? `2px solid ${C.cyan}` : "2px solid transparent", color: tab === t ? C.cyan : C.muted, fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", padding: "5px 10px", cursor: "pointer", textTransform: "uppercase" }}>
-            {t}
-          </button>
-        ))}
+      <div style={{ display: "flex", gap: 3, borderBottom: `1px solid ${C.borderHi}`, marginBottom: 8, paddingBottom: 0 }}>
+        {TABS.map((t) => {
+          const active = tab === t;
+          return (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              style={{
+                background: active ? C.panel : "transparent",
+                border: `1px solid ${active ? C.borderHi : "transparent"}`,
+                borderBottom: active ? `1px solid ${C.panel}` : "1px solid transparent",
+                borderRadius: "3px 3px 0 0",
+                color: active ? C.cyan : C.muted,
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: "0.1em",
+                padding: "5px 12px 6px",
+                cursor: "pointer",
+                textTransform: "uppercase",
+                position: "relative",
+                bottom: -1,
+                boxShadow: active ? `inset 0 2px 0 ${C.cyan}` : "none",
+              }}
+            >
+              {t}
+            </button>
+          );
+        })}
       </div>
 
       {tab === "ETR 290" && (
@@ -850,19 +872,22 @@ export default function TSAnalyser({ lastMessage }) {
             <div style={{ display: "flex", gap: 8, alignItems: "center", padding: "5px 8px", background: C.panelB, border: `1px solid ${C.border}`, borderRadius: 3 }}>
               <span style={{ fontSize: 9, color: C.head, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginRight: 4 }}>Monitor:</span>
               {[
-                { key: 'p1', label: 'P1 Critical', color: C.err, enabled: etrP1, set: setEtrP1 },
-                { key: 'p2', label: 'P2 Quality', color: C.warn, enabled: etrP2, set: setEtrP2 },
-                { key: 'p3', label: 'P3 Info', color: C.info, enabled: etrP3, set: setEtrP3 },
-              ].map(({ key, label, color, enabled, set }) => (
+                { key: 'p1', label: 'P1 Critical', desc: 'Service failure', color: C.err, enabled: etrP1, set: setEtrP1 },
+                { key: 'p2', label: 'P2 Quality',  desc: 'Impairment',      color: C.warn, enabled: etrP2, set: setEtrP2 },
+                { key: 'p3', label: 'P3 Info',     desc: 'SI / metadata',   color: C.info, enabled: etrP3, set: setEtrP3 },
+              ].map(({ key, label, desc, color, enabled, set }) => (
                 <button key={key} onClick={() => set((v) => !v)} style={{
-                  display: "flex", alignItems: "center", gap: 4, padding: "2px 8px",
-                  border: `1px solid ${enabled ? color : C.border}`,
-                  background: enabled ? `${color}18` : "transparent",
-                  borderRadius: 2, cursor: "pointer",
-                  color: enabled ? color : C.muted, fontSize: 9, fontWeight: 700,
+                  display: "flex", alignItems: "center", gap: 6, padding: "4px 10px",
+                  border: `1px solid ${enabled ? "rgba(255,255,255,0.10)" : C.border}`,
+                  background: enabled ? "rgba(255,255,255,0.03)" : "transparent",
+                  borderRadius: 2, cursor: "pointer", textAlign: "left",
                 }}>
-                  <span style={{ width: 6, height: 6, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block" }} />
-                  {label}
+                  <span style={{
+                    width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                    background: enabled ? color : C.dim, display: "inline-block",
+                    boxShadow: enabled ? `0 0 5px ${color}99` : "none",
+                  }} />
+                  <span style={{ fontSize: 9, fontWeight: 700, color: enabled ? C.text : C.muted }}>{label}</span>
                 </button>
               ))}
               <button
