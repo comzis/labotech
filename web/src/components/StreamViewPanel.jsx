@@ -588,11 +588,20 @@ function buildLaneGradient(events, timeStart, windowMs) {
     }
 
     const firstActiveTs = stateChanges[0].ts;
-    const stopAfterActive = sorted.find(
-      (e) => e.category === 'runtime_stopped' && e.ts >= firstActiveTs
-    );
-    const hasExplicitStart = sorted.some(
+    // Anchor stopAfterActive to the LAST non-bootstrap start, not the first.
+    // Tombstone race: seedFromActiveAnalysers fires between a stop and a restart,
+    // injecting a synthetic runtime_stopped. The new runtime_started arrives via WS
+    // shortly after. Using firstActiveTs would make stopAfterActive find the
+    // tombstone even when a real start supersedes it — leaving the lane grey.
+    const explicitStarts = sorted.filter(
       (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
+    );
+    const hasExplicitStart = explicitStarts.length > 0;
+    const lastExplicitStartTs = hasExplicitStart
+      ? explicitStarts[explicitStarts.length - 1].ts
+      : firstActiveTs;
+    const stopAfterActive = sorted.find(
+      (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStartTs
     );
     const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
     // Include runtime_heartbeat in the activity timestamp so the lane stays
