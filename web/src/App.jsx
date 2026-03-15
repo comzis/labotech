@@ -762,10 +762,10 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a2230, #3c4f67 20%, #3c4f67 80%, #1a2230)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[80px] flex flex-col justify-center gap-1.5">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 h-[104px] flex flex-col justify-center gap-1.5">
           <div className="flex items-center gap-1 xl:gap-2">
             <div
-              className="hidden xl:flex items-center h-12 px-3 rounded-sm shrink-0 gap-1.5 relative"
+              className="hidden xl:flex items-center h-[64px] px-4 rounded-sm shrink-0 gap-2 relative"
               style={{
                 background: 'linear-gradient(180deg, #161a21 0%, #0f1319 62%, #0b0f14 100%)',
                 border: '1px solid #2b313c',
@@ -993,7 +993,7 @@ export default function App() {
       </header>
 
       {/* ── Main content area ──────────────────────────────────────────────── */}
-      <main className="flex-1 mt-[86px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
+      <main className="flex-1 mt-[110px] mb-10 max-w-[1800px] w-full mx-auto px-4 xl:px-6 relative">
         {/* Subtle rack-rail side lines */}
         <div className="absolute left-0 top-0 bottom-0 w-1 pointer-events-none"
           style={{ background: 'linear-gradient(180deg, transparent, #1c1c1c 5%, #1c1c1c 95%, transparent)' }} />
