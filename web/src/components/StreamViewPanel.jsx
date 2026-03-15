@@ -1663,6 +1663,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     style={{
                       top: `${y - (LANE_LINE_THICKNESS_PX / 2)}px`,
                       height: `${LANE_LINE_THICKNESS_PX}px`,
+                      right: '46px', // leave room for status label
                       zIndex: 1,
                     }}
                   >
@@ -1768,6 +1769,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                           border: `1px solid ${cfg.border}`,
                           borderRadius: 2,
                           padding: '1px 5px',
+                          background: '#070b14ee',
                           pointerEvents: 'none',
                           userSelect: 'none',
                         }}
