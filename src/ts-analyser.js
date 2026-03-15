@@ -2125,9 +2125,9 @@ class TSAnalyser extends EventEmitter {
     const smpte20227 = dvb.smpte20227 || null;
     if (smpte20227?.checked === true && smpte20227?.state === 'non_compliant') {
       pushPenalty(18, `SMPTE ST 2022-7 non-compliant: ${smpte20227.reason || 'RTP sequence/loss out of bounds'}`);
-    } else if (smpte20227?.state === 'insufficient_data') {
-      pushPenalty(4, `SMPTE ST 2022-7 not fully verified: ${smpte20227.reason || 'insufficient RTP sequence evidence'}`);
     }
+    // insufficient_data means NIC capture is not providing RTP sequence evidence —
+    // a normal operating condition, not a fault. No penalty.
 
     const dolbyE = dvb.dolbyE || null;
     const dolbyEnabled = DolbyEAdapter.isEnabled();
@@ -2145,7 +2145,10 @@ class TSAnalyser extends EventEmitter {
     }
 
     const bitrateStability = this._computeBitrateStability(result);
-    if (bitrateStability.checked) {
+    // Only score bitrate drift when source is tsduck (continuous long-window measurement).
+    // ffprobe-derived 'measured' bitrate varies naturally 10-65% between 2.5s probe windows
+    // due to sampling variance — applying drift thresholds here causes constant false alarms.
+    if (bitrateStability.checked && source === 'tsduck') {
       if (bitrateStability.state === 'critical') {
         pushPenalty(10, `Bitrate drift ${bitrateStability.deltaPct}% exceeds critical envelope`);
       } else if (bitrateStability.state === 'warning') {
