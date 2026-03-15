@@ -755,6 +755,80 @@ function getEventVisualStyle(category, severity) {
   };
 }
 
+// Parse a CSS linear-gradient(90deg, …) string into canvas-ready segments.
+// Keeps buildLaneGradient logic untouched — only the paint path changes.
+function parseGradientSegments(gradientStr) {
+  if (!gradientStr || !gradientStr.startsWith('linear-gradient')) return [];
+  try {
+    const inner = gradientStr.slice(gradientStr.indexOf(',') + 1, -1).trim();
+    // Split on commas that are NOT inside a color function like rgba(…)
+    const stops = inner.split(/,(?![^(]*\))/).map((s) => s.trim());
+    const parsed = stops.map((stop) => {
+      const m = stop.match(/^(.*\S)\s+([\d.]+)%$/);
+      if (!m) return null;
+      return { color: m[1], pct: parseFloat(m[2]) };
+    }).filter(Boolean);
+    const segments = [];
+    let i = 0;
+    while (i < parsed.length) {
+      const color = parsed[i].color;
+      const startPct = parsed[i].pct;
+      let endPct = startPct;
+      while (i < parsed.length && parsed[i].color === color) {
+        endPct = parsed[i].pct;
+        i++;
+      }
+      if (endPct > startPct) segments.push({ leftPct: startPct, widthPct: endPct - startPct, color });
+    }
+    return segments;
+  } catch (_) {
+    return [];
+  }
+}
+
+// Canvas-backed lane bar — replaces the CSS gradient div.
+// Draws crisp coloured rects, hardware-accelerated, no DOM node per segment.
+function LaneCanvas({ gradient, height = 8 }) {
+  const canvasRef = React.useRef(null);
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const segments = parseGradientSegments(gradient);
+    const rafRef = { id: null };
+    const draw = () => {
+      const W = canvas.offsetWidth;
+      if (W <= 0) return;
+      if (canvas.width !== W) canvas.width = W;
+      const ctx = canvas.getContext('2d');
+      ctx.clearRect(0, 0, W, height);
+      for (const seg of segments) {
+        const x = Math.floor((seg.leftPct / 100) * W);
+        const w = Math.max(1, Math.ceil((seg.widthPct / 100) * W));
+        ctx.fillStyle = seg.color;
+        ctx.fillRect(x, 0, w, height);
+      }
+    };
+    const schedule = () => {
+      cancelAnimationFrame(rafRef.id);
+      rafRef.id = requestAnimationFrame(draw);
+    };
+    schedule();
+    const observer = new ResizeObserver(schedule);
+    observer.observe(canvas);
+    return () => {
+      cancelAnimationFrame(rafRef.id);
+      observer.disconnect();
+    };
+  }, [gradient, height]);
+  return (
+    <canvas
+      ref={canvasRef}
+      height={height}
+      style={{ width: '100%', height: `${height}px`, display: 'block' }}
+    />
+  );
+}
+
 // Events that exist only for lane-seeding / lifecycle bookkeeping — never
 // surface as the "nearest event" in the cursor readout.
 function isInternalEvent(e) {
@@ -1488,14 +1562,18 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               return (
                 <div key={id}>
                   <div
-                    className="absolute left-0 right-0"
+                    className="absolute left-0 right-0 overflow-hidden"
                     style={{
                       top: `${y - (LANE_LINE_THICKNESS_PX / 2)}px`,
                       height: `${LANE_LINE_THICKNESS_PX}px`,
-                      background: laneLineById[id] || lineColor,
                       zIndex: 1,
                     }}
-                  />
+                  >
+                    <LaneCanvas
+                      gradient={laneLineById[id] || `linear-gradient(90deg, ${lineColor} 0%, ${lineColor} 100%)`}
+                      height={LANE_LINE_THICKNESS_PX}
+                    />
+                  </div>
                   <div
                     className="absolute left-2 -translate-y-1/2 inline-flex items-center gap-1 max-w-[340px] text-[11px] font-mono px-1.5 rounded"
                     style={{
