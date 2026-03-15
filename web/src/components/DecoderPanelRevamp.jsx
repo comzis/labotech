@@ -473,6 +473,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [policyData, setPolicyData] = useState(null);
   const [policyPickerOpen, setPolicyPickerOpen] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
+  const [selectedPickerOpen, setSelectedPickerOpen] = useState(false);
 
   const {
     result,
@@ -1514,7 +1515,45 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               <>
                 {/* ── Decoder Health strip ─────────────────────────────── */}
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: 6 }}>
-                  <StatBox label="Selected" value={selectedId || "-"} color={selectedId ? C.cyan : C.muted} />
+                  {/* Decoder selector dropdown */}
+                  <div style={{ position: "relative" }}>
+                    <button
+                      onClick={() => setSelectedPickerOpen((v) => !v)}
+                      style={{
+                        width: "100%", height: "100%", minHeight: 48,
+                        padding: "4px 8px", borderRadius: 2, cursor: "pointer", textAlign: "left",
+                        background: C.dim, border: `1px solid ${selectedId ? C.cyan + "55" : C.border}`,
+                        display: "flex", flexDirection: "column", justifyContent: "center", gap: 2,
+                      }}
+                    >
+                      <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Selected</div>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 4 }}>
+                        <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: selectedId ? C.cyan : C.muted, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                          {selectedId || (activeIds.length ? "pick decoder ▾" : "-")}
+                        </span>
+                        {activeIds.length > 0 && <span style={{ fontSize: 8, color: C.muted, flexShrink: 0 }}>▾</span>}
+                      </div>
+                    </button>
+                    {selectedPickerOpen && activeIds.length > 0 && (
+                      <div style={{
+                        position: "absolute", top: "calc(100% + 2px)", left: 0, zIndex: 50,
+                        background: "#0f1520", border: `1px solid ${C.cyan}55`, borderRadius: 3,
+                        minWidth: "100%", maxWidth: 280, boxShadow: "0 8px 24px rgba(0,0,0,0.7)",
+                      }}>
+                        {activeIds.map((id) => (
+                          <button key={id} onClick={() => { setSelectedId(id); setSelectedPickerOpen(false); }} style={{
+                            display: "block", width: "100%", padding: "6px 10px", textAlign: "left",
+                            fontSize: 9, fontFamily: "'Courier New',monospace", fontWeight: id === selectedId ? 700 : 400,
+                            color: id === selectedId ? C.cyan : C.text,
+                            background: id === selectedId ? `${C.cyan}11` : "transparent",
+                            border: "none", borderBottom: `1px solid ${C.border}`, cursor: "pointer",
+                          }}>
+                            {id}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   <StatBox label="State" value={selectedId ? "RUNNING" : "IDLE"} color={selectedId ? C.ok : C.muted} />
                   <StatBox label="ETR Monitor" value={selectedEtrStatus ? "ATTACHED" : "OFF"} color={selectedEtrStatus ? C.ok : C.muted} />
                   <StatBox label="ST 2022-7" value={use20227 ? "ON" : "OFF"} color={use20227 ? C.s22 : C.muted} />
