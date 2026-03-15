@@ -35,6 +35,7 @@ const EVENT_BLOCK_DURATION_MS = {
   runtime_stopped: 14000,
   failover: 16000,
   analyse_result: 7000,
+  health_alarm: 14000,
   etr290_status: 5000,
 };
 const EVENT_STYLE_BY_CATEGORY = {
@@ -47,6 +48,7 @@ const EVENT_STYLE_BY_CATEGORY = {
   runtime_stopped: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '88' },
   failover: { alpha: 'd0', borderAlpha: 'b4', glowAlpha: '66' },
   analyse_result: { alpha: 'cf', borderAlpha: 'b2', glowAlpha: '6e' },
+  health_alarm: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '88' },
   etr290_status: { alpha: '94', borderAlpha: '82', glowAlpha: '44' },
 };
 const LEGEND_TYPE_ITEMS = [
@@ -349,6 +351,27 @@ function toEvent(msg) {
         probeDiagnostics: dvb.probeDiagnostics || null,
         health: dvb.health || null,
       },
+    };
+  }
+  if (msg.type === 'health_alarm') {
+    const laneId = normalizeLaneId(msg.id || 'analyse');
+    const severity = msg.severity === 'critical' ? 'critical' : msg.severity === 'warning' ? 'warning' : 'ok';
+    const title = severity === 'critical'
+      ? 'TS Health alarm: critical'
+      : severity === 'warning'
+        ? 'TS Health alarm: warning'
+        : 'TS Health cleared';
+    const reasons = Array.isArray(msg.reasons) ? msg.reasons : [];
+    return {
+      key: `${ts}-${msg.id || 'analyse'}-health_alarm-${severity}`,
+      ts,
+      id: laneId,
+      rawId: msg.id || 'analyse',
+      category: 'health_alarm',
+      severity,
+      title,
+      description: reasons.length > 0 ? reasons.join('; ') : (severity === 'ok' ? 'Health restored' : 'Health degraded'),
+      evidence: { score: msg.score ?? null, prevSeverity: msg.prevSeverity || null, reasons },
     };
   }
   if (msg.type === 'error') {
@@ -1534,13 +1557,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 <div className="font-mono text-gray-200">{selectedLaneId}</div>
                 <div className="font-mono text-gray-500">{pointerUtc ? toUtc(pointerUtc) : '-'}</div>
               </div>
-              <div className="mt-1 text-gray-400">
-                {selectedLaneEvent
-                  ? `${selectedLaneEvent.title} @ ${toUtc(selectedLaneEvent.ts)}`
-                  : selectedLaneNearestEvent
-                    ? `${selectedLaneNearestEvent.title} @ ${toUtc(selectedLaneNearestEvent.ts)} (nearest)`
-                    : 'No event at pointer'}
-              </div>
               <div className="mt-2 border-t border-white/10 pt-2">
                 <div className="text-[10px] uppercase tracking-wider text-gray-500 mb-1">
                   Events At Pointer (±{pointerMatchWindowMs}ms)
@@ -1565,7 +1581,10 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                         }`}
                       >
                         <div className={`${e.severity === 'critical' ? 'text-led-red' : e.severity === 'warning' ? 'text-led-amber' : 'text-gray-300'} font-mono`}>{e.title}</div>
-                        <div className="text-gray-400">{toUtc(e.ts)}</div>
+                        <div className="text-gray-400 flex gap-2">
+                          <span>{toUtc(e.ts)}</span>
+                          <span className="text-gray-600">{pointerUtc != null ? `${Math.max(0, (pointerUtc - e.ts) / 1000).toFixed(2)}s` : '0.00s'}</span>
+                        </div>
                         <div className="text-gray-500 truncate">{e.description || '-'}</div>
                       </div>
                     ))}

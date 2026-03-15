@@ -1817,7 +1817,30 @@ class TSAnalyser extends EventEmitter {
     } else {
       reported = 'ok';
     }
+
+    const prevReported = h.lastReported;
     h.lastReported = reported;
+
+    // Emit health_alarm on severity transitions so the event log can show them.
+    // Onset (ok→warning, ok→critical, warning→critical) and clear (warning/critical→ok).
+    if (reported !== prevReported) {
+      const reasons = assessment.reasons || [];
+      if (reported === 'critical' || reported === 'warning') {
+        setImmediate(() => this.emit('health_alarm', {
+          severity: reported,
+          prevSeverity: prevReported,
+          score: assessment.score,
+          reasons,
+        }));
+      } else if (reported === 'ok' && (prevReported === 'critical' || prevReported === 'warning')) {
+        setImmediate(() => this.emit('health_alarm', {
+          severity: 'ok',
+          prevSeverity: prevReported,
+          score: assessment.score,
+          reasons: [],
+        }));
+      }
+    }
 
     return {
       ...result,
