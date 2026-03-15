@@ -5,6 +5,34 @@ alwaysApply: true
 
 # Change Safety and Approval Gate
 
+## UI Changes — Consultation Required First
+
+**No UI change may be made without first presenting a plan and obtaining explicit operator approval.**
+
+This rule exists because several UI refactors introduced silent regressions in MCR workflows:
+- Removing the thumbnail from the decoder quality dashboard caused multiview layout issues.
+- Changing `hidden xl:` breakpoints made CPU metrics and the punchline disappear at non-fullscreen widths.
+- Modifying overflow/clipping on the Stream Profile section caused the policy dropdown to become unresponsive.
+
+### Changes that REQUIRE operator consultation before implementation
+
+- Any modification to component layout, grid structure, `flex`/`grid` columns, or `overflow`/`clip` behaviour
+- Adding, removing, or reordering tabs or sub-tabs (in `App.jsx`, `TSAnalyser.jsx`, `DecoderPanelRevamp.jsx`, or any panel)
+- Changing Tailwind responsive prefixes (`xl:`, `lg:`, `hidden`, `block`, `flex`)
+- Modifying colour values, badge styles, LED-dot indicators, or branding elements
+- Any structural change to `DecoderMultiviewPanel.jsx`, `DecoderPanelRevamp.jsx`, `TSAnalyser.jsx`, or `App.jsx`
+- Changing header layout, nav tab sizing, or spacing
+
+### Changes that do NOT require consultation
+
+- Backend-only fixes (`src/`, `routes/`) with no frontend impact
+- Targeted bug fixes on a specific element that does not alter surrounding layout
+- Test additions or corrections
+- Build tooling, pre-commit hooks, and scripts
+- Documentation updates
+
+## General Impact Assessment
+
 - Never remove, hide, or degrade any UI element or user-facing functionality unless the user explicitly approves that specific change.
 - If a request is ambiguous, ask a clarifying question before making UI/feature removals.
 - Before implementing non-trivial code changes, perform a short impact assessment covering:
