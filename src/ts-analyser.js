@@ -572,9 +572,12 @@ class TSAnalyser extends EventEmitter {
   _probeTransportBitrateBps() {
     return new Promise((resolve) => {
       const inputUrl = this._withLiveInputHints(this.url);
+      // SRT streams: use verbose log level so libsrt stats appear in stderr.
+      // For all other protocols use error-only to keep stderr clean.
+      const isSrt = String(inputUrl).startsWith('srt://');
       const args = [
         '-hide_banner',
-        '-loglevel', 'error',
+        '-loglevel', isSrt ? 'verbose' : 'error',
         // Ensure live TS is received without stalling on analysis
         '-fflags', '+discardcorrupt+genpts',
         '-analyzeduration', '1000000',   // 1 s — enough for MPEG-TS PAT/PMT lock
@@ -657,15 +660,20 @@ class TSAnalyser extends EventEmitter {
       return Number.isFinite(n) ? n : null;
     };
     const srt = {};
-    const rateMbps = num(last(/(?:^|[\s,])rate=([\d.]+)\s*mbps/ig));
-    const bwMbps = num(last(/(?:^|[\s,])bw=([\d.]+)\s*mbps/ig));
-    const rttMs = num(last(/(?:^|[\s,])rtt=([\d.]+)\s*ms/ig));
-    const pktTotal = num(last(/(?:^|[\s,])total=(\d+)\s*pkts?/ig));
-    const pktRetrans = num(last(/(?:^|[\s,])retrans=(\d+)\s*pkts?/ig));
-    const pktLost = num(last(/(?:^|[\s,])(?:loss|lost)=(\d+)\s*pkts?/ig));
-    const pktDropped = num(last(/(?:^|[\s,])(?:drop|dropped)=(\d+)\s*pkts?/ig));
-    const pktNak = num(last(/(?:^|[\s,])nak=(\d+)\s*pkts?/ig));
-    const pktAck = num(last(/(?:^|[\s,])ack=(\d+)\s*pkts?/ig));
+    // Field names match ffmpeg's libsrt verbose output:
+    //   mbpsRecvRate=21.234  mbpsBandwidth=100.000  msRTT=5.123
+    //   pktRecvTotal=12345  pktRcvLossTotal=0  pktRetransTotal=0
+    //   pktSentACKTotal=100  pktSentNAKTotal=0  pktRcvDrop=0
+    // Fallback patterns cover simplified formats that may appear in older builds.
+    const rateMbps = num(last(/(?:mbpsRecvRate|mbpsSendRate|rate)[\s=]+([\d.]+)/i));
+    const bwMbps   = num(last(/(?:mbpsBandwidth|bw)[\s=]+([\d.]+)/i));
+    const rttMs    = num(last(/(?:msRTT|rtt)[\s=]+([\d.]+)/i));
+    const pktTotal   = num(last(/(?:pktRecvTotal|total)[\s=]+(\d+)/i));
+    const pktRetrans = num(last(/(?:pktRetransTotal|pktRcvRetrans|retrans)[\s=]+(\d+)/i));
+    const pktLost    = num(last(/(?:pktRcvLossTotal|pktRcvLoss|loss|lost)[\s=]+(\d+)/i));
+    const pktDropped = num(last(/(?:pktRcvDrop|pktRcvDropTotal|drop|dropped)[\s=]+(\d+)/i));
+    const pktNak     = num(last(/(?:pktSentNAKTotal|pktSentNAK|nak)[\s=]+(\d+)/i));
+    const pktAck     = num(last(/(?:pktSentACKTotal|pktRecvACK|ack)[\s=]+(\d+)/i));
     if (rateMbps != null) srt.rateMbps = rateMbps;
     if (bwMbps != null) srt.bwMbps = bwMbps;
     if (rttMs != null) srt.rttMs = rttMs;
