@@ -837,4 +837,66 @@ describe('TSAnalyser', () => {
       expect(t.jitterCriticalMs).toBe(60);
     });
   });
+
+  describe('startup grace period', () => {
+    function makeBase(a) {
+      return {
+        id: a.id, url: a.url,
+        dvb: {
+          bitrateBps: 20000000, serviceCount: 1, pidCount: 5,
+          arrival: { iatMs: { avg: 5, p95: 8 }, jitterMs: 1, packetLossPct: 0 },
+          health: { score: 40, severity: 'critical', reasons: ['test'] },
+          probeDiagnostics: { scheduler: { runHeavyProbe: true } },
+        },
+      };
+    }
+    function stubCritical(a) {
+      jest.spyOn(a, '_buildHealthAssessment').mockReturnValue({ score: 40, severity: 'critical', reasons: ['stub'] });
+    }
+
+    test('UDP analyser holds ok for first 4 continuous probes', () => {
+      const a = new TSAnalyser({ id: 't', url: 'udp://239.1.1.1:5000' });
+      stubCritical(a);
+      // Simulate first 4 continuous probes via grace counter
+      a._startupGraceRemaining = 4;
+      for (let i = 0; i < 4; i++) {
+        const r = a._attachHealthAssessment(makeBase(a));
+        expect(r.dvb.health.severity).toBe('ok');
+        expect(r.dvb.health.startupGrace).toBe(true);
+      }
+      // 5th probe: grace exhausted — hysteresis begins
+      const r5 = a._attachHealthAssessment(makeBase(a));
+      expect(r5.dvb.health.startupGrace).toBeUndefined();
+    });
+
+    test('SRT analyser gets 8 grace probes', () => {
+      const a = new TSAnalyser({ id: 't', url: 'srt://10.0.0.1:9000?passphrase=test' });
+      stubCritical(a);
+      a._startupGraceRemaining = null; // not yet initialised
+      // Simulate probe() incrementing count and initialising grace
+      a._continuousProbeCount += 1;
+      if (a._startupGraceRemaining === null) {
+        const isSrt = a.url && String(a.url).startsWith('srt://');
+        a._startupGraceRemaining = isSrt ? 8 : 4;
+      }
+      expect(a._startupGraceRemaining).toBe(8);
+      for (let i = 0; i < 8; i++) {
+        const r = a._attachHealthAssessment(makeBase(a));
+        expect(r.dvb.health.severity).toBe('ok');
+      }
+      // After 8 grace probes, the next probe is scored normally
+      const rAfter = a._attachHealthAssessment(makeBase(a));
+      expect(rAfter.dvb.health.startupGrace).toBeUndefined();
+    });
+
+    test('grace does not apply to one-shot probes (_startupGraceRemaining stays null)', () => {
+      const a = new TSAnalyser({ id: 't', url: 'udp://239.1.1.1:5000' });
+      stubCritical(a);
+      // _startupGraceRemaining is null (no continuous probe ran)
+      expect(a._startupGraceRemaining).toBeNull();
+      // Should score normally (hysteresis, not grace)
+      const r = a._attachHealthAssessment(makeBase(a));
+      expect(r.dvb.health.startupGrace).toBeUndefined();
+    });
+  });
 });

@@ -101,11 +101,23 @@ class TSAnalyser extends EventEmitter {
     // escalating to 'warning'. 'critical' escalates immediately (already gated by higher
     // thresholds). 'ok' recovers immediately to clear alarms without delay.
     this._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+    // Startup grace: hold 'ok' for the first STARTUP_GRACE_N continuous probes so that
+    // SRT connection establishment, key negotiation, IAT estimator warm-up, and initial
+    // ffprobe PSI lock do not produce false CRITICAL hits in the live-view timeline.
+    // SRT streams get a longer grace (8 probes ≈ 40s) than UDP/RTP (4 probes ≈ 20s).
+    this._startupGraceRemaining = null;  // lazily initialised on first continuous probe
   }
 
   probe(options = {}) {
     const isContinuous = Boolean(options.continuous);
-    if (isContinuous) this._continuousProbeCount += 1;
+    if (isContinuous) {
+      this._continuousProbeCount += 1;
+      // Initialise startup grace on first continuous probe.
+      if (this._startupGraceRemaining === null) {
+        const isSrt = this.url && String(this.url).startsWith('srt://');
+        this._startupGraceRemaining = isSrt ? 8 : 4;
+      }
+    }
     const runHeavyProbe = this._shouldRunHeavyProbe(isContinuous, Date.now());
     // In continuous mode thumbnails are managed by a separate timer (startContinuous).
     // For one-shot probes only, capture synchronously here.
@@ -1948,6 +1960,13 @@ class TSAnalyser extends EventEmitter {
     const CRIT_HYSTERESIS_N = 3;
     const raw = assessment.severity;
     const h = this._healthHysteresis;
+
+    // Startup grace: hold 'ok' and burn down the counter without touching hysteresis.
+    if (this._startupGraceRemaining !== null && this._startupGraceRemaining > 0) {
+      this._startupGraceRemaining -= 1;
+      h.lastReported = 'ok';
+      return { ...result, dvb: { ...result.dvb, health: { ...assessment, severity: 'ok', startupGrace: true, hysteresis: { raw, warnCount: 0, critCount: 0 } } } };
+    }
 
     if (isInconclusiveProbe) {
       // Do not advance hysteresis counters; report last known value.
