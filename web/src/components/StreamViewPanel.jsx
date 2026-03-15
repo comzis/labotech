@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Activity } from 'lucide-react';
 import BentoCard from './ui/BentoCard';
 import Sparkline from './Sparkline';
@@ -867,6 +867,11 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [rangeError, setRangeError] = useState('');
   const [uiRestored, setUiRestored] = useState(false);
   const [laneThumbnailById, setLaneThumbnailById] = useState({});
+  // Crosshair DOM ref — updated directly to avoid React re-renders on every mousemove
+  const crosshairLineRef = useRef(null);
+  // Pending mouse position for rAF-throttled state update
+  const pendingMouseRef = useRef(null);
+  const mouseRafRef = useRef(null);
 
   useEffect(() => {
     try {
@@ -1392,6 +1397,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     setRangeMode('relative');
     setRangeError('');
     setFreezeCursor(false);
+    if (crosshairLineRef.current) crosshairLineRef.current.style.display = 'none';
     setMouseX(null);
     setMouseY(null);
     setMouseLaneId(null);
@@ -1507,20 +1513,40 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           onMouseMove={(e) => {
             if (freezeCursor) return;
             const rect = e.currentTarget.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-            setMouseX(Math.min(100, Math.max(0, x)));
-            setMouseY(Math.min(100, Math.max(0, yPct)));
+            const x = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100));
+            const yPct = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100));
             const yPx = e.clientY - rect.top;
             const laneIdx = Math.round((yPx - LANE_TOP_PX) / LANE_STEP_PX);
-            setMouseLaneId(laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null);
+            const laneId = laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null;
+            // Update crosshair instantly via DOM — no React re-render needed
+            if (crosshairLineRef.current) {
+              crosshairLineRef.current.style.display = 'block';
+              crosshairLineRef.current.style.left = `${x}%`;
+            }
+            // Throttle React state to rAF so popup + hover data update at ≤60fps
+            pendingMouseRef.current = { x, yPct, laneId };
+            if (!mouseRafRef.current) {
+              mouseRafRef.current = requestAnimationFrame(() => {
+                mouseRafRef.current = null;
+                const p = pendingMouseRef.current;
+                if (p) {
+                  setMouseX(p.x);
+                  setMouseY(p.yPct);
+                  setMouseLaneId(p.laneId);
+                }
+              });
+            }
           }}
           onClick={(e) => {
             const rect = e.currentTarget.getBoundingClientRect();
-            const x = ((e.clientX - rect.left) / rect.width) * 100;
-            const yPct = ((e.clientY - rect.top) / rect.height) * 100;
-            setMouseX(Math.min(100, Math.max(0, x)));
-            setMouseY(Math.min(100, Math.max(0, yPct)));
+            const x = Math.min(100, Math.max(0, ((e.clientX - rect.left) / rect.width) * 100));
+            const yPct = Math.min(100, Math.max(0, ((e.clientY - rect.top) / rect.height) * 100));
+            if (crosshairLineRef.current) {
+              crosshairLineRef.current.style.display = 'block';
+              crosshairLineRef.current.style.left = `${x}%`;
+            }
+            setMouseX(x);
+            setMouseY(yPct);
             const yPx = e.clientY - rect.top;
             const laneIdx = Math.round((yPx - LANE_TOP_PX) / LANE_STEP_PX);
             const laneId = laneIds[Math.min(laneIds.length - 1, Math.max(0, laneIdx))] || null;
@@ -1532,6 +1558,9 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           }}
           onMouseLeave={() => {
             if (!freezeCursor) {
+              if (crosshairLineRef.current) crosshairLineRef.current.style.display = 'none';
+              if (mouseRafRef.current) { cancelAnimationFrame(mouseRafRef.current); mouseRafRef.current = null; }
+              pendingMouseRef.current = null;
               setMouseX(null);
               setMouseY(null);
               setMouseLaneId(null);
@@ -1544,10 +1573,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           {/* Current UTC position line */}
           <div className="absolute top-0 bottom-0 border-l border-neon-cyan/70" style={{ left: '100%' }} />
 
-          {/* Mouse crosshair line */}
-          {mouseX != null && (
-            <div className="absolute top-0 bottom-0 border-l border-white/50 pointer-events-none" style={{ left: `${mouseX}%` }} />
-          )}
+          {/* Mouse crosshair line — position driven directly via DOM ref for zero-lag rendering */}
+          <div
+            ref={crosshairLineRef}
+            className="absolute top-0 bottom-0 border-l border-white/50 pointer-events-none"
+            style={{ display: 'none', left: '0%' }}
+          />
 
           {laneIds.length === 0 ? (
             <div className="absolute inset-0 flex items-center justify-center text-xs text-gray-500">

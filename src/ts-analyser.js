@@ -7,7 +7,7 @@ const path = require('path');
 const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
 const DolbyEAdapter = require('./dolbye-adapter');
-const { getMonitoringPolicy } = require('./monitoring-policy');
+const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
 let _multicastConfig = null;
 
 // Module-level semaphore: cap simultaneous heavy probes to prevent thundering
@@ -1813,6 +1813,20 @@ class TSAnalyser extends EventEmitter {
         iatP95WarnMs:     Math.max(base.iatP95WarnMs,     120),
         jitterCriticalMs: Math.max(base.jitterCriticalMs,  40),
         jitterWarnMs:     Math.max(base.jitterWarnMs,      10),
+      };
+    }
+    // RTP/UDP multicast: ffprobe always joins mid-stream and produces 1–10 CC
+    // errors while syncing to the first keyframe.  Apply broadcast-balanced-v1
+    // CC + tsDisc floor (ccWarnCount≥3, ccCriticalCount≥8) so those join
+    // artefacts never trigger false alarms on clean multicast sources.
+    if (this._isRtpUrl(this.url) || (this.url && this.url.startsWith('udp://'))) {
+      const balanced = (PROFILES['broadcast-balanced-v1'] && PROFILES['broadcast-balanced-v1'].health) || {};
+      return {
+        ...base,
+        ccWarnCount:          Math.max(base.ccWarnCount      || 0, balanced.ccWarnCount      || 3),
+        ccCriticalCount:      Math.max(base.ccCriticalCount  || 0, balanced.ccCriticalCount  || 8),
+        tsDiscWarnCount:      Math.max(base.tsDiscWarnCount  || 0, balanced.tsDiscWarnCount  || 3),
+        tsDiscCriticalCount:  Math.max(base.tsDiscCriticalCount || 0, balanced.tsDiscCriticalCount || 8),
       };
     }
     return base;
