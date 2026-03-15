@@ -5,6 +5,7 @@ API_HOST="${1:-10.67.18.29}"
 API_PORT="${2:-4000}"
 SERVICE="${3:-labotech}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
+ENCAP_HEALTH_URL="${ENCAP_HEALTH_URL:-http://127.0.0.1:4100/health}"
 RECREATE_ALL="${RECREATE_ALL:-0}"
 COMPOSE_BIN=""
 MIN_FREE_MB="${MIN_FREE_MB:-8192}"
@@ -139,6 +140,27 @@ wait_for_health() {
   return 1
 }
 
+wait_for_encapsulator_health() {
+  # Readiness gate for deploy success:
+  # - on success path (exit 0), encapsulator responded healthy during this window.
+  # - does not guarantee the very first UI poll cannot race by a small margin.
+  local retries=24  # 24 × 5s = 120s
+  local delay=5
+  local i=1
+  log "waiting for encapsulator at ${ENCAP_HEALTH_URL}"
+  while [[ "${i}" -le "${retries}" ]]; do
+    if curl -fsS "${ENCAP_HEALTH_URL}" >/dev/null 2>&1; then
+      log "encapsulator healthy (attempt ${i})"
+      return 0
+    fi
+    log "encapsulator not ready yet (${i}/${retries})…"
+    sleep "${delay}"
+    i=$((i + 1))
+  done
+  log "encapsulator did not respond within $((retries * delay))s — continuing anyway"
+  return 1
+}
+
 container_tool_parity() {
   local missing=()
   local t
@@ -172,6 +194,7 @@ main() {
   run_stage_or_die "disk headroom precheck" check_disk_headroom || return 1
   run_stage_or_die "rebuild and restart containers" rebuild_and_restart || return 1
   run_stage_or_die "wait for health endpoint" wait_for_health || return 1
+  run_stage "wait for encapsulator health" wait_for_encapsulator_health
   run_stage_or_die "container tooling parity" container_tool_parity || return 1
   run_stage_or_die "preflight script" bash scripts/preflight-monitoring-tools.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
