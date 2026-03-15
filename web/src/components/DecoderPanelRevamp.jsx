@@ -171,7 +171,7 @@ function extractPidRows(selectedResult) {
   (selectedResult?.programs || []).forEach((p) => (p.streams || []).forEach((s) => rows.push(s)));
   (selectedResult?.orphanStreams || []).forEach((s) => rows.push(s));
   const normalized = rows.map((s, i) => ({
-    pid: Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
+    pid: s.pid != null && Number.isFinite(Number(s.pid)) ? Number(s.pid) : null,
     pidHex: s.pidHex,
     codecType: s.codecType || s.type || "unknown",
     codec: s.codecName || s.codec || s.description || "-",
