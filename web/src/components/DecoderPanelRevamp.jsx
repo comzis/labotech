@@ -4,6 +4,7 @@ import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
 import { resolveTransportBitrate } from "../utils/transportBitrate";
 import { getAnalyser, getMonitoringPolicy, setMonitoringProfile } from "../api";
+import { toast } from "sonner";
 
 const PROBE_MODES = [
   { value: "rtp", label: "RTP" },
@@ -510,8 +511,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       .then((data) => {
         setPolicyData(data);
         setPolicyPickerOpen(false);
+        toast.success(`Policy set to ${data?.current?.profileMeta?.label || profileId}`);
       })
-      .catch(() => {})
+      .catch((err) => {
+        toast.error(`Policy change failed: ${err?.message || 'server error'}`);
+      })
       .finally(() => setPolicyBusy(false));
   };
 
@@ -1378,6 +1382,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           <div style={{ display: "flex", background: C.panelAlt, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
             {[
               { id: "quality", label: "Quality Dashboard", icon: "📊" },
+              { id: "srt",     label: "SRT Transport",     icon: "🔒" },
               { id: "rtp", label: "RTP Header", icon: "🔬" },
               { id: "st20227", label: "SMPTE 2022-7", icon: "⚡" },
               { id: "iface", label: "Interfaces", icon: "🖧" },
@@ -1807,6 +1812,93 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   </div>
                 </PanelBox>
               </>
+            );
+          })()}
+
+          {subTab === "srt" && (() => {
+            const srt = selectedResult?.dvb?.srtStats || null;
+            const isSrtUrl = String(legAUrl || "").startsWith("srt://");
+            const rttMs = toFiniteNumber(srt?.rttMs);
+            const lossPercent = toFiniteNumber(srt?.lossPercent);
+            const rateMbps = toFiniteNumber(srt?.rateMbps);
+            const bwMbps = toFiniteNumber(srt?.bwMbps);
+            const nak = srt?.pktNak ?? null;
+            const ack = srt?.pktAck ?? null;
+            const retrans = srt?.pktRetrans ?? null;
+            const dropped = srt?.pktDropped ?? null;
+            const lost = srt?.pktLost ?? null;
+            const total = srt?.pktTotal ?? null;
+            const nakColor = nak > 0 ? C.warn : C.ok;
+            const retransColor = retrans > 0 ? C.warn : C.ok;
+            const droppedColor = dropped > 0 ? C.err : C.ok;
+            const lostColor = lossPercent > 0.1 ? C.err : lossPercent > 0 ? C.warn : C.ok;
+            const rttColor = rttMs != null ? (rttMs > 200 ? C.err : rttMs > 80 ? C.warn : C.ok) : C.muted;
+            return (
+              <PanelBox>
+                <SectionHead icon="🔒" title="SRT Transport"
+                  right={
+                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                      {isSrtUrl
+                        ? <Badge label="SRT INPUT" color={C.info} small />
+                        : <Badge label="NOT SRT" color={C.muted} small />}
+                      {srt
+                        ? <Badge label="STATS OK" color={C.ok} small />
+                        : <Badge label="AWAITING STATS" color={C.muted} small />}
+                    </div>
+                  }
+                />
+                {!isSrtUrl && (
+                  <div style={{ padding: "8px 12px", fontSize: 9, color: C.muted }}>
+                    SRT transport stats are only available when the decoder input URL uses the <span style={{ color: C.info }}>srt://</span> scheme.
+                  </div>
+                )}
+                {isSrtUrl && (
+                  <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+
+                    {/* Link quality row */}
+                    <div>
+                      <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Link Quality</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 6 }}>
+                        <StatBox label="RTT" value={rttMs != null ? `${rttMs.toFixed(1)} ms` : "-"} color={rttColor} />
+                        <StatBox label="Rate" value={rateMbps != null ? `${rateMbps.toFixed(3)} Mbps` : "-"} color={C.ok} />
+                        <StatBox label="Bandwidth" value={bwMbps != null ? `${bwMbps.toFixed(3)} Mbps` : "-"} color={C.text} />
+                        <StatBox label="Loss" value={lossPercent != null ? `${lossPercent.toFixed(3)} %` : "-"} color={lostColor} />
+                      </div>
+                    </div>
+
+                    {/* ARQ counters */}
+                    <div>
+                      <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>ARQ Counters (cumulative since session start)</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
+                        <StatBox label="NAK sent" value={nak ?? "-"} color={nakColor}
+                          title="Negative acknowledgements — receiver requested retransmit" />
+                        <StatBox label="ACK sent" value={ack ?? "-"} color={C.ok}
+                          title="Positive acknowledgements" />
+                        <StatBox label="Retransmitted" value={retrans ?? "-"} color={retransColor}
+                          title="Packets re-sent by sender after NAK" />
+                        <StatBox label="Dropped (too late)" value={dropped ?? "-"} color={droppedColor}
+                          title="Packets dropped because retransmit arrived after playout deadline" />
+                        <StatBox label="Lost (unrecovered)" value={lost ?? "-"} color={lostColor}
+                          title="Packets that could not be recovered by ARQ" />
+                        <StatBox label="Total received" value={total ?? "-"} color={C.text} />
+                      </div>
+                    </div>
+
+                    {/* SRT threshold note */}
+                    <div style={{ fontSize: 9, color: C.muted, background: C.dim, borderRadius: 2, padding: "6px 8px", border: `1px solid ${C.border}` }}>
+                      <span style={{ color: C.info, fontWeight: 700 }}>Note:</span> SRT ARQ retransmissions produce higher IAT P95 and jitter than UDP multicast.
+                      Health thresholds are automatically relaxed for SRT streams (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms).
+                      Use the <span style={{ color: C.info }}>SRT Contribution</span> monitoring policy for additional tuning.
+                    </div>
+
+                    {!srt && (
+                      <div style={{ fontSize: 9, color: C.muted }}>
+                        No libsrt counters yet — SRT stats appear after the first transport bitrate probe completes on an active stream.
+                      </div>
+                    )}
+                  </div>
+                )}
+              </PanelBox>
             );
           })()}
 
