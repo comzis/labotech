@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Backend
 npm install
-npm test                          # all tests (57 tests across 4 suites)
+npm test -- --runInBand            # all tests (138 tests across 6 suites)
 npm test -- test/encoder.test.js  # single test file
 npm start                         # run API server
 
@@ -75,6 +75,23 @@ React SPA. `App.jsx` handles tab routing to feature panels. Custom hooks in `hoo
 ## Build Order
 
 See `labotech-project.md` for the full phased build sequence (Phases 1–5). Start with Phase 1 (Dockerfile → encoder.js → api.js + streams route → basic React shell) before moving to transcoding, multicast, TS analysis, and advanced features.
+
+## Known Pitfalls
+
+### `Number(null) === 0` — null PID coercion
+`Number(null) === 0` and `Number.isFinite(0) === true`. Always guard with `x != null && Number.isFinite(Number(x))` before coercing PIDs or any nullable numeric field. The backend nulls PID 0 (PAT) in `_mapStream`; the frontend must not silently re-coerce it. Affects: `renderPidRef`, `extractPidRows`, all sort comparators on stream PIDs.
+
+### tsanalyze: do not check `code === 0`
+`tsanalyze` is killed by our 9 s SIGTERM timer and exits non-zero, but writes valid JSON to stdout before dying. Parse stdout whenever non-empty — gating on exit code discards all per-PID bitrate data. Do not pass `--input-timeout` (unsupported on production TSDuck).
+
+### health_alarm must not render timeline blocks
+`health_alarm` events are alarm-log-only. `buildEventBlocks()` in `StreamViewPanel.jsx` must filter `e.category !== 'health_alarm'`. The gradient is already driven by `analyse_result`; a separate block causes duplicate red/amber tinting on every severity transition.
+
+### Ghost null-PID stream entries from ffprobe
+ffprobe emits the same elementary stream twice in some cases: once inside the program list (with PID) and once in the global stream array (without PID). Suppress null-PID rows in `extractPidRows` when a same-codecType row with a real PID exists. Sort comparators must map null PID to `Number.POSITIVE_INFINITY`, not `0`.
+
+### Thundering herd on batch decoder start
+Multiple decoders started simultaneously synchronise their probe cycles. Mitigated by startup jitter (0–4500 ms) and a module-level heavy probe semaphore (default max 3 concurrent, `TS_HEAVY_PROBE_MAX_CONCURRENT`). Do not bypass either.
 
 ## Configuration
 
