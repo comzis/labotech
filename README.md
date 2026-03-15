@@ -408,6 +408,7 @@ npm test
 
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
 - Engineering operations runbook: `docs/engineering-support-manual.md`
+- Disk recovery and log-rotation runbook: `docs/ops-disk-recovery.md`
 - UI hardening and SMPTE 2022-7 worklog: `docs/ui-hardening-and-20227-worklog.md`
 - Day-1 post-change operations checklist: `docs/day1-monitoring-checklist.md`
 - Ubuntu host tuning scripts: `scripts/optimize-host-v2.sh` and `scripts/rollback-host-optimization-v2.sh`
