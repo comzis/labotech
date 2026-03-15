@@ -636,11 +636,15 @@ function buildLaneGradient(events, timeStart, windowMs) {
       initSev = sc.sev;
     }
 
-    const hadActivityBeforeWindow = firstActiveTs <= timeStart;
-    // Live lane: fill from the window start regardless of when the first probe
-    // event arrived. Operators expect a continuous color bar — not a grey left
-    // section just because no probe completed in the first N seconds of the window.
-    const effectiveStartTs = (isLive || hadActivityBeforeWindow) ? timeStart : firstActiveTs;
+    // Determine where the lane bar should begin:
+    //   • Real start known → clamp to window left edge or actual start position.
+    //     e.g. started 30 min ago inside a 1h window → bar starts at 50%.
+    //   • Bootstrap-only (fresh page load, no WS history yet) → fill from window
+    //     left edge: we know the decoder is running but don't have the actual start
+    //     timestamp, so we assume it was running before the window.
+    const effectiveStartTs = hasExplicitStart
+      ? Math.max(timeStart, lastExplicitStartTs)
+      : timeStart;
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const stopX = Math.min(100, Math.max(0, ((effectiveEndTs - timeStart) / windowMs) * 100));
 
