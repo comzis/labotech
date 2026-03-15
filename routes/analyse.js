@@ -41,6 +41,7 @@ module.exports = function(analysers, wss, broadcastFn = null) {
     const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined });
 
     analyser.on('result', result => broadcast({ type: 'analyse_result', id, ...result }));
+    analyser.on('health_alarm', data => broadcast({ type: 'health_alarm', id, ...data }));
     analyser.on('error',  err    => broadcast({ type: 'error', id, message: err.message }));
 
     analyser.startContinuous();
