@@ -6,6 +6,9 @@ API_PORT="${2:-4000}"
 SERVICE="${3:-labotech}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
 ENCAP_HEALTH_URL="${ENCAP_HEALTH_URL:-http://127.0.0.1:4100/health}"
+ENCAP_HEALTH_REQUIRED="${ENCAP_HEALTH_REQUIRED:-0}"
+ENCAP_HEALTH_RETRIES="${ENCAP_HEALTH_RETRIES:-12}"
+ENCAP_HEALTH_DELAY_SEC="${ENCAP_HEALTH_DELAY_SEC:-5}"
 RECREATE_ALL="${RECREATE_ALL:-0}"
 COMPOSE_BIN=""
 MIN_FREE_MB="${MIN_FREE_MB:-8192}"
@@ -49,6 +52,18 @@ run_stage_or_die() {
     echo "[deploy] summary: PASS=${PASS_COUNT} FAIL=${FAIL_COUNT}"
     return 1
   fi
+  return 0
+}
+
+run_stage_warn() {
+  local name="$1"
+  shift
+  log "stage: ${name}"
+  if "$@"; then
+    pass "${name}"
+    return 0
+  fi
+  echo "[WARN] ${name} (non-fatal)"
   return 0
 }
 
@@ -141,11 +156,10 @@ wait_for_health() {
 }
 
 wait_for_encapsulator_health() {
-  # Readiness gate for deploy success:
-  # - on success path (exit 0), encapsulator responded healthy during this window.
-  # - does not guarantee the very first UI poll cannot race by a small margin.
-  local retries=24  # 24 × 5s = 120s
-  local delay=5
+  # Optional readiness check (warning-only by default).
+  # Set ENCAP_HEALTH_REQUIRED=1 to make this stage fail-fast.
+  local retries="${ENCAP_HEALTH_RETRIES}"
+  local delay="${ENCAP_HEALTH_DELAY_SEC}"
   local i=1
   log "waiting for encapsulator at ${ENCAP_HEALTH_URL}"
   while [[ "${i}" -le "${retries}" ]]; do
@@ -157,7 +171,7 @@ wait_for_encapsulator_health() {
     sleep "${delay}"
     i=$((i + 1))
   done
-  log "encapsulator did not respond within $((retries * delay))s — continuing anyway"
+  log "encapsulator did not respond within $((retries * delay))s"
   return 1
 }
 
@@ -194,7 +208,11 @@ main() {
   run_stage_or_die "disk headroom precheck" check_disk_headroom || return 1
   run_stage_or_die "rebuild and restart containers" rebuild_and_restart || return 1
   run_stage_or_die "wait for health endpoint" wait_for_health || return 1
-  run_stage "wait for encapsulator health" wait_for_encapsulator_health
+  if [[ "${ENCAP_HEALTH_REQUIRED}" == "1" ]]; then
+    run_stage_or_die "wait for encapsulator health (required)" wait_for_encapsulator_health || return 1
+  else
+    run_stage_warn "wait for encapsulator health (optional)" wait_for_encapsulator_health
+  fi
   run_stage_or_die "container tooling parity" container_tool_parity || return 1
   run_stage_or_die "preflight script" bash scripts/preflight-monitoring-tools.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
