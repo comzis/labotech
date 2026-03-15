@@ -69,6 +69,17 @@ Key frontend components:
 - **`DecoderPanelRevamp.jsx`** — Decoder tab. Left column: Decoder Provisioning → **Confidence Monitor** (full-width 16:9 thumbnail) → ETR 290 Alarm Configuration. Active Decoders section has per-row STOP and a header-level **STOP ALL** button.
 - **`DecoderMultiviewPanel.jsx`** — Multiview tiles, thumbnail display. Auto-seeding checks `anyActive` to avoid short-circuiting on stale server-restart IDs.
 
+## Release Notes Rule
+
+**Every commit that changes behaviour must be documented in `docs/release-notes-v3.1.md` before or in the same commit.**
+
+- Add a new `## vX.Y.Z — YYYY-MM-DD` section at the top of the version block (below the overview).
+- Include: what changed, why it was changed, and the operator impact.
+- Bump `web/package.json` version (patch) for frontend-only changes; bump `package.json` for backend changes; bump both for full-stack changes.
+- The pre-commit hook enforces the `web/package.json` version bump — do not bypass with `--no-verify`.
+
+This rule applies to Claude Code and Cursor equally. No exceptions for "small" fixes — every operator-visible change needs a release note.
+
 ## Coding Rules
 
 - Plain ES6 Node.js with `require()` — no TypeScript
