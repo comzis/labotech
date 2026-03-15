@@ -230,7 +230,7 @@ function makeMultiviewDecoderId({ requestedId, use20227, usedSet }) {
 }
 
 function renderPidRef(pid, pidHex) {
-  const hasDec = Number.isFinite(Number(pid));
+  const hasDec = pid != null && Number.isFinite(Number(pid));
   const dec = hasDec ? Number(pid) : null;
   const hex = pidHex || (hasDec ? `0x${Number(pid).toString(16).toUpperCase().padStart(4, "0")}` : null);
   if (dec == null && !hex) return <span style={{ color: C.muted }}>-</span>;
