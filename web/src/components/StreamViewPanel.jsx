@@ -772,6 +772,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [customRange, setCustomRange] = useState(null); // { startMs, endMs }
   const [rangeError, setRangeError] = useState('');
   const [uiRestored, setUiRestored] = useState(false);
+  const [laneThumbnailById, setLaneThumbnailById] = useState({});
 
   useEffect(() => {
     try {
@@ -908,6 +909,31 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
         if (!mounted) return;
         const analysers = Array.isArray(list) ? list : [];
         const etrs = Array.isArray(etrList) ? etrList : [];
+        setLaneThumbnailById((prev) => {
+          const activeLaneIds = new Set(
+            analysers
+              .filter((a) => a?.id)
+              .map((a) => normalizeLaneId(a.id))
+          );
+          const next = {};
+          activeLaneIds.forEach((laneId) => {
+            if (prev[laneId]) next[laneId] = prev[laneId];
+          });
+          analysers.forEach((a) => {
+            if (!a?.id) return;
+            const laneId = normalizeLaneId(a.id);
+            const thumb = typeof a?.lastResult?.thumbnailUrl === 'string'
+              ? a.lastResult.thumbnailUrl.trim()
+              : '';
+            if (thumb) next[laneId] = thumb;
+          });
+          const prevKeys = Object.keys(prev);
+          const nextKeys = Object.keys(next);
+          if (prevKeys.length === nextKeys.length && prevKeys.every((k) => prev[k] === next[k])) {
+            return prev;
+          }
+          return next;
+        });
 
         // Normalised IDs of everything currently alive on the server.
         const serverActiveIds = new Set([
@@ -1420,7 +1446,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     }}
                   />
                   <div
-                    className="absolute left-2 -translate-y-1/2 text-[11px] font-mono max-w-[320px] truncate px-1.5 rounded"
+                    className="absolute left-2 -translate-y-1/2 inline-flex items-center gap-1 max-w-[340px] text-[11px] font-mono px-1.5 rounded"
                     style={{
                       top: `${y}px`,
                       color: C.text,
@@ -1431,7 +1457,30 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     }}
                     title={id}
                   >
-                    {id}
+                    <span
+                      className="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-sm"
+                      aria-hidden="true"
+                      style={{
+                        width: '14px',
+                        height: '10px',
+                        border: '1px solid rgba(255,255,255,0.16)',
+                        background: '#0a0a0a',
+                        boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.03)',
+                      }}
+                    >
+                      {laneThumbnailById[id] ? (
+                        <img
+                          src={laneThumbnailById[id]}
+                          alt=""
+                          className="w-full h-full"
+                          style={{ objectFit: 'cover', objectPosition: 'center' }}
+                          loading="lazy"
+                        />
+                      ) : (
+                        <span className="inline-block w-[3px] h-[3px] rounded-full" style={{ background: '#2f3a4d' }} />
+                      )}
+                    </span>
+                    <span className="truncate">{id}</span>
                     {laneRecentStartById[id] && (
                       <span
                         className="ml-1.5 inline-flex items-center rounded border border-emerald-400/40 bg-emerald-500/15 px-1 py-0 text-[9px] uppercase tracking-wide text-emerald-300"
