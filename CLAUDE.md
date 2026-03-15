@@ -93,6 +93,32 @@ ffprobe emits the same elementary stream twice in some cases: once inside the pr
 ### Thundering herd on batch decoder start
 Multiple decoders started simultaneously synchronise their probe cycles. Mitigated by startup jitter (0–4500 ms) and a module-level heavy probe semaphore (default max 3 concurrent, `TS_HEAVY_PROBE_MAX_CONCURRENT`). Do not bypass either.
 
+## Development Workflow
+
+**Three AI tools are active on this repo. Read this section before making any changes.**
+
+| Tool | Branch prefix | Role |
+|---|---|---|
+| Claude Code (this tool) | `feat/`, `fix/`, `chore/` | Multi-file features, backend logic, deploy scripts, refactors |
+| Cursor | `cursor/` | Inline editing, small fixes, debugging sessions |
+| Antigravity / Project IDX | `idx/` | Exploratory work, Google-ecosystem tooling |
+
+### Rules — enforced for all tools
+
+1. **Never push directly to `main`** — always work on a branch and open a PR
+2. **One tool per branch** — commit + push before switching tools on the same task
+3. **PR required to merge** — the human reviews and merges; no auto-merge
+4. **Run tests before opening a PR** — `npm test -- --runInBand` must pass
+5. **Frontend build must be clean** — `npm run build --prefix web` must produce 0 warnings
+
+### AI telemetry — zero tolerance
+
+Cursor's AI debugger has previously injected `fetch('http://127.0.0.1:7265/...')` telemetry into production files (see INC-003 in memory). The pre-commit hook at `.git/hooks/pre-commit` blocks any commit containing these patterns. If a commit is rejected, inspect the diff before force-bypassing.
+
+Patterns blocked: `127.0.0.1:7265`, `#region agent log`, `antigravity.inject`
+
+See `WORKFLOW.md` for the full day-to-day process.
+
 ## Configuration
 
 - `config/presets.json` — 64 encoder preset slots
