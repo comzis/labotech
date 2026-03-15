@@ -512,11 +512,6 @@ function buildLaneGradient(events, timeStart, windowMs) {
   if (!hasEtrStateEvents) {
     const OKS_TO_CLEAR = 2;
 
-    // Timestamp of the first actual analysis result — used to render the
-    // "stream started but analysis not yet arrived" window as teal/pending
-    // rather than green, giving operators a clear visual cue.
-    const firstAnalyseResultTs = sorted.find((e) => e.category === 'analyse_result')?.ts ?? Infinity;
-
     function decEvtSev(e) {
       if (e.category === 'runtime_error') {
         // Only genuine LOS errors (no input signal) drive the gradient red.
@@ -525,10 +520,11 @@ function buildLaneGradient(events, timeStart, windowMs) {
         return e.evidence?.noSignal ? 'critical' : null;
       }
       if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) {
-        // Show 'pending' (teal) from stream start until the first analysis
-        // result confirms the signal is ok.  If analysis has already arrived
-        // before this start (e.g. restarted mid-window), treat as 'ok'.
-        return e.ts < firstAnalyseResultTs ? 'pending' : 'ok';
+        // Start green immediately — the first analyse_result (arriving within
+        // one probe cycle) will confirm or change to amber/red if needed.
+        // Showing 'pending'/teal here looked like a stall+recovery on every
+        // decoder startup, which was visually misleading for operators.
+        return 'ok';
       }
       if (e.category === 'analyse_result') return e.severity || 'ok';
       return null;
@@ -579,10 +575,7 @@ function buildLaneGradient(events, timeStart, windowMs) {
           }
         } else {
           okStreak = 0;
-          // 'pending' → 'ok' (first analysis arrived): transition immediately.
-          // 'ok' → 'pending' after analysis: treat as no-op — confirmed ok beats pending.
-          const shouldTransition = stateSev !== raw && !(stateSev === 'ok' && raw === 'pending');
-          if (shouldTransition) {
+          if (stateSev !== raw) {
             stateChanges.push({ ts: e.ts, sev: raw });
             stateSev = raw;
           }
