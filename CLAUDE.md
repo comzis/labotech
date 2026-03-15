@@ -52,7 +52,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 - **`encoder.js`** — Core `SRTEncoder` class (extends `EventEmitter`). All other processing classes extend this. Key methods: `detectInputType()`, `buildInputArgs()`, `buildSRTUrl()`, `buildFFmpegArgs()`, `start()`, `stop()`, `parseStats()`.
 - **`transcoder.js`** — Extends `SRTEncoder`. Implements `INTERLACE_PRESETS` map for four broadcast conversions: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT).
 - **`multicast-forward.js`** — `MulticastForwarder` class. Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
-- **`ts-analyser.js`** — `TSAnalyser` class wrapping ffprobe. Parses PAT/PMT/PID tree via `parseStructure()`.
+- **`ts-analyser.js`** — `TSAnalyser` class wrapping ffprobe. Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
 - **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active encoders.
 
@@ -63,6 +63,11 @@ Each route file maps to a feature domain: `streams.js`, `transcode.js`, `multica
 ### Frontend (`web/src/`)
 
 React SPA. `App.jsx` handles tab routing to feature panels. Custom hooks in `hooks/` manage WS connection (`useWebSocket.js`), REST polling (`useStreams.js`), and TS probing (`useTSAnalysis.js`). `api.js` contains all `fetch()` wrappers.
+
+Key frontend components:
+- **`StreamViewPanel.jsx`** — UTC timeline across analyser/ETR lanes. Lane bars rendered via `LaneCanvas` component using `HTMLCanvasElement` `fillRect()` calls (v3.1.5). `buildLaneGradient()` logic is unchanged; `parseGradientSegments()` converts gradient strings to `{leftPct, widthPct, color}[]` for canvas draw calls.
+- **`DecoderPanelRevamp.jsx`** — Decoder tab. Left column layout (top→bottom): Decoder Provisioning → **Confidence Monitor** (full-width 16:9 thumbnail, service name label, no audio bars) → ETR 290 Alarm Configuration.
+- **`DecoderMultiviewPanel.jsx`** — Multiview tiles, thumbnail display. Auto-seeding checks `anyActive` to avoid short-circuiting on stale server-restart IDs.
 
 ## Coding Rules
 
@@ -83,6 +88,9 @@ See `labotech-project.md` for the full phased build sequence (Phases 1–5). Sta
 
 ### tsanalyze: do not check `code === 0`
 `tsanalyze` is killed by our 9 s SIGTERM timer and exits non-zero, but writes valid JSON to stdout before dying. Parse stdout whenever non-empty — gating on exit code discards all per-PID bitrate data. Do not pass `--input-timeout` (unsupported on production TSDuck).
+
+### `matchAll` requires a global regex — derive with `new RegExp(rx.source, rx.flags + 'g')`
+`String.prototype.matchAll()` throws `TypeError` when called with a non-global regex (missing `g` flag). In `_extractSrtStatsFromLog()` (`ts-analyser.js`) the regex literals in the stats-field table do not carry `g`. Always derive a global copy before calling `matchAll`: `new RegExp(rx.source, rx.flags.includes('g') ? rx.flags : rx.flags + 'g')`. Failure to do so keeps `lastResult: null` permanently and tiles show "Awaiting Frame" indefinitely.
 
 ### health_alarm must not render timeline blocks
 `health_alarm` events are alarm-log-only. `buildEventBlocks()` in `StreamViewPanel.jsx` must filter `e.category !== 'health_alarm'`. The gradient is already driven by `analyse_result`; a separate block causes duplicate red/amber tinting on every severity transition.

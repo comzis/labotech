@@ -1086,6 +1086,12 @@ Panel routing (`decoderIds` per panel) is stored in `sessionStorage` under key `
 
 Auto-seeding: if no panel routing exists at all (first use), the first panel is seeded with all active analyser IDs when `refreshActives()` first returns results.
 
+**Stale routing after server restart (v3.1.1 fix)**
+
+Before v3.1.1, the auto-seeding logic had an `assignedCount > 0` short-circuit: if any decoder IDs were already stored in `sessionStorage`, the seeding effect returned early without checking whether those IDs were actually alive. After a server restart the server's in-memory analyser map is empty, so every stored ID is stale — `visibleIds` (intersection of stored IDs with `activeIds`) computed to `[]` and all tiles remained blank permanently.
+
+Fix: the seeding effect now checks `anyActive = storedIds.some(id => activeIds.includes(id))`. If stored IDs exist but none are in `activeIds`, the stale routing is discarded and auto-seeding runs as if it were a first-use scenario. Operator action: after server restart, start the analysers from the Decoder tab; tiles will auto-populate once `refreshActives()` detects the newly running analysers.
+
 ### Refresh cadence
 
 - **REST poll:** every 5 s (matches probe cadence).
@@ -1181,3 +1187,101 @@ CPU starvation also caused spurious `transport_error` and `pcr_disc` alarms. Two
 ### Node.js heap note
 
 Without `NODE_OPTIONS=--max-old-space-size=6144`, Node.js 20 inside a 4 GB cgroup limits its V8 heap to ~1 GB. With 9 active lanes the in-memory structures (event ring 1000 entries, timeline maps, WebSocket broadcast state, per-analyser probe results) approach this limit under sustained load, causing GC pressure and event loop latency that presents as UI unresponsiveness rather than a hard crash.
+
+---
+
+## 15) Canvas-Based Timeline Lane Renderer (v3.1.5)
+
+### Background
+
+Prior to v3.1.5, each timeline lane bar in `StreamViewPanel.jsx` was rendered as a `<div>` with a CSS `linear-gradient` string as its background. `buildLaneGradient()` produced one colour stop per event segment; with 20+ active lanes and many events per lane these strings could contain hundreds of stops. CSS gradient rendering at that density is slow (browser recalculates on every resize/scroll), unreliable on Chromium/WebKit (visual gaps between stops, sub-pixel rounding artefacts), and non-deterministic in colour accuracy at narrow segment widths.
+
+### Replacement: `LaneCanvas` component
+
+`StreamViewPanel.jsx` now uses a `LaneCanvas` React component for each lane bar. The gradient string from `buildLaneGradient()` is **unchanged** — it is still produced by the same logic. `LaneCanvas` converts it into draw calls:
+
+1. `parseGradientSegments(gradientStr)` — parses the gradient CSS string into `{ leftPct, widthPct, color }[]` segment objects.
+2. `LaneCanvas` mounts a `<canvas>` element, attaches a `ResizeObserver`, and on each size change schedules a `requestAnimationFrame` repaint.
+3. Each segment is drawn as a `fillRect()` block using the 2D canvas context. Pixel-perfect crisp edges, no sub-pixel gap artefacts.
+
+### Operational notes
+
+- `buildLaneGradient()` logic is **completely untouched** — no change to event colour mapping, severity colours, or gradient generation.
+- Canvas rendering is purely a frontend performance and visual quality improvement.
+- If a lane bar appears blank after upgrade, verify the browser supports `HTMLCanvasElement` (all modern browsers do) and check console for `parseGradientSegments` parse warnings.
+- `ResizeObserver` + `requestAnimationFrame` ensures the canvas repaints correctly on window resize and timeline zoom changes without layout jank.
+
+### Change-control note
+
+`LaneCanvas` and `parseGradientSegments` in `StreamViewPanel.jsx` are performance-critical rendering paths. Do not modify them without consulting the operator — visual regressions (gaps, wrong colours, missing segments) in the timeline are high-impact for MCR operators. See §13 and `.cursor/rules/change-safety-explicit-approval.mdc`.
+
+---
+
+### INC-006 — `_extractSrtStatsFromLog` matchAll TypeError — tiles permanently "Awaiting Frame" (v3.1.1)
+
+**Symptom**
+
+Decoder Multiview tiles and Stream View lane cards showed "Awaiting Frame" / "awaiting telemetry" indefinitely on all SRT streams, even when the analyser was receiving data. `lastResult` on the server remained `null` after every probe cycle. No visible error in the UI; server logs showed a recurring `TypeError`.
+
+**Root cause**
+
+`_extractSrtStatsFromLog()` in `src/ts-analyser.js` called `String.prototype.matchAll()` using the non-global regex literals stored in the stats-field table (e.g. `/mbpsRecvRate:\s*([\d.]+)/i` without the `g` flag). `matchAll()` requires a global regex and throws `TypeError: String.prototype.matchAll called with a non-global RegExp argument` when given a non-global one. This exception propagated up through the probe cycle, aborting the result assignment on every call. Because the probe never completed cleanly, `lastResult` stayed `null` and the REST restore path had nothing to seed tiles from.
+
+**Fix applied** — v3.1.1
+
+Inside `_extractSrtStatsFromLog()`, the call site uses a `last()` helper. Before passing each regex to `matchAll()`, a global copy is derived:
+
+```js
+const globalRx = new RegExp(rx.source, rx.flags.includes('g') ? rx.flags : rx.flags + 'g');
+str.matchAll(globalRx)
+```
+
+The original regex literals in the table are unchanged; only the local call site is patched.
+
+**Verification**
+
+```bash
+sudo journalctl -u labotech --since "2 min ago" --no-pager | grep -i "matchAll\|TypeError"
+# should return no lines after upgrade
+```
+
+Then open Decoder Multiview — tiles should populate within one probe cycle (~5 s).
+
+---
+
+### INC-007 — Health assessment false positives (v3.1.4)
+
+#### INC-007a — SMPTE ST 2022-7 `insufficient_data` penalising all RTP streams
+
+**Symptom**
+
+All RTP streams scored −4 pts on every health cycle under `SMPTE ST 2022-7` compliance checks, even on streams where no dual-NIC path was configured. The health chip showed WARNING/CRITICAL on otherwise clean sources.
+
+**Root cause**
+
+`_attachHealthAssessment()` in `src/ts-analyser.js` applied a −4 point penalty for `smpte2022_7.status === 'insufficient_data'`. This status is set whenever the NIC capture layer has not yet gathered enough RTP sequence-number data to assess dual-path compliance — a completely normal operating condition for any single-NIC or non-redundancy deployment. The penalty turned a "data not available" diagnostic state into a health deduction on every probe.
+
+**Fix applied** — v3.1.4
+
+The `insufficient_data` branch is removed from the penalty table. Only `non_compliant` (confirmed dual-path failure) now deducts points. `insufficient_data` is still reported in `dvb.health.reasons` for diagnostic visibility but carries zero score impact.
+
+#### INC-007b — Bitrate drift scoring on ffprobe-derived measurements
+
+**Symptom**
+
+Health assessments periodically showed CRITICAL for "bitrate drift" on streams with stable, known-good bitrates. The drift reason cited percentage swings of 10–65% between probe windows.
+
+**Root cause**
+
+Drift thresholds (3% warn / 6% critical) were applied to the `measured` bitrate field, which is derived from ffprobe's 2.5-second probe window. Short-window ffprobe measurements naturally vary 10–65% between cycles on CBR and VBR streams due to GOP/keyframe alignment within the window — this is expected measurement noise, not a real bitrate change.
+
+**Fix applied** — v3.1.4
+
+Drift scoring in `_attachHealthAssessment()` is now gated on `bitrateSource === 'tsduck'`. TSDuck uses a long continuous PCR-derived window (typically 10–30 s) that produces stable bitrate readings where 3%/6% thresholds are meaningful. ffprobe-derived `measured` values are excluded from drift scoring entirely.
+
+**Verification**
+
+After upgrade, open a running decoder and confirm:
+- Health chip shows OK on a stable clean source.
+- `dvb.health.reasons` array does not contain a bitrate-drift entry.
+- `bitrateSource` field in analyser telemetry confirms which path is active.
