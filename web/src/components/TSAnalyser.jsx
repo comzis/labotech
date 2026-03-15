@@ -25,7 +25,7 @@ const C = {
   head: "#6a7fa8",
 };
 
-const TABS = ["ETR 290", "ST 2022-7", "Arrival Quality", "DVB Tables", "PIDs", "Programs", "Event Log"];
+const TABS = ["ETR 290", "ST 2022-7", "Arrival Quality", "SRT Transport", "DVB Tables", "PIDs", "Programs", "Event Log"];
 const STORAGE_KEY = "labotech:ts-analyser:v2";
 
 const ETR_CHECK_DEFS = [
@@ -1144,6 +1144,82 @@ export default function TSAnalyser({ lastMessage }) {
           {programs.length === 0 && <Panel title="Programs"><span style={{ color: C.muted }}>No program map parsed yet.</span></Panel>}
         </div>
       )}
+
+      {tab === "SRT Transport" && (() => {
+        const srt = activeResult?.dvb?.srtStats || null;
+        const isSrtUrl = String(activeUrl || "").startsWith("srt://");
+        const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
+        const rttMs      = num(srt?.rttMs);
+        const rateMbps   = num(srt?.rateMbps);
+        const bwMbps     = num(srt?.bwMbps);
+        const lossPercent = num(srt?.lossPercent);
+        const nak     = srt?.pktNak     ?? null;
+        const ack     = srt?.pktAck     ?? null;
+        const retrans = srt?.pktRetrans  ?? null;
+        const dropped = srt?.pktDropped  ?? null;
+        const lost    = srt?.pktLost     ?? null;
+        const total   = srt?.pktTotal    ?? null;
+        const rttColor      = rttMs != null ? (rttMs > 200 ? C.err : rttMs > 80 ? C.warn : C.ok) : C.muted;
+        const nakColor      = nak  > 0 ? C.warn : C.ok;
+        const retransColor  = retrans > 0 ? C.warn : C.ok;
+        const droppedColor  = dropped > 0 ? C.err : C.ok;
+        const lostColor     = lossPercent > 0.1 ? C.err : lossPercent > 0 ? C.warn : C.ok;
+        const Stat = ({ label, value, color }) => (
+          <div style={{ background: C.panelB, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 8px", textAlign: "center" }}>
+            <div style={{ fontSize: 8, color: C.muted, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+            <div style={{ fontSize: 12, fontWeight: 700, color: color || C.text }}>{value ?? "-"}</div>
+          </div>
+        );
+        return (
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            <Panel title="SRT Transport" right={
+              <span style={{ display: "flex", gap: 6 }}>
+                <Badge label={isSrtUrl ? "SRT INPUT" : "NOT SRT"} color={isSrtUrl ? C.info : C.muted} small />
+                <Badge label={srt ? "STATS OK" : "AWAITING"} color={srt ? C.ok : C.muted} small />
+              </span>
+            }>
+              {!isSrtUrl ? (
+                <div style={{ fontSize: 9, color: C.muted, padding: "4px 0" }}>
+                  SRT transport stats are only available when the probe URL uses the <Mono v="srt://" c={C.info} /> scheme.
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <div>
+                    <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Link Quality</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 5 }}>
+                      <Stat label="RTT" value={rttMs != null ? `${rttMs.toFixed(1)} ms` : "-"} color={rttColor} />
+                      <Stat label="Rate" value={rateMbps != null ? `${rateMbps.toFixed(3)} Mbps` : "-"} color={C.ok} />
+                      <Stat label="Bandwidth" value={bwMbps != null ? `${bwMbps.toFixed(3)} Mbps` : "-"} color={C.text} />
+                      <Stat label="Loss %" value={lossPercent != null ? `${lossPercent.toFixed(3)} %` : "-"} color={lostColor} />
+                    </div>
+                  </div>
+                  <div>
+                    <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>ARQ Counters (per probe interval)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5 }}>
+                      <Stat label="NAK sent" value={nak ?? "-"} color={nakColor} />
+                      <Stat label="ACK sent" value={ack ?? "-"} color={C.ok} />
+                      <Stat label="Retransmitted" value={retrans ?? "-"} color={retransColor} />
+                      <Stat label="Dropped (too late)" value={dropped ?? "-"} color={droppedColor} />
+                      <Stat label="Lost (unrecovered)" value={lost ?? "-"} color={lostColor} />
+                      <Stat label="Total received" value={total ?? "-"} color={C.text} />
+                    </div>
+                  </div>
+                  {!srt && (
+                    <div style={{ fontSize: 9, color: C.muted, background: C.panelB, borderRadius: 2, padding: "5px 8px", border: `1px solid ${C.border}` }}>
+                      No libsrt counters yet — stats appear after the first transport bitrate probe on an active SRT stream.
+                      SRT stats require the ffmpeg loglevel to be <Mono v="verbose" c={C.info} size={9} /> (applied automatically for srt:// URLs).
+                    </div>
+                  )}
+                  <div style={{ fontSize: 9, color: C.muted, background: C.panelB, borderRadius: 2, padding: "5px 8px", border: `1px solid ${C.border}` }}>
+                    <span style={{ color: C.info, fontWeight: 700 }}>Note:</span> SRT ARQ retransmissions produce higher IAT P95 and jitter than UDP/RTP.
+                    Health thresholds are automatically relaxed for SRT streams (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms).
+                  </div>
+                </div>
+              )}
+            </Panel>
+          </div>
+        );
+      })()}
 
       {tab === "Event Log" && (
         <Panel title="Event Log" right="live">
