@@ -763,7 +763,7 @@ export default function App() {
         {/* Rack rail top-edge line */}
         <div style={{ height: '2px', background: 'linear-gradient(90deg, #1a2230, #3c4f67 20%, #3c4f67 80%, #1a2230)' }} />
 
-        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 py-2 flex flex-col gap-1.5">
+        <div className="max-w-[1800px] mx-auto px-3 xl:px-5 flex flex-col justify-center gap-2" style={{ height: 117 }}>
           <div className="flex items-center gap-1 xl:gap-2">
             <div
               className="hidden xl:flex items-center h-[64px] px-4 rounded-sm shrink-0 gap-2 relative"
