@@ -1769,16 +1769,36 @@ class TSAnalyser extends EventEmitter {
     if (!result || !result.dvb) return result;
     const assessment = this._buildHealthAssessment(result);
 
-    // Hysteresis: suppress single-probe transient warnings (common on multicast mid-stream
-    // join — tsanalyze has no CC baseline for the first packets it captures).
+    // Inconclusive probe guard: if a heavy probe returns 0 PIDs, 0 services AND
+    // 0 bitrate simultaneously, ffprobe did not capture any valid PSI data —
+    // the probe joined the multicast stream after a PAT/PMT cycle and the 2-second
+    // analyse window expired before the next one arrived.  This is a probe-timing
+    // artifact, not a signal fault.  Scoring it drives the health score below 65
+    // (no bitrate 16pts + no services 14pts + no PIDs 14pts = 44pts penalty = 56/100)
+    // which immediately escalates to critical even though 8 other decoders on the
+    // same source are clean.  In this case, hold the last reported value and do not
+    // update hysteresis state.
+    const dvbResult = result.dvb || {};
+    const isHeavyProbe = Boolean(dvbResult.probeDiagnostics?.scheduler?.runHeavyProbe);
+    const bitrateBps = Number(dvbResult.bitrateBps || 0);
+    const serviceCount = Number(dvbResult.serviceCount || 0);
+    const pidCount = Number(dvbResult.pidCount || 0);
+    const isInconclusiveProbe = isHeavyProbe && bitrateBps <= 0 && serviceCount <= 0 && pidCount <= 0;
+
+    // Hysteresis: suppress transient warnings (multicast mid-stream join artifacts).
     // Rules:
-    //   critical → escalate immediately (already gated by ccCriticalCount ≥ 3)
+    //   inconclusive probe → hold last reported, do not update counts
+    //   critical → requires 2 consecutive critical probes (same gate as warning,
+    //              prevents a single PSI-miss from immediately flagging red)
     //   warning  → escalate only after HYSTERESIS_N consecutive warning/worse probes
     //   ok       → recover immediately to clear alarms without delay
     const HYSTERESIS_N = 2;
     const raw = assessment.severity;
     const h = this._healthHysteresis;
-    if (raw === 'critical') {
+
+    if (isInconclusiveProbe) {
+      // Do not advance hysteresis counters; report last known value.
+    } else if (raw === 'critical') {
       h.critCount++;
       h.warnCount = 0;
     } else if (raw === 'warning') {
@@ -1790,7 +1810,7 @@ class TSAnalyser extends EventEmitter {
     }
 
     let reported;
-    if (h.critCount >= 1) {
+    if (h.critCount >= HYSTERESIS_N) {
       reported = 'critical';
     } else if (h.warnCount >= HYSTERESIS_N) {
       reported = 'warning';
