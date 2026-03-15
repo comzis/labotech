@@ -899,7 +899,10 @@ class TSAnalyser extends EventEmitter {
   }
 
   _buildTSDuckArgs() {
-    return ['--json', '--input-timeout', '5000', this.url];
+    // '--input-timeout' is not supported on all TSDuck versions installed in
+    // production.  The probe is already wrapped in a hard kill-timer, so we
+    // rely on that rather than a TSDuck-level flag to bound execution time.
+    return ['--json', this.url];
   }
 
   _mapStream(s) {

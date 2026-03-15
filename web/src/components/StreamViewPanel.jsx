@@ -985,6 +985,35 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               evidence: { bootstrap: true },
             };
           });
+        // Synthesise an analyse_result seed event from the analyser's lastResult.
+        // Without this, after a page reload firstAnalyseResultTs = Infinity and the
+        // entire historical window shows as teal/pending rather than the actual
+        // health state that was running overnight.
+        const analyseSeeds = analysers
+          .filter((a) => a && a.isRunning && a.id && a.lastResult)
+          .map((a) => {
+            const laneId = normalizeLaneId(a.id);
+            const dvb = a.lastResult?.dvb || {};
+            const probeTs = Number(a.lastResult?.probeTime);
+            const ts = Number.isFinite(probeTs) && probeTs > 0 ? probeTs : Date.now();
+            const healthSeverity = dvb?.health?.severity;
+            const severity = healthSeverity === 'critical' || healthSeverity === 'warning' ? healthSeverity : 'ok';
+            const bitrateBps = Number(dvb.bitrateBps);
+            const bitrateMbps = Number.isFinite(bitrateBps) && bitrateBps > 0 ? Number((bitrateBps / 1e6).toFixed(3)) : null;
+            const title = severity === 'critical' ? 'TS Analysis (critical)' : severity === 'warning' ? 'TS Analysis (warning)' : 'TS Analysis (OK)';
+            return {
+              key: `seed-analyse-${laneId}`,
+              ts,
+              id: laneId,
+              rawId: a.id,
+              category: 'analyse_result',
+              severity,
+              title,
+              description: `${dvb.pidCount ?? 0} PID · ${dvb.serviceCount ?? 0} svc · ${bitrateMbps != null ? bitrateMbps.toFixed(2) : '0.00'} Mbps (seed)`,
+              evidence: { health: dvb.health || null, bootstrap: true },
+            };
+          });
+
         const heartbeat = analysers
           .filter((a) => a && a.isRunning && a.id)
           .map((a) => {
@@ -1039,7 +1068,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             });
           }
 
-          return mergeTimelineEvents(prev, [...missing, ...heartbeat, ...tombstones]);
+          return mergeTimelineEvents(prev, [...missing, ...analyseSeeds, ...heartbeat, ...tombstones]);
         });
       } catch (_) {}
     };
