@@ -479,45 +479,126 @@ function buildLaneGradient(events, timeStart, windowMs) {
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
   const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
 
-  // Fallback when ETR heartbeat is not present.
-  // Rule: an explicit runtime_started with no subsequent runtime_stopped means
-  // the stream IS live — extend the green bar to the right edge (now) with no
-  // stale timeout. Only bootstrap/heartbeat-only lanes use the stale timeout.
+  // Fallback for decoder/analyser lanes (no ETR heartbeat present).
+  // Build a severity-aware gradient: green = healthy, red = LOS/error, amber = warning.
+  // Hysteresis: critical/warning → ok requires OKS_TO_CLEAR consecutive ok probes so
+  // a single brief recovery probe doesn't paint a green blip inside a red LOS block.
   if (!hasEtrStateEvents) {
-    const activityEvents = sorted.filter((e) =>
-      e.category === 'runtime_started' ||
-      e.category === 'runtime_heartbeat' ||
-      e.category === 'analyse_result'
-    );
-    const nonBootstrapActivityEvents = activityEvents.filter((e) => !e?.evidence?.bootstrap);
-    const activitySource = nonBootstrapActivityEvents.length > 0 ? nonBootstrapActivityEvents : activityEvents;
-    if (activitySource.length === 0) {
+    const OKS_TO_CLEAR = 2;
+
+    function decEvtSev(e) {
+      if (e.category === 'runtime_error') return 'critical';
+      if (e.category === 'runtime_started' && !e?.evidence?.bootstrap) return 'ok';
+      if (e.category === 'analyse_result') return e.severity || 'ok';
+      return null;
+    }
+
+    const sevEvts = sorted.filter((e) => decEvtSev(e) != null);
+    if (sevEvts.length === 0) {
       return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
-    const firstActiveTs = activitySource[0].ts;
-    const stopAfterActive = sorted.find((e) =>
-      e.category === 'runtime_stopped' && e.ts >= firstActiveTs
+
+    // Build de-noised state-change list with hysteresis.
+    let stateSev = null;
+    let okStreak = 0;
+    const stateChanges = []; // { ts, sev }
+    const isBad = (s) => s === 'critical' || s === 'warning';
+
+    for (const e of sevEvts) {
+      const raw = decEvtSev(e);
+      if (!raw) continue;
+      if (isBad(raw)) {
+        okStreak = 0;
+        if (stateSev !== raw) {
+          stateChanges.push({ ts: e.ts, sev: raw });
+          stateSev = raw;
+        }
+      } else { // ok
+        if (isBad(stateSev)) {
+          okStreak++;
+          if (okStreak >= OKS_TO_CLEAR) {
+            okStreak = 0;
+            stateChanges.push({ ts: e.ts, sev: 'ok' });
+            stateSev = 'ok';
+          }
+          // else: still in bad state — suppress this brief ok
+        } else {
+          okStreak = 0;
+          if (stateSev !== 'ok') {
+            stateChanges.push({ ts: e.ts, sev: 'ok' });
+            stateSev = 'ok';
+          }
+        }
+      }
+    }
+
+    if (stateChanges.length === 0) {
+      return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
+    }
+
+    const firstActiveTs = stateChanges[0].ts;
+    const stopAfterActive = sorted.find(
+      (e) => e.category === 'runtime_stopped' && e.ts >= firstActiveTs
     );
-    // Explicit start (not bootstrap) → stream is live until explicit stop, no stale cutoff.
-    const hasExplicitStart = nonBootstrapActivityEvents.some((e) => e.category === 'runtime_started');
-    const lastActivityTs = activitySource[activitySource.length - 1]?.ts || firstActiveTs;
-    const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
-    const isLive = !stopAfterActive && (hasExplicitStart || staleStopTs >= (timeStart + windowMs));
-    const hadActivityBeforeWindow = activitySource.some((e) => e.ts <= timeStart);
-    const effectiveStartTs = (isLive && hadActivityBeforeWindow) ? timeStart : Math.max(timeStart, firstActiveTs);
+    const hasExplicitStart = sorted.some(
+      (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
+    );
+    const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
+    const staleStopTs = lastSevEvtTs + LANE_ACTIVITY_STALE_MS;
+    const timeEnd = timeStart + windowMs;
+    const isLive = !stopAfterActive && (hasExplicitStart || staleStopTs >= timeEnd);
+    // Apply stale cutoff for non-live lanes even when no explicit stop event exists.
+    const effectiveEndTs = stopAfterActive
+      ? Math.min(timeEnd, stopAfterActive.ts)
+      : (isLive ? timeEnd : Math.min(timeEnd, staleStopTs));
+    const gradientEnd = effectiveEndTs;
+
+    // Initial severity: last state change at or before timeStart.
+    let initSev = null;
+    for (const sc of stateChanges) {
+      if (sc.ts > timeStart) break;
+      initSev = sc.sev;
+    }
+
+    const hadActivityBeforeWindow = firstActiveTs <= timeStart;
+    const effectiveStartTs = hadActivityBeforeWindow ? timeStart : firstActiveTs;
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
-    // Live streams extend to 100% (right edge = now). Stopped streams end at stop event.
-    const effectiveStopTs = stopAfterActive ? stopAfterActive.ts : (timeStart + windowMs);
-    const stopX = stopAfterActive
-      ? Math.min(100, Math.max(0, ((Math.min(timeStart + windowMs, effectiveStopTs) - timeStart) / windowMs) * 100))
-      : 100;
-    if (stopX <= startX) {
+    const stopX = Math.min(100, Math.max(0, ((effectiveEndTs - timeStart) / windowMs) * 100));
+
+    if (!isLive && stopX <= startX) {
       return 'linear-gradient(90deg, #44556644 0%, #44556644 100%)';
     }
-    if (stopX >= 100) {
-      return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00dd55b8 ${startX}%, #00dd55b8 100%)`;
+
+    // Determine starting color: use initSev if known, else use first in-window change.
+    const firstInWindowSev = stateChanges.find((sc) => sc.ts > timeStart)?.sev || 'ok';
+    let curSev = initSev || firstInWindowSev;
+
+    const parts = [];
+    if (startX > 0) {
+      parts.push(`#44556644 0%`);
+      parts.push(`#44556644 ${startX}%`);
     }
-    return `linear-gradient(90deg, #44556644 0%, #44556644 ${startX}%, #00dd55b8 ${startX}%, #00dd55b8 ${stopX}%, #44556644 ${stopX}%, #44556644 100%)`;
+    parts.push(`${laneTintForSeverity(curSev)} ${startX}%`);
+
+    for (const sc of stateChanges) {
+      if (sc.ts <= timeStart || sc.ts > gradientEnd) continue;
+      const x = Math.min(100, Math.max(0, ((sc.ts - timeStart) / windowMs) * 100));
+      if (sc.sev !== curSev) {
+        parts.push(`${laneTintForSeverity(curSev)} ${x}%`);
+        parts.push(`${laneTintForSeverity(sc.sev)} ${x}%`);
+        curSev = sc.sev;
+      }
+    }
+
+    if (effectiveEndTs < timeEnd) {
+      parts.push(`${laneTintForSeverity(curSev)} ${stopX}%`);
+      parts.push(`#44556644 ${stopX}%`);
+      parts.push(`#44556644 100%`);
+    } else {
+      parts.push(`${laneTintForSeverity(curSev)} 100%`);
+    }
+
+    return `linear-gradient(90deg, ${parts.join(', ')})`;
   }
 
   // Determine initial severity: scan ALL pre-window events (not just leading ones)
