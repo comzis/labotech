@@ -1898,23 +1898,31 @@ class TSAnalyser extends EventEmitter {
     // artifact, not a signal fault.  Scoring it drives the health score below 65
     // (no bitrate 16pts + no services 14pts + no PIDs 14pts = 44pts penalty = 56/100)
     // which immediately escalates to critical even though 8 other decoders on the
-    // same source are clean.  In this case, hold the last reported value and do not
-    // update hysteresis state.
+    // same source are clean.  This guard now covers both heavy and light probes —
+    // a light probe with zero data causes identical false criticals without it.
+    // In this case, hold the last reported value and do not update hysteresis state.
     const dvbResult = result.dvb || {};
     const isHeavyProbe = Boolean(dvbResult.probeDiagnostics?.scheduler?.runHeavyProbe);
     const bitrateBps = Number(dvbResult.bitrateBps || 0);
     const serviceCount = Number(dvbResult.serviceCount || 0);
     const pidCount = Number(dvbResult.pidCount || 0);
-    const isInconclusiveProbe = isHeavyProbe && bitrateBps <= 0 && serviceCount <= 0 && pidCount <= 0;
+    // Inconclusive probe: all three key metrics are zero — the probe window was too short
+    // to capture any valid PSI/bitrate data (probe join timing artefact, not a signal fault).
+    // Applies to BOTH heavy and light probes: a light probe that returns zero data would
+    // score 100-16-14-14-12-6 = 38 (critical) even on a healthy stream, filling hysteresis
+    // counters and triggering a false alarm after just two consecutive short-window probes.
+    const isInconclusiveProbe = bitrateBps <= 0 && serviceCount <= 0 && pidCount <= 0;
 
     // Hysteresis: suppress transient warnings (multicast mid-stream join artifacts).
     // Rules:
     //   inconclusive probe → hold last reported, do not update counts
-    //   critical → requires 2 consecutive critical probes (same gate as warning,
-    //              prevents a single PSI-miss from immediately flagging red)
+    //   critical → requires 3 consecutive critical probes to escalate
+    //              (extra gate vs. HYSTERESIS_N guards against single-cycle PSI miss
+    //              or brief CC burst at probe join triggering a false critical)
     //   warning  → escalate only after HYSTERESIS_N consecutive warning/worse probes
     //   ok       → recover immediately to clear alarms without delay
     const HYSTERESIS_N = 2;
+    const CRIT_HYSTERESIS_N = 3;
     const raw = assessment.severity;
     const h = this._healthHysteresis;
 
@@ -1932,7 +1940,7 @@ class TSAnalyser extends EventEmitter {
     }
 
     let reported;
-    if (h.critCount >= HYSTERESIS_N) {
+    if (h.critCount >= CRIT_HYSTERESIS_N) {
       reported = 'critical';
     } else if (h.warnCount >= HYSTERESIS_N) {
       reported = 'warning';
