@@ -617,7 +617,10 @@ function buildLaneGradient(events, timeStart, windowMs) {
     }
 
     const hadActivityBeforeWindow = firstActiveTs <= timeStart;
-    const effectiveStartTs = hadActivityBeforeWindow ? timeStart : firstActiveTs;
+    // Live lane: fill from the window start regardless of when the first probe
+    // event arrived. Operators expect a continuous color bar — not a grey left
+    // section just because no probe completed in the first N seconds of the window.
+    const effectiveStartTs = (isLive || hadActivityBeforeWindow) ? timeStart : firstActiveTs;
     const startX = Math.min(100, Math.max(0, ((effectiveStartTs - timeStart) / windowMs) * 100));
     const stopX = Math.min(100, Math.max(0, ((effectiveEndTs - timeStart) / windowMs) * 100));
 
@@ -1097,10 +1100,12 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           .filter((a) => a && a.isRunning && a.id)
           .map((a) => {
             const laneId = normalizeLaneId(a.id);
-            const probeTs = Number(a?.lastResult?.probeTime);
             return {
               key: `heartbeat-${laneId}`,
-              ts: Number.isFinite(probeTs) ? probeTs : Date.now(),
+              // Always use Date.now() — this seed confirms the analyser is alive
+              // RIGHT NOW. Using probeTime here causes the heartbeat to be stale
+              // (minutes old), making staleStopTs expire and the lane go grey.
+              ts: Date.now(),
               id: laneId,
               rawId: a.id,
               category: 'runtime_heartbeat',
