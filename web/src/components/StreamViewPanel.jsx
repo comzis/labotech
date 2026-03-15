@@ -1368,6 +1368,38 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return out;
   }, [laneIds, fullLaneMap, timeStart, effectiveWindowMs]);
 
+  // Current status label per lane — derived from the last known severity event
+  // in fullLaneMap (pre-window history included) plus live heartbeat presence.
+  // Values: 'ok' | 'warning' | 'critical' | 'los' | null (not running)
+  const laneStatusById = useMemo(() => {
+    const out = {};
+    for (const id of laneIds) {
+      const events = fullLaneMap[id] || [];
+      const sorted = [...events].sort((a, b) => a.ts - b.ts);
+      // Is there a recent heartbeat confirming the process is alive?
+      const lastHeartbeatTs = sorted.filter((e) => e.category === 'runtime_heartbeat').pop()?.ts || 0;
+      const isAlive = lastHeartbeatTs >= timeStart;
+      // Check for explicit stop after the last start (process not running)
+      const explicitStarts = sorted.filter((e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap);
+      const lastStartTs = explicitStarts.length > 0 ? explicitStarts[explicitStarts.length - 1].ts : 0;
+      const stoppedAfterStart = sorted.some((e) => e.category === 'runtime_stopped' && e.ts >= lastStartTs && lastStartTs > 0);
+      if (!isAlive && stoppedAfterStart) { out[id] = null; continue; }
+      if (!isAlive && lastHeartbeatTs === 0 && explicitStarts.length === 0) { out[id] = null; continue; }
+      // Last known severity from analyse_result or runtime_error (LOS)
+      const losEvent = sorted.filter((e) => e.category === 'runtime_error' && e.evidence?.noSignal).pop();
+      const lastAnalyse = sorted.filter((e) => e.category === 'analyse_result').pop();
+      // LOS takes priority if it is newer than the last ok analyse
+      if (losEvent && (!lastAnalyse || losEvent.ts > lastAnalyse.ts)) {
+        out[id] = 'los';
+      } else if (lastAnalyse) {
+        out[id] = lastAnalyse.severity || 'ok';
+      } else {
+        out[id] = 'ok'; // running but no probe result yet
+      }
+    }
+    return out;
+  }, [laneIds, fullLaneMap, timeStart]);
+
   const laneBlocksById = useMemo(() => {
     const out = {};
     for (const id of laneIds) {
@@ -1705,6 +1737,41 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       ))}
                     </div>
                   )}
+                  {/* Right-edge status label — broadcast operator quick-read */}
+                  {(() => {
+                    const st = laneStatusById[id];
+                    if (!st) return null;
+                    const cfg = st === 'los'
+                      ? { label: 'LOS',  color: '#ff2233', bg: 'rgba(255,34,51,0.12)',  border: 'rgba(255,34,51,0.35)' }
+                      : st === 'critical'
+                        ? { label: 'CRIT', color: '#ff2233', bg: 'rgba(255,34,51,0.12)',  border: 'rgba(255,34,51,0.35)' }
+                        : st === 'warning'
+                          ? { label: 'WARN', color: '#ffaa00', bg: 'rgba(255,170,0,0.12)', border: 'rgba(255,170,0,0.35)' }
+                          : { label: 'OK',   color: '#00dd55', bg: 'rgba(0,221,85,0.10)',  border: 'rgba(0,221,85,0.30)' };
+                    return (
+                      <div
+                        className="absolute -translate-y-1/2"
+                        style={{
+                          top: `${y}px`,
+                          right: '4px',
+                          zIndex: 5,
+                          fontFamily: "'Courier New',monospace",
+                          fontSize: 9,
+                          fontWeight: 700,
+                          letterSpacing: '0.08em',
+                          color: cfg.color,
+                          background: cfg.bg,
+                          border: `1px solid ${cfg.border}`,
+                          borderRadius: 2,
+                          padding: '1px 5px',
+                          pointerEvents: 'none',
+                          userSelect: 'none',
+                        }}
+                      >
+                        {cfg.label}
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })
