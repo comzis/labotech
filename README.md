@@ -114,7 +114,7 @@ Web UI: `http://10.67.18.29:4000`
 ```bash
 # Backend
 npm install
-npm test                          # 87 tests across 4 suites
+npm test                          # 149 tests across 6 suites
 npm test -- test/encoder.test.js  # single suite
 npm start                         # API server
 
@@ -157,7 +157,9 @@ All state is **in-memory `Map()` objects** — no database.
 | `transcode.js` | `GET/POST/DELETE /transcode`, `GET /transcode/presets` |
 | `multicast.js` | `GET/POST/DELETE /multicast/forward`, `GET /multicast/config` |
 | `analyse.js` | `GET /analyse`, `POST /analyse/start`, `GET/DELETE /analyse/:id` |
+| `etr290.js` | `GET/POST/DELETE /etr290`, `GET/POST /etr290/profiles` |
 | `events.js` | `GET /api/events`, `DELETE /api/events` |
+| `encap.js` | `GET/POST/DELETE /encap/channels`, `GET /encap/health`, `GET/POST /encap/port-offender` |
 | `pipelines.js` | `POST /pipeline` — chained ingest → transcode → forward |
 | `scte35.js` | `POST /scte35/splice` |
 
@@ -172,7 +174,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `MulticastPanel` | `eno2` forwarder controls and subnet status |
 | `TSAnalyser` | One-shot TS probe, DVB service summary/table, embedded ETR290 view, and continuous decoder/monitor workflows |
 | `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
-| `StreamViewPanel` | Live UTC timeline across analyser/ETR lanes with pointer popup, lane error context, and IAT/jitter forensics |
+| `StreamViewPanel` | Live UTC timeline across analyser/ETR lanes. Canvas lane bars, rAF crosshair cursor, right-edge OK/WARN/CRIT/LOS status labels, pointer popup with error context and IAT/jitter forensics |
 | `EventLogPanel` | Central alarm/event log with UTC timestamps, instance correlation, severity/status filters, and CSV/JSONL export |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
@@ -218,7 +220,8 @@ The TS Analyser now includes transport, DVB, and ETR290 operator views:
 - **IAT sniffer diagnostics** (attempted, capture method, sample count, error) for NIC-capture visibility
 - **Transport integrity checks** for timestamp discontinuities and continuity counter (CC) errors
 - **Composite health model** (`dvb.health`) including score, severity, and reasons for operator triage
-- **Health assessment accuracy** (v3.1.4): SMPTE ST 2022-7 `insufficient_data` no longer penalises score (only `non_compliant` deducts); bitrate drift scoring applies only when `bitrateSource === 'tsduck'` to avoid false alarms from short ffprobe measurement windows
+- **Health assessment accuracy** (v3.1.3): SMPTE ST 2022-7 `insufficient_data` no longer penalises score (only `non_compliant` deducts); bitrate drift scoring applies only when `bitrateSource === 'tsduck'` to avoid false alarms from short ffprobe measurement windows
+- **Per-protocol CC thresholds** (v3.1.4): RTP and UDP multicast sources automatically use `broadcast-balanced-v1` floor values (ccWarnCount ≥ 3, ccCriticalCount ≥ 8) in `_healthThresholds()`. Eliminates false CC/discontinuity alarms from ffprobe joining mid-stream. SRT streams retain configured policy thresholds unchanged.
 
 ### Recent broadcast-grade monitoring improvements
 
@@ -284,7 +287,12 @@ For the latest UI hardening + SMPTE 2022-7 implementation details and validation
 - **Dynamic pointer popup**: follows cursor quadrants to reduce lane occlusion while inspecting nearby evidence
 - **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
 - **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
-- **Canvas lane renderer** (v3.1.5): lane bars use `HTMLCanvasElement` `fillRect()` drawing via `LaneCanvas` component, replacing CSS `linear-gradient` strings. Eliminates sub-pixel gap artefacts and slow browser recalculation on dense event lanes. `buildLaneGradient()` logic is unchanged.
+- **Canvas lane renderer** (v3.1.2): lane bars use `HTMLCanvasElement` `fillRect()` drawing via `LaneCanvas` component, replacing CSS `linear-gradient` strings. Eliminates sub-pixel gap artefacts and slow browser recalculation on dense event lanes. `buildLaneGradient()` logic is unchanged.
+- **rAF-throttled crosshair cursor** (v3.1.4): crosshair line position updated via direct DOM ref — zero React re-renders at high mousemove frequency. React state for the pointer popup is throttled to `requestAnimationFrame` (≤ 60 fps).
+- **Right-edge status labels** (v3.1.12): each lane shows a chip — **OK** / **WARN** / **CRIT** / **LOS** — derived from the latest probe result. Consistent with Elecard Boro / Telestream PRISM conventions.
+- **Lane colour stability** (v3.1.6–v3.1.11): four layered fixes ensure lanes stay green while decoders are active — heartbeat seed uses `Date.now()`, stale check uses `max(sevEventTs, heartbeatTs)`, `isLive` uses heartbeat-in-window as primary condition, tombstone detection anchored to last explicit start.
+- **Lane start position** (v3.1.14): bar begins at actual decoder start time, not the left edge of the current window.
+- **Stop All button** (v3.1.5): Active Decoders section header includes a STOP ALL control visible when one or more decoders are running.
 
 ---
 
@@ -393,20 +401,23 @@ Thumbnail quality profile options:
 
 ```bash
 npm test
-# 87 tests across 4 suites — encoder, transcoder, multicast, ts-analyser
+# 149 tests across 6 suites
 ```
 
 | Suite | Tests | Coverage |
 |---|---|---|
-| `encoder.test.js` | 91 | Input detection, FFmpeg args, DVB muxer, output modes (SRT/UDP/RTP), PID assignment, stats parsing |
-| `transcoder.test.js` | 13 | Interlace presets, yadif filter, broadcast conversions |
+| `encoder.test.js` | 57 | Input detection, FFmpeg args, DVB muxer, output modes (SRT/UDP/RTP), PID assignment, stats parsing |
+| `transcoder.test.js` | 16 | Interlace presets, yadif filter, broadcast conversions |
 | `multicast.test.js` | 13 | Subnet validator, CIDR edge cases, URL building |
-| `ts-analyser.test.js` | 12 | PAT/PMT/PID parsing, orphan streams, continuous probing |
+| `ts-analyser.test.js` | 54 | PAT/PMT/PID parsing, orphan streams, continuous probing, health scoring, per-protocol thresholds |
+| `etr290-analyser.test.js` | 6 | ETR290 P1/P2/P3 alarm parsing and profile matching |
+| `monitoring.test.js` | 3 | Thumbnail capture, atomic write, concurrency guard |
 
 ---
 
 ## Release Safety
 
+- v3.1 release notes: `docs/release-notes-v3.1.md`
 - Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
 - Engineering operations runbook: `docs/engineering-support-manual.md`
 - Disk recovery and log-rotation runbook: `docs/ops-disk-recovery.md`
