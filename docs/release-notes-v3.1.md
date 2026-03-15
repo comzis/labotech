@@ -212,3 +212,17 @@ Result: a brief signal glitch now shows as ~one probe interval of red (~5–15s 
 - `EVENT_STYLE_BY_CATEGORY['runtime_probe_timeout']` — semi-transparent amber
 
 **Result:** Lanes stay green throughout probe capture failures. Probe timeouts appear as thin amber tick marks at their exact timestamp. Only genuine LOS (`connection refused`, `input disappeared`, etc.) still drives the gradient red.
+
+---
+
+## v3.1.19 — 2026-03-16
+
+### Perf: Smooth 60fps now-line; reduce live tick to 250ms
+
+**Problem:** The cyan current-time line moved in 2-second jumps because `LIVE_TICK_MS=2000` caused `nowMs` state (and thus the entire timeline content) to update every 2 seconds.
+
+**Fix:**
+- `LIVE_TICK_MS` reduced 2000 → **250ms**: content jump is now 0.08% (~1px) at 5m window — imperceptible.
+- Now-line driven by `requestAnimationFrame` loop via `nowLineRef` DOM ref — updates at 60fps with zero React re-renders. Same pattern as the crosshair cursor.
+- `timeStartRef` / `effectiveWindowMsRef` hold latest values without restarting the rAF loop on every 250ms tick.
+- Works correctly in both live and custom range modes: hides when current time is outside the visible window.
