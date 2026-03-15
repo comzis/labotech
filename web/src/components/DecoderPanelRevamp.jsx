@@ -1161,22 +1161,25 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Alert priorities — click to enable / disable</div>
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 6 }}>
                       {[
-                        { label: "P1 Critical", desc: "Service failure", enabled: etrP1Enabled, set: setEtrP1Enabled, color: C.err },
-                        { label: "P2 Quality",  desc: "Impairment",      enabled: etrP2Enabled, set: setEtrP2Enabled, color: C.warn },
-                        { label: "P3 Info",     desc: "SI / metadata",   enabled: etrP3Enabled, set: setEtrP3Enabled, color: C.info },
-                      ].map(({ label, desc, enabled, set, color }) => (
-                        <button key={label} onClick={() => set((v) => !v)} style={{
-                          padding: "6px 8px", borderRadius: 2, cursor: "pointer", textAlign: "left",
-                          border: `2px solid ${enabled ? color : C.border}`,
-                          background: enabled ? `${color}14` : "transparent",
-                        }}>
-                          <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-                            <span style={{ width: 7, height: 7, borderRadius: "50%", background: enabled ? color : C.dim, display: "inline-block", boxShadow: enabled ? `0 0 5px ${color}` : "none" }} />
-                            <span style={{ fontSize: 10, fontWeight: 700, color: enabled ? color : C.muted }}>{label}</span>
-                          </div>
-                          <div style={{ fontSize: 9, color: enabled ? C.muted : C.dim }}>{enabled ? desc : "DISABLED"}</div>
-                        </button>
-                      ))}
+                        { label: "P1 Critical", desc: "Service failure", enabled: etrP1Enabled, set: setEtrP1Enabled, color: C.err,  keys: ['ts_sync','sync_byte','pat_error','cc_error','pmt_error','pid_error'] },
+                        { label: "P2 Quality",  desc: "Impairment",      enabled: etrP2Enabled, set: setEtrP2Enabled, color: C.warn, keys: ['transport_error','crc_error','pcr_disc','pcr_acc','pcr_rep','pts_error','cat_error'] },
+                        { label: "P3 Info",     desc: "SI / metadata",   enabled: etrP3Enabled, set: setEtrP3Enabled, color: C.info, keys: ['nit_error','sdt_error','eit_error','rst_error','tdt_error','empty_buf'] },
+                      ].map(({ label, desc, enabled, set, color, keys }) => {
+                        const hasAlarm = enabled && keys.some((k) => selectedEtrStatus?.status?.[k] === 'error');
+                        return (
+                          <button key={label} onClick={() => set((v) => !v)} style={{
+                            padding: "6px 8px", borderRadius: 2, cursor: "pointer", textAlign: "left",
+                            border: `2px solid ${hasAlarm ? color : enabled ? "rgba(255,255,255,0.12)" : C.border}`,
+                            background: hasAlarm ? `${color}14` : enabled ? "rgba(255,255,255,0.04)" : "transparent",
+                          }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
+                              <span style={{ width: 7, height: 7, borderRadius: "50%", background: hasAlarm ? color : enabled ? "rgba(255,255,255,0.45)" : C.dim, display: "inline-block", boxShadow: hasAlarm ? `0 0 5px ${color}` : "none" }} />
+                              <span style={{ fontSize: 10, fontWeight: 700, color: hasAlarm ? color : enabled ? C.text : C.muted }}>{label}</span>
+                            </div>
+                            <div style={{ fontSize: 9, color: enabled ? C.muted : C.dim }}>{enabled ? desc : "DISABLED"}</div>
+                          </button>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -1185,9 +1188,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     { p: 1, label: "Priority 1 — Service not receivable (critical alarms)", color: C.err, enabled: etrP1Enabled, keys: ['ts_sync','sync_byte','pat_error','cc_error','pmt_error','pid_error'] },
                     { p: 2, label: "Priority 2 — Quality impairment", color: C.warn, enabled: etrP2Enabled, keys: ['transport_error','crc_error','pcr_disc','pcr_acc','pcr_rep','pts_error','cat_error'] },
                     { p: 3, label: "Priority 3 — Informational (SI/metadata)", color: C.info, enabled: etrP3Enabled, keys: ['nit_error','sdt_error','eit_error','rst_error','tdt_error','empty_buf'] },
-                  ].map(({ p, label, color, enabled, keys }) => (
-                    <div key={p} style={{ opacity: enabled ? 1 : 0.4 }}>
-                      <div style={{ fontSize: 8, color: enabled ? color : C.muted, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
+                  ].map(({ p, label, color, enabled, keys }) => {
+                    const groupHasAlarm = enabled && keys.some((k) => selectedEtrStatus?.status?.[k] === 'error');
+                    const headerColor = groupHasAlarm ? color : enabled ? C.muted : C.dim;
+                    return (<div key={p} style={{ opacity: enabled ? 1 : 0.4 }}>
+                      <div style={{ fontSize: 8, color: headerColor, fontWeight: 700, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>
                         {label}{!enabled ? " — DISABLED" : ""}
                       </div>
                       {/* header row */}
@@ -1232,8 +1237,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           </div>
                         );
                       })}
-                    </div>
-                  ))}
+                    </div>);
+                  })}
 
                   {/* ── Apply config CTA ────────────────────────────────── */}
                   <button
