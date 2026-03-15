@@ -543,10 +543,14 @@ function buildLaneGradient(events, timeStart, windowMs) {
     //   - Escalation (ok→bad or warn→critical): immediate, resets okStreak.
     //   - Downgrade (critical→warning): immediate transition, preserves okStreak.
     //   - Recovery (bad→ok): requires OKS_TO_CLEAR consecutive ok events.
+    //     Exception: after a runtime_error noSignal event (binary signal-presence),
+    //     only ONE ok probe is required to clear. noSignalRecovery is reset to
+    //     false as soon as a sustained analyse_result critical confirms the state.
     //   - Repeated same-severity bad events do NOT reset okStreak — prevents
     //     alternating warn/ok patterns from locking the lane permanently red.
     let stateSev = null;
     let okStreak = 0;
+    let noSignalRecovery = false; // true = next single ok clears critical
     const stateChanges = []; // { ts, sev }
 
     for (const e of sevEvts) {
@@ -556,6 +560,9 @@ function buildLaneGradient(events, timeStart, windowMs) {
         if (sevLevel(raw) > sevLevel(stateSev)) {
           // Escalation: reset streak, record transition.
           okStreak = 0;
+          // Signal-loss events are binary: present or absent. One ok probe is
+          // sufficient to confirm recovery. Sustained probe-critical overrides.
+          noSignalRecovery = (e.category === 'runtime_error' && !!e.evidence?.noSignal);
           stateChanges.push({ ts: e.ts, sev: raw });
           stateSev = raw;
         } else if (sevLevel(raw) < sevLevel(stateSev)) {
@@ -563,13 +570,18 @@ function buildLaneGradient(events, timeStart, windowMs) {
           // keep okStreak so recovery can continue counting.
           stateChanges.push({ ts: e.ts, sev: raw });
           stateSev = raw;
+        } else if (noSignalRecovery && e.category === 'analyse_result') {
+          // Sustained probe confirms the critical state — revert to normal hysteresis.
+          noSignalRecovery = false;
         }
         // Same severity: no change, no streak reset.
       } else { // ok-like (ok or pending)
         if (isBad(stateSev)) {
           okStreak++;
-          if (okStreak >= OKS_TO_CLEAR) {
+          const clearAt = noSignalRecovery ? 1 : OKS_TO_CLEAR;
+          if (okStreak >= clearAt) {
             okStreak = 0;
+            noSignalRecovery = false;
             stateChanges.push({ ts: e.ts, sev: raw });
             stateSev = raw;
           }
