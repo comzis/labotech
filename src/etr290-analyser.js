@@ -4,6 +4,16 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const INCIDENT_CLEAR_GRACE_MS = parseInt(process.env.ETR290_INCIDENT_CLEAR_GRACE_MS || '12000', 10) || 12000;
 const INCIDENT_SAMPLE_LINES = 6;
+// Pending counts are only meaningful within a burst window. If the last match
+// for a check was more than this many ms ago, reset pendingCounts before
+// counting the new hit — converting threshold from "N hits ever" to "N hits
+// within PENDING_BURST_WINDOW_MS". Prevents isolated single-event blips from
+// slowly accumulating across minutes and crossing the threshold spuriously.
+const PENDING_BURST_WINDOW_MS = parseInt(process.env.ETR290_PENDING_BURST_WINDOW_MS || '30000', 10) || 30000;
+// Higher-noise checks that require a genuine burst (not a single processing
+// blip) before an incident is raised. Operators can override via profile
+// thresholds; these are the factory defaults.
+const NOISY_CHECK_DEFAULTS = { transport_error: 3, pcr_disc: 3 };
 
 // ETR 290 (ETSI TR 101 290) check definitions by priority
 const CHECKS = {
@@ -55,7 +65,9 @@ function normalisePidList(list) {
 
 function normaliseThresholds(input) {
   const thresholds = {};
-  for (const id of ALL_CHECK_IDS) thresholds[id] = 1;
+  for (const id of ALL_CHECK_IDS) {
+    thresholds[id] = NOISY_CHECK_DEFAULTS[id] ?? 1;
+  }
   if (!input || typeof input !== 'object') return thresholds;
   for (const id of ALL_CHECK_IDS) {
     const v = parseInt(input[id], 10);
@@ -77,7 +89,8 @@ class ETR290Analyser extends EventEmitter {
     this._counts = {};   // checkId → count
     this._status = {};   // checkId → 'ok' | 'error'
     this._activeIncidents = {}; // checkId -> incident
-    this._pendingCounts = {}; // checkId -> matches not yet escalated to incident
+    this._pendingCounts = {};       // checkId -> matches not yet escalated to incident
+    this._pendingLastMatchAt = {};  // checkId -> ms timestamp of last pending match (burst window)
     this._incidentSeq = 0;
     this._runtime = {
       bitrateMbps: null,
@@ -98,6 +111,7 @@ class ETR290Analyser extends EventEmitter {
         this._counts[c.id] = 0;
         this._status[c.id] = 'ok';
         this._pendingCounts[c.id] = 0;
+        this._pendingLastMatchAt[c.id] = 0;
         this._diagnostics.perCheck[c.id] = {
           matches: 0,
           lastMatchAt: null,
@@ -220,7 +234,14 @@ class ETR290Analyser extends EventEmitter {
             continue;
           }
           this._counts[c.id]++;
+          // Burst-window reset: if the previous pending match for this check
+          // was more than PENDING_BURST_WINDOW_MS ago, isolated blips that
+          // slowly accumulated can no longer carry over — start a fresh count.
+          if (now - (this._pendingLastMatchAt[c.id] || 0) > PENDING_BURST_WINDOW_MS) {
+            this._pendingCounts[c.id] = 0;
+          }
           this._pendingCounts[c.id] = (this._pendingCounts[c.id] || 0) + 1;
+          this._pendingLastMatchAt[c.id] = now;
           this._diagnostics.lastMatchAt = now;
           this._diagnostics.totalMatchedLines += 1;
           this._diagnostics.perCheck[c.id] = {
@@ -252,6 +273,7 @@ class ETR290Analyser extends EventEmitter {
             };
             this._activeIncidents[c.id] = incident;
             this._pendingCounts[c.id] = 0;
+            this._pendingLastMatchAt[c.id] = now;
             this._status[c.id] = 'error';
             this.emit('incident_started', { ...incident });
           } else {
@@ -318,6 +340,7 @@ class ETR290Analyser extends EventEmitter {
       delete this._activeIncidents[checkId];
       this._status[checkId] = 'ok';
       this._pendingCounts[checkId] = 0;
+      this._pendingLastMatchAt[checkId] = 0;
       this.emit('incident_cleared', cleared);
       changed = true;
     }

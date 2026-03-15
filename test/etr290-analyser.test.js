@@ -10,8 +10,14 @@ describe('ETR290Analyser parser patterns', () => {
 
   test('registers timestamp discontinuity wording as pcr_disc', () => {
     const a = new ETR290Analyser({ id: 'etr-test', url: 'udp://239.1.1.1:1234' });
+    // pcr_disc has a default burst threshold of 3 (processing-noise filter).
+    // Pattern must match on first hit, but incident only escalates after 3 hits.
     a._parseLine('[mpegts @ 0x0] time stamp discontinuity detected on pid 100');
-    expect(a._counts.pcr_disc).toBeGreaterThan(0);
+    expect(a._counts.pcr_disc).toBe(1);
+    expect(a._status.pcr_disc).toBe('ok'); // pending — threshold not yet reached
+    a._parseLine('[mpegts @ 0x0] time stamp discontinuity detected on pid 100');
+    a._parseLine('[mpegts @ 0x0] time stamp discontinuity detected on pid 100');
+    expect(a._counts.pcr_disc).toBe(3);
     expect(a._status.pcr_disc).toBe('error');
   });
 
@@ -34,6 +40,30 @@ describe('ETR290Analyser parser patterns', () => {
     expect(cleared.length).toBe(1);
     expect(cleared[0].status).toBe('cleared');
     expect(a._status.cc_error).toBe('ok');
+  });
+
+  test('burst window resets pending count for stale single-blip matches', () => {
+    const a = new ETR290Analyser({
+      id: 'etr-burst',
+      url: 'udp://239.1.1.1:1234',
+      config: { thresholds: { transport_error: 3 } },
+    });
+    const started = [];
+    a.on('incident_started', (evt) => started.push(evt));
+
+    // Two isolated blips, each within burst window of each other
+    a._parseLine('[mpegts @ 0x0] Packet corrupt (stream = 0, dts = 100), dropping it.');
+    a._parseLine('[mpegts @ 0x0] Packet corrupt (stream = 0, dts = 200), dropping it.');
+    expect(a._counts.transport_error).toBe(2);
+    expect(a._status.transport_error).toBe('ok'); // still pending
+
+    // Simulate burst window expiry by back-dating the last match timestamp
+    a._pendingLastMatchAt.transport_error = Date.now() - 60000;
+
+    // Third blip — arrives after the burst window, so pending count resets to 1
+    a._parseLine('[mpegts @ 0x0] Packet corrupt (stream = 0, dts = 300), dropping it.');
+    expect(a._status.transport_error).toBe('ok'); // count reset to 1, still pending
+    expect(started.length).toBe(0);
   });
 
   test('respects per-check threshold before raising incident', () => {

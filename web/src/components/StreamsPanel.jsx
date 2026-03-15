@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Activity } from 'lucide-react';
 import { toast } from 'sonner';
 import useStreams from '../hooks/useStreams';
-import { getEncapsulatorHealth, stopStream } from '../api';
+import { getEncapsulatorHealth, inspectEncapPortOffender, resolveEncapPortOffender, stopStream } from '../api';
 import StatusDot from './StatusDot';
 import MetricsTile from './MetricsTile';
 import EncoderForm from './EncoderForm';
@@ -51,6 +51,7 @@ export default function StreamsPanel({ lastMessage }) {
   const [encapStaleSince, setEncapStaleSince] = useState(null); // ms timestamp, set on first failure
   const [encapHealthError, setEncapHealthError] = useState(null);
   const [encapHealthLoading, setEncapHealthLoading] = useState(false);
+  const [encapResolveBusy, setEncapResolveBusy] = useState(false);
   const [encapLastCheckMs, setEncapLastCheckMs] = useState(null);
   const encapFailCount = React.useRef(0);
   const encapStaleSinceRef = React.useRef(null); // same value as encapStaleSince but ref-stable for logic
@@ -112,6 +113,44 @@ export default function StreamsPanel({ lastMessage }) {
       }
     }
     refresh();
+  };
+
+  const resolveEncapPortConflict = async () => {
+    if (encapResolveBusy) return;
+    setEncapResolveBusy(true);
+    try {
+      const preview = await inspectEncapPortOffender(4100);
+      const listeners = Array.isArray(preview?.listeners) ? preview.listeners : [];
+      if (listeners.length === 0) {
+        toast.message('No listener detected on 4100.');
+        await loadEncapHealth({ forceError: true });
+        return;
+      }
+      const summary = listeners.map((l) => {
+        const pid = l?.pid != null ? `PID ${l.pid}` : 'PID unknown';
+        const hint = l?.commandHint || 'unknown process';
+        return `${pid} (${hint})`;
+      }).join(', ');
+      const ok = window.confirm(`Resolve port 4100 conflict?\nDetected: ${summary}\n\nThis sends SIGTERM to allowlisted offender processes.`);
+      if (!ok) return;
+      const result = await resolveEncapPortOffender(4100, true);
+      const killedCount = Number(result?.killedCount || 0);
+      const remainingCount = Number(result?.remainingCount || 0);
+      if (killedCount > 0) {
+        toast.success(`Sent SIGTERM to ${killedCount} process(es) on port 4100.`);
+      } else {
+        toast.warning('No process was killed (not allowlisted or already exited).');
+      }
+      if (remainingCount > 0) {
+        toast.warning(`Port 4100 still has ${remainingCount} listener(s). Use host triage script if needed.`);
+      }
+      encapFailCount.current = 2;
+      await loadEncapHealth({ forceError: true });
+    } catch (err) {
+      toast.error(`Resolve failed: ${err.message}`);
+    } finally {
+      setEncapResolveBusy(false);
+    }
   };
 
   const running = streams.filter((s) => s.isRunning);
@@ -211,6 +250,14 @@ export default function StreamsPanel({ lastMessage }) {
                 className="shrink-0 rounded border border-red-600/60 px-2 py-1 text-[10px] uppercase tracking-wide text-red-100 hover:bg-red-900/30 disabled:opacity-50"
               >
                 {encapHealthLoading ? 'Retrying...' : 'Retry'}
+              </button>
+              <button
+                onClick={resolveEncapPortConflict}
+                disabled={encapResolveBusy}
+                className="shrink-0 rounded border border-amber-500/70 px-2 py-1 text-[10px] uppercase tracking-wide text-amber-100 hover:bg-amber-900/30 disabled:opacity-50"
+                title="Detect and terminate allowlisted process listeners on 127.0.0.1:4100"
+              >
+                {encapResolveBusy ? 'Resolving...' : 'Resolve Port 4100'}
               </button>
             </div>
             <div className="mt-1 text-[10px] text-red-300/90">

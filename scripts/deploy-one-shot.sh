@@ -6,6 +6,7 @@ API_PORT="${2:-4000}"
 SERVICE="${3:-labotech}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
 ENCAP_HEALTH_URL="${ENCAP_HEALTH_URL:-http://127.0.0.1:4100/health}"
+ENCAP_HEALTH_CHECK_ENABLED="${ENCAP_HEALTH_CHECK_ENABLED:-0}"
 ENCAP_HEALTH_REQUIRED="${ENCAP_HEALTH_REQUIRED:-0}"
 ENCAP_HEALTH_RETRIES="${ENCAP_HEALTH_RETRIES:-12}"
 ENCAP_HEALTH_DELAY_SEC="${ENCAP_HEALTH_DELAY_SEC:-5}"
@@ -293,14 +294,19 @@ main() {
   run_stage_or_die "disk headroom precheck" check_disk_headroom || return 1
   run_stage_or_die "rebuild and restart containers" rebuild_and_restart || return 1
   run_stage_or_die "wait for health endpoint" wait_for_health || return 1
-  if [[ "${ENCAP_HEALTH_REQUIRED}" == "1" ]]; then
-    if ! run_stage_or_die "wait for encapsulator health (required)" wait_for_encapsulator_health; then
-      run_encap_triage_if_enabled
-      return 1
-    fi
+  if [[ "${ENCAP_HEALTH_CHECK_ENABLED}" != "1" ]]; then
+    log "stage: wait for encapsulator health"
+    echo "[WARN] encapsulator readiness check skipped (ENCAP_HEALTH_CHECK_ENABLED=${ENCAP_HEALTH_CHECK_ENABLED})"
   else
-    if ! run_stage_warn "wait for encapsulator health (optional)" wait_for_encapsulator_health; then
-      run_encap_triage_if_enabled
+    if [[ "${ENCAP_HEALTH_REQUIRED}" == "1" ]]; then
+      if ! run_stage_or_die "wait for encapsulator health (required)" wait_for_encapsulator_health; then
+        run_encap_triage_if_enabled
+        return 1
+      fi
+    else
+      if ! run_stage_warn "wait for encapsulator health (optional)" wait_for_encapsulator_health; then
+        run_encap_triage_if_enabled
+      fi
     fi
   fi
   run_stage_or_die "container tooling parity" container_tool_parity || return 1
