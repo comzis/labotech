@@ -9,8 +9,11 @@ const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'BES';
 const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
-const MULTIVIEW_REFRESH_MS = 12000;
+const MULTIVIEW_REFRESH_MS = 5000;   // match probe cadence so stale data is replaced promptly
 const MULTIVIEW_CLOCK_TICK_MS = 3000;
+// After mount, if active analysers have no results yet, retry quickly up to this many times.
+const MOUNT_RETRY_MAX = 6;
+const MOUNT_RETRY_INTERVAL_MS = 2000;
 
 function normalizePanelName(raw) {
   return String(raw || '')
@@ -204,6 +207,7 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
   const thumbFresh = thumbAgeSec != null ? thumbAgeSec <= 8 : false;
   const hasTelemetry = Boolean(result?.probeTime);
+  const hasProbeError = !hasTelemetry && Boolean(result?.probeError);
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
   const isRunning = Boolean(meta?.isRunning);
   const telemetryFresh = hasTelemetry && staleMs <= 15000;
@@ -289,9 +293,11 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         </div>
         <div
           className="text-[10px] font-mono uppercase tracking-wider"
-          style={{ color: freshness.color }}
+          style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
         >
-          update age: {freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - {freshness.label}
+          {hasProbeError
+            ? `probe error: ${String(result.probeError).slice(0, 60)}`
+            : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
         </div>
         <div
           className="text-[10px] font-mono uppercase tracking-wider"
@@ -462,6 +468,25 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     }, MULTIVIEW_REFRESH_MS);
     return () => clearInterval(t);
   }, [refreshActives]);
+
+  // Mount-phase rapid retry: when active analysers exist but resultsById is still
+  // empty (server probe not yet complete or first WS message hasn't arrived),
+  // re-poll until data appears or retry budget is exhausted.
+  const mountRetryCountRef = React.useRef(0);
+  useEffect(() => {
+    mountRetryCountRef.current = 0;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // reset on mount only
+
+  useEffect(() => {
+    if (activeIds.length === 0) return; // nothing running yet
+    const hasData = activeIds.some((id) => resultsById[id]?.probeTime);
+    if (hasData) { mountRetryCountRef.current = MOUNT_RETRY_MAX; return; } // satisfied
+    if (mountRetryCountRef.current >= MOUNT_RETRY_MAX) return;
+    mountRetryCountRef.current += 1;
+    const t = setTimeout(() => refreshActives(), MOUNT_RETRY_INTERVAL_MS);
+    return () => clearTimeout(t);
+  }, [activeIds, resultsById, refreshActives]);
 
   useEffect(() => {
     if (lastMessage) onWsResult(lastMessage);
