@@ -8,6 +8,9 @@ import { C } from './BroadcastUI';
 const STREAMVIEW_STATE_KEY = 'labotech:streamview:state:v2';
 
 const WINDOW_OPTIONS = [
+  { value: 30 * 1000, label: '30s' },
+  { value: 60 * 1000, label: '1m' },
+  { value: 2 * 60 * 1000, label: '2m' },
   { value: 5 * 60 * 1000, label: '5m' },
   { value: 15 * 60 * 1000, label: '15m' },
   { value: 60 * 60 * 1000, label: '1h' },
@@ -903,7 +906,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [mouseY, setMouseY] = useState(null);
   const [mouseLaneId, setMouseLaneId] = useState(null);
   const [freezeCursor, setFreezeCursor] = useState(false);
-  const [scaleMode, setScaleMode] = useState('normalized');
   const [rangeMode, setRangeMode] = useState('relative'); // relative | custom
   const [customStartInput, setCustomStartInput] = useState('');
   const [customEndInput, setCustomEndInput] = useState('');
@@ -933,7 +935,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
               .slice(-MAX_EVENTS)
           );
         }
-        if (parsed.scaleMode === 'normalized' || parsed.scaleMode === 'absolute') setScaleMode(parsed.scaleMode);
         if (parsed.rangeMode === 'relative' || parsed.rangeMode === 'custom') setRangeMode(parsed.rangeMode);
         if (typeof parsed.customStartInput === 'string') setCustomStartInput(parsed.customStartInput);
         if (typeof parsed.customEndInput === 'string') setCustomEndInput(parsed.customEndInput);
@@ -963,7 +964,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
         JSON.stringify({
           windowMs,
           events: events.slice(-MAX_EVENTS),
-          scaleMode,
           rangeMode,
           customStartInput,
           customEndInput,
@@ -976,7 +976,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     uiRestored,
     windowMs,
     events,
-    scaleMode,
     rangeMode,
     customStartInput,
     customEndInput,
@@ -1352,29 +1351,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
     return byLane;
   }, [laneIds, laneMap]);
 
-  const globalRanges = useMemo(() => {
-    const collect = (field) => laneIds.flatMap((id) => forensicByLane[id]?.[field] || []);
-    const mk = (arr) => {
-      if (!arr.length) return { min: null, max: null };
-      return { min: Math.min(...arr), max: Math.max(...arr) };
-    };
-    return {
-      iatMin: mk(collect('iatMin')),
-      iatAvg: mk(collect('iatAvg')),
-      iatP95: mk(collect('iatP95')),
-      jitter: mk(collect('jitter')),
-      loss: mk(collect('loss')),
-    };
-  }, [forensicByLane, laneIds]);
-
-  const sparkScale = (metric) => {
-    if (scaleMode !== 'absolute') return { minValue: null, maxValue: null };
-    return {
-      minValue: globalRanges[metric]?.min ?? null,
-      maxValue: globalRanges[metric]?.max ?? null,
-    };
-  };
-
   const laneLineById = useMemo(() => {
     const out = {};
     for (const id of laneIds) {
@@ -1500,16 +1476,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                 {opt.label}
               </button>
             ))}
-            <button
-              onClick={() => setScaleMode((m) => (m === 'normalized' ? 'absolute' : 'normalized'))}
-              className={`text-[11px] px-2 py-0.5 rounded border ${
-                scaleMode === 'absolute'
-                  ? 'border-led-amber/50 text-led-amber bg-led-amber/10'
-                  : 'border-white/10 text-gray-400 bg-black/20'
-              }`}
-            >
-              Scale: {scaleMode === 'absolute' ? 'Absolute' : 'Normalized'}
-            </button>
             <button
               onClick={() => setFreezeCursor((v) => !v)}
               className={`text-[11px] px-2 py-0.5 rounded border ${
@@ -1983,27 +1949,27 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                       <div className="grid grid-cols-1 lg:grid-cols-5 gap-2">
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
                           <div className="text-[10px] text-gray-500 uppercase">IAT Min (ms)</div>
-                          <Sparkline data={lane.iatMin} width={120} height={24} color="#00ddff" {...sparkScale('iatMin')} />
+                          <Sparkline data={lane.iatMin} width={120} height={24} color="#00ddff" />
                           <div className="font-mono text-gray-300 text-[11px]">{latestIat.min ?? '-'}</div>
                         </div>
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
                           <div className="text-[10px] text-gray-500 uppercase">IAT Avg (ms)</div>
-                          <Sparkline data={lane.iatAvg} width={120} height={24} color="#66ccff" {...sparkScale('iatAvg')} />
+                          <Sparkline data={lane.iatAvg} width={120} height={24} color="#66ccff" />
                           <div className="font-mono text-gray-300 text-[11px]">{latestIat.avg ?? '-'}</div>
                         </div>
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
                           <div className="text-[10px] text-gray-500 uppercase">IAT P95 (ms)</div>
-                          <Sparkline data={lane.iatP95} width={120} height={24} color="#cc88ff" {...sparkScale('iatP95')} />
+                          <Sparkline data={lane.iatP95} width={120} height={24} color="#cc88ff" />
                           <div className="font-mono text-gray-300 text-[11px]">{latestIat.p95 ?? '-'}</div>
                         </div>
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
                           <div className="text-[10px] text-gray-500 uppercase">Jitter (ms)</div>
-                          <Sparkline data={lane.jitter} width={120} height={24} color="#ffaa00" {...sparkScale('jitter')} />
+                          <Sparkline data={lane.jitter} width={120} height={24} color="#ffaa00" />
                           <div className="font-mono text-gray-300 text-[11px]">{latest?.jitterMs ?? '-'}</div>
                         </div>
                         <div className="rounded border border-white/10 bg-black/20 p-1.5">
                           <div className="text-[10px] text-gray-500 uppercase">Packet Loss (%)</div>
-                          <Sparkline data={lane.loss} width={120} height={24} color="#ff5566" {...sparkScale('loss')} />
+                          <Sparkline data={lane.loss} width={120} height={24} color="#ff5566" />
                           <div className="font-mono text-gray-300 text-[11px]">{latest?.packetLossPct ?? '-'}</div>
                         </div>
                       </div>
