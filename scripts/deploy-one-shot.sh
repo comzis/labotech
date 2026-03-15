@@ -9,6 +9,8 @@ ENCAP_HEALTH_URL="${ENCAP_HEALTH_URL:-http://127.0.0.1:4100/health}"
 ENCAP_HEALTH_REQUIRED="${ENCAP_HEALTH_REQUIRED:-0}"
 ENCAP_HEALTH_RETRIES="${ENCAP_HEALTH_RETRIES:-12}"
 ENCAP_HEALTH_DELAY_SEC="${ENCAP_HEALTH_DELAY_SEC:-5}"
+ENCAP_TRIAGE_ON_FAIL="${ENCAP_TRIAGE_ON_FAIL:-1}"
+ENCAP_PROMPT_KILL_ON_4100="${ENCAP_PROMPT_KILL_ON_4100:-1}"
 RECREATE_ALL="${RECREATE_ALL:-0}"
 COMPOSE_BIN=""
 MIN_FREE_MB="${MIN_FREE_MB:-8192}"
@@ -64,7 +66,7 @@ run_stage_warn() {
     return 0
   fi
   echo "[WARN] ${name} (non-fatal)"
-  return 0
+  return 1
 }
 
 require_cmds() {
@@ -175,6 +177,89 @@ wait_for_encapsulator_health() {
   return 1
 }
 
+prompt_kill_4100_offender() {
+  # Interactive helper: when 4100 is occupied, ask operator if offending PID(s)
+  # should be terminated. Disabled automatically in non-interactive runs.
+  if [[ "${ENCAP_PROMPT_KILL_ON_4100}" != "1" ]]; then
+    echo "[triage] interactive kill prompt disabled (ENCAP_PROMPT_KILL_ON_4100=${ENCAP_PROMPT_KILL_ON_4100})"
+    return 0
+  fi
+  if [[ ! -t 0 ]]; then
+    echo "[triage] non-interactive shell detected; skipping kill prompt"
+    return 0
+  fi
+  if ! command -v ss >/dev/null 2>&1; then
+    echo "[triage] ss not available; cannot auto-detect listener PID(s)"
+    return 0
+  fi
+
+  local ss_lines pids pid line ans
+  ss_lines="$(ss -ltnp 2>/dev/null | awk '/:4100/ {print $0}' || true)"
+  if [[ -z "${ss_lines}" ]]; then
+    echo "[triage] no :4100 listener detected at prompt stage"
+    return 0
+  fi
+
+  pids="$(printf '%s\n' "${ss_lines}" | sed -n 's/.*pid=\([0-9]\+\).*/\1/p' | awk '!seen[$0]++')"
+  if [[ -z "${pids}" ]]; then
+    echo "[triage] :4100 is occupied but PID extraction failed; skipping kill prompt"
+    return 0
+  fi
+
+  echo "[triage] :4100 listener(s) detected:"
+  printf '%s\n' "${ss_lines}"
+  echo "[triage] For safety, only confirm kill for processes you recognize as conflicting."
+  for pid in ${pids}; do
+    line="$(ps -p "${pid}" -o pid=,ppid=,user=,comm=,args= 2>/dev/null || true)"
+    echo "[triage] PID ${pid}: ${line:-<process details unavailable>}"
+    printf "Kill PID %s now? [y/N]: " "${pid}"
+    read -r ans
+    if [[ "${ans}" =~ ^[Yy]$ ]]; then
+      if kill -TERM "${pid}" 2>/dev/null; then
+        echo "[triage] sent SIGTERM to PID ${pid}"
+      else
+        echo "[triage] unable to kill PID ${pid} (permissions or process exited)"
+      fi
+    else
+      echo "[triage] kept PID ${pid}"
+    fi
+  done
+  return 0
+}
+
+triage_encapsulator_failure() {
+  echo "[triage] encapsulator readiness diagnostics"
+  echo "[triage] compose command: ${COMPOSE_BIN}"
+  echo "[triage] service status:"
+  ${COMPOSE_BIN} ps || true
+
+  echo "[triage] host listener check (:4100):"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltnp | awk 'NR==1 || /:4100/' || true
+  else
+    echo "[triage] ss not available"
+  fi
+
+  echo "[triage] host health probe ${ENCAP_HEALTH_URL}:"
+  curl -fsS --max-time 5 "${ENCAP_HEALTH_URL}" || echo "[triage] host health probe failed"
+
+  echo "[triage] encapsulator logs (tail 120):"
+  ${COMPOSE_BIN} logs --tail=120 labotech-encapsulator || true
+
+  echo "[triage] ${SERVICE} logs (tail 80):"
+  ${COMPOSE_BIN} logs --tail=80 "${SERVICE}" || true
+
+  prompt_kill_4100_offender
+}
+
+run_encap_triage_if_enabled() {
+  if [[ "${ENCAP_TRIAGE_ON_FAIL}" == "1" ]]; then
+    triage_encapsulator_failure
+  else
+    echo "[triage] skipped (ENCAP_TRIAGE_ON_FAIL=${ENCAP_TRIAGE_ON_FAIL})"
+  fi
+}
+
 container_tool_parity() {
   local missing=()
   local t
@@ -209,9 +294,14 @@ main() {
   run_stage_or_die "rebuild and restart containers" rebuild_and_restart || return 1
   run_stage_or_die "wait for health endpoint" wait_for_health || return 1
   if [[ "${ENCAP_HEALTH_REQUIRED}" == "1" ]]; then
-    run_stage_or_die "wait for encapsulator health (required)" wait_for_encapsulator_health || return 1
+    if ! run_stage_or_die "wait for encapsulator health (required)" wait_for_encapsulator_health; then
+      run_encap_triage_if_enabled
+      return 1
+    fi
   else
-    run_stage_warn "wait for encapsulator health (optional)" wait_for_encapsulator_health
+    if ! run_stage_warn "wait for encapsulator health (optional)" wait_for_encapsulator_health; then
+      run_encap_triage_if_enabled
+    fi
   fi
   run_stage_or_die "container tooling parity" container_tool_parity || return 1
   run_stage_or_die "preflight script" bash scripts/preflight-monitoring-tools.sh "${API_HOST}" "${API_PORT}" || return 1
