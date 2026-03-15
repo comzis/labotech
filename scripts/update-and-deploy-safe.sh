@@ -117,7 +117,13 @@ container_log_cleanup() {
 }
 
 auto_cleanup() {
-  log "auto cleanup: truncating app logs and pruning docker artifacts"
+  log "auto cleanup: stopping containers and pruning docker artifacts"
+
+  # Bring containers down first so their image layers can be freed by docker prune.
+  # Without this, the running container holds the image in use and prune reclaims nothing.
+  # This is safe — deploy-one-shot.sh will rebuild and restart them immediately after.
+  ${COMPOSE_BIN} down --remove-orphans 2>/dev/null || true
+
   container_log_cleanup
 
   # Truncate Docker container JSON logs — these are NOT removed by docker system
@@ -134,14 +140,10 @@ auto_cleanup() {
     log "docker json logs truncated: reclaimed ~${reclaimed_mb} MB"
   fi
 
-  docker builder prune -af || true
-  docker image prune -af || true
-  docker container prune -f || true
   docker system prune -af || true
 
   if [[ "${AUTO_CLEAN_AGGRESSIVE}" == "1" ]]; then
     log "auto cleanup aggressive mode enabled"
-    ${COMPOSE_BIN} down --remove-orphans || true
     docker system prune -af --volumes || true
   fi
 

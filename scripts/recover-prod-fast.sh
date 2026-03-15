@@ -27,7 +27,7 @@ else
 fi
 
 echo "==> Recover target: ${TARGET_REF}"
-git fetch --all --tags --prune
+git fetch --prune origin
 git rev-parse --verify "${TARGET_REF}" >/dev/null
 git checkout "${TARGET_REF}"
 
