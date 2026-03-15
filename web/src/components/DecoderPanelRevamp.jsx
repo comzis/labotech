@@ -86,14 +86,17 @@ function normalizeLaneId(rawId) {
   return id.replace(/^etr[-_:]/i, "") || id;
 }
 
-function buildProbeUrl({ mode, host, port, latency, passphrase }) {
+function buildProbeUrl({ mode, host, port, latency, passphrase, pbkeylen }) {
   if (!host || !port) return "";
   if (mode === "udp") return `udp://${host}:${port}`;
   if (mode === "rtp") return `rtp://${host}:${port}`;
   let url = `srt://${host}:${port}`;
-  const params = ["stats=1", "statsintvl=1"];
+  const params = ["mode=caller", "stats=1", "statsintvl=1"];
   if (latency) params.push(`latency=${latency}`);
-  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (passphrase) {
+    params.push(`passphrase=${encodeURIComponent(passphrase)}`);
+    params.push(`pbkeylen=${pbkeylen || 16}`);
+  }
   if (params.length) url += `?${params.join("&")}`;
   return url;
 }
@@ -443,6 +446,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
   const [latency, setLatency] = useState("2000");
   const [passphrase, setPassphrase] = useState("");
+  const [pbkeylen, setPbkeylen] = useState(16);
   const [intervalMs, setIntervalMs] = useState(5000);
   const [addToMultiview, setAddToMultiview] = useState(true);
   const [captureNic, setCaptureNic] = useState("");
@@ -562,9 +566,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           port: row.port,
           latency,
           passphrase,
+          pbkeylen,
         }),
       })),
-    [decoderRows, mode, latency, passphrase]
+    [decoderRows, mode, latency, passphrase, pbkeylen]
   );
 
   const validRowPlans = rowPlans.filter((r) => r.url);
@@ -575,6 +580,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     port: legBPort,
     latency,
     passphrase,
+    pbkeylen,
   });
   const selectedResult = useMemo(() => {
     if (selectedId) return resultsById[selectedId] || (result?.id === selectedId ? result : null);
@@ -1080,12 +1086,24 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               </div>
 
               {mode === "srt" && (
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 10 }}>
                   <Field label="Latency (ms)">
                     <Input value={latency} onChange={(e) => setLatency(e.target.value)} mono />
                   </Field>
-                  <Field label="Passphrase">
+                  <Field label="Passphrase (AES key)">
                     <Input value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
+                  </Field>
+                  <Field label="Key len">
+                    <select
+                      value={pbkeylen}
+                      onChange={(e) => setPbkeylen(Number(e.target.value))}
+                      style={{ width: "100%", height: 30, background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 2, fontSize: 10, padding: "0 4px" }}
+                      title="AES key length: 16=AES-128, 24=AES-192, 32=AES-256"
+                    >
+                      <option value={16}>128</option>
+                      <option value={24}>192</option>
+                      <option value={32}>256</option>
+                    </select>
                   </Field>
                 </div>
               )}
@@ -1492,8 +1510,8 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             const captureMethod = captureMethodRaw === "tshark" || captureMethodRaw === "tcpdump"
               ? `NIC-${captureMethodRaw}`
               : (captureMethodRaw === "tsduck" ? "ANALYSER" : "UNAVAILABLE");
-            const policyProfile = selectedResult?.dvb?.monitoringPolicy?.profile || policyData?.current?.profile || "-";
-            const policyProfileMeta = selectedResult?.dvb?.monitoringPolicy?.profileMeta || policyData?.current?.profileMeta || null;
+            const policyProfile = policyData?.current?.profile || selectedResult?.dvb?.monitoringPolicy?.profile || "-";
+            const policyProfileMeta = policyData?.current?.profileMeta || selectedResult?.dvb?.monitoringPolicy?.profileMeta || null;
             const schedulerCadence = selectedResult?.dvb?.probeDiagnostics?.scheduler?.cadence || null;
 
             // Estimate video bitrate from total TS rate minus known audio bitrates when
