@@ -57,7 +57,7 @@ function _buildPolicy() {
       ),
       startupJitterMaxMs: _envNumber(
         'TS_PROBE_START_JITTER_MAX_MS',
-        Number(filePolicy?.probeCadence?.startupJitterMaxMs || 2000)
+        Number(filePolicy?.probeCadence?.startupJitterMaxMs || 4500)
       ),
     },
     bitrate: {

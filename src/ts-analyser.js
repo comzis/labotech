@@ -10,6 +10,45 @@ const DolbyEAdapter = require('./dolbye-adapter');
 const { getMonitoringPolicy } = require('./monitoring-policy');
 let _multicastConfig = null;
 
+// Module-level semaphore: cap simultaneous heavy probes to prevent thundering
+// herd when many analysers are started in batch.  Each heavy probe spawns
+// ffprobe + tsanalyze + up to 4 sub-processes; without a cap, 9 decoders
+// starting simultaneously saturate CPU/multicast-join slots and produce false
+// "0 PIDs / 0 services / 0 bitrate" inconclusive results that trigger alarms.
+// Configurable via TS_HEAVY_PROBE_MAX_CONCURRENT env (default 3).
+const _HEAVY_PROBE_MAX = Math.max(1, _envNumberEarly('TS_HEAVY_PROBE_MAX_CONCURRENT', 3));
+const _heavyProbeQueue = [];
+let _heavyProbeActive = 0;
+
+function _envNumberEarly(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _acquireHeavyProbeSlot() {
+  return new Promise((resolve) => {
+    const tryAcquire = () => {
+      if (_heavyProbeActive < _HEAVY_PROBE_MAX) {
+        _heavyProbeActive++;
+        resolve();
+      } else {
+        _heavyProbeQueue.push(tryAcquire);
+      }
+    };
+    tryAcquire();
+  });
+}
+
+function _releaseHeavyProbeSlot() {
+  _heavyProbeActive = Math.max(0, _heavyProbeActive - 1);
+  if (_heavyProbeQueue.length > 0) {
+    const next = _heavyProbeQueue.shift();
+    next();
+  }
+}
+
 function _envNumber(name, fallback) {
   const raw = process.env[name];
   if (raw == null || raw === '') return fallback;
@@ -144,14 +183,25 @@ class TSAnalyser extends EventEmitter {
           const pidProbe = await this._probeStreamPidsFromFfmpeg();
           result = this._applyPidMap(result, pidProbe || {});
           result = this._applyFallbackPidRows(result, pidProbe.rows || []);
-          const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = await Promise.all([
-            runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
-            runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
-            this._probeAudioLevels(),
-            runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
-            runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null),
-            runHeavyProbe ? this._probeDolbyE() : Promise.resolve(null),
-          ]);
+          // Acquire a heavy-probe slot before spawning the sub-process burst.
+          // This serialises the expensive ffprobe+tsanalyze launches across all
+          // concurrent analysers, preventing the thundering-herd problem when
+          // multiple decoders are started simultaneously.
+          if (runHeavyProbe) await _acquireHeavyProbeSlot();
+          let heavyProbeResults;
+          try {
+            heavyProbeResults = await Promise.all([
+              runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
+              runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
+              this._probeAudioLevels(),
+              runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
+              runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null),
+              runHeavyProbe ? this._probeDolbyE() : Promise.resolve(null),
+            ]);
+          } finally {
+            if (runHeavyProbe) _releaseHeavyProbeSlot();
+          }
+          const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
             ? this._iatSniffer.getMetrics()
             : null;
