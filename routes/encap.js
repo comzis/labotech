@@ -1,6 +1,7 @@
 'use strict';
 
 const express = require('express');
+const { inspectPortOffenders, resolvePortOffenders } = require('../src/encap-port-ops');
 
 const ENCAPSULATOR_API_URL = process.env.ENCAPSULATOR_API_URL || 'http://127.0.0.1:4100';
 
@@ -34,6 +35,28 @@ module.exports = function () {
   }
 
   router.get('/health', (req, res) => forward(req, res, '/health'));
+  router.get('/port-offender', async (req, res) => {
+    try {
+      const result = await inspectPortOffenders(req.query?.port || 4100);
+      if (!result.ok) return res.status(500).json(result);
+      return res.json(result);
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
+  router.post('/port-offender/resolve', async (req, res) => {
+    try {
+      const result = await resolvePortOffenders({
+        port: req.body?.port || 4100,
+        confirm: req.body?.confirm === true,
+      });
+      if (result.error === 'confirmation_required') return res.status(409).json(result);
+      if (!result.ok) return res.status(500).json(result);
+      return res.json(result);
+    } catch (err) {
+      return res.status(500).json({ ok: false, error: err.message });
+    }
+  });
   router.get('/channels', (req, res) => forward(req, res, '/channels'));
   router.get('/channels/:id', (req, res) => forward(req, res, `/channels/${encodeURIComponent(req.params.id)}`));
   router.post('/channels', (req, res) => forward(req, res, '/channels'));

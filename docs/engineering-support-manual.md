@@ -203,7 +203,7 @@ Expected operator outcomes:
 
 - **Success path:** script prints git HEAD, then `deploy-one-shot` stages and health checks pass.
 - **Encapsulator readiness nuance:** a successful deploy means the encapsulator health gate passed within deploy checks; this greatly reduces restart-time false alarms but does not guarantee zero race window for the first UI poll.
-- **Encapsulator readiness mode:** by default, encapsulator readiness is warning-only (non-fatal) to avoid blocking deploy on sidecar startup turbulence. Set `ENCAP_HEALTH_REQUIRED=1` to enforce fail-fast behavior.
+- **Encapsulator readiness mode:** by default, encapsulator readiness check is skipped to avoid blocking deploy on sidecar/network turbulence. Enable with `ENCAP_HEALTH_CHECK_ENABLED=1`, and optionally enforce fail-fast with `ENCAP_HEALTH_REQUIRED=1`.
 - **Auto triage on sidecar miss:** when encapsulator readiness fails, deploy now prints triage output (`compose ps`, `:4100` listener, host curl probe, and service logs). Disable with `ENCAP_TRIAGE_ON_FAIL=0`.
 - **Interactive offender handling:** if `:4100` is occupied during triage, deploy can prompt to terminate detected listener PID(s). Enabled by default in interactive shells; disable with `ENCAP_PROMPT_KILL_ON_4100=0`.
 - **Disk guard stop:** script exits early with explicit low-disk message before mutating git state.
@@ -228,7 +228,7 @@ bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
 Strict encapsulator gate (optional):
 
 ```bash
-ENCAP_HEALTH_REQUIRED=1 ENCAP_HEALTH_RETRIES=24 ENCAP_HEALTH_DELAY_SEC=5 \
+ENCAP_HEALTH_CHECK_ENABLED=1 ENCAP_HEALTH_REQUIRED=1 ENCAP_HEALTH_RETRIES=24 ENCAP_HEALTH_DELAY_SEC=5 \
   bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
 ```
 
@@ -242,6 +242,27 @@ Disable interactive kill prompt (optional):
 
 ```bash
 ENCAP_PROMPT_KILL_ON_4100=0 bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+```
+
+UI-assisted offender resolution (Streams panel):
+
+- In `Streams` when the red sidecar error banner is shown, use `Resolve Port 4100`.
+- Flow: inspect listeners on `127.0.0.1:4100` -> confirm dialog -> backend sends `SIGTERM` to allowlisted offenders.
+- Allowlist defaults to: `encapsulator,boro,dashboard`.
+- Configure with env:
+  - `ENCAP_KILL_ALLOWLIST` (comma-separated regex tokens)
+  - `ENCAP_KILL_ENABLED=0` to disable kill action
+  - `ENCAP_KILL_FORCE_ANY=1` to bypass allowlist (not recommended)
+- If offender remains due to host/container PID namespace boundaries, run host script `scripts/triage-port-kill.sh`.
+
+Standalone interactive offender script (recommended during incidents):
+
+```bash
+# default port 4100
+bash scripts/triage-port-kill.sh
+
+# custom port
+bash scripts/triage-port-kill.sh 4100
 ```
 
 ### Incident playbook: encapsulator unreachable on `127.0.0.1:4100`

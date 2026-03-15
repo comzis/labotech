@@ -38,6 +38,9 @@ export const startStream = (body) => request('POST', '/encap/channels', body);
 export const getStream = (id) => request('GET', `/encap/channels/${id}`);
 export const stopStream = (id) => request('DELETE', `/encap/channels/${id}`);
 export const getEncapsulatorHealth = () => request('GET', '/encap/health');
+export const inspectEncapPortOffender = (port = 4100) => request('GET', `/encap/port-offender?port=${encodeURIComponent(port)}`);
+export const resolveEncapPortOffender = (port = 4100, confirm = false) =>
+  request('POST', '/encap/port-offender/resolve', { port, confirm });
 
 // Transcode
 export const getTranscoders = () => request('GET', '/transcode');
