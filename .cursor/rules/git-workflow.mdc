@@ -1,0 +1,27 @@
+---
+description: Git branch and PR workflow for Cursor on this repo
+alwaysApply: true
+---
+
+# Git Workflow — Cursor Lane
+
+See `WORKFLOW.md` for the full multi-tool process. Cursor's responsibilities:
+
+## Branch naming
+- Always work on a branch prefixed `cursor/` (e.g. `cursor/fix-header-layout`).
+- Never commit directly to `main`. Create a branch first.
+- One logical change per branch.
+
+## Before pushing
+1. Run `npm test -- --runInBand` — all tests must pass.
+2. Run `npm run build --prefix web` — build must produce 0 warnings.
+3. The pre-commit hook at `.git/hooks/pre-commit` scans staged source files for AI telemetry injection patterns (localhost debug ports, agent-log regions, injector markers). Any such pattern blocks the commit — see the hook for the exact list.
+
+## Opening a PR
+- Push the branch and open a PR against `main`.
+- Title: `fix(scope): …` / `feat(scope): …` / `chore(scope): …`
+- The human reviews and merges — do not auto-merge.
+
+## Switching tools mid-task
+- Commit and push all changes before handing off to Claude Code or IDX.
+- Never leave staged or uncommitted changes when switching tools.
