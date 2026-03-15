@@ -13,6 +13,29 @@ export default function useWebSocket() {
   const retries  = useRef(0);
   const timerRef = useRef(null);
   const activeRef = useRef(true);
+  // Message queue: when multiple messages arrive in the same onmessage handler
+  // (batched newline-delimited payloads) React 18 auto-batching would drop all
+  // but the last setLastMessage call.  Queue here and drain one-per-frame so
+  // every message reaches its consumers.
+  const queueRef   = useRef([]);
+  const drainTimer = useRef(null);
+
+  const drainQueue = useCallback(() => {
+    drainTimer.current = null;
+    const next = queueRef.current.shift();
+    if (!next) return;
+    setLastMessage(next);
+    if (queueRef.current.length > 0) {
+      drainTimer.current = setTimeout(drainQueue, 0);
+    }
+  }, []);
+
+  const enqueue = useCallback((value) => {
+    queueRef.current.push(value);
+    if (!drainTimer.current) {
+      drainTimer.current = setTimeout(drainQueue, 0);
+    }
+  }, [drainQueue]);
 
   const connect = useCallback(() => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
@@ -44,7 +67,7 @@ export default function useWebSocket() {
           return;
         }
         if (typeof value === 'object') {
-          setLastMessage(value);
+          enqueue(value);
         }
       };
 
@@ -76,7 +99,7 @@ export default function useWebSocket() {
     };
 
     ws.onerror = () => ws.close();
-  }, []);
+  }, [enqueue]);
 
   useEffect(() => {
     activeRef.current = true;
@@ -84,6 +107,7 @@ export default function useWebSocket() {
     return () => {
       activeRef.current = false;
       clearTimeout(timerRef.current);
+      clearTimeout(drainTimer.current);
       if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);

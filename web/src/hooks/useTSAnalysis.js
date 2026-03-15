@@ -170,6 +170,17 @@ export default function useTSAnalysis() {
     }
     if (msg.type === 'analyse_started') {
       stopSuppressedUntilRef.current.delete(msg.id);
+      setActiveIds(ids => (ids.includes(msg.id) ? ids : [...ids, msg.id]));
+      return;
+    }
+    // Propagate probe errors so tiles show a failure state rather than waiting forever.
+    if (msg.type === 'error' && msg.id) {
+      if (isSuppressed(msg.id)) return;
+      setResultsById((prev) => {
+        if (prev[msg.id]) return prev; // already have data; don't overwrite with error
+        return { ...prev, [msg.id]: { ...(prev[msg.id] || {}), id: msg.id, probeError: msg.message || 'probe failed', probeTime: null } };
+      });
+      return;
     }
   }, [isSuppressed]);
 
