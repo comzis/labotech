@@ -957,3 +957,62 @@ New `Alarm Log` tab (`web/src/components/EventLogPanel.jsx`) aggregates all WebS
 - Bitrate readouts in MetricsTile: `text-xl tracking-tight` — MCR-readable from 1.5m
 - Panel surface: `bg-[#0d1117]` + inset top-edge highlight simulates instrument panel depth
 - Header height reduced; tab buttons tighter for 9-tab layout without overflow
+
+---
+
+## 11) CPU and Memory Tuning (gva-boro-probe, 2026-03-15)
+
+### Problem
+
+With 9 concurrent decoder lanes, the `labotech` container was hitting 401% CPU utilisation against a 4-core (cpuset 0-3) ceiling. Each lane spawns three concurrent processes:
+
+| Process | Purpose |
+|---|---|
+| FFmpeg (ETR 290 monitor) | Continuous MPEG-TS demux, stderr parsed for P1/P2 alarms |
+| ffprobe / tsanalyze (TS analyser) | Periodic deep probe, PAT/PMT/PID/bitrate extraction |
+| tshark / tcpdump (IAT sniffer) | NIC packet capture, arrival jitter measurement |
+
+9 lanes × 3 processes = **27 concurrent heavy processes on 4 cores**. Under CPU starvation each FFmpeg instance failed to schedule its receive socket read in time, causing internal UDP buffer drops reported as `Packet corrupt (stream = N, dts = ...)` — which the ETR 290 analyser correctly logged as `transport_error` P2 alarms. This created false alarm noise on the timeline despite the source signal being clean.
+
+The container also had a 4 GB memory limit. Node.js inside a cgroup auto-detects ~25% as its V8 heap budget (~1 GB), leaving little headroom for in-memory event rings, WebSocket state, and active decoder maps across 9 lanes.
+
+### Fix applied
+
+`docker-env.txt` updated:
+
+```
+LABOTECH_CPUS=16.0
+LABOTECH_CPUSET=0-15
+LABOTECH_MEM_LIMIT=8192m
+NODE_OPTIONS=--max-old-space-size=6144
+ENCAPSULATOR_CPUSET=16-19   # moved to avoid overlap
+```
+
+Applied with `docker compose up -d --force-recreate labotech` (no rebuild needed for env changes).
+
+### Server context (gva-boro-probe)
+
+- Total logical cores: **56** (`nproc`)
+- Allocation post-fix: labotech 0-15 (16 cores), encapsulator 16-19 (4 cores), ~36 cores free for OS and future services
+
+### Scaling reference
+
+| Active decoder lanes | Recommended CPUSET | Recommended MEM_LIMIT |
+|---|---|---|
+| 1–4 | 0-7 (8 cores) | 4096m |
+| 5–9 | 0-15 (16 cores) | 8192m |
+| 10–16 | 0-23 (24 cores) | 12288m |
+| 17+ | 0-31 (32 cores) | 16384m |
+
+Rule of thumb: **~1.5–2 cores and ~400 MB per active decoder lane** (ETR + analyser + IAT sniffer combined).
+
+### ETR noise suppression (related)
+
+CPU starvation also caused spurious `transport_error` and `pcr_disc` alarms. Two changes were made to `src/etr290-analyser.js`:
+
+1. **Burst window**: `_pendingCounts` resets if the last match for a check was >30s ago (`PENDING_BURST_WINDOW_MS=30000`). Converts threshold from "N hits ever" to "N hits within 30s".
+2. **Higher defaults for noisy checks**: `transport_error` and `pcr_disc` default threshold raised from 1 to 3 — requires a genuine burst of 3 occurrences within 30s before an incident is raised. Overridable per-monitor via profile thresholds.
+
+### Node.js heap note
+
+Without `NODE_OPTIONS=--max-old-space-size=6144`, Node.js 20 inside a 4 GB cgroup limits its V8 heap to ~1 GB. With 9 active lanes the in-memory structures (event ring 1000 entries, timeline maps, WebSocket broadcast state, per-analyser probe results) approach this limit under sustained load, causing GC pressure and event loop latency that presents as UI unresponsiveness rather than a hard crash.
