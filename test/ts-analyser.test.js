@@ -523,7 +523,15 @@ describe('TSAnalyser', () => {
     // _buildHealthAssessment so we can control the raw severity sequence.
 
     function makeMinimalResult(analyserInst) {
-      return analyserInst.parseStructure({ programs: [], streams: [] });
+      // Must have bitrateBps > 0, serviceCount > 0, pidCount > 0 so the
+      // isInconclusiveProbe guard does not hold the hysteresis state and
+      // the stub health severity is actually applied.
+      const r = analyserInst.parseStructure({ programs: [], streams: [] });
+      r.dvb = r.dvb || {};
+      r.dvb.bitrateBps = 5000000;   // 5 Mbps — non-zero bitrate
+      r.dvb.serviceCount = 1;
+      r.dvb.pidCount = 4;
+      return r;
     }
 
     function stubHealth(analyserInst, rawSeverity) {
@@ -555,31 +563,42 @@ describe('TSAnalyser', () => {
       expect(r.dvb.health.hysteresis.warnCount).toBe(2);
     });
 
-    test('single critical probe does not escalate — requires 2 consecutive (same gate as warning)', () => {
+    test('single critical probe does not escalate — requires 3 consecutive', () => {
       const base = makeMinimalResult(analyser);
       analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
       stubHealth(analyser, 'critical');
       const r = analyser._attachHealthAssessment(base);
-      expect(r.dvb.health.severity).toBe('ok');   // critCount=1 < HYSTERESIS_N=2
+      expect(r.dvb.health.severity).toBe('ok');   // critCount=1 < CRIT_HYSTERESIS_N=3
       expect(r.dvb.health.hysteresis.critCount).toBe(1);
     });
 
-    test('two consecutive critical probes escalate to critical', () => {
+    test('two consecutive critical probes do not yet escalate (need 3)', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      stubHealth(analyser, 'critical');
+      analyser._attachHealthAssessment(base);      // probe 1 — critCount=1
+      stubHealth(analyser, 'critical');
+      const r = analyser._attachHealthAssessment(base); // probe 2 — critCount=2, still ok
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.critCount).toBe(2);
+    });
+
+    test('three consecutive critical probes escalate to critical', () => {
       const base = makeMinimalResult(analyser);
       analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
       stubHealth(analyser, 'critical');
       analyser._attachHealthAssessment(base);      // probe 1 — suppressed
       stubHealth(analyser, 'critical');
-      const r = analyser._attachHealthAssessment(base); // probe 2 — escalates
+      analyser._attachHealthAssessment(base);      // probe 2 — suppressed
+      stubHealth(analyser, 'critical');
+      const r = analyser._attachHealthAssessment(base); // probe 3 — escalates
       expect(r.dvb.health.severity).toBe('critical');
-      expect(r.dvb.health.hysteresis.critCount).toBe(2);
+      expect(r.dvb.health.hysteresis.critCount).toBe(3);
     });
 
-    test('inconclusive heavy probe (0 pids + 0 services + 0 bitrate) holds last reported value', () => {
+    test('inconclusive probe (0 pids + 0 services + 0 bitrate) holds last reported — heavy probe', () => {
       const base = makeMinimalResult(analyser);
-      // Seed with a known good state
       analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
-      // Build a result that looks like a failed PSI capture on a heavy probe
       const inconclusiveResult = {
         ...base,
         dvb: {
@@ -592,7 +611,27 @@ describe('TSAnalyser', () => {
       };
       stubHealth(analyser, 'critical'); // would be critical based on score
       const r = analyser._attachHealthAssessment(inconclusiveResult);
-      // Hysteresis counters must not advance; severity must hold at 'ok'
+      expect(r.dvb.health.severity).toBe('ok');
+      expect(r.dvb.health.hysteresis.critCount).toBe(0);
+    });
+
+    test('inconclusive probe (0 pids + 0 services + 0 bitrate) holds last reported — light probe', () => {
+      const base = makeMinimalResult(analyser);
+      analyser._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+      // Light probe: runHeavyProbe = false (or absent). Bug: old code only guarded heavy probes.
+      const inconclusiveLight = {
+        ...base,
+        dvb: {
+          ...base.dvb,
+          bitrateBps: 0,
+          serviceCount: 0,
+          pidCount: 0,
+          probeDiagnostics: { scheduler: { runHeavyProbe: false } },
+        },
+      };
+      stubHealth(analyser, 'critical');
+      const r = analyser._attachHealthAssessment(inconclusiveLight);
+      // Must also be held — isInconclusiveProbe now applies regardless of probe type
       expect(r.dvb.health.severity).toBe('ok');
       expect(r.dvb.health.hysteresis.critCount).toBe(0);
     });
