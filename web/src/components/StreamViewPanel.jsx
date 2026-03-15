@@ -595,13 +595,18 @@ function buildLaneGradient(events, timeStart, windowMs) {
       (e) => e.category === 'runtime_started' && !e?.evidence?.bootstrap
     );
     const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
-    const staleStopTs = lastSevEvtTs + LANE_ACTIVITY_STALE_MS;
+    // Include runtime_heartbeat in the activity timestamp so the lane stays
+    // live-colored between probe cycles (heartbeats arrive every ~5s while the
+    // process runs; analyse_result may only arrive every 30-60s+).
+    const lastHeartbeatTs = sorted.filter((e) => e.category === 'runtime_heartbeat').pop()?.ts || 0;
+    const lastActivityTs = Math.max(lastSevEvtTs, lastHeartbeatTs);
+    const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     const timeEnd = timeStart + windowMs;
     const isLive = !stopAfterActive && (hasExplicitStart || staleStopTs >= timeEnd);
     // Apply stale cutoff for non-live lanes even when no explicit stop event exists.
     const effectiveEndTs = stopAfterActive
       ? Math.min(timeEnd, stopAfterActive.ts)
-      : (isLive ? timeEnd : Math.min(timeEnd, staleStopTs));
+      : (isLive ? timeEnd : Math.min(timeEnd, lastActivityTs + LANE_ACTIVITY_STALE_MS));
     const gradientEnd = effectiveEndTs;
 
     // Initial severity: last state change at or before timeStart.
