@@ -15,6 +15,9 @@ ENCAP_PROMPT_KILL_ON_4100="${ENCAP_PROMPT_KILL_ON_4100:-1}"
 RECREATE_ALL="${RECREATE_ALL:-0}"
 COMPOSE_BIN=""
 MIN_FREE_MB="${MIN_FREE_MB:-8192}"
+# Version tag baked into the frontend at build time.
+# Resolved from LABOTECH_RELEASE env var, then git describe, then short SHA.
+LABOTECH_RELEASE="${LABOTECH_RELEASE:-$(git describe --tags --always --dirty 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || echo 'dev')}"
 MIN_FREE_INODE_PCT="${MIN_FREE_INODE_PCT:-10}"
 DISK_CHECK_PATH="${DISK_CHECK_PATH:-.}"
 
@@ -134,19 +137,18 @@ check_disk_headroom() {
 }
 
 rebuild_and_restart() {
+  log "LABOTECH_RELEASE=${LABOTECH_RELEASE}"
   if [[ "${RECREATE_ALL}" == "1" ]]; then
     ${COMPOSE_BIN} down --remove-orphans
-    ${COMPOSE_BIN} build --no-cache
+    ${COMPOSE_BIN} build --no-cache --build-arg "LABOTECH_RELEASE=${LABOTECH_RELEASE}"
     ${COMPOSE_BIN} up -d --force-recreate
   else
+    # Bring down first to ensure old image layers are freed before the build.
+    # A deploy implies a service interruption; the containers are back up within minutes.
+    ${COMPOSE_BIN} down --remove-orphans
     # Build both services — they share the same Dockerfile so the cost is the same.
-    # Building only the main service would leave the encapsulator running stale code.
-    ${COMPOSE_BIN} build --no-cache "${SERVICE}" labotech-encapsulator
-    ${COMPOSE_BIN} up -d --force-recreate "${SERVICE}"
-    # Start the encapsulator if it is stopped/crashed.  No --force-recreate here so we
-    # don't interrupt active SRT sessions unnecessarily.  If the image was rebuilt above,
-    # docker-compose will detect the mismatch and recreate the container automatically.
-    ${COMPOSE_BIN} up -d labotech-encapsulator
+    ${COMPOSE_BIN} build --no-cache --build-arg "LABOTECH_RELEASE=${LABOTECH_RELEASE}" "${SERVICE}" labotech-encapsulator
+    ${COMPOSE_BIN} up -d
   fi
 }
 

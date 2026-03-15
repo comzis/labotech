@@ -6,6 +6,8 @@ COPY web/package*.json ./web/
 RUN npm install
 RUN cd web && npm install && npm install framer-motion lucide-react clsx tailwind-merge
 COPY . .
+ARG LABOTECH_RELEASE
+ENV LABOTECH_RELEASE=$LABOTECH_RELEASE
 RUN cd web && npm run build
 
 # Stage 2: Production runtime
