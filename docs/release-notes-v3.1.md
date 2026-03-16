@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.40)
+Date: 2026-03-17 (latest: v3.1.41)
 
 ## Overview
 
@@ -10,6 +10,14 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.41 — 2026-03-17
+
+### Ops: `scripts/diagnose.sh` — one-command health snapshot
+
+`bash scripts/diagnose.sh` prints: process status, systemd service state, journal errors (last 30 min), all registered analysers with running flag and last probe time, active probe URLs, WebSocket connection count, disk, and memory. Optional arg: `bash scripts/diagnose.sh "1 hour ago"`.
 
 ---
 
