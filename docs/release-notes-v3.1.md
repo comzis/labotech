@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.30)
+Date: 2026-03-16 (latest: v3.1.31)
 
 ## Overview
 
@@ -10,6 +10,26 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.31 — 2026-03-16
+
+### Ops: One-command setup scripts for cron and Docker log rotation
+
+Replaces manual copy-paste commands with two runnable scripts:
+
+**`scripts/setup-disk-guard-cron.sh`** — installs the nightly 3am disk-guard cron entry:
+```bash
+bash scripts/setup-disk-guard-cron.sh
+```
+Writes `/etc/cron.d/labotech-disk-guard` automatically. Accepts optional username arg (default: `boro`).
+
+**`scripts/setup-docker-log-rotation.sh`** — configures Docker daemon global log rotation:
+```bash
+bash scripts/setup-docker-log-rotation.sh
+```
+Writes `/etc/docker/daemon.json` and restarts the Docker daemon. Prompts for confirmation if the file already exists. **Causes brief container downtime — run during a quiet period.**
 
 ---
 
