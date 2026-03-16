@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.27)
+Date: 2026-03-16 (latest: v3.1.28)
 
 ## Overview
 
@@ -10,6 +10,39 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.28 — 2026-03-16
+
+### Feature: Stream registry import/export + visual tile distinction for Multiview
+
+**Stream registry per panel (server-persisted):**
+Each Multiview panel now has an independent stream registry — a named list of `{ name, ip, port, mode }` entries that survive browser refreshes, server restarts, and cross-workstation sessions. Registry data is stored in `config/multiview-panels.json` via two new API endpoints: `GET /api/multiview/panels` (load) and `PUT /api/multiview/panels` (save, debounced 800ms). localStorage acts as an offline fallback and is kept in sync.
+
+**Import CSV or JSON:**
+Click the **Import** button in the Stream Registry toolbar to load streams from a `.csv` or `.json` file.
+- CSV format: `name,ip,port,mode` (header row optional). Mode defaults to `rtp` if omitted.
+- JSON format: `[{ "name": "...", "ip": "...", "port": "..." }]` or `{ "streams": [...] }`.
+- Duplicate IP:port pairs are silently skipped on import.
+
+**Export CSV:**
+Click **Export CSV** to download all streams for the active panel as `multiview-<panel>-streams.csv`. Import the same file on any workstation running Labotech to instantly replicate the panel layout.
+
+**Visual tile distinction — Loaded vs Active:**
+Two distinct tile states are now rendered in the grid:
+- **Active (LIVE) tiles** — existing cyan-border treatment with thumbnail, audio meters, and stats. These are streams currently being probed.
+- **Loaded tiles** — dark navy (`#090e18`) background, dim blue left accent border (`rgba(40,90,200,0.5)`), "Loaded" badge in blue/grey. Show IP:port but no thumbnail. Operators can distinguish at-a-glance which feeds are configured vs actively monitored.
+
+**Start from loaded tile:**
+Each Loaded tile has a green **▶ Start** button. Clicking it launches a continuous TSAnalyser probe for that stream and immediately promotes the tile to Active in the same panel. The stream ID is derived deterministically from `name+ip+port`, so the same stream started twice lands on the same decoder slot.
+
+**Remove from registry:**
+Each Loaded tile has a × dismiss button to remove the entry from the panel registry.
+
+**OPS access:** Import/Export is available to all roles. It is an operational task (pre-show setup, roster changes), not engineering config.
+
+**Operator impact:** MCR operators can now pre-configure an entire show's multicast roster (import CSV), monitor a subset live, and share the configuration across workstations without manual re-entry.
 
 ---
 
