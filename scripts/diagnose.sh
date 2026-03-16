@@ -4,7 +4,7 @@
 
 SINCE="${1:-30 min ago}"
 PORT="${LABOTECH_PORT:-4000}"
-API="localhost:${PORT}"
+API="${LABOTECH_HOST:-10.67.18.29}:${PORT}"
 
 sep() { echo ""; printf '%.0s─' {1..44}; echo ""; echo "  $*"; printf '%.0s─' {1..44}; echo ""; }
 
@@ -23,10 +23,11 @@ else
 fi
 
 sep "Analysers registered"
-python3 - <<'EOF'
+python3 - "$API" <<'EOF'
 import urllib.request, json, sys
+api = sys.argv[1]
 try:
-    with urllib.request.urlopen('http://localhost:4000/api/analyse', timeout=5) as r:
+    with urllib.request.urlopen(f'http://{api}/api/analyse', timeout=5) as r:
         d = json.loads(r.read())
     analysers = d.get('analysers', d if isinstance(d, list) else [])
     print(f'{len(analysers)} analyser(s) registered')
@@ -44,7 +45,8 @@ except Exception as e:
 EOF
 
 sep "WebSocket connections"
-ss -tn 2>/dev/null | grep ":${PORT}" | grep -c ESTAB | xargs echo "established:" || echo "0 established"
+ss -tn 2>/dev/null | grep ":${PORT} " | grep -c ESTAB || echo "0"
+echo "connections on :${PORT}"
 
 sep "Disk"
 df -h / /var/lib/docker 2>/dev/null || df -h /
