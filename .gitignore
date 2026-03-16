@@ -14,3 +14,6 @@ REREFENCE ONLY/
 "REREFENCE ONLY"/
 REFERENCE ONLY/
 "REFERENCE ONLY"/
+
+# ── PRIVATE — local drafts, emails, handover notes — never commit ─────────────
+private/
