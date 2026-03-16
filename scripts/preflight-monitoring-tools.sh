@@ -35,17 +35,10 @@ if ! health_json="$(curl -fsS "${HEALTH_URL}")"; then
   exit 2
 fi
 
-export HEALTH_JSON="${health_json}"
-node <<'NODE'
-const payload = JSON.parse(process.env.HEALTH_JSON || '{}');
-const tooling = payload.tooling || {};
-const policy = payload.monitoringPolicy || {};
-const nic = tooling.nicCapture || {};
-console.log(`  [info] tooling status: ${tooling.status || 'unknown'}`);
-console.log(`  [info] NIC capture: ${nic.state || 'unknown'} (${nic.tool || 'n/a'})`);
-console.log(`  [info] policy profile: ${policy.profile || 'unknown'}`);
-console.log(`  [info] probe cadence: ${policy.probeCadence ? JSON.stringify(policy.probeCadence) : 'unknown'}`);
-NODE
+echo "  [info] tooling status:  $(echo "${health_json}" | jq -r '.tooling.status // "unknown"')"
+echo "  [info] NIC capture:     $(echo "${health_json}" | jq -r '(.tooling.nicCapture.state // "unknown") + " (" + (.tooling.nicCapture.tool // "n/a") + ")"')"
+echo "  [info] policy profile:  $(echo "${health_json}" | jq -r '.monitoringPolicy.profile // "unknown"')"
+echo "  [info] probe cadence:   $(echo "${health_json}" | jq -c '.monitoringPolicy.probeCadence // "unknown"')"
 
 if [[ "${missing}" -gt 0 ]]; then
   echo "[preflight] core tool warnings detected (ffmpeg/ffprobe required)"
