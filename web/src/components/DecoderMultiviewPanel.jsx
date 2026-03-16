@@ -390,7 +390,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
   useEffect(() => {
     try {
-      const raw = sessionStorage.getItem(MULTIVIEW_STATE_KEY);
+      const raw = localStorage.getItem(MULTIVIEW_STATE_KEY);
       if (!raw) return;
       const parsed = JSON.parse(raw);
       if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
@@ -422,7 +422,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
   useEffect(() => {
     try {
-      sessionStorage.setItem(
+      localStorage.setItem(
         MULTIVIEW_STATE_KEY,
         JSON.stringify({
           openCreate,
