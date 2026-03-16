@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.33)
+Date: 2026-03-16 (latest: v3.1.34)
 
 ## Overview
 
@@ -10,6 +10,20 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.34 — 2026-03-16
+
+### Fix: Add GV/LK Blue and Red Multicast categories; filter invalid IPs from import
+
+New source JSON introduced four additional prefixes not present in the original files. Added to `deriveCategory()` and category order:
+- `GV_BMCAST_*` → GV Blue Multicast (199 streams)
+- `GV_RMCAST_*` → GV Red Multicast (199 streams)
+- `LK_BMCAST_*` → LK Blue Multicast (64 streams)
+- `LK_RMCAST_*` → LK Red Multicast (64 streams)
+
+Extraction script updated to filter non-multicast IPs (e.g. `0.0.0.0`) and `_old` legacy entries. Clean extracted file: **914 unique valid streams**.
 
 ---
 

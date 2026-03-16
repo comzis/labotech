@@ -99,6 +99,10 @@ function deriveCategory(name) {
   if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
   if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
   if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_BMCAST')) return 'GV Blue Multicast';
+  if (n.startsWith('GV_RMCAST')) return 'GV Red Multicast';
+  if (n.startsWith('LK_BMCAST')) return 'LK Blue Multicast';
+  if (n.startsWith('LK_RMCAST')) return 'LK Red Multicast';
   if (n.startsWith('GV_RX'))     return 'GV Receivers';
   if (n.startsWith('LK_RX'))     return 'LK Receivers';
   if (n.endsWith('_OLD'))        return 'Legacy';
@@ -1093,7 +1097,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           const hasAnyTiles = visibleIds.length > 0 || loadedStreams.length > 0;
 
           // Group loaded streams by auto-derived category
-          const categoryOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','Other','Legacy'];
+          const categoryOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
           const grouped = {};
           loadedStreams.forEach((s) => {
             const cat = deriveCategory(s.name);
