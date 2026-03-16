@@ -541,6 +541,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [stoppingIds, setStoppingIds] = useState(new Set());
   const [startingStreamIds, setStartingStreamIds] = useState(new Set());
   const [collapsedCategories, setCollapsedCategories] = useState(new Set());
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
   const importFileRef = useRef(null);
   // Debounce timer for server-side panel sync
   const serverSyncTimerRef = useRef(null);
@@ -644,6 +648,27 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     setEngineerModeLabelDraft(engineerModeLabel);
     setIsEditingEngineerModeLabel(false);
   };
+
+  // Fetch stream catalog for the host/IP picker
+  useEffect(() => {
+    fetch('/api/multiview/catalog')
+      .then((r) => r.ok ? r.json() : { streams: [] })
+      .then((d) => setCatalog(Array.isArray(d.streams) ? d.streams : []))
+      .catch(() => {});
+  }, []);
+
+  // Close catalog dropdown on outside click
+  useEffect(() => {
+    if (!showCatalog) return;
+    const handler = (e) => {
+      if (catalogRef.current && !catalogRef.current.contains(e.target)) {
+        setShowCatalog(false);
+        setCatalogSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCatalog]);
 
   useEffect(() => {
     refreshActives();
@@ -1058,7 +1083,68 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               ))}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              <Field label="Host / IP" value={host} onChange={setHost} placeholder="Host / IP" />
+              {/* Host / IP with catalog picker */}
+              <div className="relative" ref={catalogRef}>
+                <label className="block text-[10px] uppercase tracking-widest text-gray-500 mb-1">Host / IP</label>
+                <input
+                  type="text"
+                  value={host}
+                  onChange={(e) => { setHost(e.target.value); setCatalogSearch(e.target.value); }}
+                  onFocus={() => { setShowCatalog(true); setCatalogSearch(host); }}
+                  placeholder="Host / IP or pick from catalog"
+                  className="w-full px-2 py-1.5 text-xs font-mono rounded border border-white/10 bg-black/30 text-gray-200 focus:outline-none focus:border-neon-cyan/40"
+                />
+                {showCatalog && catalog.length > 0 && (() => {
+                  const q = catalogSearch.toLowerCase();
+                  const filtered = q.length >= 1
+                    ? catalog.filter(s => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                    : catalog;
+                  const catOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
+                  const grouped = {};
+                  filtered.forEach(s => {
+                    const c = deriveCategory(s.name);
+                    if (!grouped[c]) grouped[c] = [];
+                    grouped[c].push(s);
+                  });
+                  const cats = catOrder.filter(c => grouped[c]);
+                  return (
+                    <div
+                      className="absolute left-0 right-0 z-50 mt-1 rounded border border-white/15 overflow-y-auto"
+                      style={{ background: '#0d1117', boxShadow: '0 8px 32px rgba(0,0,0,0.7)', maxHeight: '320px' }}
+                    >
+                      {cats.length === 0 && (
+                        <div className="px-3 py-2 text-[10px] text-gray-500">No streams match</div>
+                      )}
+                      {cats.map(cat => (
+                        <div key={cat}>
+                          <div className="px-2 py-1 text-[9px] uppercase tracking-widest font-bold sticky top-0"
+                            style={{ background: '#0d1117', color: '#3a6a9a', borderBottom: '1px solid rgba(40,90,160,0.2)' }}>
+                            {cat} ({grouped[cat].length})
+                          </div>
+                          {grouped[cat].map(s => (
+                            <button
+                              key={s.ip + ':' + s.port}
+                              className="w-full text-left px-3 py-1.5 flex items-center gap-3 hover:bg-white/5"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setHost(s.ip);
+                                setPort(s.port);
+                                setMode(s.mode || 'rtp');
+                                setDecoderId(deriveStreamDecoderId(s));
+                                setShowCatalog(false);
+                                setCatalogSearch('');
+                              }}
+                            >
+                              <span className="text-[10px] font-mono text-gray-300 truncate flex-1">{s.name}</span>
+                              <span className="text-[9px] font-mono shrink-0" style={{ color: '#3a6a9a' }}>{s.ip}:{s.port}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
               <Field label="Port" value={port} onChange={setPort} type="number" placeholder="Port" />
               <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
               <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />

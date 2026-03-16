@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.36)
+Date: 2026-03-16 (latest: v3.1.37)
 
 ## Overview
 
@@ -10,6 +10,24 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.37 — 2026-03-16
+
+### Feature: Stream catalog picker on Host/IP field in decoder form
+
+Click the **Host/IP** field when adding a decoder — a categorised dropdown appears showing all 914 streams from the catalog, grouped by type (GV Receivers, LK Receivers, GV/LK Encoders, IP Decoders, Blue/Red Multicast). Type to filter by name or IP. Selecting a stream auto-fills IP, port, mode and decoder ID.
+
+Catalog served from `config/multiview-stream-catalog.json` via `GET /api/multiview/catalog`. Separate from the panel registry — does not load streams as multiview tiles.
+
+Reverts the accidental pre-population of `config/multiview-panels.json` — panels config is back to empty default.
+
+---
+
+### Revert: Remove pre-populated streams from multiview panels config
+
+`config/multiview-panels.json` reset to empty. The 914-stream catalog will be used as a source picker dropdown on the Host/IP field in the decoder form — not loaded as multiview tiles.
 
 ---
 
