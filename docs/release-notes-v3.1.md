@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.20)
+Date: 2026-03-16 (latest: v3.1.21)
 
 ## Overview
 
@@ -10,6 +10,18 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.21 — 2026-03-16
+
+### Fix: MCR panels now persist across page refresh and tab close
+
+**Root cause:** `DecoderMultiviewPanel` stored all state (panel names, panel count, decoder routing per panel, engineer mode label) in `sessionStorage`. Session storage is scoped to the browser tab — it is wiped the moment the tab is closed or the page is refreshed. Any MCR panel created during a shift was silently lost.
+
+**Fix:** Changed both `sessionStorage.getItem` and `sessionStorage.setItem` calls to `localStorage`. The storage key (`labotech:decoder-multiview:state:v1`) is unchanged — existing sessions will migrate transparently on first load because the same key is now read from `localStorage`.
+
+**Result:** Panel names, decoder routing, engineer mode label, and active panel selection all survive page refresh, browser restart, and shift handover.
 
 ---
 
