@@ -27,7 +27,7 @@ python3 - "$API" <<'EOF'
 import urllib.request, json, sys
 api = sys.argv[1]
 try:
-    with urllib.request.urlopen(f'http://{api}/api/analyse', timeout=5) as r:
+    with urllib.request.urlopen(f'http://{api}/analyse', timeout=5) as r:
         d = json.loads(r.read())
     analysers = d.get('analysers', d if isinstance(d, list) else [])
     print(f'{len(analysers)} analyser(s) registered')
