@@ -3,10 +3,11 @@ services:
     build: .
     container_name: labotech
     network_mode: host
-    cpus: ${LABOTECH_CPUS:-4.0}
-    cpuset: ${LABOTECH_CPUSET:-0-3}
-    mem_limit: ${LABOTECH_MEM_LIMIT:-4096m}
-    shm_size: ${LABOTECH_SHM_SIZE:-512m}
+    # Xeon Gold 5120 dual-socket: NUMA node 0 = physical 0-13 + HT siblings 28-41
+    cpus: ${LABOTECH_CPUS:-24.0}
+    cpuset: ${LABOTECH_CPUSET:-0-13,28-41}
+    mem_limit: ${LABOTECH_MEM_LIMIT:-24g}
+    shm_size: ${LABOTECH_SHM_SIZE:-1g}
     ulimits:
       nofile:
         soft: 65536
@@ -36,10 +37,11 @@ services:
     container_name: labotech-encapsulator
     network_mode: host
     command: ["node", "src/encapsulator-index.js"]
-    cpus: ${ENCAPSULATOR_CPUS:-2.0}
-    cpuset: ${ENCAPSULATOR_CPUSET:-4-5}
-    mem_limit: ${ENCAPSULATOR_MEM_LIMIT:-2048m}
-    shm_size: ${ENCAPSULATOR_SHM_SIZE:-256m}
+    # NUMA node 1 = physical 14-27 + HT siblings 42-55
+    cpus: ${ENCAPSULATOR_CPUS:-12.0}
+    cpuset: ${ENCAPSULATOR_CPUSET:-14-27,42-55}
+    mem_limit: ${ENCAPSULATOR_MEM_LIMIT:-8g}
+    shm_size: ${ENCAPSULATOR_SHM_SIZE:-512m}
     ulimits:
       nofile:
         soft: 65536
