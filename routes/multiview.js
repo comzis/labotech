@@ -4,9 +4,8 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
-const CONFIG_FILE = path.join(__dirname, '..', 'config', 'multiview-panels.json');
-
-const STREAM_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const CONFIG_FILE   = path.join(__dirname, '..', 'config', 'multiview-panels.json');
+const CATALOG_FILE  = path.join(__dirname, '..', 'config', 'multiview-stream-catalog.json');
 
 function safePanels(raw) {
   if (!Array.isArray(raw)) return [];
@@ -25,6 +24,17 @@ function safePanels(raw) {
 
 module.exports = function () {
   const router = express.Router();
+
+  // GET /api/multiview/catalog — stream catalog for the decoder host/IP picker
+  router.get('/catalog', (req, res) => {
+    try {
+      if (!fs.existsSync(CATALOG_FILE)) return res.json({ streams: [] });
+      const data = JSON.parse(fs.readFileSync(CATALOG_FILE, 'utf8'));
+      return res.json({ streams: Array.isArray(data.streams) ? data.streams : [] });
+    } catch (err) {
+      return res.status(500).json({ error: err.message });
+    }
+  });
 
   // GET /api/multiview/panels — return stored panel stream registry
   router.get('/panels', (req, res) => {
