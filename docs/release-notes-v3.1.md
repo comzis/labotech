@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.42)
+Date: 2026-03-17 (latest: v3.1.43)
 
 ## Overview
 
@@ -10,6 +10,26 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.43 — 2026-03-17
+
+### Ops: Full NUMA-aligned CPU/memory allocation for Xeon Gold 5120 dual-socket
+
+Previously using 16 of 56 available logical CPUs. Now NUMA-pinned:
+
+| Container | cpuset | cpus | mem |
+|---|---|---|---|
+| labotech | `0-13,28-41` (NUMA 0) | 24.0 | 24 GB |
+| labotech-encapsulator | `14-27,42-55` (NUMA 1) | 16.0 | 8 GB |
+
+- Node.js heap: 6 GB → **20 GB**
+- `TS_HEAVY_PROBE_MAX_CONCURRENT`: 3 → **8** (8 simultaneous ffprobe+tsanalyze spawns)
+- `THUMBNAIL_MAX_CONCURRENT`: 2 → **4**
+- `shm_size` labotech: 512 MB → 1 GB
+
+Operator impact: faster probe cycles under load, no cross-socket memory latency, thumbnails refresh 2× faster.
 
 ---
 
