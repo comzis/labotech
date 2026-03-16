@@ -321,6 +321,7 @@ main() {
   run_stage_or_die "preflight script" bash scripts/preflight-monitoring-tools.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "health assertions (tsanalyze required)" health_assertions || return 1
+  run_stage_warn "prune dangling images and build cache" docker image prune -f
 
   echo
   echo "[deploy] summary: PASS=${PASS_COUNT} FAIL=${FAIL_COUNT}"

@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.19)
+Date: 2026-03-16 (latest: v3.1.20)
 
 ## Overview
 
@@ -10,6 +10,22 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.20 — 2026-03-16
+
+### Fix: Docker log rotation + post-deploy image prune
+
+**Problem:** Disk filled up progressively between deploys from two sources:
+- Docker container logs had no size cap. The TS analyser runs ffprobe every 30 s per stream; stderr from each probe cycle is captured by the JSON log driver, which grew unbounded in `/var/lib/docker/containers/`.
+- `deploy-one-shot.sh` builds with `--no-cache` every deploy, leaving orphaned image layers in `/var/lib/docker/overlay2` that were never pruned.
+
+**Fix:**
+- `docker-compose.yml` — added `logging: driver: json-file, max-size: 50m, max-file: 5` to `labotech`; `max-size: 20m, max-file: 3` to `labotech-encapsulator`. Capped at ~310 MB total log retention across both containers.
+- `deploy-one-shot.sh` — added `docker image prune -f` as a `run_stage_warn` step after health assertions pass. Runs automatically on every successful deploy; non-fatal if it fails.
+
+**Steady-state disk budget (Docker):** ≤ 310 MB logs + current image layers only.
 
 ---
 
