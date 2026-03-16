@@ -388,10 +388,14 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
 
+  // Prevent the persist effect from overwriting localStorage with default state
+  // before the load effect's setState calls have been applied (React mount race).
+  const hydratedRef = useRef(false);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(MULTIVIEW_STATE_KEY);
-      if (!raw) return;
+      if (!raw) { hydratedRef.current = true; return; }
       const parsed = JSON.parse(raw);
       if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
       if (parsed?.mode) setMode(parsed.mode);
@@ -411,16 +415,21 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           .map((p, idx) => ({
             id: String(p?.id || `panel-${idx + 1}`),
             name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
-            decoderIds: Array.isArray(p?.decoderIds) ? p.decoderIds.map((id) => String(id)) : [],
+            // decoderIds are NOT restored — they are timestamp-based and become stale
+            // after every server restart. The auto-seed effect repopulates routing each
+            // session from the live activeIds list.
+            decoderIds: [],
           }))
           .filter((p) => p.id);
         if (sanitized.length > 0) setPanels(sanitized);
       }
       if (parsed?.activePanelId != null) setActivePanelId(String(parsed.activePanelId));
     } catch (_) {}
+    hydratedRef.current = true;
   }, []);
 
   useEffect(() => {
+    if (!hydratedRef.current) return;
     try {
       localStorage.setItem(
         MULTIVIEW_STATE_KEY,
