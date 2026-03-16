@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.34)
+Date: 2026-03-16 (latest: v3.1.35)
 
 ## Overview
 
@@ -10,6 +10,14 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.35 — 2026-03-16
+
+### Ops: Pre-populate stream registry with 914 multicast streams
+
+`config/multiview-panels.json` seeded with all 914 clean multicast streams across 10 categories on the default BES panel. No manual import needed after deploy — streams are available immediately on first load.
 
 ---
 
