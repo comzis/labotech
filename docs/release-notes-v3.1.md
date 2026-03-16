@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.26)
+Date: 2026-03-16 (latest: v3.1.27)
 
 ## Overview
 
@@ -10,6 +10,22 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.27 — 2026-03-16
+
+### Fix: Panel names now survive server restarts and browser re-logins
+
+**Two root causes identified:**
+
+**1. React mount race condition (persist overwrites load):**
+The persist effect ran on mount with the initial default state (single empty "BES" panel) *before* the load effect's `setState` calls were applied. In the brief window between those two effects, localStorage was overwritten with default state. Fixed with a `hydratedRef` — the persist effect is blocked until the load effect has finished restoring state.
+
+**2. Stale decoder IDs across sessions:**
+Panel `decoderIds` were persisted across sessions, but decoder IDs are timestamp-based (`decoder-17773668150861`) and change on every server restart or decoder stop/start. After a redeploy, stored IDs matched nothing in `activeIds` → auto-seed triggered → first panel routing reset → custom panel routing lost. Fixed by not restoring `decoderIds` from storage. Panel names and structure are preserved; decoder routing is always seeded fresh from `activeIds` each session by the existing auto-seed logic.
+
+**Result:** Panel names ("MCR-A", "BES", etc.) survive indefinitely across logins, server restarts, and redeployments. Decoder routing auto-populates correctly on each session start.
 
 ---
 
