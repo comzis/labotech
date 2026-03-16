@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.35)
+Date: 2026-03-16 (latest: v3.1.36)
 
 ## Overview
 
@@ -10,6 +10,14 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.36 — 2026-03-16
+
+### Fix: Replace `node` with `jq` in post-deploy smoke script
+
+`post-deploy-smoke.sh` used a `node` heredoc to parse the health JSON — same issue as the preflight script (v3.1.25). Node.js is not installed on the host, causing a permanent FAIL=1 on every deploy. Replaced with `jq` one-liners, same fix pattern as preflight. Deploy summary will now show PASS=7 FAIL=0.
 
 ---
 
