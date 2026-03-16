@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.23)
+Date: 2026-03-16 (latest: v3.1.24)
 
 ## Overview
 
@@ -10,6 +10,23 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.24 — 2026-03-16
+
+### Revert: Restore thumbnail analyzeduration and attempt timeouts to v3.1.22 values
+
+**Problem:** v3.1.23 reduced `analyzeduration` (2s→1s), `probesize` (3MB→1.5MB), and attempt timeouts (8s→5s) to speed up first thumbnail. This caused regressions on production streams:
+- 1s `analyzeduration` insufficient to find the first I-frame on some streams — attempts timed out and fell through to attempt 4 (any-frame fallback), producing macroblocked thumbnails.
+- Increased probe timeout error rate as more thumbnail attempts failed within the shorter window.
+
+**Fix:** Restored `monitoring.js` exactly to v3.1.22 state:
+- `analyzeduration`: I-frame path `2000000` (2s), fallback `7000000` (7s)
+- `probesize`: I-frame path `3000000` (3MB), fallback `7000000` (7MB)
+- All attempt timeouts: `8000ms`
+
+No other files changed. v3.1.21 (localStorage), v3.1.22 (storage key v2) changes are preserved and unaffected.
 
 ---
 
