@@ -1803,7 +1803,6 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                           fontWeight: 700,
                           letterSpacing: '0.08em',
                           color: cfg.color,
-                          background: cfg.bg,
                           border: `1px solid ${cfg.border}`,
                           borderRadius: 2,
                           padding: '1px 5px',
