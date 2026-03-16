@@ -93,6 +93,18 @@ function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
   );
 }
 
+function deriveCategory(name) {
+  const n = String(name || '').toUpperCase();
+  if (n.startsWith('GV_IPDEC'))  return 'GV IP Decoders';
+  if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
+  if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
+  if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_RX'))     return 'GV Receivers';
+  if (n.startsWith('LK_RX'))     return 'LK Receivers';
+  if (n.endsWith('_OLD'))        return 'Legacy';
+  return 'Other';
+}
+
 // Derive a stable decoder ID from a stream registry entry name.
 // Uses name-based slug so that the same stream can be identified across sessions.
 function deriveStreamDecoderId(stream) {
@@ -524,6 +536,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
   const [startingStreamIds, setStartingStreamIds] = useState(new Set());
+  const [collapsedCategories, setCollapsedCategories] = useState(new Set());
   const importFileRef = useRef(null);
   // Debounce timer for server-side panel sync
   const serverSyncTimerRef = useRef(null);
@@ -1072,12 +1085,31 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        {/* Tile grid: loaded (inactive) tiles first, then active tiles */}
+        {/* Tile grid: active tiles first, then loaded tiles grouped by category */}
         {(() => {
           const loadedStreams = (activePanel?.streams || []).filter(
             (s) => !activeIds.includes(deriveStreamDecoderId(s))
           );
           const hasAnyTiles = visibleIds.length > 0 || loadedStreams.length > 0;
+
+          // Group loaded streams by auto-derived category
+          const categoryOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','Other','Legacy'];
+          const grouped = {};
+          loadedStreams.forEach((s) => {
+            const cat = deriveCategory(s.name);
+            if (!grouped[cat]) grouped[cat] = [];
+            grouped[cat].push(s);
+          });
+          const categories = categoryOrder.filter((c) => grouped[c]);
+
+          const toggleCategory = (cat) => {
+            setCollapsedCategories((prev) => {
+              const next = new Set(prev);
+              if (next.has(cat)) next.delete(cat); else next.add(cat);
+              return next;
+            });
+          };
+
           return (
             <>
               {!hasAnyTiles && activeIds.length === 0 && (
@@ -1090,19 +1122,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                   No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.
                 </p>
               )}
-              {hasAnyTiles && (
+
+              {/* Active (live) tiles */}
+              {visibleIds.length > 0 && (
                 <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                  {/* Loaded (inactive) tiles — navy styling */}
-                  {loadedStreams.map((stream) => (
-                    <LoadedStreamCard
-                      key={`loaded-${stream.id}`}
-                      stream={stream}
-                      onStart={() => handleStartLoadedStream(stream)}
-                      onRemove={() => removeStreamFromActivePanel(stream.id)}
-                      isStarting={startingStreamIds.has(deriveStreamDecoderId(stream))}
-                    />
-                  ))}
-                  {/* Active (live) tiles — existing cyan styling */}
                   {visibleIds.map((id) => (
                     <DecoderCard
                       key={id}
@@ -1113,9 +1136,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                       onStop={async () => {
                         if (stoppingIds.has(id)) return;
                         setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
-                        try {
-                          await stop(id);
-                        } finally {
+                        try { await stop(id); } finally {
                           refreshActives();
                           setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
                         }
@@ -1127,6 +1148,52 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                   ))}
                 </div>
               )}
+
+              {/* Loaded tiles grouped by category */}
+              {categories.map((cat) => {
+                const streams = grouped[cat];
+                const collapsed = collapsedCategories.has(cat);
+                return (
+                  <div key={cat} className="mt-4">
+                    {/* Category header */}
+                    <button
+                      onClick={() => toggleCategory(cat)}
+                      className="w-full flex items-center gap-2 px-2 py-1.5 mb-2 text-left"
+                      style={{ background: 'rgba(20,40,70,0.4)', border: '1px solid rgba(40,90,160,0.25)', borderRadius: '3px' }}
+                    >
+                      <span className="text-[9px] font-mono" style={{ color: '#3a6a9a' }}>
+                        {collapsed ? '▶' : '▼'}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b9fd4' }}>
+                        {cat}
+                      </span>
+                      <span className="text-[10px] font-mono" style={{ color: '#2a4a6a' }}>
+                        ({streams.length})
+                      </span>
+                      {!collapsed && (
+                        <span className="ml-auto text-[9px] font-mono" style={{ color: '#1e3a5f' }}>
+                          click to collapse
+                        </span>
+                      )}
+                    </button>
+
+                    {/* Category tiles */}
+                    {!collapsed && (
+                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+                        {streams.map((stream) => (
+                          <LoadedStreamCard
+                            key={`loaded-${stream.id}`}
+                            stream={stream}
+                            onStart={() => handleStartLoadedStream(stream)}
+                            onRemove={() => removeStreamFromActivePanel(stream.id)}
+                            isStarting={startingStreamIds.has(deriveStreamDecoderId(stream))}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </>
           );
         })()}
