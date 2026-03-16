@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Monitor, Plus, Pencil } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Monitor, Plus, Pencil, Upload, Download, Play } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
@@ -93,6 +93,65 @@ function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
   );
 }
 
+// Derive a stable decoder ID from a stream registry entry name.
+// Uses name-based slug so that the same stream can be identified across sessions.
+function deriveStreamDecoderId(stream) {
+  const slug = String(stream.name || stream.ip || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'stream';
+  const ipSlug = String(stream.ip || '').replace(/\./g, '-').slice(0, 15);
+  return `mv-${slug}-${ipSlug}-${String(stream.port || '0')}`.slice(0, 64);
+}
+
+function parseStreamsCsv(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const result = [];
+  const start = (lines[0] || '').toLowerCase().startsWith('name') ? 1 : 0;
+  for (let i = start; i < lines.length; i++) {
+    const parts = lines[i].split(',').map(p => p.trim());
+    if (parts.length < 3) continue;
+    const [name, ip, port, mode] = parts;
+    if (!ip || !port) continue;
+    result.push({ id: `s-${Date.now()}-${i}`, name: name || ip, ip, port, mode: mode || 'rtp' });
+  }
+  return result;
+}
+
+function parseStreamsJson(text) {
+  try {
+    const parsed = JSON.parse(text);
+    const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.streams) ? parsed.streams : []);
+    return arr
+      .filter(s => s && (s.ip || s.address) && s.port)
+      .map((s, i) => ({
+        id: `s-${Date.now()}-${i}`,
+        name: String(s.name || s.label || s.ip || s.address || '').slice(0, 64),
+        ip: String(s.ip || s.address || '').trim(),
+        port: String(s.port).trim(),
+        mode: ['rtp', 'udp', 'srt'].includes(String(s.mode)) ? String(s.mode) : 'rtp',
+      }));
+  } catch (_) {
+    return [];
+  }
+}
+
+function exportStreamsCsv(streams, panelName) {
+  const header = 'name,ip,port,mode';
+  const rows = streams.map(s => [s.name, s.ip, s.port, s.mode || 'rtp'].join(','));
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `multiview-${panelName || 'panel'}-streams.csv`.toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
 function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (!host || !port) return '';
   if (mode === 'udp') return `udp://${host}:${port}`;
@@ -140,6 +199,83 @@ function extractThumbTimestamp(thumbnailUrl) {
   if (!m) return null;
   const ts = Number(m[1]);
   return Number.isFinite(ts) ? ts : null;
+}
+
+// Tile for a stream that is in the registry but not yet running.
+// Distinct dark-navy styling so operators can immediately tell "loaded" from "live".
+function LoadedStreamCard({ stream, onStart, onRemove, isStarting = false }) {
+  return (
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{
+        background: '#090e18',
+        border: '1px solid rgba(40,90,160,0.35)',
+        borderLeft: '3px solid rgba(40,90,200,0.5)',
+        borderRadius: '3px',
+        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
+        minWidth: 0,
+        opacity: isStarting ? 0.7 : 1,
+      }}
+    >
+      {/* Header */}
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 shrink-0"
+        style={{ background: 'linear-gradient(180deg,#111c2e 0%,#0d1622 100%)', borderBottom: '1px solid rgba(40,90,160,0.2)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)' }}
+      >
+        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: '#1e3a5f', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.6)' }} />
+        <span className="font-mono text-[10px] text-blue-300/70 truncate flex-1" title={stream.name}>{stream.name || stream.ip}</span>
+        <span
+          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0"
+          style={{ background: 'rgba(30,60,120,0.25)', borderColor: 'rgba(60,120,220,0.3)', color: '#93bbf0' }}
+        >
+          Loaded
+        </span>
+        <button
+          onClick={onStart}
+          disabled={isStarting}
+          className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
+          style={{
+            background: 'rgba(30,100,60,0.35)',
+            border: '1px solid rgba(50,180,100,0.3)',
+            color: '#86efac',
+            borderRadius: '2px',
+            opacity: isStarting ? 0.55 : 1,
+            cursor: isStarting ? 'not-allowed' : 'pointer',
+          }}
+        >
+          <Play className="w-2.5 h-2.5" />
+          {isStarting ? 'Starting…' : 'Start'}
+        </button>
+        <button
+          onClick={onRemove}
+          className="text-[9px] px-1.5 py-0.5 shrink-0"
+          style={{ color: '#2a4a6a', borderRadius: '2px', cursor: 'pointer' }}
+          title="Remove from registry"
+        >
+          ×
+        </button>
+      </div>
+
+      {/* Placeholder frame */}
+      <div
+        className="relative w-full overflow-hidden shrink-0 flex flex-col items-center justify-center gap-2"
+        style={{ aspectRatio: '16/9', background: '#060b12', borderBottom: '1px solid rgba(40,90,160,0.15)' }}
+      >
+        <div className="w-4 h-4 rounded-full" style={{ background: '#0d1a2e', border: '1px solid rgba(40,90,160,0.3)' }} />
+        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: '#2a4a6a' }}>Inactive</span>
+      </div>
+
+      {/* Info */}
+      <div className="p-2 space-y-1" style={{ background: '#0a1018' }}>
+        <div className="text-[10px] font-mono" style={{ color: '#3a6a9a' }}>
+          {stream.mode ? stream.mode.toUpperCase() : 'RTP'}://{stream.ip}:{stream.port}
+        </div>
+        <div className="text-[9px] font-mono uppercase" style={{ color: '#1e3a5f' }}>
+          Not monitoring — click Start to begin probe
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode, isStopping = false }) {
@@ -383,49 +519,76 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [engineerModeLabel, setEngineerModeLabel] = useState(DEFAULT_ENGINEER_MODE_LABEL);
   const [isEditingEngineerModeLabel, setIsEditingEngineerModeLabel] = useState(false);
   const [engineerModeLabelDraft, setEngineerModeLabelDraft] = useState(DEFAULT_ENGINEER_MODE_LABEL);
-  const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
+  const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [], streams: [] }]);
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
+  const [startingStreamIds, setStartingStreamIds] = useState(new Set());
+  const importFileRef = useRef(null);
+  // Debounce timer for server-side panel sync
+  const serverSyncTimerRef = useRef(null);
 
   // Prevent the persist effect from overwriting localStorage with default state
   // before the load effect's setState calls have been applied (React mount race).
   const hydratedRef = useRef(false);
 
   useEffect(() => {
+    // Step 1: load UI prefs and panel structure from localStorage (fast, offline)
     try {
       const raw = localStorage.getItem(MULTIVIEW_STATE_KEY);
-      if (!raw) { hydratedRef.current = true; return; }
-      const parsed = JSON.parse(raw);
-      if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
-      if (parsed?.mode) setMode(parsed.mode);
-      if (parsed?.host != null) setHost(String(parsed.host));
-      if (parsed?.port != null) setPort(String(parsed.port));
-      if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
-      if (parsed?.interval != null) setInterval(String(parsed.interval));
-      if (parsed?.latency != null) setLatency(String(parsed.latency));
-      if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
-      if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
-      if (parsed?.engineerModeLabel != null) {
-        const nextLabel = String(parsed.engineerModeLabel).trim();
-        if (nextLabel) setEngineerModeLabel(nextLabel.slice(0, 32));
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
+        if (parsed?.mode) setMode(parsed.mode);
+        if (parsed?.host != null) setHost(String(parsed.host));
+        if (parsed?.port != null) setPort(String(parsed.port));
+        if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
+        if (parsed?.interval != null) setInterval(String(parsed.interval));
+        if (parsed?.latency != null) setLatency(String(parsed.latency));
+        if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
+        if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+        if (parsed?.engineerModeLabel != null) {
+          const nextLabel = String(parsed.engineerModeLabel).trim();
+          if (nextLabel) setEngineerModeLabel(nextLabel.slice(0, 32));
+        }
+        if (Array.isArray(parsed?.panels) && parsed.panels.length > 0) {
+          const sanitized = parsed.panels
+            .map((p, idx) => ({
+              id: String(p?.id || `panel-${idx + 1}`),
+              name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
+              // decoderIds are NOT restored — timestamp-based, stale after restart
+              decoderIds: [],
+              // streams from localStorage as initial fallback until server responds
+              streams: Array.isArray(p?.streams) ? p.streams : [],
+            }))
+            .filter((p) => p.id);
+          if (sanitized.length > 0) setPanels(sanitized);
+        }
+        if (parsed?.activePanelId != null) setActivePanelId(String(parsed.activePanelId));
       }
-      if (Array.isArray(parsed?.panels) && parsed.panels.length > 0) {
-        const sanitized = parsed.panels
-          .map((p, idx) => ({
-            id: String(p?.id || `panel-${idx + 1}`),
-            name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
-            // decoderIds are NOT restored — they are timestamp-based and become stale
-            // after every server restart. The auto-seed effect repopulates routing each
-            // session from the live activeIds list.
-            decoderIds: [],
-          }))
-          .filter((p) => p.id);
-        if (sanitized.length > 0) setPanels(sanitized);
-      }
-      if (parsed?.activePanelId != null) setActivePanelId(String(parsed.activePanelId));
     } catch (_) {}
-    hydratedRef.current = true;
+
+    // Step 2: fetch authoritative stream registry from server (overrides localStorage for streams)
+    fetch('/api/multiview/panels')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data || !Array.isArray(data.panels) || data.panels.length === 0) return;
+        setPanels((prev) => {
+          // Merge server streams into existing panels by panel id; add new server panels.
+          const byId = {};
+          prev.forEach((p) => { byId[p.id] = p; });
+          data.panels.forEach((sp) => {
+            if (byId[sp.id]) {
+              byId[sp.id] = { ...byId[sp.id], streams: Array.isArray(sp.streams) ? sp.streams : [] };
+            } else {
+              byId[sp.id] = { id: sp.id, name: sp.name, decoderIds: [], streams: Array.isArray(sp.streams) ? sp.streams : [] };
+            }
+          });
+          return Object.values(byId);
+        });
+      })
+      .catch(() => {}) // server offline — localStorage fallback already applied
+      .finally(() => { hydratedRef.current = true; });
   }, []);
 
   useEffect(() => {
@@ -433,22 +596,20 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     try {
       localStorage.setItem(
         MULTIVIEW_STATE_KEY,
-        JSON.stringify({
-          openCreate,
-          mode,
-          host,
-          port,
-          decoderId,
-          interval,
-          latency,
-          passphrase,
-          engineerMode,
-          engineerModeLabel,
-          panels,
-          activePanelId,
-        })
+        JSON.stringify({ openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, engineerModeLabel, panels, activePanelId })
       );
     } catch (_) {}
+
+    // Debounced server sync — only syncs panel structure + streams (not decoderIds)
+    clearTimeout(serverSyncTimerRef.current);
+    serverSyncTimerRef.current = setTimeout(() => {
+      const serverPanels = panels.map((p) => ({ id: p.id, name: p.name, streams: p.streams || [] }));
+      fetch('/api/multiview/panels', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ panels: serverPanels }),
+      }).catch(() => {});
+    }, 800);
   }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, engineerModeLabel, panels, activePanelId]);
 
   const beginEngineerModeLabelEdit = () => {
@@ -568,7 +729,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     if (!name || name.length < 3) return;
     if (panelNameInUse) return;
     const id = `panel-${Date.now()}`;
-    const panel = { id, name, decoderIds: [] };
+    const panel = { id, name, decoderIds: [], streams: [] };
     setPanels((prev) => [...prev, panel]);
     setActivePanelId(id);
     setNewPanelName('');
@@ -585,6 +746,61 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       setActivePanelId(remaining[0]?.id || DEFAULT_PANEL_ID);
     }
   };
+
+  const addStreamsToActivePanel = useCallback((newStreams) => {
+    if (!activePanel || !newStreams.length) return;
+    setPanels((prev) => prev.map((p) => {
+      if (p.id !== activePanel.id) return p;
+      // Deduplicate by ip+port
+      const existing = new Set((p.streams || []).map((s) => `${s.ip}:${s.port}`));
+      const toAdd = newStreams.filter((s) => !existing.has(`${s.ip}:${s.port}`));
+      return { ...p, streams: [...(p.streams || []), ...toAdd] };
+    }));
+  }, [activePanel]);
+
+  const removeStreamFromActivePanel = useCallback((streamId) => {
+    if (!activePanel) return;
+    setPanels((prev) => prev.map((p) => {
+      if (p.id !== activePanel.id) return p;
+      return { ...p, streams: (p.streams || []).filter((s) => s.id !== streamId) };
+    }));
+  }, [activePanel]);
+
+  const handleImportFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result || '';
+      const streams = file.name.endsWith('.json') ? parseStreamsJson(text) : parseStreamsCsv(text);
+      addStreamsToActivePanel(streams);
+    };
+    reader.readAsText(file);
+  }, [addStreamsToActivePanel]);
+
+  const handleExportCsv = useCallback(() => {
+    if (!activePanel) return;
+    exportStreamsCsv(activePanel.streams || [], activePanel.name);
+  }, [activePanel]);
+
+  const handleStartLoadedStream = useCallback(async (stream) => {
+    const decoderId = deriveStreamDecoderId(stream);
+    if (startingStreamIds.has(decoderId) || activeIds.includes(decoderId)) return;
+    const url = buildProbeUrl({ mode: stream.mode || 'rtp', host: stream.ip, port: stream.port, latency: '', passphrase: '' });
+    if (!url) return;
+    setStartingStreamIds((prev) => { const n = new Set(prev); n.add(decoderId); return n; });
+    try {
+      await startContinuous(decoderId, url, 5000);
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(decoderId)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), decoderId] };
+      }));
+      refreshActives();
+    } catch (_) {}
+    setStartingStreamIds((prev) => { const n = new Set(prev); n.delete(decoderId); return n; });
+  }, [startingStreamIds, activeIds, activePanelId, startContinuous, refreshActives]);
 
   const handleCreate = async () => {
     if (!probeUrl) return;
@@ -827,49 +1043,105 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           </div>
         )}
 
-        {activeIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No active decoders. Start decoders from Decoder tab.</p>
+        {/* Stream registry toolbar — import/export CSV/JSON per panel */}
+        {activePanel && (
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-gray-600 font-bold">Stream Registry</span>
+            <span className="text-[10px] font-mono text-gray-600">
+              {(activePanel.streams || []).length} configured
+            </span>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".csv,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <button
+              onClick={() => importFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded border"
+              style={{ borderColor: 'rgba(40,90,160,0.4)', color: '#93bbf0', background: 'rgba(20,50,100,0.2)' }}
+              title="Import streams from CSV or JSON file"
+            >
+              <Upload className="w-3 h-3" />
+              Import
+            </button>
+            {(activePanel.streams || []).length > 0 && (
+              <button
+                onClick={handleExportCsv}
+                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded border"
+                style={{ borderColor: 'rgba(40,90,160,0.3)', color: '#6b9fd4', background: 'rgba(15,35,70,0.2)' }}
+                title="Export panel streams as CSV"
+              >
+                <Download className="w-3 h-3" />
+                Export CSV
+              </button>
+            )}
+          </div>
         )}
-        {activeIds.length > 0 && visibleIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.</p>
-        )}
+
         {error && (
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {visibleIds.map((id) => (
-            <DecoderCard
-              key={id}
-              id={id}
-              displayName={getMultiviewDisplayName(id)}
-              meta={decoderMeta[id]}
-              result={resultsById[id]}
-              onStop={async () => {
-                if (stoppingIds.has(id)) return;
-                setStoppingIds((prev) => {
-                  const next = new Set(prev);
-                  next.add(id);
-                  return next;
-                });
-                try {
-                  await stop(id);
-                } finally {
-                  // Background refresh keeps UI responsive while stop settles.
-                  refreshActives();
-                  setStoppingIds((prev) => {
-                    const next = new Set(prev);
-                    next.delete(id);
-                    return next;
-                  });
-                }
-              }}
-              nowMs={nowMs}
-              engineerMode={engineerMode}
-              isStopping={stoppingIds.has(id)}
-            />
-          ))}
-        </div>
+        {/* Tile grid: loaded (inactive) tiles first, then active tiles */}
+        {(() => {
+          const loadedStreams = (activePanel?.streams || []).filter(
+            (s) => !activeIds.includes(deriveStreamDecoderId(s))
+          );
+          const hasAnyTiles = visibleIds.length > 0 || loadedStreams.length > 0;
+          return (
+            <>
+              {!hasAnyTiles && activeIds.length === 0 && (
+                <p className="text-gray-500 text-sm mt-4">
+                  No active decoders. Start decoders from the Decoder tab, or import streams above.
+                </p>
+              )}
+              {!hasAnyTiles && activeIds.length > 0 && (
+                <p className="text-gray-500 text-sm mt-4">
+                  No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.
+                </p>
+              )}
+              {hasAnyTiles && (
+                <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+                  {/* Loaded (inactive) tiles — navy styling */}
+                  {loadedStreams.map((stream) => (
+                    <LoadedStreamCard
+                      key={`loaded-${stream.id}`}
+                      stream={stream}
+                      onStart={() => handleStartLoadedStream(stream)}
+                      onRemove={() => removeStreamFromActivePanel(stream.id)}
+                      isStarting={startingStreamIds.has(deriveStreamDecoderId(stream))}
+                    />
+                  ))}
+                  {/* Active (live) tiles — existing cyan styling */}
+                  {visibleIds.map((id) => (
+                    <DecoderCard
+                      key={id}
+                      id={id}
+                      displayName={getMultiviewDisplayName(id)}
+                      meta={decoderMeta[id]}
+                      result={resultsById[id]}
+                      onStop={async () => {
+                        if (stoppingIds.has(id)) return;
+                        setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
+                        try {
+                          await stop(id);
+                        } finally {
+                          refreshActives();
+                          setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+                        }
+                      }}
+                      nowMs={nowMs}
+                      engineerMode={engineerMode}
+                      isStopping={stoppingIds.has(id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
       </BentoCard>
     </div>
   );

@@ -295,6 +295,7 @@ function start() {
   app.use('/scte35',    require('../routes/scte35')());
   app.use('/monitoring-policy', require('../routes/monitoring-policy')());
   app.use('/api/events', require('../routes/events')(eventLog));
+  app.use('/api/multiview', require('../routes/multiview')());
 
   app.get('/health', (req, res) => {
     res.json(getHealthPayload());
