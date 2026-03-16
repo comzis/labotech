@@ -893,6 +893,31 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               <Plus className="w-3 h-3" />
               Decoder
             </button>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".csv,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <button
+              onClick={() => importFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+              title="Import streams from CSV or JSON"
+            >
+              <Upload className="w-3 h-3" />
+              Import
+            </button>
+            {(activePanel?.streams || []).length > 0 && (
+              <button
+                onClick={handleExportCsv}
+                className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+                title="Export panel streams as CSV"
+              >
+                <Download className="w-3 h-3" />
+                Export
+              </button>
+            )}
           </div>
         </div>
 
@@ -1040,43 +1065,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             <div className="text-[10px] text-gray-500">
               Continuous probe cadence is target-based. Heavy bitrate/SI sampling runs every few cycles to reduce multiview lag.
             </div>
-          </div>
-        )}
-
-        {/* Stream registry toolbar — import/export CSV/JSON per panel */}
-        {activePanel && (
-          <div className="mt-3 flex items-center gap-2 flex-wrap">
-            <span className="text-[10px] uppercase tracking-[0.2em] text-gray-600 font-bold">Stream Registry</span>
-            <span className="text-[10px] font-mono text-gray-600">
-              {(activePanel.streams || []).length} configured
-            </span>
-            <input
-              ref={importFileRef}
-              type="file"
-              accept=".csv,.json"
-              className="hidden"
-              onChange={handleImportFile}
-            />
-            <button
-              onClick={() => importFileRef.current?.click()}
-              className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded border"
-              style={{ borderColor: 'rgba(40,90,160,0.4)', color: '#93bbf0', background: 'rgba(20,50,100,0.2)' }}
-              title="Import streams from CSV or JSON file"
-            >
-              <Upload className="w-3 h-3" />
-              Import
-            </button>
-            {(activePanel.streams || []).length > 0 && (
-              <button
-                onClick={handleExportCsv}
-                className="inline-flex items-center gap-1 text-[10px] font-bold uppercase px-2 py-1 rounded border"
-                style={{ borderColor: 'rgba(40,90,160,0.3)', color: '#6b9fd4', background: 'rgba(15,35,70,0.2)' }}
-                title="Export panel streams as CSV"
-              >
-                <Download className="w-3 h-3" />
-                Export CSV
-              </button>
-            )}
           </div>
         )}
 
