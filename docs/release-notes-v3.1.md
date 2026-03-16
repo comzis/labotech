@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.29)
+Date: 2026-03-16 (latest: v3.1.30)
 
 ## Overview
 
@@ -10,6 +10,43 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.30 — 2026-03-16
+
+### Ops: Scheduled disk housekeeping script (`scripts/disk-guard.sh`)
+
+**Problem:** Disk fills up silently between deploys. The `update-and-deploy-safe.sh` cleanup only runs when a deploy is triggered and disk is already low — by then it may be too late.
+
+**Solution:** `scripts/disk-guard.sh` — a standalone cleanup script safe to run from cron while Labotech is live (no container stop or restart). Cleans five categories:
+1. Docker container JSON logs (`/var/lib/docker/containers/*/*-json.log`) — truncated in-place, the primary silent killer
+2. Unused Docker images and build cache (`docker system prune -af`)
+3. apt package cache + orphaned packages
+4. systemd journal vacuumed to 200 MB / 7 days
+5. Thumbnail JPEGs older than 1 hour from `logs/thumbnails/`
+
+Logs before/after free space for root and Docker volumes, with a warning if free space is still below `WARN_FREE_MB` (default 2 GB) after cleanup.
+
+**Cron entry (run once on server as root):**
+```bash
+echo '0 3 * * * boro bash /home/boro/LaboTech/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1' \
+  | sudo tee /etc/cron.d/labotech-disk-guard
+```
+
+**Docker daemon log rotation (run once on server as root):**
+```bash
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "50m", "max-file": "5" }
+}
+EOF
+sudo systemctl restart docker
+```
+This caps logs at the daemon level for all containers as a belt-and-braces measure alongside the per-service limits already in `docker-compose.yml`.
+
+**Operator impact:** Disk no longer fills up silently. Daily 3am run reclaims build cache, logs, and thumbnails. Operators see reclaimed MB in `/var/log/labotech-disk-guard.log`.
 
 ---
 
