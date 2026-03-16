@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Monitor, Plus, Pencil, Upload, Download } from 'lucide-react';
+import { Monitor, Plus, Pencil, Upload, Download, Search } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
@@ -959,29 +959,20 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
         {openCreate && (
           <div className="mt-4 p-3 rounded-xl border border-white/10 bg-black/20 space-y-3">
-            <div className="grid grid-cols-3 gap-2">
-              {['rtp', 'srt', 'udp'].map(v => (
-                <button
-                  key={v}
-                  onClick={() => setMode(v)}
-                  className={`px-3 py-2 rounded-lg text-xs border ${mode === v ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white' : 'bg-black/30 border-white/10 text-gray-400'}`}
-                >
-                  {v.toUpperCase()}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-              {/* Host / IP with catalog picker */}
-              <div className="relative" ref={catalogRef}>
-                <label className="block text-[10px] uppercase tracking-widest text-gray-500 mb-1">Host / IP</label>
-                <input
-                  type="text"
-                  value={host}
-                  onChange={(e) => { setHost(e.target.value); setCatalogSearch(e.target.value); }}
-                  onFocus={() => { setShowCatalog(true); setCatalogSearch(host); }}
-                  placeholder="Host / IP or pick from catalog"
-                  className="w-full px-2 py-1.5 text-xs font-mono rounded border border-white/10 bg-black/30 text-gray-200 focus:outline-none focus:border-neon-cyan/40"
-                />
+            {/* Select stream from catalog + mode buttons in one row */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1" ref={catalogRef}>
+                <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-white/10 bg-black/30 focus-within:border-neon-cyan/40">
+                  <Search className="w-3 h-3 text-gray-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={catalogSearch}
+                    onChange={(e) => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
+                    onFocus={() => setShowCatalog(true)}
+                    placeholder="Select stream from catalog…"
+                    className="flex-1 bg-transparent text-xs text-gray-300 placeholder-gray-600 outline-none font-mono"
+                  />
+                </div>
                 {showCatalog && catalog.length > 0 && (() => {
                   const q = catalogSearch.toLowerCase();
                   const filtered = q.length >= 1
@@ -1033,6 +1024,18 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                   );
                 })()}
               </div>
+              {['rtp', 'srt', 'udp'].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setMode(v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs border shrink-0 ${mode === v ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white' : 'bg-black/30 border-white/10 text-gray-400 hover:text-gray-200'}`}
+                >
+                  {v.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.x.x.x" />
               <Field label="Port" value={port} onChange={setPort} type="number" placeholder="Port" />
               <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
               <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />
