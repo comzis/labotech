@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.25)
+Date: 2026-03-16 (latest: v3.1.26)
 
 ## Overview
 
@@ -10,6 +10,22 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.26 — 2026-03-16
+
+### Fix: Auto-clear thumbnail cache + LVM root volume prune on every deploy
+
+**Thumbnail cache wipe (always, not just on low disk):**
+Stale or 0-byte JPEG files left from a previous crashed/disk-full run were served to the multiview and rendered as black frames until the next probe cycle overwrote them. `update-and-deploy-safe.sh` now removes all `logs/thumbnails/*.jpg` before calling `deploy-one-shot.sh`. The count of removed files is logged. Thumbnails regenerate automatically within the first probe cycle (≤5s) after startup.
+
+**LVM root volume cleanup added to `auto_cleanup`:**
+`/dev/mapper/ubuntu--vg-ubuntu--lv` was not explicitly targeted by the existing cleanup. Added to `auto_cleanup` (runs automatically when disk is below threshold):
+- `apt-get autoremove -y` (was missing, reclaims orphaned packages)
+- `journalctl --vacuum-time=7d` (tightened from 14d)
+- `find /tmp -atime +1 -delete` (clears stale temp files)
+- Logs free MB on the root LV after cleanup for visibility
 
 ---
 

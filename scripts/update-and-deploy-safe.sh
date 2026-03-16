@@ -147,11 +147,16 @@ auto_cleanup() {
     docker system prune -af --volumes || true
   fi
 
-  # Optional host cleanup (best-effort, non-blocking)
+  # Host root volume (ubuntu--vg-ubuntu--lv) cleanup — apt cache, journal, /tmp
   if command -v sudo >/dev/null 2>&1; then
     sudo -n apt-get clean >/dev/null 2>&1 || true
+    sudo -n apt-get autoremove -y >/dev/null 2>&1 || true
     sudo -n journalctl --vacuum-size=200M >/dev/null 2>&1 || true
-    sudo -n journalctl --vacuum-time=14d >/dev/null 2>&1 || true
+    sudo -n journalctl --vacuum-time=7d >/dev/null 2>&1 || true
+    sudo -n find /tmp -type f -atime +1 -delete 2>/dev/null || true
+    local lv_free_mb
+    lv_free_mb=$(df -Pk /dev/mapper/ubuntu--vg-ubuntu--lv 2>/dev/null | awk 'NR==2{printf "%d", $4/1024}' || echo '?')
+    log "root LV free after host cleanup: ${lv_free_mb}MB"
   fi
 }
 
@@ -185,6 +190,19 @@ main() {
   fi
 
   safe_git_update
+
+  # Clear stale thumbnail JPEGs before every deploy.
+  # Thumbnails from a previous run (especially after a disk-full crash) can be
+  # 0-byte or corrupt — they render as black frames in the multiview until the
+  # next probe overwrites them. Wiping here guarantees a clean capture on startup.
+  local thumb_dir="${repo_root}/logs/thumbnails"
+  if [[ -d "${thumb_dir}" ]]; then
+    local thumb_count
+    thumb_count=$(find "${thumb_dir}" -maxdepth 1 -name '*.jpg' 2>/dev/null | wc -l)
+    rm -f "${thumb_dir}"/*.jpg 2>/dev/null || true
+    log "thumbnail cache cleared: ${thumb_count} file(s) removed"
+  fi
+
   bash scripts/deploy-one-shot.sh "${API_HOST}" "${API_PORT}" "${SERVICE}"
 }
 
