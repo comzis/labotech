@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.41)
+Date: 2026-03-17 (latest: v3.1.42)
 
 ## Overview
 
@@ -10,6 +10,20 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.42 — 2026-03-17
+
+### Fix: TS analyser state persisted across container restarts
+
+Active decoders/analysers were not saved to `config/state.json`, so every container restart wiped the TS timeline and required manual re-adding of all decoders.
+
+- `state-persistence.js`: adds `analysers` to `save()`/`load()` (fields: `id`, `url`, `interval`, `nicName`)
+- `api.js`: `saveState()` now includes the analysers map; `restoreState()` always restores analysers on boot (no env var gate — decoders must survive restarts)
+- `routes/analyse.js`: calls `saveState()` on every `POST /analyse/start` and `DELETE /analyse/:id`
+
+Operator impact: start your decoders once — they auto-resume after every deploy.
 
 ---
 

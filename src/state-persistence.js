@@ -41,13 +41,21 @@ function _forwarderConfig(f) {
   };
 }
 
+function _analyserConfig(a) {
+  return {
+    id: a.id, url: a.url,
+    interval: a.interval, nicName: a.nicName,
+  };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function save(streams, transcoders, forwarders) {
+function save(streams, transcoders, forwarders, analysers) {
   const state = {
     streams:     [...streams.values()]    .filter(e => e.isRunning).map(_encoderConfig),
     transcoders: [...transcoders.values()].filter(t => t.isRunning).map(_transcoderConfig),
     forwarders:  [...forwarders.values()] .filter(f => f.isRunning).map(_forwarderConfig),
+    analysers:   analysers ? [...analysers.values()].filter(a => a.isRunning).map(_analyserConfig) : [],
   };
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));

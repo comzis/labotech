@@ -120,7 +120,7 @@ function broadcastStats(wss, type, id, stats) {
 }
 
 function saveState() {
-  persistence.save(streams, transcoders, forwarders);
+  persistence.save(streams, transcoders, forwarders, analysers);
 }
 
 function _isManagedEtrMonitorId(id) {
@@ -251,6 +251,23 @@ async function restoreState(broadcast) {
   } else if ((state.forwarders || []).length > 0) {
     console.log('[state] Forwarder restore skipped (set RESTORE_FORWARDERS_ON_BOOT=true to enable)');
   }
+
+  // Analysers always restore — decoders must survive container restarts.
+  const TSAnalyser = require('./ts-analyser');
+  for (const cfg of (state.analysers || [])) {
+    if (analysers.has(cfg.id)) continue;
+    try {
+      const a = new TSAnalyser({ id: cfg.id, url: cfg.url, interval: cfg.interval, nicName: cfg.nicName });
+      a.on('result',       result => broadcast({ type: 'analyse_result', id: cfg.id, ...result }));
+      a.on('health_alarm', data   => broadcast({ type: 'health_alarm',   id: cfg.id, ...data }));
+      a.on('error',        err    => broadcast({ type: 'error',          id: cfg.id, message: err.message }));
+      a.startContinuous();
+      analysers.set(cfg.id, a);
+      console.log(`[state] Restored analyser: ${cfg.id}`);
+    } catch (err) {
+      console.error(`[state] Failed to restore analyser ${cfg.id}:`, err.message);
+    }
+  }
 }
 
 function start() {
@@ -289,7 +306,7 @@ function start() {
   app.use('/encap',     require('../routes/encap')());
   app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
-  app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast));
+  app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast, saveState));
   app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast));
   app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));
   app.use('/scte35',    require('../routes/scte35')());
