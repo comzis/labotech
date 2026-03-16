@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.21)
+Date: 2026-03-16 (latest: v3.1.22)
 
 ## Overview
 
@@ -10,6 +10,16 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.22 — 2026-03-16
+
+### Fix: Multiview storage key bumped to v2 — clears stale localStorage data
+
+**Problem:** v3.1.21 switched multiview state from `sessionStorage` to `localStorage`. Any pre-existing entry under the old key `labotech:decoder-multiview:state:v1` in `localStorage` (from a prior dev or test session) was now being loaded, producing corrupt panel state and breaking the multiview on first load after the upgrade.
+
+**Fix:** Storage key bumped to `labotech:decoder-multiview:state:v2`. The old key is simply ignored; the component starts clean. Panels created from this version onward will persist correctly across refreshes and restarts.
 
 ---
 

@@ -5,7 +5,7 @@ import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
-const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v1';
+const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v2';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'BES';
 const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
