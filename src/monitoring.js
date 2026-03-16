@@ -136,11 +136,10 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         // noref (previous value) only skipped non-reference B-frames — P-frames still
         // decoded without their reference I-frame, causing the visible macroblocking.
         ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
-        // 1s analyze is sufficient for a live broadcast stream — codec is known within
-        // the first few packets. 2s was adding unnecessary latency on first capture.
+        // 2s analyze is sufficient to find the first I-frame in a live broadcast stream.
         // Fallback gets a longer window to find any decodable frame.
-        '-analyzeduration', iFrameOnly ? '1000000' : '5000000',
-        '-probesize', iFrameOnly ? '1500000' : '5000000',
+        '-analyzeduration', iFrameOnly ? '2000000' : '7000000',
+        '-probesize', iFrameOnly ? '3000000' : '7000000',
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
@@ -178,21 +177,21 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     runAttempt({
       // Attempt 1: full quality — I-frame + deblock + denoise
       iFrameOnly: true,
-      timeoutMs: 5000,
+      timeoutMs: 8000,
       deblock: capture.deblock,
       denoise: capture.denoise,
     })
       .catch(() => runAttempt({
         // Attempt 2: I-frame, no deblock (handles ffmpeg builds without "pp" filter)
         iFrameOnly: true,
-        timeoutMs: 5000,
+        timeoutMs: 8000,
         deblock: false,
         denoise: capture.denoise,
       }))
       .catch(() => runAttempt({
-        // Attempt 3: I-frame, no quality filters (bare scale only) — fast path
+        // Attempt 3: I-frame, no quality filters (bare scale only)
         iFrameOnly: true,
-        timeoutMs: 5000,
+        timeoutMs: 8000,
         deblock: false,
         denoise: null,
       }))
