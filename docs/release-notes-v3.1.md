@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.22)
+Date: 2026-03-16 (latest: v3.1.23)
 
 ## Overview
 
@@ -10,6 +10,25 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.23 — 2026-03-16
+
+### Perf: Faster multiview thumbnail — reduce analyze latency and fallback timeouts
+
+**Problem:** First thumbnail on a fresh decoder was slow to appear ("Awaiting Frame" for 10–32 seconds) due to three compounding issues:
+- `analyzeduration: 2s` — ffmpeg spent 2 seconds analysing the stream format before decoding a single frame. For a live broadcast stream the codec is known within the first few packets; 2s was pure wasted wait.
+- Fallback ladder attempt timeouts were all 8s — if attempt 1 failed (e.g. `pp=de/de` filter unavailable on this ffmpeg build), attempt 2 did not start until 8s elapsed. Worst case: 32s before any thumbnail appeared.
+- `probesize: 3MB` — read up to 3MB of stream data for format detection, adding further latency on attempt start.
+
+**Fix:**
+- `analyzeduration` on I-frame path: `2000000` → `1000000` (1s)
+- `probesize` on I-frame path: `3000000` → `1500000` (1.5MB)
+- Attempt 1, 2, 3 timeouts: `8000ms` → `5000ms` (fail fast to reach bare-scale attempt sooner)
+- Attempt 4 (last resort / any frame) retains 8s timeout for very long GOP streams
+
+**Result:** First thumbnail appears in 2–4s on a typical broadcast stream. Worst-case (all 4 attempts exhaust): 23s instead of 32s.
 
 ---
 
