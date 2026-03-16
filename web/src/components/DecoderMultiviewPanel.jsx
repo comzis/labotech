@@ -112,14 +112,7 @@ function deriveCategory(name) {
 // Derive a stable decoder ID from a stream registry entry name.
 // Uses name-based slug so that the same stream can be identified across sessions.
 function deriveStreamDecoderId(stream) {
-  const slug = String(stream.name || stream.ip || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/-{2,}/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 40) || 'stream';
-  const ipSlug = String(stream.ip || '').replace(/\./g, '-').slice(0, 15);
-  return `mv-${slug}-${ipSlug}-${String(stream.port || '0')}`.slice(0, 64);
+  return String(stream.name || stream.ip || 'stream').trim().slice(0, 64);
 }
 
 function parseStreamsCsv(text) {

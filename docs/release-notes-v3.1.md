@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.38)
+Date: 2026-03-16 (latest: v3.1.39)
 
 ## Overview
 
@@ -10,6 +10,14 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.39 — 2026-03-16
+
+### Fix: Decoder ID auto-fill uses stream name directly
+
+When selecting a stream from the catalog dropdown, the Decoder ID field is now populated with the stream name as-is (e.g. `GV RX096`) instead of a slugified compound string (`mv-gv-rx-096-239-100-20-196-6501`). Easier to read at MCR distance and matches the operator naming convention.
 
 ---
 
