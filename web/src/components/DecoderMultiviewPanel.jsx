@@ -1,11 +1,11 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { Monitor, Plus, Pencil, Upload, Download, Play } from 'lucide-react';
+import { Monitor, Plus, Pencil, Upload, Download } from 'lucide-react';
 import useTSAnalysis from '../hooks/useTSAnalysis';
 import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
-const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v2';
+const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v3';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'BES';
 const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
@@ -215,83 +215,6 @@ function extractThumbTimestamp(thumbnailUrl) {
   if (!m) return null;
   const ts = Number(m[1]);
   return Number.isFinite(ts) ? ts : null;
-}
-
-// Tile for a stream that is in the registry but not yet running.
-// Distinct dark-navy styling so operators can immediately tell "loaded" from "live".
-function LoadedStreamCard({ stream, onStart, onRemove, isStarting = false }) {
-  return (
-    <div
-      className="flex flex-col overflow-hidden"
-      style={{
-        background: '#090e18',
-        border: '1px solid rgba(40,90,160,0.35)',
-        borderLeft: '3px solid rgba(40,90,200,0.5)',
-        borderRadius: '3px',
-        boxShadow: '0 2px 8px rgba(0,0,0,0.5)',
-        minWidth: 0,
-        opacity: isStarting ? 0.7 : 1,
-      }}
-    >
-      {/* Header */}
-      <div
-        className="flex items-center gap-2 px-2.5 py-1.5 shrink-0"
-        style={{ background: 'linear-gradient(180deg,#111c2e 0%,#0d1622 100%)', borderBottom: '1px solid rgba(40,90,160,0.2)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.03)' }}
-      >
-        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: '#1e3a5f', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.6)' }} />
-        <span className="font-mono text-[10px] text-blue-300/70 truncate flex-1" title={stream.name}>{stream.name || stream.ip}</span>
-        <span
-          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0"
-          style={{ background: 'rgba(30,60,120,0.25)', borderColor: 'rgba(60,120,220,0.3)', color: '#93bbf0' }}
-        >
-          Loaded
-        </span>
-        <button
-          onClick={onStart}
-          disabled={isStarting}
-          className="inline-flex items-center gap-1 text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
-          style={{
-            background: 'rgba(30,100,60,0.35)',
-            border: '1px solid rgba(50,180,100,0.3)',
-            color: '#86efac',
-            borderRadius: '2px',
-            opacity: isStarting ? 0.55 : 1,
-            cursor: isStarting ? 'not-allowed' : 'pointer',
-          }}
-        >
-          <Play className="w-2.5 h-2.5" />
-          {isStarting ? 'Starting…' : 'Start'}
-        </button>
-        <button
-          onClick={onRemove}
-          className="text-[9px] px-1.5 py-0.5 shrink-0"
-          style={{ color: '#2a4a6a', borderRadius: '2px', cursor: 'pointer' }}
-          title="Remove from registry"
-        >
-          ×
-        </button>
-      </div>
-
-      {/* Placeholder frame */}
-      <div
-        className="relative w-full overflow-hidden shrink-0 flex flex-col items-center justify-center gap-2"
-        style={{ aspectRatio: '16/9', background: '#060b12', borderBottom: '1px solid rgba(40,90,160,0.15)' }}
-      >
-        <div className="w-4 h-4 rounded-full" style={{ background: '#0d1a2e', border: '1px solid rgba(40,90,160,0.3)' }} />
-        <span className="text-[9px] font-mono uppercase tracking-widest" style={{ color: '#2a4a6a' }}>Inactive</span>
-      </div>
-
-      {/* Info */}
-      <div className="p-2 space-y-1" style={{ background: '#0a1018' }}>
-        <div className="text-[10px] font-mono" style={{ color: '#3a6a9a' }}>
-          {stream.mode ? stream.mode.toUpperCase() : 'RTP'}://{stream.ip}:{stream.port}
-        </div>
-        <div className="text-[9px] font-mono uppercase" style={{ color: '#1e3a5f' }}>
-          Not monitoring — click Start to begin probe
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode, isStopping = false }) {
@@ -539,8 +462,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
-  const [startingStreamIds, setStartingStreamIds] = useState(new Set());
-  const [collapsedCategories, setCollapsedCategories] = useState(new Set());
   const [catalog, setCatalog] = useState([]);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [showCatalog, setShowCatalog] = useState(false);
@@ -800,14 +721,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     }));
   }, [activePanel]);
 
-  const removeStreamFromActivePanel = useCallback((streamId) => {
-    if (!activePanel) return;
-    setPanels((prev) => prev.map((p) => {
-      if (p.id !== activePanel.id) return p;
-      return { ...p, streams: (p.streams || []).filter((s) => s.id !== streamId) };
-    }));
-  }, [activePanel]);
-
   const handleImportFile = useCallback((e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -825,24 +738,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     if (!activePanel) return;
     exportStreamsCsv(activePanel.streams || [], activePanel.name);
   }, [activePanel]);
-
-  const handleStartLoadedStream = useCallback(async (stream) => {
-    const decoderId = deriveStreamDecoderId(stream);
-    if (startingStreamIds.has(decoderId) || activeIds.includes(decoderId)) return;
-    const url = buildProbeUrl({ mode: stream.mode || 'rtp', host: stream.ip, port: stream.port, latency: '', passphrase: '' });
-    if (!url) return;
-    setStartingStreamIds((prev) => { const n = new Set(prev); n.add(decoderId); return n; });
-    try {
-      await startContinuous(decoderId, url, 5000);
-      setPanels((prev) => prev.map((p) => {
-        if (p.id !== activePanelId) return p;
-        if ((p.decoderIds || []).includes(decoderId)) return p;
-        return { ...p, decoderIds: [...(p.decoderIds || []), decoderId] };
-      }));
-      refreshActives();
-    } catch (_) {}
-    setStartingStreamIds((prev) => { const n = new Set(prev); n.delete(decoderId); return n; });
-  }, [startingStreamIds, activeIds, activePanelId, startContinuous, refreshActives]);
 
   const handleCreate = async () => {
     if (!probeUrl) return;
@@ -1175,118 +1070,37 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        {/* Tile grid: active tiles first, then loaded tiles grouped by category */}
-        {(() => {
-          const loadedStreams = (activePanel?.streams || []).filter(
-            (s) => !activeIds.includes(deriveStreamDecoderId(s))
-          );
-          const hasAnyTiles = visibleIds.length > 0 || loadedStreams.length > 0;
-
-          // Group loaded streams by auto-derived category
-          const categoryOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
-          const grouped = {};
-          loadedStreams.forEach((s) => {
-            const cat = deriveCategory(s.name);
-            if (!grouped[cat]) grouped[cat] = [];
-            grouped[cat].push(s);
-          });
-          const categories = categoryOrder.filter((c) => grouped[c]);
-
-          const toggleCategory = (cat) => {
-            setCollapsedCategories((prev) => {
-              const next = new Set(prev);
-              if (next.has(cat)) next.delete(cat); else next.add(cat);
-              return next;
-            });
-          };
-
-          return (
-            <>
-              {!hasAnyTiles && activeIds.length === 0 && (
-                <p className="text-gray-500 text-sm mt-4">
-                  No active decoders. Start decoders from the Decoder tab, or import streams above.
-                </p>
-              )}
-              {!hasAnyTiles && activeIds.length > 0 && (
-                <p className="text-gray-500 text-sm mt-4">
-                  No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.
-                </p>
-              )}
-
-              {/* Active (live) tiles */}
-              {visibleIds.length > 0 && (
-                <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                  {visibleIds.map((id) => (
-                    <DecoderCard
-                      key={id}
-                      id={id}
-                      displayName={getMultiviewDisplayName(id)}
-                      meta={decoderMeta[id]}
-                      result={resultsById[id]}
-                      onStop={async () => {
-                        if (stoppingIds.has(id)) return;
-                        setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
-                        try { await stop(id); } finally {
-                          refreshActives();
-                          setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-                        }
-                      }}
-                      nowMs={nowMs}
-                      engineerMode={engineerMode}
-                      isStopping={stoppingIds.has(id)}
-                    />
-                  ))}
-                </div>
-              )}
-
-              {/* Loaded tiles grouped by category */}
-              {categories.map((cat) => {
-                const streams = grouped[cat];
-                const collapsed = collapsedCategories.has(cat);
-                return (
-                  <div key={cat} className="mt-4">
-                    {/* Category header */}
-                    <button
-                      onClick={() => toggleCategory(cat)}
-                      className="w-full flex items-center gap-2 px-2 py-1.5 mb-2 text-left"
-                      style={{ background: 'rgba(20,40,70,0.4)', border: '1px solid rgba(40,90,160,0.25)', borderRadius: '3px' }}
-                    >
-                      <span className="text-[9px] font-mono" style={{ color: '#3a6a9a' }}>
-                        {collapsed ? '▶' : '▼'}
-                      </span>
-                      <span className="text-[10px] font-bold uppercase tracking-[0.15em]" style={{ color: '#6b9fd4' }}>
-                        {cat}
-                      </span>
-                      <span className="text-[10px] font-mono" style={{ color: '#2a4a6a' }}>
-                        ({streams.length})
-                      </span>
-                      {!collapsed && (
-                        <span className="ml-auto text-[9px] font-mono" style={{ color: '#1e3a5f' }}>
-                          click to collapse
-                        </span>
-                      )}
-                    </button>
-
-                    {/* Category tiles */}
-                    {!collapsed && (
-                      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-                        {streams.map((stream) => (
-                          <LoadedStreamCard
-                            key={`loaded-${stream.id}`}
-                            stream={stream}
-                            onStart={() => handleStartLoadedStream(stream)}
-                            onRemove={() => removeStreamFromActivePanel(stream.id)}
-                            isStarting={startingStreamIds.has(deriveStreamDecoderId(stream))}
-                          />
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </>
-          );
-        })()}
+        {/* Active decoder tiles only */}
+        {activeIds.length === 0 && (
+          <p className="text-gray-500 text-sm mt-4">No active decoders. Use + Decoder to start monitoring a stream.</p>
+        )}
+        {activeIds.length > 0 && visibleIds.length === 0 && (
+          <p className="text-gray-500 text-sm mt-4">No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.</p>
+        )}
+        {visibleIds.length > 0 && (
+          <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+            {visibleIds.map((id) => (
+              <DecoderCard
+                key={id}
+                id={id}
+                displayName={getMultiviewDisplayName(id)}
+                meta={decoderMeta[id]}
+                result={resultsById[id]}
+                onStop={async () => {
+                  if (stoppingIds.has(id)) return;
+                  setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
+                  try { await stop(id); } finally {
+                    refreshActives();
+                    setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+                  }
+                }}
+                nowMs={nowMs}
+                engineerMode={engineerMode}
+                isStopping={stoppingIds.has(id)}
+              />
+            ))}
+          </div>
+        )}
       </BentoCard>
     </div>
   );

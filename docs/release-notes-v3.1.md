@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-16 (latest: v3.1.37)
+Date: 2026-03-16 (latest: v3.1.38)
 
 ## Overview
 
@@ -10,6 +10,21 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.38 — 2026-03-16
+
+### Fix: Remove loaded stream tiles from multiview panel
+
+Multiview was accidentally flooding with 914 loaded (inactive) stream tiles from the catalog. The panel grid now shows **only active (running) decoder tiles** — no loaded tiles concept exists.
+
+- Removed `LoadedStreamCard` component entirely
+- Removed `startingStreamIds`, `collapsedCategories`, category-grouping for tile display
+- Bumped localStorage key from `v2` → `v3` to clear stale browser cache (browsers with old data will auto-reset on next load)
+- The 914-stream catalog remains available as a **dropdown picker on the Host/IP field only**
+
+Operator impact: multiview is clean again — only live decoders appear as tiles.
 
 ---
 
