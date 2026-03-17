@@ -101,11 +101,21 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     const tmpPath = `${outPath}.tmp.jpg`;
     const capture = getThumbnailCaptureSettings();
 
-    // Build input URL with multicast-friendly options
+    // Build input URL with protocol-specific options
     let src = inputUrl;
+    const isSrtUrl = inputUrl.startsWith('srt://');
     if (inputUrl.startsWith('udp://') || inputUrl.startsWith('rtp://')) {
       const sep = inputUrl.includes('?') ? '&' : '?';
       src = `${inputUrl}${sep}fifo_size=${TS_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${TS_INPUT_TIMEOUT_US}&reorder_queue_size=${TS_INPUT_REORDER_QUEUE_SIZE}`;
+    } else if (isSrtUrl) {
+      // SRT caller: ensure mode=caller and a generous connection timeout.
+      // ffmpeg SRT timeout is in microseconds; 8s covers latency windows up to ~5s.
+      const sep = inputUrl.includes('?') ? '&' : '?';
+      let srtSrc = inputUrl;
+      if (!srtSrc.includes('mode=')) srtSrc += `${sep}mode=caller`;
+      const modeAdded = !inputUrl.includes('mode=');
+      if (!srtSrc.includes('timeout=')) srtSrc += `${modeAdded ? '&' : sep}timeout=8000000`;
+      src = srtSrc;
     }
 
     const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
@@ -136,10 +146,11 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         // noref (previous value) only skipped non-reference B-frames — P-frames still
         // decoded without their reference I-frame, causing the visible macroblocking.
         ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
-        // 2s analyze is sufficient to find the first I-frame in a live broadcast stream.
-        // Fallback gets a longer window to find any decodable frame.
-        '-analyzeduration', iFrameOnly ? '2000000' : '7000000',
-        '-probesize', iFrameOnly ? '3000000' : '7000000',
+        // SRT needs a longer analyze window: the SRT latency window (typically 2-5s)
+        // must fill before any data flows. For SRT use 6s; RTP/UDP 2s is sufficient.
+        // Fallback path always uses 7s regardless of protocol.
+        '-analyzeduration', iFrameOnly ? (isSrtUrl ? '6000000' : '2000000') : '7000000',
+        '-probesize', iFrameOnly ? (isSrtUrl ? '7000000' : '3000000') : '7000000',
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
@@ -174,31 +185,33 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     // Attempt 4 is the last-resort continuity fallback for streams with very long GOPs
     // (e.g. CBR filler, test cards, static slides) — may show mild blocking artefacts
     // but is better than a blank tile for extended periods.
+    // SRT caller streams need longer timeouts: latency window (up to 5s) + frame decode.
+    const attemptTimeoutMs = isSrtUrl ? 14000 : 8000;
     runAttempt({
       // Attempt 1: full quality — I-frame + deblock + denoise
       iFrameOnly: true,
-      timeoutMs: 8000,
+      timeoutMs: attemptTimeoutMs,
       deblock: capture.deblock,
       denoise: capture.denoise,
     })
       .catch(() => runAttempt({
         // Attempt 2: I-frame, no deblock (handles ffmpeg builds without "pp" filter)
         iFrameOnly: true,
-        timeoutMs: 8000,
+        timeoutMs: attemptTimeoutMs,
         deblock: false,
         denoise: capture.denoise,
       }))
       .catch(() => runAttempt({
         // Attempt 3: I-frame, no quality filters (bare scale only)
         iFrameOnly: true,
-        timeoutMs: 8000,
+        timeoutMs: attemptTimeoutMs,
         deblock: false,
         denoise: null,
       }))
       .catch(() => runAttempt({
         // Attempt 4: last resort — allow any decodable frame (very long GOP / no-signal streams)
         iFrameOnly: false,
-        timeoutMs: 8000,
+        timeoutMs: attemptTimeoutMs,
         deblock: false,
         denoise: null,
       }))
