@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.43)
+Date: 2026-03-17 (latest: v3.1.44)
 
 ## Overview
 
@@ -10,6 +10,24 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.44 — 2026-03-17
+
+### Fix: SRT caller thumbnail "Awaiting Frame" — latency window starving analyze
+
+Two bugs caused SRT caller streams to show "Awaiting Frame" indefinitely:
+
+1. **analyzeduration too short**: I-frame attempts used `analyzeduration=2s`. SRT caller's latency window (typically 2–5s) must fill before any data flows — the analyze window expired before a single packet arrived.
+2. **No connection timeout set**: SRT URLs got no `timeout` parameter, so ffmpeg hung on connection failures until the 8s kill timer fired — consuming all available thumbnail attempt slots.
+
+**Fix (`monitoring.js`):**
+- SRT URLs: automatically appends `mode=caller` (if absent) and `timeout=8000000` (8s connection timeout)
+- SRT I-frame `analyzeduration` raised from 2s → **6s**
+- SRT attempt timeout raised from 8s → **14s** per attempt (covers up to 5s latency window + decode)
+
+Operator impact: SRT caller confidence thumbnails now appear on first or second attempt instead of exhausting all retries.
 
 ---
 
