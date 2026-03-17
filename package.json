@@ -1,6 +1,6 @@
 {
   "name": "labotech",
-  "version": "3.1.52",
+  "version": "3.1.53",
   "description": "Professional broadcast encoder and stream management",
   "main": "src/index.js",
   "scripts": {
