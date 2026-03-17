@@ -4,7 +4,7 @@ const { EventEmitter } = require('events');
 const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId } = require('./monitoring');
+const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId, PersistentThumbnailCapture, parseSrtLatency } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
 const DolbyEAdapter = require('./dolbye-adapter');
 const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
@@ -587,15 +587,20 @@ class TSAnalyser extends EventEmitter {
       // SRT streams: use verbose log level so libsrt stats appear in stderr.
       // For all other protocols use error-only to keep stderr clean.
       const isSrt = String(inputUrl).startsWith('srt://');
+      // For SRT the latency window must fill before data flows — derive capture
+      // duration and analyze window from the URL's latency parameter.
+      const srtLatencyMs   = isSrt ? parseSrtLatency(this.url) : 0;
+      const analyzeDurUs   = isSrt ? String((srtLatencyMs + 2000) * 1000) : '1000000';
+      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : '3.0';
+      const killTimerMs    = isSrt ? (srtLatencyMs + 20000) : 12000;
       const args = [
         '-hide_banner',
         '-loglevel', isSrt ? 'verbose' : 'error',
-        // Ensure live TS is received without stalling on analysis
         '-fflags', '+discardcorrupt+genpts',
-        '-analyzeduration', '1000000',   // 1 s — enough for MPEG-TS PAT/PMT lock
+        '-analyzeduration', analyzeDurUs,
         '-probesize', '2000000',
         '-progress', 'pipe:2',
-        '-t', '3.0',
+        '-t', captureSec,
         '-i', inputUrl,
         '-map', '0',
         '-c', 'copy',
@@ -607,7 +612,7 @@ class TSAnalyser extends EventEmitter {
       let stderr = '';
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 12000);
+      }, killTimerMs);
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('error', () => {
         clearTimeout(timeout);
@@ -2240,46 +2245,38 @@ class TSAnalyser extends EventEmitter {
       this._iatSniffer.start();
     }
 
-    // Independent thumbnail timer — runs in parallel with the analysis loop so
-    // thumbnail refresh rate is not bottlenecked by the (slow) sub-probes.
-    const thumbIntervalMs = Math.max(1000, (parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5) * 1000);
-    const runThumbnail = async () => {
-      if (!this.isRunning) return;
-      if (!this._thumbnailCapturing) {
-        this._thumbnailCapturing = true;
-        try {
-          await captureThumbnail(this.id, this.url);
-          this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-        } catch (_) {
-          // Keep existing URL on failure; will retry next cycle.
-          if (!this._lastThumbnailUrl) {
-            const cached = this._resolveCachedThumbnailUrl();
-            if (cached) this._lastThumbnailUrl = cached;
-          }
-        } finally {
-          this._thumbnailCapturing = false;
-        }
-      }
-      if (this.isRunning) {
-        this._thumbnailTimer = setTimeout(runThumbnail, thumbIntervalMs);
-      }
-    };
+    // ── Persistent thumbnail capture ──────────────────────────────────────────
+    // Replaces the timer-based captureThumbnail() loop. One long-lived ffmpeg
+    // process per stream writes I-frames to pipe:1; JpegFrameExtractor detects
+    // complete frames and writes them atomically. No reconnect overhead after
+    // the first SRT latency window — subsequent frames are near real-time.
+    const thumbIntervalSec = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
+    const thumbIntervalMs  = thumbIntervalSec * 1000;
+    if (this._persistentThumb) this._persistentThumb.stop();
+    this._persistentThumb = new PersistentThumbnailCapture({
+      streamId: this.id,
+      inputUrl: this.url,
+      intervalSec: thumbIntervalSec,
+    });
+    this._persistentThumb.on('frame', () => {
+      this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+    });
     const phaseSeed = String(this.id || '');
     const phaseHash = phaseSeed.split('').reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 0);
-    // Stagger startup across analysers to avoid ffprobe/ffmpeg thundering herd
-    // when many decoders are started in batch.
+    // Stagger startup across analysers to avoid ffmpeg thundering herd.
     const jitterWindowMs = Math.min(
       Math.max(200, Math.floor(cadence.baseIntervalMs * 0.6)),
       cadence.startupJitterMaxMs
     );
-    const probeStartJitterMs = jitterWindowMs > 0
-      ? (phaseHash % jitterWindowMs)
-      : 0;
+    const probeStartJitterMs = jitterWindowMs > 0 ? (phaseHash % jitterWindowMs) : 0;
     const thumbStartJitterMs = thumbIntervalMs > 0 ? (phaseHash % Math.min(thumbIntervalMs, 1500)) : 0;
 
-    // First thumbnail fires quickly but with small jitter to smooth burst starts.
+    // Delay persistent capture start with same jitter used for probe staggering.
     if (this._thumbnailTimer) clearTimeout(this._thumbnailTimer);
-    this._thumbnailTimer = setTimeout(runThumbnail, thumbStartJitterMs);
+    this._thumbnailTimer = setTimeout(() => {
+      this._thumbnailTimer = null;
+      if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
+    }, thumbStartJitterMs);
 
     const run = async () => {
       const scheduledAt = Number.isFinite(this._nextProbeAt) && this._nextProbeAt > 0 ? this._nextProbeAt : Date.now();
@@ -2315,6 +2312,10 @@ class TSAnalyser extends EventEmitter {
     if (this._thumbnailTimer) {
       clearTimeout(this._thumbnailTimer);
       this._thumbnailTimer = null;
+    }
+    if (this._persistentThumb) {
+      this._persistentThumb.stop();
+      this._persistentThumb = null;
     }
     if (this._iatSniffer) {
       this._iatSniffer.stop();

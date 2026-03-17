@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.44)
+Date: 2026-03-17 (latest: v3.1.45)
 
 ## Overview
 
@@ -10,6 +10,23 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.45 — 2026-03-17
+
+### Fix: SRT bitrate measurement, persistent thumbnails, dynamic latency window
+
+Three related SRT improvements:
+
+**1. 786 kbps bitrate measurement bug fixed**
+`_probeTransportBitrateBps` used a fixed `-t 3.0 s` capture window and `analyzeduration=1s`. For SRT with `latency=2000ms`, the first 2s were consumed by the SRT handshake + latency window fill — leaving only 1s of data in a 3s window, producing ~⅓ of true bitrate. Now uses `parseSrtLatency()` to derive the capture window dynamically: `latency + 5s` capture, `latency + 2s` analyze, `latency + 20s` kill timer.
+
+**2. Persistent thumbnail process — near real-time refresh**
+Replaced the timer-based `captureThumbnail()` loop (which spawned a new ffmpeg every 5s, incurring a full SRT latency window reconnect on every cycle) with a long-lived `PersistentThumbnailCapture` per decoder. The ffmpeg process runs indefinitely, emitting JPEG frames to `pipe:1`; a `JpegFrameExtractor` detects complete frame boundaries (FF D8 … FF D9) and writes them atomically. After the first SRT latency window, subsequent frames are delivered in real time at the configured interval — no reconnect overhead.
+
+**3. SRT latency is now read from the URL parameter**
+`parseSrtLatency(url)` extracts `?latency=N` from the SRT URL. All analyze windows, capture durations, and attempt timeouts are derived from this value. Set your SRT latency in the decoder form — the probe and thumbnail pipeline adapts automatically. Higher-latency SRT links (e.g. `latency=5000`) now work without manual tuning.
 
 ---
 
