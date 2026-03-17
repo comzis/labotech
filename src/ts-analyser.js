@@ -201,38 +201,48 @@ class TSAnalyser extends EventEmitter {
           // multiple decoders are started simultaneously.
           if (runHeavyProbe) await _acquireHeavyProbeSlot();
 
-          // SRT single-connection yield: PersistentThumbnailCapture holds the only
-          // SRT caller slot indefinitely.  Before running the heavy probe burst, we
-          // suspend it for the probe budget so the transport bitrate probe can connect.
-          // suspend() sets a restart timer BEFORE killing — the close handler's own
-          // _scheduleRestart(5000) sees the timer already set and exits early, so the
-          // thumbnail does not reclaim the slot mid-probe.
-          const isSrtHeavy = runHeavyProbe &&
-            this.url && this.url.startsWith('srt://') &&
-            this._persistentThumb;
+          // SRT single-connection serialisation:
+          // Many SRT sources (contribution encoders, CDN ingest) accept only ONE
+          // simultaneous caller.  Promise.all launches all probes concurrently —
+          // only the first to connect gets TS data; the rest get rejected, producing
+          // "0 PIDs / 0 services" while the bitrate probe (which won the slot)
+          // reports full bitrate.  For SRT we run probes sequentially so each one
+          // gets the sole connection slot in turn.  The thumbnail's PersistentCapture
+          // (if active) is suspended for the full sequential budget before probes start.
+          const isSrt = runHeavyProbe && this.url && this.url.startsWith('srt://');
+          const isSrtHeavy = isSrt && this._persistentThumb;
           if (isSrtHeavy) {
             const srtLatMs = parseSrtLatency(this.url);
-            // Budget = latency window + all sub-probe timeouts + 5s margin
-            const suspendMs = srtLatMs + 30000;
+            // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
+            const suspendMs = srtLatMs + 70000;
             this._persistentThumb.suspend(suspendMs);
-            // Brief pause to let the SRT connection close before probes connect.
             await new Promise(r => setTimeout(r, 600));
           }
 
           let heavyProbeResults;
           try {
-            heavyProbeResults = await Promise.all([
-              runHeavyProbe ? this._probeTSDuck() : Promise.resolve(null),
-              runHeavyProbe ? this._probeTransportBitrateBps() : Promise.resolve(null),
-              this._probeAudioLevels(),
-              runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
-              runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null),
-              runHeavyProbe ? this._probeDolbyE() : Promise.resolve(null),
-            ]);
+            if (isSrt) {
+              // Sequential: one SRT connection at a time.
+              const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
+              const transport = await (runHeavyProbe ? this._probeTransportBitrateBps()     : Promise.resolve(null));
+              const audio     = await this._probeAudioLevels();
+              const tsDisc    = await (runHeavyProbe ? this._probeTimestampDiscontinuities(): Promise.resolve(null));
+              const cc        = await (runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null));
+              const dolby     = await (runHeavyProbe ? this._probeDolbyE()                  : Promise.resolve(null));
+              heavyProbeResults = [tsduck, transport, audio, tsDisc, cc, dolby];
+            } else {
+              // RTP/UDP multicast: parallel is fine — unlimited simultaneous receivers.
+              heavyProbeResults = await Promise.all([
+                runHeavyProbe ? this._probeTSDuck()                   : Promise.resolve(null),
+                runHeavyProbe ? this._probeTransportBitrateBps()      : Promise.resolve(null),
+                this._probeAudioLevels(),
+                runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
+                runHeavyProbe ? this._probeContinuityCounterErrors()  : Promise.resolve(null),
+                runHeavyProbe ? this._probeDolbyE()                   : Promise.resolve(null),
+              ]);
+            }
           } finally {
             if (runHeavyProbe) _releaseHeavyProbeSlot();
-            // Resume thumbnail immediately after probes complete — don't wait for
-            // the full suspend budget.  resume() is a no-op if not suspended.
             if (isSrtHeavy && this._persistentThumb) this._persistentThumb.resume();
           }
           const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
