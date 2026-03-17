@@ -86,6 +86,34 @@ describe('ETR290Analyser parser patterns', () => {
     expect(started.length).toBe(1);
   });
 
+  test('startup grace suppresses incidents but still counts matches', () => {
+    const a = new ETR290Analyser({
+      id: 'etr-grace',
+      url: 'udp://239.1.1.1:1234',
+      config: { thresholds: { transport_error: 1 } },
+    });
+    const started = [];
+    a.on('incident_started', (evt) => started.push(evt));
+
+    // Simulate just-started (within 5s grace)
+    a._startedAt = Date.now();
+
+    // RTP join artefact — should count but NOT raise incident during grace
+    a._parseLine('[rtpproto @ 0x0] RTP: missed 3 packets');
+    expect(a._counts.transport_error).toBe(1);
+    expect(a._status.transport_error).toBe('ok');
+    expect(started.length).toBe(0);
+
+    // Expire grace by back-dating _startedAt
+    a._startedAt = Date.now() - 10000;
+
+    // Same error after grace — incident must fire
+    a._parseLine('[rtpproto @ 0x0] RTP: missed 3 packets');
+    expect(a._counts.transport_error).toBe(2);
+    expect(a._status.transport_error).toBe('error');
+    expect(started.length).toBe(1);
+  });
+
   test('filters alarms by included PID list', () => {
     const a = new ETR290Analyser({
       id: 'etr-pid-filter',

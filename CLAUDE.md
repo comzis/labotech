@@ -34,9 +34,9 @@ npm start                         # run API server
 cd web && npm install && npm run build   # build React app to web/dist/
 cd web && npm run dev                    # Vite dev server (proxies to API)
 
-# Docker
-docker-compose up -d                     # production
-docker-compose -f docker-compose.dev.yml up   # development with live reload
+# Docker (requires Compose v2 plugin — docker-compose v1 is NOT supported)
+docker compose up -d                     # production
+docker compose -f docker-compose.dev.yml up   # development with live reload
 
 # Host setup (run once on Ubuntu server as root)
 sudo bash scripts/setup-host.sh
