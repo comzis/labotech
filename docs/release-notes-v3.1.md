@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.50)
+Date: 2026-03-17 (latest: v3.1.51)
 
 ## Overview
 
@@ -10,6 +10,18 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.51 — 2026-03-17
+
+### Fix: SRT thumbnail race condition + analyzeduration too aggressive
+
+Two bugs introduced in v3.1.49–v3.1.50 causing "AWAITING FRAME" and complete thumbnail loss:
+
+**Race condition (monitoring.js):** `suspend()` killed the ffmpeg process but the stale `close` event fired after `resume()` had already spawned a new one — setting `this._proc = null` on the live process and scheduling a spurious 5s restart. Fixed with an epoch counter (`this._epoch`) incremented on every `_spawn()`. Close and error handlers capture epoch at spawn time and bail out if it no longer matches, making them immune to stale events from processes killed by `suspend()`.
+
+**`analyzeduration` too short (monitoring.js):** Reduced from `latencyMs+3000ms` to `latencyMs+500ms` in v3.1.50 — too aggressive. ffmpeg needs to detect H.264/HEVC codec info by seeing at least one IDR frame. Broadcast streams with a 2s GOP at 25fps require up to 2000ms of media data after the SRT latency window fills. With only 500ms headroom, the format detection phase timed out before an IDR arrived → ffmpeg exited → "AWAITING FRAME". Restored to `latencyMs+2000ms` (a practical improvement over the original 3000ms while guaranteeing reliable GOP detection).
 
 ---
 

@@ -119,6 +119,11 @@ class PersistentThumbnailCapture extends EventEmitter {
     this._running   = false;
     this._proc      = null;
     this._restartTimer = null;
+    // Epoch increments on every _spawn() call.  The close/error handlers capture
+    // the epoch at spawn time and bail out if it no longer matches — this prevents
+    // a stale close event from a suspend()-killed process from nulling out this._proc
+    // or scheduling a spurious restart after resume() has already spawned a new process.
+    this._epoch     = 0;
     const safeId    = sanitizeStreamId(streamId);
     this._outPath   = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
     this._tmpPath   = `${this._outPath}.ptmp.jpg`;
@@ -182,22 +187,22 @@ class PersistentThumbnailCapture extends EventEmitter {
 
   _spawn() {
     if (!this._running) return;
+    const epoch = ++this._epoch; // capture at spawn time for stale-close guard
     const capture   = getThumbnailCaptureSettings();
     const isSrt     = this._inputUrl.startsWith('srt://');
     const latencyMs = isSrt ? parseSrtLatency(this._inputUrl) : 0;
-    // SRT: analyzeduration only needs to cover the protocol latency window + a small
-    // margin for the first keyframe to arrive.  500 ms headroom is sufficient —
-    // SRT itself guarantees data delivery after latencyMs.  The previous 3000 ms
-    // headroom delayed the first thumbnail by 3+ s on every spawn/resume.
-    // Non-SRT: 2 s is enough for UDP/RTP multicast join + first keyframe.
-    const analyzeDurUs = isSrt ? String((latencyMs + 500) * 1000) : '2000000';
+    // SRT analyzeduration: must cover the latency buffer fill + codec detection.
+    // Codec detection needs to see at least one IDR frame — for broadcast streams
+    // with a 2s GOP at 25fps, worst case is 2000ms after data starts flowing.
+    // Use latencyMs + 2000ms as a reliable baseline across all GOP sizes.
+    // Non-SRT: 2s covers UDP/RTP multicast join artefacts + first IDR.
+    const analyzeDurUs = isSrt ? String((latencyMs + 2000) * 1000) : '2000000';
     const src = this._buildSrc();
 
     // -skip_frame nokey already ensures the decoder only ever sees keyframes (I-frames).
-    // select=eq(pict_type,I) is therefore redundant AND harmful: it only passes frames
-    // that fall exactly on the fps=1/N time grid, which can skip the very first keyframe
-    // and delay the thumbnail by up to one full interval.  Remove it — every decoded
-    // frame is already an I-frame; fps=1/N alone throttles the output rate.
+    // select=eq(pict_type\,I) is therefore redundant AND harmful: it only passes frames
+    // that fall exactly on the fps=1/N time grid, potentially skipping the very first
+    // keyframe.  Remove it — fps=1/N alone throttles the output rate.
     const vf = [
       `fps=1/${this._intervalSec}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
@@ -234,8 +239,14 @@ class PersistentThumbnailCapture extends EventEmitter {
 
     proc.stdout.on('data', (chunk) => extractor.push(chunk));
     proc.stderr.on('data', () => {}); // suppress — loglevel error keeps it quiet
-    proc.on('error', () => this._scheduleRestart(5000));
+    proc.on('error', () => {
+      // Stale guard: if epoch no longer matches, suspend()+resume() has already
+      // spawned a new process — ignore this event to avoid a spurious restart.
+      if (this._epoch !== epoch) return;
+      this._scheduleRestart(5000);
+    });
     proc.on('close', () => {
+      if (this._epoch !== epoch) return; // stale close from suspend()-killed process
       this._proc = null;
       if (this._running) this._scheduleRestart(5000);
     });
