@@ -1,6 +1,23 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.59)
+Date: 2026-03-17 (latest: v3.1.61)
+
+## v3.1.61 — 2026-03-17
+
+### Chore: Phase 2 thumbnail worker scaffolding (worker + client + tests)
+
+**Included in this PR:**
+
+- Added `src/thumbnail-worker.js` worker runtime using `child_process.fork()` IPC command handling.
+- Added `src/thumbnail-worker-client.js` with restart/backoff and active capture replay logic.
+- Added `test/thumbnail-worker.test.js` for command routing, shutdown handshake, and restart replay behavior.
+
+**Scope clarification:**
+
+- `src/api.js` wiring is intentionally deferred to a follow-up change after this Phase 2 scaffolding PR merges.
+- No frontend behavior changes in this entry.
+
+**Operator impact:** No immediate operator-facing behavior change from this scaffolding-only patch. Runtime integration (API wiring and activation path) lands in follow-up work.
 
 ## v3.1.59 — 2026-03-17
 

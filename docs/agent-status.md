@@ -42,20 +42,20 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Reviewing Agent B Phase 2 PR when ready. Planning Phase 3 (enhanced tsanalyze cadence).
+**Current task:** Phase 2 merged. Wiring `ThumbnailWorkerClient` into `api.js`. Phase 3 PR #16 open.
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
 - `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
-- `docs/release-notes-v3.3.md` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Phase 1 DONE: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% base interval, 156 tests pass
-- PR #13 + #14 merged to main (v3.1.59)
-- All gates cleared
+- Phase 3 DONE: `src/tsduck-monitor.js` — continuous PCR+SI+bitrate sampler, 27 tests
+- Phase 2 merged: wiring ThumbnailWorkerClient into api.js (in progress)
+- 161 tests pass (pre-wiring)
+- PR #16 open: `feat/phase3-tsduck-monitor`
 
-**Active branch:** none — on main, idle until Phase 2 PR ready for review
+**Active branch:** `cursor/phase2-thumbnail-worker` → merging to main
 
 **Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
 
@@ -68,39 +68,25 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** START Phase 2 — `src/thumbnail-worker.js` + `src/thumbnail-worker-client.js`
+**Current task:** DONE Phase 2 — PR open, awaiting operator review + merge.
 
-**Branch:** create `cursor/phase2-thumbnail-worker` off `cursor/phase0a-tsduck-findings`
+**Branch:** `cursor/phase2-thumbnail-worker`
 
 **Owns:**
-- `src/thumbnail-worker.js` (new file, Phase 2)
-- `src/thumbnail-worker-client.js` (new file, Phase 2)
-- `test/thumbnail-worker.test.js` (new file, Phase 2)
-- `src/monitoring.js` (migrate module-level state to worker)
-- `docs/release-notes-v3.2.md` (new file, Phase 2 release)
+- `src/thumbnail-worker.js` (new file, Phase 2) ✅
+- `src/thumbnail-worker-client.js` (new file, Phase 2) ✅
+- `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
+- `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-17 — recorded Phase 0a spike findings (`docs/tsduck-spike-findings.md`).
+**Last session:** 2026-03-17 — Phase 2 scaffolding complete. Worker runtime + client + 5 unit tests. 161 tests pass. PR open.
 
-**Active branch:** `cursor/phase0a-tsduck-findings` → create `cursor/phase2-thumbnail-worker` off it
+**Active branch:** `cursor/phase2-thumbnail-worker` (PR open — awaiting operator merge)
 
-**Session start checklist:**
-1. `git checkout cursor/phase0a-tsduck-findings && git pull`
-2. `git checkout -b cursor/phase2-thumbnail-worker`
-3. Read `docs/architecture-roadmap-continuous-monitoring.md` §Phase 2 before writing code
-4. Read SHARED CONTRACT section below — IPC protocol is the integration boundary
-
-**Gate verification:**
-- Phase 0a: ✅ CLEARED
-- Phase 0b: ✅ CLEARED
-- Phase 1 (ts-analyser.js constructor edit): ⏳ do NOT add the ~3-line constructor param yet — add during rebase after Phase 1 merges to main
-
-**Review request for Agent A (Phase 1 PR):**
-- `_effectiveProbeIntervalMs()` multipliers look correct for our suspend/resume timing
-- 1 s floor is fine — suspend() has a 1.5 s settle delay already, so probes won't fire inside it
+**Waiting for:** Operator to review and merge Phase 2 PR. Agent A to wire `thumbnail-worker-client.js` into `api.js` (Phase 2 integration step, post-merge).
 
 **Do NOT touch (Agent A owns):**
-- `src/tsduck-monitor.js` (does not exist yet — leave for Agent A)
-- `src/ts-analyser.js` (beyond the ~3-line constructor addition — do that during rebase)
+- `src/tsduck-monitor.js`
+- `src/ts-analyser.js` (beyond the ~3-line constructor addition)
 - Any file in `web/src/` (UI Change Policy — operator approval required)
 
 ---
