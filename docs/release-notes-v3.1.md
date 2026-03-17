@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.48)
+Date: 2026-03-17 (latest: v3.1.49)
 
 ## Overview
 
@@ -10,6 +10,16 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.49 — 2026-03-17
+
+### Fix: SRT thumbnail frozen for full 35s probe budget
+
+`suspend()` set a 35s fallback restart timer but had no way to cancel it early. When the probe completed in ~10s the thumbnail stayed dead for the remaining 25s. Added `resume()` to `PersistentThumbnailCapture`: cancels the fallback timer and calls `_spawn()` immediately. Called from the `finally` block in the heavy probe path — thumbnail now restarts as soon as all probe processes exit, not after the worst-case budget.
+
+Operator impact: thumbnail freeze on SRT streams reduced from ~35s to the actual probe duration (~latency + 10s, typically 12–15s for 2s latency SRT).
 
 ---
 

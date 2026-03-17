@@ -140,25 +140,34 @@ class PersistentThumbnailCapture extends EventEmitter {
   /**
    * Temporarily yield the SRT connection slot for a probe.
    * Kills the current ffmpeg process (freeing the SRT caller slot) and schedules
-   * an automatic restart after `durationMs`.  Does NOT set _running=false, so the
-   * existing _scheduleRestart(5000) guard in the close handler fires but exits
-   * immediately (this._restartTimer is already set), preventing a premature restart
-   * that would reclaim the slot mid-probe.
+   * a fallback restart after `durationMs`.  Call resume() as soon as the probe
+   * completes to restart immediately instead of waiting for the full budget.
+   * Does NOT set _running=false, so the close handler's _scheduleRestart(5000)
+   * finds this._restartTimer already set and exits early — no premature restart.
    */
   suspend(durationMs) {
     if (!this._running) return;
-    // Detach the process reference before killing so the close handler's
-    // `this._proc = null` is harmless (it's already null).
     const proc = this._proc;
     this._proc = null;
-    // Set restart timer BEFORE killing — the close handler's _scheduleRestart(5000)
-    // sees this._restartTimer is already set and exits early, preventing a 5s restart.
+    // Set fallback restart timer BEFORE killing so the close handler's
+    // _scheduleRestart(5000) sees it is already set and exits early.
     if (this._restartTimer) clearTimeout(this._restartTimer);
     this._restartTimer = setTimeout(() => {
       this._restartTimer = null;
       if (this._running) this._spawn();
     }, durationMs);
     if (proc) { try { proc.kill('SIGTERM'); } catch (_) {} }
+  }
+
+  /**
+   * Cancel a pending suspend and restart immediately.
+   * Call this after the probe completes so the thumbnail resumes without waiting
+   * for the full fallback budget.
+   */
+  resume() {
+    if (!this._running) return;
+    if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
+    if (!this._proc) this._spawn();
   }
 
   _buildSrc() {

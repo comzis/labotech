@@ -231,6 +231,9 @@ class TSAnalyser extends EventEmitter {
             ]);
           } finally {
             if (runHeavyProbe) _releaseHeavyProbeSlot();
+            // Resume thumbnail immediately after probes complete — don't wait for
+            // the full suspend budget.  resume() is a no-op if not suspended.
+            if (isSrtHeavy && this._persistentThumb) this._persistentThumb.resume();
           }
           const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
