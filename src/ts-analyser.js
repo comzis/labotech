@@ -667,10 +667,29 @@ class TSAnalyser extends EventEmitter {
 
   _extractSrtStatsFromLog(stderr) {
     if (!stderr) return null;
+
+    // ffmpeg emits libsrt statistics on lines containing SRT-specific field names.
+    // We MUST restrict parsing to those lines only — the full stderr also contains
+    // ffmpeg -progress pipe:2 output (bitrate=, total_size=, speed=, etc.) whose
+    // field names overlap with our broad fallback patterns.  Example false matches:
+    //   "rate"   → bitrate=0.0kbits/s  (progress output, rate is a substring)
+    //   "total"  → total_size=N        (progress output)
+    //   "bw"     → (any line containing "bw")
+    // By filtering to libsrt stat lines first, we eliminate all false positives.
+    // libsrt dumps stats as space-separated key=value pairs on lines that contain
+    // at least one unambiguous libsrt-only field (msRTT=, mbpsRecvRate=, mbpsBandwidth=).
+    const srtStatLines = String(stderr)
+      .split('\n')
+      .filter(l => /msRTT=|mbpsRecvRate=|mbpsSendRate=|mbpsBandwidth=/i.test(l))
+      .join('\n');
+
+    // No genuine libsrt output found — return null so the UI shows "AWAITING" not false zeros.
+    if (!srtStatLines) return null;
+
     const last = (rx) => {
       // matchAll requires a global regex; ensure g flag is set regardless of caller.
       const grx = rx.global ? rx : new RegExp(rx.source, rx.flags + 'g');
-      const matches = Array.from(String(stderr).matchAll(grx));
+      const matches = Array.from(srtStatLines.matchAll(grx));
       if (!matches.length) return null;
       return matches[matches.length - 1][1];
     };
@@ -679,31 +698,32 @@ class TSAnalyser extends EventEmitter {
       return Number.isFinite(n) ? n : null;
     };
     const srt = {};
-    // Field names match ffmpeg's libsrt verbose output:
-    //   mbpsRecvRate=21.234  mbpsBandwidth=100.000  msRTT=5.123
-    //   pktRecvTotal=12345  pktRcvLossTotal=0  pktRetransTotal=0
-    //   pktSentACKTotal=100  pktSentNAKTotal=0  pktRcvDrop=0
-    // Fallback patterns cover simplified formats that may appear in older builds.
-    const rateMbps   = num(last(/(?:mbpsRecvRate|mbpsSendRate|rate)[\s=]+([\d.]+)/i));
-    const bwMbps     = num(last(/(?:mbpsBandwidth|bw)[\s=]+([\d.]+)/i));
-    const maxBwMbps  = num(last(/(?:mbpsMaxBW|maxBW)[\s=]+([\d.]+)/i));
-    const rttMs      = num(last(/(?:msRTT|rtt)[\s=]+([\d.]+)/i));
-    const pktTotal   = num(last(/(?:pktRecvTotal|total)[\s=]+(\d+)/i));
-    const pktRetrans = num(last(/(?:pktRetransTotal|pktRcvRetrans|retrans)[\s=]+(\d+)/i));
-    const pktLost    = num(last(/(?:pktRcvLossTotal|pktRcvLoss|loss|lost)[\s=]+(\d+)/i));
+
+    // All patterns use exact libsrt field names as emitted by ffmpeg's libsrt.c.
+    // No short fallback aliases — those caused false matches against ffmpeg progress output.
+    // libsrt format: space-separated key=value on the statistics line, e.g.:
+    //   msRTT=18.500 mbpsBandwidth=1024.000 mbpsRecvRate=21.234 pktRecvTotal=12345 ...
+    const rateMbps   = num(last(/\bmbpsRecvRate=([\d.]+)/i)) ?? num(last(/\bmbpsSendRate=([\d.]+)/i));
+    const bwMbps     = num(last(/\bmbpsBandwidth=([\d.]+)/i));
+    const maxBwMbps  = num(last(/\bmbpsMaxBW=([\d.]+)/i));
+    const rttMs      = num(last(/\bmsRTT=([\d.]+)/i));
+    const pktTotal   = num(last(/\bpktRecvTotal=(\d+)/i));
+    const pktRetrans = num(last(/\bpktRetransTotal=(\d+)/i)) ?? num(last(/\bpktRcvRetrans=(\d+)/i));
+    const pktLost    = num(last(/\bpktRcvLossTotal=(\d+)/i)) ?? num(last(/\bpktRcvLoss=(\d+)/i));
     // pktRcvDrop / pktSndDrop: non-zero = latency window too short (per Haivision SRT spec)
-    const pktRcvDrop = num(last(/(?:pktRcvDrop\b|pktRcvDropTotal)[\s=]+(\d+)/i));
-    const pktSndDrop = num(last(/(?:pktSndDrop\b|pktSndDropTotal)[\s=]+(\d+)/i));
-    // pktRcvBelated: arrived after latency deadline — warning indicator
-    const pktRcvBelated        = num(last(/(?:pktRcvBelated)[\s=]+(\d+)/i));
-    const pktRcvAvgBelatedTime = num(last(/(?:pktRcvAvgBelatedTime)[\s=]+([\d.]+)/i));
-    // Buffer headroom: byteAvailRcvBuf / msRcvBuf show receive buffer fill level
-    const byteAvailRcvBuf = num(last(/(?:byteAvailRcvBuf)[\s=]+(\d+)/i));
-    const msRcvBuf        = num(last(/(?:msRcvBuf)[\s=]+([\d.]+)/i));
-    // Flow window: available receive window slots
-    const pktFlowWindow   = num(last(/(?:pktFlowWindow)[\s=]+(\d+)/i));
-    const pktNak     = num(last(/(?:pktSentNAKTotal|pktSentNAK|nak)[\s=]+(\d+)/i));
-    const pktAck     = num(last(/(?:pktSentACKTotal|pktRecvACK|ack)[\s=]+(\d+)/i));
+    const pktRcvDrop = num(last(/\bpktRcvDrop=(\d+)/i));
+    const pktSndDrop = num(last(/\bpktSndDrop=(\d+)/i));
+    // pktRcvBelated: arrived after latency deadline — early warning before drops
+    const pktRcvBelated        = num(last(/\bpktRcvBelated=(\d+)/i));
+    const pktRcvAvgBelatedTime = num(last(/\bpktRcvAvgBelatedTime=([\d.]+)/i));
+    // Buffer headroom: remaining receive buffer capacity
+    const byteAvailRcvBuf = num(last(/\bbyteAvailRcvBuf=(\d+)/i));
+    const msRcvBuf        = num(last(/\bmsRcvBuf=([\d.]+)/i));
+    // Flow window
+    const pktFlowWindow   = num(last(/\bpktFlowWindow=(\d+)/i));
+    const pktNak     = num(last(/\bpktSentNAKTotal=(\d+)/i)) ?? num(last(/\bpktSentNAK=(\d+)/i));
+    const pktAck     = num(last(/\bpktSentACKTotal=(\d+)/i)) ?? num(last(/\bpktSentACK=(\d+)/i));
+
     if (rateMbps   != null) srt.rateMbps   = rateMbps;
     if (bwMbps     != null) srt.bwMbps     = bwMbps;
     if (maxBwMbps  != null) srt.maxBwMbps  = maxBwMbps;
@@ -720,6 +740,7 @@ class TSAnalyser extends EventEmitter {
     if (pktFlowWindow   != null) srt.pktFlowWindow     = pktFlowWindow;
     if (pktNak != null) srt.pktNak = pktNak;
     if (pktAck != null) srt.pktAck = pktAck;
+
     if (srt.pktTotal > 0 && srt.pktLost != null) {
       srt.lossPercent = parseFloat(((srt.pktLost / srt.pktTotal) * 100).toFixed(3));
     }
@@ -727,7 +748,7 @@ class TSAnalyser extends EventEmitter {
     if (srt.pktTotal > 0 && srt.pktRetrans != null) {
       srt.retransRatio = parseFloat(((srt.pktRetrans / srt.pktTotal) * 100).toFixed(3));
     }
-    // Aggregate drop count for legacy pktDropped consumers
+    // Aggregate drop count
     if (pktRcvDrop != null || pktSndDrop != null) {
       srt.pktDropped = (srt.pktRcvDrop || 0) + (srt.pktSndDrop || 0);
     }
