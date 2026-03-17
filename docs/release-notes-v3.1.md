@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.47)
+Date: 2026-03-17 (latest: v3.1.48)
 
 ## Overview
 
@@ -10,6 +10,25 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.48 — 2026-03-17
+
+### Fix: SRT probe failure — PersistentThumbnailCapture holding single connection slot
+
+**Problem:** `PersistentThumbnailCapture` (added v3.1.45) holds a long-lived SRT caller connection indefinitely. Many SRT encoders and contribution servers accept only one caller at a time. When the heavy probe cycle runs, `_probeTransportBitrateBps()` tries to open a second SRT connection — the source rejects it, the probe fails with 0 TS packets and 0 bitrate while the SRT Transport tab shows no counters.
+
+**Fix (`monitoring.js`):**
+Added `suspend(durationMs)` to `PersistentThumbnailCapture`:
+- Kills the current ffmpeg process (freeing the SRT caller slot)
+- Sets a restart timer for `durationMs` before killing, so the close handler's own `_scheduleRestart(5000)` sees `_restartTimer` already set and exits early — preventing the thumbnail from reclaiming the slot mid-probe
+- Does not set `_running = false`, so the class resumes cleanly after the budget expires
+
+**Fix (`ts-analyser.js`):**
+Before each heavy probe burst on SRT URLs: calls `this._persistentThumb.suspend(latencyMs + 30000)` then waits 600 ms for the SRT connection to close. After the burst completes, the thumbnail auto-restarts via its internal timer.
+
+Operator impact: SRT heavy probes now get the connection slot they need — TS packet counts, bitrate, and libsrt stats all populate correctly. Thumbnail freezes for ~35 s per probe cycle (every 15–60 s depending on policy) then resumes.
 
 ---
 
