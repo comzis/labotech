@@ -42,7 +42,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Phase 2 merged. Wiring `ThumbnailWorkerClient` into `api.js`. Phase 3 PR #16 open.
+**Current task:** Phase 3 PR #16 open, awaiting operator review/merge.
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
@@ -50,14 +50,13 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Phase 3 DONE: `src/tsduck-monitor.js` — continuous PCR+SI+bitrate sampler, 27 tests
-- Phase 2 merged: wiring ThumbnailWorkerClient into api.js (in progress)
-- 161 tests pass (pre-wiring)
-- PR #16 open: `feat/phase3-tsduck-monitor`
+- Phase 3 implementation complete on PR #16 (`feat/phase3-tsduck-monitor`)
+- API wiring follow-up merged via PR #17 (`feat/phase2-api-wiring`)
+- Monitoring test suite passing on server validation
 
-**Active branch:** `cursor/phase2-thumbnail-worker` → merging to main
+**Active branch:** `feat/phase3-tsduck-monitor` (PR #16 open)
 
-**Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
+**Waiting for:** Operator review/merge for PR #16
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
@@ -68,9 +67,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** DONE Phase 2 — PR open, awaiting operator review + merge.
+**Current task:** Phase 2 merged. Idle / supporting Phase 3 review.
 
-**Branch:** `cursor/phase2-thumbnail-worker`
+**Branch:** none (Phase 2 branch merged)
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -78,11 +77,11 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
 - `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-17 — Phase 2 scaffolding complete. Worker runtime + client + 5 unit tests. 161 tests pass. PR open.
+**Last session:** 2026-03-17 — Phase 2 merged (PR #15), release notes updated, server validation passed.
 
-**Active branch:** `cursor/phase2-thumbnail-worker` (PR open — awaiting operator merge)
+**Active branch:** `main`
 
-**Waiting for:** Operator to review and merge Phase 2 PR. Agent A to wire `thumbnail-worker-client.js` into `api.js` (Phase 2 integration step, post-merge).
+**Waiting for:** Operator review of Phase 3 PR #16.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
@@ -153,6 +152,20 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 
 | Date | Agent | Branch | PR | What merged |
 |---|---|---|---|---|
+| 2026-03-15 | A | fix/multiview-iframe-lock | #1 | fix(multiview): lock thumbnails to I-frames using  |
+| 2026-03-15 | A | fix/live-view-false-critical | #2 | fix(health): extend inconclusive-probe guard to li |
+| 2026-03-15 | A | chore/standardise-dev-workflow | #3 | chore(workflow): standardise Claude/Cursor/IDX bra |
+| 2026-03-15 | A | fix/header-srt-policy-ui | #4 | Fix/header srt policy UI |
+| 2026-03-15 | B | cursor/ide-config-updates | #5 | Cursor/ide config updates |
+| 2026-03-15 | A | fix/header-vertical-centering | #6 | fix(ui): increase header inner height to 140px for |
+| 2026-03-15 | A | fix/srt-health-tab-policy | #7 | Fix/srt health tab policy |
+| 2026-03-15 | A | fix/srt-health-tab-policy | #8 | Fix/srt health tab policy |
+| 2026-03-15 | A | fix/version-bump-3.1.0 | #9 | Fix/version bump 3.1.0 |
+| 2026-03-17 | A | feat/srt-broadcast-health-thresholds | #10 | feat(srt): professional broadcast health threshold |
+| 2026-03-17 | A | fix/rtp-thumbnail-regression | #11 | fix(thumbnail): scope PersistentThumbnailCapture t |
+| 2026-03-17 | A | fix/rtp-thumbnail-regression | #12 | fix(srt): serialise heavy probes + RTP thumbnail r |
+| 2026-03-17 | B | cursor/phase2-thumbnail-worker | #15 | feat(thumbnail-worker): Phase 2 — worker runtime,  |
+| 2026-03-17 | A | feat/phase2-api-wiring | #17 | feat(api): Phase 2 — wire ThumbnailWorkerClient in |
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
 | 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | SRT hardening, multiview export, thumbnail backoff, agent infra |
 | 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |

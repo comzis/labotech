@@ -84,10 +84,8 @@ require_cmds() {
   done
   if docker compose version >/dev/null 2>&1; then
     COMPOSE_BIN="docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    COMPOSE_BIN="docker-compose"
   else
-    echo "[deploy] missing command: docker compose (v2) or docker-compose (v1)"
+    echo "[deploy] missing command: docker compose (v2 plugin required — install docker-compose-plugin)"
     missing=1
   fi
   return "${missing}"

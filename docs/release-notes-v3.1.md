@@ -1,6 +1,19 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.62)
+Date: 2026-03-18 (latest: v3.1.63)
+
+## v3.1.63 — 2026-03-18
+
+### Fix: ETR290Analyser 5s startup grace — suppress multicast join noise
+
+**`src/etr290-analyser.js`:**
+- Added `STARTUP_GRACE_MS = 5000` (overridable via `ETR290_STARTUP_GRACE_MS` env var).
+- `start()` sets `_startedAt = Date.now()`.
+- `_parseLine()` suppresses incident creation (but still increments `_counts`) for the first 5 seconds after start.
+
+**Why:** ffmpeg joining a multicast stream mid-stream emits `RTP: missed N packets` and similar lines within the first 1–3 seconds. With `transport_error` threshold set to 1, this fired a spurious alarm in the event log on every decoder start, with no corresponding count growth in the TS Analyser (which has its own 20s probe-cycle grace). The ETR290 and TS Analyser alarm logs were therefore inconsistent at startup.
+
+**Operator impact:** Transport Error and PCR Discontinuity alarms will no longer fire in the first 5 seconds after a decoder starts. Genuine persistent errors that begin immediately after the grace window still fire normally. The count totals in the UI still increment during the grace period.
 
 ## v3.1.62 — 2026-03-17
 

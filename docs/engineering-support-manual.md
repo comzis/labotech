@@ -281,13 +281,13 @@ cd ~/LaboTech/labotech
 # Ctrl+C
 
 # 2) inspect runtime state
-docker compose ps || docker-compose ps
-docker compose logs --tail=200 labotech-encapsulator || docker-compose logs --tail=200 labotech-encapsulator
+docker compose ps
+docker compose logs --tail=200 labotech-encapsulator
 curl -v --max-time 5 http://127.0.0.1:4100/health
 sudo ss -ltnp | awk 'NR==1 || /:4100/'
 
 # 3) restart sidecar only
-docker compose restart labotech-encapsulator || docker-compose restart labotech-encapsulator
+docker compose restart labotech-encapsulator
 sleep 5
 curl -fsS --max-time 5 http://127.0.0.1:4100/health
 ```
@@ -296,10 +296,9 @@ If still failing:
 
 ```bash
 # force recreate encapsulator service
-docker compose up -d --build --force-recreate labotech-encapsulator || \
-docker-compose up -d --build --force-recreate labotech-encapsulator
+docker compose up -d --build --force-recreate labotech-encapsulator
 
-docker compose logs --tail=200 labotech-encapsulator || docker-compose logs --tail=200 labotech-encapsulator
+docker compose logs --tail=200 labotech-encapsulator
 curl -fsS --max-time 5 http://127.0.0.1:4100/health
 ```
 
