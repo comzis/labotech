@@ -1,0 +1,49 @@
+---
+description: Require append-capture command flow for remote-server interactions
+alwaysApply: true
+---
+
+# Remote Server Output Capture Policy
+
+When the user indicates they are running commands on a remote server (SSH session,
+remote prompt, or explicit mention of remote host), always use append-capture
+guidance by default.
+
+## Required assistant behavior
+
+1. Prefer giving a single copy-paste command block that:
+   - echoes the command being run
+   - runs the command
+   - appends stdout/stderr to a file via `tee -a`
+2. Ask for (or provide) a follow-up command to print the captured file content
+   in a bounded window (for example with `sed -n`).
+3. When suggesting multiple remote checks, provide one grouped append block so
+   the user can run it once and send back one artifact.
+4. Do not assume remote output is persisted unless append-capture was used.
+
+## Preferred pattern
+
+Use this structure for remote diagnostics:
+
+```bash
+{
+  echo "=== $(date -u '+%Y-%m-%d %H:%M:%S UTC') <title> ==="
+  echo "$ <command 1>"
+  <command 1>
+  echo
+  echo "$ <command 2>"
+  <command 2>
+  echo
+} 2>&1 | tee -a ~/remote-checks.txt
+```
+
+Then request:
+
+```bash
+sed -n '1,300p' ~/remote-checks.txt
+```
+
+## Scope
+
+This policy applies to read-only diagnostic and planning sessions by default.
+If the user explicitly asks for a different format, follow the user instruction.

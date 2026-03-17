@@ -1,0 +1,70 @@
+---
+description: Agent A/B collaboration protocol — read at every session start
+alwaysApply: true
+---
+
+# Agent Collaboration — Cursor is Agent B
+
+Claude Code is **Agent A**. Cursor is **Agent B**. Both work on the same repository
+with separate file ownership and separate branches. You (Cursor) must follow this
+protocol every session.
+
+## Session start — mandatory
+
+1. Read `docs/agent-status.md` before opening any source file
+2. Check the **Phase Gates** table — if any gate affecting your work is 🔴 BLOCKED,
+   stop and tell the operator. Do not write code past a blocked gate.
+3. Check Agent A's status block — note their active branch and last modified files
+   before touching any shared file
+
+## File ownership
+
+**You own (create and modify freely):**
+- `src/thumbnail-worker.js` — new file, Phase 2
+- `src/thumbnail-worker-client.js` — new file, Phase 2
+- `test/thumbnail-worker.test.js` — new file, Phase 2
+- `src/monitoring.js` — migrate module-level state to worker
+- `docs/release-notes-v3.2.md` — new file, Phase 2 release
+
+**You modify carefully (shared with Agent A — check agent-status.md first):**
+- `src/ts-analyser.js` — additive constructor option only (~3 lines), branch off
+  main AFTER Agent A's Phase 1 PR is merged
+- `src/api.js` — thumbnail client wiring only; check Agent A is not editing it
+
+**You do NOT touch:**
+- `src/tsduck-monitor.js` — Agent A creates this in Phase 3; does not exist yet
+- `test/tsduck-monitor.test.js` — Agent A
+- `web/src/**` — UI Change Policy requires operator approval for any frontend change
+- `docs/release-notes-v3.1.md` — Agent A owns Phase 1 entry; you create v3.2.md
+
+## Session end — mandatory
+
+Update the **Agent B Status** block in `docs/agent-status.md`:
+- Current task / idle
+- Active branch name
+- Files modified this session
+- Any open questions for the operator or Agent A
+
+## Product identity — never say encoder
+
+Labotech is a **DVB-IP stream processor**: SRT encapsulation, multicast routing,
+MPEG-TS analysis, multiview, ETR 290. NOT a broadcast encoder. Transcoding is
+secondary and limited. `SRTEncoder` is a legacy class name — it encapsulates, it
+does not encode.
+
+## IPC contract (Phase 2) — frozen interface
+
+The agreed message schema between thumbnail-worker.js and thumbnail-worker-client.js
+is recorded in `docs/agent-status.md` under "Shared Contract — IPC Protocol".
+Do not change that contract unilaterally. If you need a change, propose it in the
+agent-status.md file and wait for operator approval before implementing.
+
+## Telemetry injection — pre-commit blocks this automatically
+
+Cursor's AI debugger has previously injected `fetch('http://127.0.0.1:7265/...')`
+calls and `#region agent log` blocks into production files (INC-003).
+The pre-commit hook blocks these patterns. Before every commit run:
+```
+git diff --staged | grep -E "127.0.0.1:7265|#region agent log|antigravity.inject"
+```
+If any match: remove the injected code, do not bypass with --no-verify.
