@@ -200,6 +200,25 @@ class TSAnalyser extends EventEmitter {
           // concurrent analysers, preventing the thundering-herd problem when
           // multiple decoders are started simultaneously.
           if (runHeavyProbe) await _acquireHeavyProbeSlot();
+
+          // SRT single-connection yield: PersistentThumbnailCapture holds the only
+          // SRT caller slot indefinitely.  Before running the heavy probe burst, we
+          // suspend it for the probe budget so the transport bitrate probe can connect.
+          // suspend() sets a restart timer BEFORE killing — the close handler's own
+          // _scheduleRestart(5000) sees the timer already set and exits early, so the
+          // thumbnail does not reclaim the slot mid-probe.
+          const isSrtHeavy = runHeavyProbe &&
+            this.url && this.url.startsWith('srt://') &&
+            this._persistentThumb;
+          if (isSrtHeavy) {
+            const srtLatMs = parseSrtLatency(this.url);
+            // Budget = latency window + all sub-probe timeouts + 5s margin
+            const suspendMs = srtLatMs + 30000;
+            this._persistentThumb.suspend(suspendMs);
+            // Brief pause to let the SRT connection close before probes connect.
+            await new Promise(r => setTimeout(r, 600));
+          }
+
           let heavyProbeResults;
           try {
             heavyProbeResults = await Promise.all([
@@ -212,6 +231,9 @@ class TSAnalyser extends EventEmitter {
             ]);
           } finally {
             if (runHeavyProbe) _releaseHeavyProbeSlot();
+            // Resume thumbnail immediately after probes complete — don't wait for
+            // the full suspend budget.  resume() is a no-op if not suspended.
+            if (isSrtHeavy && this._persistentThumb) this._persistentThumb.resume();
           }
           const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
@@ -667,10 +689,29 @@ class TSAnalyser extends EventEmitter {
 
   _extractSrtStatsFromLog(stderr) {
     if (!stderr) return null;
+
+    // ffmpeg emits libsrt statistics on lines containing SRT-specific field names.
+    // We MUST restrict parsing to those lines only — the full stderr also contains
+    // ffmpeg -progress pipe:2 output (bitrate=, total_size=, speed=, etc.) whose
+    // field names overlap with our broad fallback patterns.  Example false matches:
+    //   "rate"   → bitrate=0.0kbits/s  (progress output, rate is a substring)
+    //   "total"  → total_size=N        (progress output)
+    //   "bw"     → (any line containing "bw")
+    // By filtering to libsrt stat lines first, we eliminate all false positives.
+    // libsrt dumps stats as space-separated key=value pairs on lines that contain
+    // at least one unambiguous libsrt-only field (msRTT=, mbpsRecvRate=, mbpsBandwidth=).
+    const srtStatLines = String(stderr)
+      .split('\n')
+      .filter(l => /msRTT=|mbpsRecvRate=|mbpsSendRate=|mbpsBandwidth=/i.test(l))
+      .join('\n');
+
+    // No genuine libsrt output found — return null so the UI shows "AWAITING" not false zeros.
+    if (!srtStatLines) return null;
+
     const last = (rx) => {
       // matchAll requires a global regex; ensure g flag is set regardless of caller.
       const grx = rx.global ? rx : new RegExp(rx.source, rx.flags + 'g');
-      const matches = Array.from(String(stderr).matchAll(grx));
+      const matches = Array.from(srtStatLines.matchAll(grx));
       if (!matches.length) return null;
       return matches[matches.length - 1][1];
     };
@@ -679,31 +720,59 @@ class TSAnalyser extends EventEmitter {
       return Number.isFinite(n) ? n : null;
     };
     const srt = {};
-    // Field names match ffmpeg's libsrt verbose output:
-    //   mbpsRecvRate=21.234  mbpsBandwidth=100.000  msRTT=5.123
-    //   pktRecvTotal=12345  pktRcvLossTotal=0  pktRetransTotal=0
-    //   pktSentACKTotal=100  pktSentNAKTotal=0  pktRcvDrop=0
-    // Fallback patterns cover simplified formats that may appear in older builds.
-    const rateMbps = num(last(/(?:mbpsRecvRate|mbpsSendRate|rate)[\s=]+([\d.]+)/i));
-    const bwMbps   = num(last(/(?:mbpsBandwidth|bw)[\s=]+([\d.]+)/i));
-    const rttMs    = num(last(/(?:msRTT|rtt)[\s=]+([\d.]+)/i));
-    const pktTotal   = num(last(/(?:pktRecvTotal|total)[\s=]+(\d+)/i));
-    const pktRetrans = num(last(/(?:pktRetransTotal|pktRcvRetrans|retrans)[\s=]+(\d+)/i));
-    const pktLost    = num(last(/(?:pktRcvLossTotal|pktRcvLoss|loss|lost)[\s=]+(\d+)/i));
-    const pktDropped = num(last(/(?:pktRcvDrop|pktRcvDropTotal|drop|dropped)[\s=]+(\d+)/i));
-    const pktNak     = num(last(/(?:pktSentNAKTotal|pktSentNAK|nak)[\s=]+(\d+)/i));
-    const pktAck     = num(last(/(?:pktSentACKTotal|pktRecvACK|ack)[\s=]+(\d+)/i));
-    if (rateMbps != null) srt.rateMbps = rateMbps;
-    if (bwMbps != null) srt.bwMbps = bwMbps;
-    if (rttMs != null) srt.rttMs = rttMs;
-    if (pktTotal != null) srt.pktTotal = pktTotal;
+
+    // All patterns use exact libsrt field names as emitted by ffmpeg's libsrt.c.
+    // No short fallback aliases — those caused false matches against ffmpeg progress output.
+    // libsrt format: space-separated key=value on the statistics line, e.g.:
+    //   msRTT=18.500 mbpsBandwidth=1024.000 mbpsRecvRate=21.234 pktRecvTotal=12345 ...
+    const rateMbps   = num(last(/\bmbpsRecvRate=([\d.]+)/i)) ?? num(last(/\bmbpsSendRate=([\d.]+)/i));
+    const bwMbps     = num(last(/\bmbpsBandwidth=([\d.]+)/i));
+    const maxBwMbps  = num(last(/\bmbpsMaxBW=([\d.]+)/i));
+    const rttMs      = num(last(/\bmsRTT=([\d.]+)/i));
+    const pktTotal   = num(last(/\bpktRecvTotal=(\d+)/i));
+    const pktRetrans = num(last(/\bpktRetransTotal=(\d+)/i)) ?? num(last(/\bpktRcvRetrans=(\d+)/i));
+    const pktLost    = num(last(/\bpktRcvLossTotal=(\d+)/i)) ?? num(last(/\bpktRcvLoss=(\d+)/i));
+    // pktRcvDrop / pktSndDrop: non-zero = latency window too short (per Haivision SRT spec)
+    const pktRcvDrop = num(last(/\bpktRcvDrop=(\d+)/i));
+    const pktSndDrop = num(last(/\bpktSndDrop=(\d+)/i));
+    // pktRcvBelated: arrived after latency deadline — early warning before drops
+    const pktRcvBelated        = num(last(/\bpktRcvBelated=(\d+)/i));
+    const pktRcvAvgBelatedTime = num(last(/\bpktRcvAvgBelatedTime=([\d.]+)/i));
+    // Buffer headroom: remaining receive buffer capacity
+    const byteAvailRcvBuf = num(last(/\bbyteAvailRcvBuf=(\d+)/i));
+    const msRcvBuf        = num(last(/\bmsRcvBuf=([\d.]+)/i));
+    // Flow window
+    const pktFlowWindow   = num(last(/\bpktFlowWindow=(\d+)/i));
+    const pktNak     = num(last(/\bpktSentNAKTotal=(\d+)/i)) ?? num(last(/\bpktSentNAK=(\d+)/i));
+    const pktAck     = num(last(/\bpktSentACKTotal=(\d+)/i)) ?? num(last(/\bpktSentACK=(\d+)/i));
+
+    if (rateMbps   != null) srt.rateMbps   = rateMbps;
+    if (bwMbps     != null) srt.bwMbps     = bwMbps;
+    if (maxBwMbps  != null) srt.maxBwMbps  = maxBwMbps;
+    if (rttMs      != null) srt.rttMs      = rttMs;
+    if (pktTotal   != null) srt.pktTotal   = pktTotal;
     if (pktRetrans != null) srt.pktRetrans = pktRetrans;
-    if (pktLost != null) srt.pktLost = pktLost;
-    if (pktDropped != null) srt.pktDropped = pktDropped;
+    if (pktLost    != null) srt.pktLost    = pktLost;
+    if (pktRcvDrop != null) srt.pktRcvDrop = pktRcvDrop;
+    if (pktSndDrop != null) srt.pktSndDrop = pktSndDrop;
+    if (pktRcvBelated        != null) srt.pktRcvBelated        = pktRcvBelated;
+    if (pktRcvAvgBelatedTime != null) srt.pktRcvAvgBelatedTime = pktRcvAvgBelatedTime;
+    if (byteAvailRcvBuf != null) srt.byteAvailRcvBuf = byteAvailRcvBuf;
+    if (msRcvBuf        != null) srt.msRcvBuf         = msRcvBuf;
+    if (pktFlowWindow   != null) srt.pktFlowWindow     = pktFlowWindow;
     if (pktNak != null) srt.pktNak = pktNak;
     if (pktAck != null) srt.pktAck = pktAck;
+
     if (srt.pktTotal > 0 && srt.pktLost != null) {
       srt.lossPercent = parseFloat(((srt.pktLost / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Retransmit ratio per Haivision SRT spec: >5% = warning, >25% = critical
+    if (srt.pktTotal > 0 && srt.pktRetrans != null) {
+      srt.retransRatio = parseFloat(((srt.pktRetrans / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Aggregate drop count
+    if (pktRcvDrop != null || pktSndDrop != null) {
+      srt.pktDropped = (srt.pktRcvDrop || 0) + (srt.pktSndDrop || 0);
     }
     return Object.keys(srt).length > 0 ? srt : null;
   }
@@ -2172,6 +2241,43 @@ class TSAnalyser extends EventEmitter {
         pushPenalty(10, `Bitrate drift ${bitrateStability.deltaPct}% exceeds critical envelope`);
       } else if (bitrateStability.state === 'warning') {
         pushPenalty(4, `Bitrate drift ${bitrateStability.deltaPct}% exceeds warning envelope`);
+      }
+    }
+
+    // SRT link health — Haivision SRT spec + Eurovision broadcast thresholds
+    // Applied only when SRT stats are present in the probe result.
+    const srtStats = result.srtStats || dvb.srtStats || null;
+    if (srtStats && this.url && this.url.startsWith('srt://')) {
+      const srtLatencyMs = parseSrtLatency(this.url);
+      // Drops (pktRcvDrop / pktSndDrop): non-zero means latency window too short.
+      // Per Haivision spec this is the most critical SRT indicator — the link cannot
+      // deliver reliable broadcast quality without increasing SRTO_LATENCY or fixing RTT.
+      const rcvDrop = Number(srtStats.pktRcvDrop || 0);
+      const sndDrop = Number(srtStats.pktSndDrop || 0);
+      if (rcvDrop > 0) pushPenalty(30, `SRT receiver drop ${rcvDrop} pkt — latency window too short for link RTT`);
+      if (sndDrop > 0) pushPenalty(30, `SRT sender drop ${sndDrop} pkt — sender could not retransmit within latency window`);
+
+      // Belated packets: arrived after deadline — early warning before drops occur
+      const belated = Number(srtStats.pktRcvBelated || 0);
+      if (belated > 0) pushPenalty(12, `SRT ${belated} pkt arrived after latency deadline (pktRcvBelated) — consider increasing latency`);
+
+      // RTT vs latency ratio: per SRT spec, RTT > SRTO_LATENCY/2 means retransmits
+      // may not complete before the receiver deadline.  RTT > SRTO_LATENCY = impossible.
+      const rttMs = Number(srtStats.rttMs || 0);
+      if (rttMs > 0 && srtLatencyMs > 0) {
+        if (rttMs >= srtLatencyMs) {
+          pushPenalty(25, `SRT RTT ${rttMs}ms ≥ latency ${srtLatencyMs}ms — ARQ cannot recover lost packets`);
+        } else if (rttMs > srtLatencyMs / 2) {
+          pushPenalty(10, `SRT RTT ${rttMs}ms > latency/2 (${srtLatencyMs / 2}ms) — retransmits may miss receiver deadline`);
+        }
+      }
+
+      // Retransmit ratio: per Haivision spec >5% = link congestion, >25% = critical
+      const retransRatio = Number(srtStats.retransRatio || 0);
+      if (retransRatio > 25) {
+        pushPenalty(20, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds critical threshold (25%)`);
+      } else if (retransRatio > 5) {
+        pushPenalty(8, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds warning threshold (5%)`);
       }
     }
 

@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.45)
+Date: 2026-03-17 (latest: v3.1.51)
 
 ## Overview
 
@@ -10,6 +10,114 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.51 — 2026-03-17
+
+### Fix: SRT thumbnail race condition + analyzeduration too aggressive
+
+Two bugs introduced in v3.1.49–v3.1.50 causing "AWAITING FRAME" and complete thumbnail loss:
+
+**Race condition (monitoring.js):** `suspend()` killed the ffmpeg process but the stale `close` event fired after `resume()` had already spawned a new one — setting `this._proc = null` on the live process and scheduling a spurious 5s restart. Fixed with an epoch counter (`this._epoch`) incremented on every `_spawn()`. Close and error handlers capture epoch at spawn time and bail out if it no longer matches, making them immune to stale events from processes killed by `suspend()`.
+
+**`analyzeduration` too short (monitoring.js):** Reduced from `latencyMs+3000ms` to `latencyMs+500ms` in v3.1.50 — too aggressive. ffmpeg needs to detect H.264/HEVC codec info by seeing at least one IDR frame. Broadcast streams with a 2s GOP at 25fps require up to 2000ms of media data after the SRT latency window fills. With only 500ms headroom, the format detection phase timed out before an IDR arrived → ffmpeg exited → "AWAITING FRAME". Restored to `latencyMs+2000ms` (a practical improvement over the original 3000ms while guaranteeing reliable GOP detection).
+
+---
+
+## v3.1.50 — 2026-03-17
+
+### Fix: SRT thumbnail first-frame latency — redundant I-frame filter and oversized analyze window
+
+Two compounding delays before the first thumbnail appeared after each spawn/resume:
+
+1. **`analyzeduration = latencyMs + 3000ms`** — the 3s headroom was added for the transport bitrate probe (which needs a full measurement window) but was also applied to the thumbnail process, which only needs the SRT latency window to fill. Reduced to `latencyMs + 500ms`.
+
+2. **`select=eq(pict_type\,I)` in the vf chain was redundant and harmful** — `-skip_frame nokey` already instructs the decoder to skip all non-keyframes, so every frame reaching the filter graph is already an I-frame. The `select` filter only passed frames that fell on the `fps=1/N` time grid, which could skip the very first keyframe and delay the first thumbnail by up to one full interval (e.g. 30s). Removed.
+
+Result: first thumbnail after spawn/resume now appears at `latencyMs + ~500ms + time-to-first-keyframe` instead of `latencyMs + 3000ms + interval`.
+
+---
+
+## v3.1.49 — 2026-03-17
+
+### Fix: SRT thumbnail frozen for full 35s probe budget
+
+`suspend()` set a 35s fallback restart timer but had no way to cancel it early. When the probe completed in ~10s the thumbnail stayed dead for the remaining 25s. Added `resume()` to `PersistentThumbnailCapture`: cancels the fallback timer and calls `_spawn()` immediately. Called from the `finally` block in the heavy probe path — thumbnail now restarts as soon as all probe processes exit, not after the worst-case budget.
+
+Operator impact: thumbnail freeze on SRT streams reduced from ~35s to the actual probe duration (~latency + 10s, typically 12–15s for 2s latency SRT).
+
+---
+
+## v3.1.48 — 2026-03-17
+
+### Fix: SRT probe failure — PersistentThumbnailCapture holding single connection slot
+
+**Problem:** `PersistentThumbnailCapture` (added v3.1.45) holds a long-lived SRT caller connection indefinitely. Many SRT encoders and contribution servers accept only one caller at a time. When the heavy probe cycle runs, `_probeTransportBitrateBps()` tries to open a second SRT connection — the source rejects it, the probe fails with 0 TS packets and 0 bitrate while the SRT Transport tab shows no counters.
+
+**Fix (`monitoring.js`):**
+Added `suspend(durationMs)` to `PersistentThumbnailCapture`:
+- Kills the current ffmpeg process (freeing the SRT caller slot)
+- Sets a restart timer for `durationMs` before killing, so the close handler's own `_scheduleRestart(5000)` sees `_restartTimer` already set and exits early — preventing the thumbnail from reclaiming the slot mid-probe
+- Does not set `_running = false`, so the class resumes cleanly after the budget expires
+
+**Fix (`ts-analyser.js`):**
+Before each heavy probe burst on SRT URLs: calls `this._persistentThumb.suspend(latencyMs + 30000)` then waits 600 ms for the SRT connection to close. After the burst completes, the thumbnail auto-restarts via its internal timer.
+
+Operator impact: SRT heavy probes now get the connection slot they need — TS packet counts, bitrate, and libsrt stats all populate correctly. Thumbnail freezes for ~35 s per probe cycle (every 15–60 s depending on policy) then resumes.
+
+---
+
+## v3.1.47 — 2026-03-17
+
+### Fix: SRT stats showing false zeros ("STATS OK" but all 0.0)
+
+**Root cause:** `_extractSrtStatsFromLog()` searched the entire ffmpeg stderr string with overly-broad patterns. The `rate` alias matched `bitrate=0.0kbits/s` from `ffmpeg -progress pipe:2`, `total` matched `total_size=N`, and `bw` / `rtt` hit other unrelated fields — all returning 0. This made `srtStats` truthy (showing "STATS OK") but with all-zero values.
+
+**Fix (ts-analyser.js):**
+- Pre-filter stderr to only lines containing a genuine libsrt marker (`msRTT=`, `mbpsRecvRate=`, `mbpsBandwidth=`) before parsing — lines from `-progress pipe:2` are excluded entirely
+- Removed all short-word fallback aliases (`rate`, `bw`, `total`, `rtt`, `retrans`, `loss`, `lost`, `nak`, `ack`) — replaced with exact libsrt field names using `\b` word boundary anchors
+- Returns `null` (not a falsy empty object) when no libsrt stat lines are present — UI correctly shows "AWAITING" instead of "STATS OK" with zeros
+
+**Fix (TSAnalyser.jsx):** SRT Transport tab reorganised with four sections:
+- **Link Quality** — RTT, Recv Rate, Bandwidth, Loss %
+- **ARQ Counters** — NAK, ACK, Retransmitted, Lost, Total, Retrans %
+- **Latency Health** — RcvDrop, SndDrop, Belated (with inline drop/belated banners)
+- **Buffer & Flow** — Rcv Buf (ms), Flow Window, Max BW
+
+Operator impact: SRT Transport tab now correctly shows "AWAITING" until the first transport probe completes, then populates with real libsrt counters. Drops/belated events surface with colour coding and diagnostic messages in-panel.
+
+---
+
+## v3.1.46 — 2026-03-17
+
+### Feat: SRT professional broadcast health thresholds (Haivision spec + Eurovision dashboard)
+
+SRT link quality assessment aligned to Haivision SRT specification and Eurovision contribution link data (RTT ~19ms, 22–24 Mbps, all drops at 0).
+
+**Backend (`ts-analyser.js`):**
+
+*New stats parsed from libsrt verbose output:*
+- `pktRcvDrop` / `pktSndDrop` — drops due to latency window too short (per Haivision spec: non-zero = critical)
+- `pktRcvBelated` / `pktRcvAvgBelatedTime` — packets arriving after deadline (warning: raise latency)
+- `byteAvailRcvBuf` / `msRcvBuf` — receiver buffer fill level
+- `pktFlowWindow` — available flow window slots
+- `mbpsMaxBW` — sender max bandwidth limit
+- `retransRatio` — `pktRetrans / pktTotal × 100%` (>5% = warning, >25% = critical per Haivision spec)
+
+*New health penalties in `_buildHealthAssessment()`:*
+- `pktRcvDrop > 0` → −30pts critical: receiver drops, latency window too short for link RTT
+- `pktSndDrop > 0` → −30pts critical: sender could not retransmit within latency window
+- `pktRcvBelated > 0` → −12pts warning: packets arriving after deadline, consider raising latency
+- `RTT ≥ SRTO_LATENCY` → −25pts critical: ARQ cannot recover (mathematically impossible)
+- `RTT > SRTO_LATENCY/2` → −10pts warning: retransmits may miss receiver deadline
+- `retransRatio > 25%` → −20pts critical; `> 5%` → −8pts warning
+
+**Frontend (`MetricsTile.jsx`):**
+
+SRT Link panel gains a third row: **RcvDrop / Belated / Retrans%** with broadcast traffic-light colouring (green=0, yellow=warning, red=critical). RTT value now shows one decimal place. Retrans count colour-coded to retransRatio threshold.
+
+Operator impact: SRT drops and belated arrivals are now visible in the MCR tile immediately, with the health score and alarm system picking them up within one probe cycle.
 
 ---
 
