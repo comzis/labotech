@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.51)
+Date: 2026-03-17 (latest: v3.1.52)
 
 ## Overview
 
@@ -10,6 +10,18 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.52 — 2026-03-17
+
+### Fix: RTP/UDP thumbnails broken — PersistentThumbnailCapture scoped to SRT only
+
+`PersistentThumbnailCapture` (introduced v3.1.45) was applied to all protocols including RTP/UDP multicast. For SRT it is necessary — reconnecting every frame costs a full latency window. For RTP/UDP multicast, multicast join is near-instant and the proven one-shot `captureThumbnail()` path was already working before v3.1.45.
+
+The persistent process on multicast failed silently (`-loglevel error` suppresses stderr) and produced no frames, leaving all RTP/UDP decoders at "AWAITING FRAME" after deploy.
+
+Fix: `PersistentThumbnailCapture` is now SRT-only. RTP/UDP streams revert to the original interval timer loop calling `captureThumbnail()` — the approach that worked reliably before this session's changes.
 
 ---
 
