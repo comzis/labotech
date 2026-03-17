@@ -36,32 +36,35 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 |---|---|---|---|
 | **Phase 0a** — TSDuck tsp spike on gva-boro-probe | ✅ CLEARED | Cursor | Finding: `tsp` `monitor`/`etr290` plugins NOT present on production host. Persistent tsp real-time ETR/PCR path is blocked. Fallback confirmed: Phase 1 reduced-interval tsanalyze. Phase 3 scope adjusted — see roadmap §3. `docs/tsduck-spike-findings.md` to be written by Cursor. |
 | **Phase 0b** — SRT arbitration decision (Option A / B / C) | ✅ CLEARED | Agent A | Moot for current Phase 3 scope. Persistent tsp is not available. Phase 3 becomes enhanced tsanalyze cadence only. No SRT relay architecture needed. Revisit if TSDuck is upgraded on host. |
-| **Phase 1 merged to main** | 🔴 PENDING | operator | Agent B (Cursor) must branch off main AFTER Phase 1 merges. Do not start Phase 2 ts-analyser.js edits until this gate is cleared. |
+| **Phase 1 merged to main** | 🔴 PENDING | operator | Agent B can start Phase 2 NEW FILES now on `cursor/phase2-thumbnail-worker` (branch off `cursor/phase0a-tsduck-findings`). Do NOT edit `src/ts-analyser.js` constructor until this gate clears — add the ~3-line option param during rebase onto main after merge. |
 
 ---
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Idle — awaiting Phase 0a gate clearance to begin Phase 1
+**Current task:** Phase 1 — severity-aware probe scheduling (`feat/phase1-probe-scheduling`)
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 1 scheduling changes; Phase 3 TSDuckMonitor wiring)
-- `src/tsduck-monitor.js` (new file, Phase 3 only — do not create until Phase 0a cleared)
+- `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
 - `docs/release-notes-v3.1.md` (Phase 1 entry)
 - `docs/release-notes-v3.3.md` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Delivered v3.1.58: PCR metrics wired to analyser panel, multiview persistence fix, gray text legibility improvement
-- Created `docs/architecture-roadmap-continuous-monitoring.md`
-- Created `docs/agent-status.md` (this file)
-- Updated CLAUDE.md and package.json to correct product description (encapsulator not encoder)
+- Delivered v3.1.58: PCR metrics, multiview persistence, gray text legibility
+- Delivered: CC rolling window, multiview export/import, thumbnail backoff
+- Delivered: agent infrastructure (sync script, roadmap, CLAUDE.md corrections)
+- Phase 1 implementation: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% of base interval
+- PR #13 open: `cursor/phase0a-tsduck-findings` → main (all above work)
 
-**Active branch:** none (all merged to main at v3.1.58)
+**Active branch:** `feat/phase1-probe-scheduling` (off `cursor/phase0a-tsduck-findings`)
 
-**Open questions for operator:**
-- Phase 0a: when can gva-boro-probe be accessed to run the tsp spike?
-- Phase 0b: which SRT arbitration option do you want? Option A (safest, RTP/UDP only for persistent tsp) is recommended as the starting point.
+**Review request for Agent B:**
+- Check `_effectiveProbeIntervalMs()` in `src/ts-analyser.js` — does the 0.25/0.5 multiplier suit the probe-storm risk given the global semaphore (max 3 concurrent heavy)?
+- Confirm the 1 s floor is appropriate for your Phase 2 suspend/resume timing
+
+**Open questions for operator:** none — both Phase 0 gates cleared.
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
@@ -72,7 +75,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Phase 1 checklist ready, awaiting Phase 1 gate clearance from operator.
+**Current task:** START Phase 2 — `src/thumbnail-worker.js` + `src/thumbnail-worker-client.js`
+
+**Branch:** create `cursor/phase2-thumbnail-worker` off `cursor/phase0a-tsduck-findings`
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2)
@@ -81,29 +86,28 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `src/monitoring.js` (migrate module-level state to worker)
 - `docs/release-notes-v3.2.md` (new file, Phase 2 release)
 
-**Last session:** 2026-03-17 — recorded Phase 0a spike findings (`docs/tsduck-spike-findings.md`) and prepared Phase 1 commit-sized checklist.
+**Last session:** 2026-03-17 — recorded Phase 0a spike findings (`docs/tsduck-spike-findings.md`).
 
-**Active branch:** `cursor/phase0a-tsduck-findings`
+**Active branch:** `cursor/phase0a-tsduck-findings` → create `cursor/phase2-thumbnail-worker` off it
 
-**Files modified (this session):**
-- `docs/tsduck-spike-findings.md`
-
-**Waiting for:**
-- Operator review of Phase 1 checklist
-- Phase 1 merged to main before editing `src/ts-analyser.js` in Phase 2 work
+**Session start checklist:**
+1. `git checkout cursor/phase0a-tsduck-findings && git pull`
+2. `git checkout -b cursor/phase2-thumbnail-worker`
+3. Read `docs/architecture-roadmap-continuous-monitoring.md` §Phase 2 before writing code
+4. Read SHARED CONTRACT section below — IPC protocol is the integration boundary
 
 **Gate verification:**
 - Phase 0a: ✅ CLEARED
 - Phase 0b: ✅ CLEARED
+- Phase 1 (ts-analyser.js constructor edit): ⏳ do NOT add the ~3-line constructor param yet — add during rebase after Phase 1 merges to main
 
-**Incidental findings — Agent A positions:**
-- `_probeTSDuck()` proc.on('exit'): leave as-is in Phase 1; stdout data events buffer before exit fires in practice. Phase 3 may revisit.
-- `src/api.js` SIGTERM gap: confirmed, Phase 2 adds it.
-- CLAUDE.md port 3000 vs 4000: known doc inconsistency, not blocking.
+**Review request for Agent A (Phase 1 PR):**
+- `_effectiveProbeIntervalMs()` multipliers look correct for our suspend/resume timing
+- 1 s floor is fine — suspend() has a 1.5 s settle delay already, so probes won't fire inside it
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js` (does not exist yet — leave for Agent A)
-- `src/ts-analyser.js` beyond the constructor option addition (~3 lines)
+- `src/ts-analyser.js` (beyond the ~3-line constructor addition — do that during rebase)
 - Any file in `web/src/` (UI Change Policy — operator approval required)
 
 ---

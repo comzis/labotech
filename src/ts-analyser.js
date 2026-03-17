@@ -2006,11 +2006,36 @@ class TSAnalyser extends EventEmitter {
     return false;
   }
 
+  // Return the effective probe interval for the NEXT schedule tick, adjusted for
+  // the current alarm state.  Alarm streams probe more aggressively so recovery
+  // or escalation is detected within one or two cycles rather than waiting for
+  // the full base interval.
+  //
+  //  ok       → baseIntervalMs                 (no change)
+  //  warning  → baseIntervalMs × 0.5  (min 1 s)
+  //  critical → baseIntervalMs × 0.25 (min 1 s)
+  //
+  // The 1 s floor prevents probe storms when baseIntervalMs is very small, and
+  // the global heavy-probe semaphore caps parallel load regardless.
+  _effectiveProbeIntervalMs(cadence) {
+    const severity = this.lastResult?.severity;
+    const base = cadence.baseIntervalMs;
+    const floor = Math.max(1000, cadence.minLoopDelayMs * 4);
+    if (severity === 'critical') return Math.max(floor, Math.floor(base * 0.25));
+    if (severity === 'warning')  return Math.max(floor, Math.floor(base * 0.5));
+    return base;
+  }
+
   _schedulerDiagnostics(runHeavyProbe) {
     const cadence = this._cadencePolicy();
+    const effectiveIntervalMs = this._effectiveProbeIntervalMs(cadence);
     return {
       cadence,
       runHeavyProbe,
+      effectiveIntervalMs,
+      priorityBoost: effectiveIntervalMs < cadence.baseIntervalMs
+        ? (this.lastResult?.severity || 'none')
+        : null,
       nextHeavyProbeAt: Number.isFinite(this._nextHeavyProbeAt) ? this._nextHeavyProbeAt : null,
       nextProbeAt: Number.isFinite(this._nextProbeAt) ? this._nextProbeAt : null,
     };
@@ -2610,7 +2635,11 @@ class TSAnalyser extends EventEmitter {
       }
       if (this.isRunning) {
         const now = Date.now();
-        const targetNextAt = scheduledAt + cadence.baseIntervalMs;
+        // Use severity-aware interval: alarm streams probe more frequently so
+        // recovery or escalation is caught within 1–2 cycles rather than waiting
+        // for the full base interval (see _effectiveProbeIntervalMs).
+        const effectiveInterval = this._effectiveProbeIntervalMs(cadence);
+        const targetNextAt = scheduledAt + effectiveInterval;
         this._nextProbeAt = Math.max(targetNextAt, now + cadence.minLoopDelayMs);
         const delay = Math.max(cadence.minLoopDelayMs, this._nextProbeAt - now);
         this._timer = setTimeout(run, delay);
