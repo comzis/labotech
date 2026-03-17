@@ -48,18 +48,24 @@ TS_INPUT_TIMEOUT_US=7000000
 TS_INPUT_REORDER_QUEUE_SIZE=512
 ```
 
-## Capacity Model (Operational Baseline)
+## Capacity Model (Guardrail Ceiling — Not a Throughput Guarantee)
 
-- Planning rule: `1 core ~= 20 streams @ 22 Mbps`
-- Estimated max streams:
-  - `estimatedMaxStreams = ENCAPSULATOR_CORES * ENCAP_CAPACITY_PER_CORE`
-- Example with `ENCAPSULATOR_CPUSET=4-7` (4 cores):
-  - `4 * 20 = 80` planned streams
+`ENCAP_CAPACITY_PER_CORE=20` defines the per-core admission ceiling used by the guardrail logic:
 
-Guardrail behavior:
+```
+guardrailCeiling = ENCAPSULATOR_CORES × ENCAP_CAPACITY_PER_CORE
+```
 
-- `warn`: at/above warning threshold (CPU and/or projected stream load)
-- `block`: refuses new channel start with HTTP `429` when threshold is exceeded
+Example with `ENCAPSULATOR_CPUSET=4-7` (4 cores): ceiling = `4 × 20 = 80`.
+
+**This is a configured admission threshold, not a validated throughput figure.** Real usable capacity depends on live traffic profile (bitrate mix, burst behaviour, SRT retransmit load) and host conditions (CPU activity from other containers, memory pressure, NIC saturation). The `ENCAP_CPU_BLOCK_PCT=75` CPU ceiling is the primary runtime safety net and takes precedence over the stream-count ceiling.
+
+Guardrail behaviour:
+
+- `warn`: at/above `ENCAP_CPU_WARN_PCT` (CPU) or 90% of stream ceiling — operator alert only
+- `block`: refuses new channel start with HTTP `429` when `ENCAP_CPU_BLOCK_PCT` or stream ceiling is exceeded
+
+Treat the stream ceiling as a starting point for capacity planning; validate against observed CPU headroom under real traffic before committing to it operationally.
 
 ## Deployment Commands
 
