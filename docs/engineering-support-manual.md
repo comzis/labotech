@@ -1203,7 +1203,7 @@ FFmpeg auto-detects available cores from the cgroup cpuset. No `-threads` overri
 
 #### Encapsulator guardrails
 
-`ENCAP_CAPACITY_PER_CORE=20` and `ENCAP_CAPACITY_STREAM_MBPS=22` are per-core multipliers, so they scale automatically with the 16-core allocation. The `ENCAP_CPU_BLOCK_PCT=75` ceiling is the primary safety net regardless of core count.
+`ENCAP_CAPACITY_PER_CORE=20` and `ENCAP_CAPACITY_STREAM_MBPS=22` are per-core multipliers used by the guardrail admission logic — they scale the configured ceiling with core count, not actual throughput. With the 16-core NUMA 1 allocation the stream ceiling becomes `16 × 20 = 320`, but this is an admission guardrail threshold, not a validated capacity figure. Real usable throughput depends on live traffic profile and host conditions. `ENCAP_CPU_BLOCK_PCT=75` is the primary hard limit and takes precedence; treat the stream ceiling as a planning guide to be validated under live load.
 
 ---
 
