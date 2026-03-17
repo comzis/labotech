@@ -2351,25 +2351,11 @@ class TSAnalyser extends EventEmitter {
       this._iatSniffer.start();
     }
 
-    // ── Persistent thumbnail capture ──────────────────────────────────────────
-    // Replaces the timer-based captureThumbnail() loop. One long-lived ffmpeg
-    // process per stream writes I-frames to pipe:1; JpegFrameExtractor detects
-    // complete frames and writes them atomically. No reconnect overhead after
-    // the first SRT latency window — subsequent frames are near real-time.
+    // ── Thumbnail capture ──────────────────────────────────────────────────────
     const thumbIntervalSec = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
     const thumbIntervalMs  = thumbIntervalSec * 1000;
-    if (this._persistentThumb) this._persistentThumb.stop();
-    this._persistentThumb = new PersistentThumbnailCapture({
-      streamId: this.id,
-      inputUrl: this.url,
-      intervalSec: thumbIntervalSec,
-    });
-    this._persistentThumb.on('frame', () => {
-      this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-    });
     const phaseSeed = String(this.id || '');
     const phaseHash = phaseSeed.split('').reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 0);
-    // Stagger startup across analysers to avoid ffmpeg thundering herd.
     const jitterWindowMs = Math.min(
       Math.max(200, Math.floor(cadence.baseIntervalMs * 0.6)),
       cadence.startupJitterMaxMs
@@ -2377,12 +2363,42 @@ class TSAnalyser extends EventEmitter {
     const probeStartJitterMs = jitterWindowMs > 0 ? (phaseHash % jitterWindowMs) : 0;
     const thumbStartJitterMs = thumbIntervalMs > 0 ? (phaseHash % Math.min(thumbIntervalMs, 1500)) : 0;
 
-    // Delay persistent capture start with same jitter used for probe staggering.
-    if (this._thumbnailTimer) clearTimeout(this._thumbnailTimer);
-    this._thumbnailTimer = setTimeout(() => {
-      this._thumbnailTimer = null;
-      if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
-    }, thumbStartJitterMs);
+    if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
+    if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
+
+    if (this.url && this.url.startsWith('srt://')) {
+      // SRT: persistent long-lived ffmpeg avoids reconnect on every frame
+      // (reconnect costs a full SRT latency window each time).
+      this._persistentThumb = new PersistentThumbnailCapture({
+        streamId: this.id,
+        inputUrl: this.url,
+        intervalSec: thumbIntervalSec,
+      });
+      this._persistentThumb.on('frame', () => {
+        this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+      });
+      this._thumbnailTimer = setTimeout(() => {
+        this._thumbnailTimer = null;
+        if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
+      }, thumbStartJitterMs);
+    } else {
+      // RTP / UDP multicast: one-shot timer loop.  Multicast join is near-instant
+      // so per-frame reconnect is fine, and the proven captureThumbnail() path
+      // avoids the silent-failure modes of a persistent process on multicast.
+      const scheduleThumb = () => {
+        if (!this.isRunning) return;
+        this._thumbnailTimer = setTimeout(async () => {
+          this._thumbnailTimer = null;
+          if (!this.isRunning) return;
+          try {
+            await captureThumbnail(this.id, this.url);
+            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+          } catch (_) { /* captureThumbnail logs internally */ }
+          scheduleThumb();
+        }, thumbIntervalMs);
+      };
+      this._thumbnailTimer = setTimeout(scheduleThumb, thumbStartJitterMs);
+    }
 
     const run = async () => {
       const scheduledAt = Number.isFinite(this._nextProbeAt) && this._nextProbeAt > 0 ? this._nextProbeAt : Date.now();
