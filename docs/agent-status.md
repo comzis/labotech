@@ -42,20 +42,20 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Reviewing Agent B Phase 2 PR when ready. Planning Phase 3 (enhanced tsanalyze cadence).
+**Current task:** Reviewing Agent B Phase 2 PR when ready. Phase 3 PR open.
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
 - `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
-- `docs/release-notes-v3.3.md` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Phase 1 DONE: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% base interval, 156 tests pass
-- PR #13 + #14 merged to main (v3.1.59)
-- All gates cleared
+- Phase 3 DONE: `src/tsduck-monitor.js` — continuous PCR+SI+bitrate sampler, 27 tests
+- `src/ts-analyser.js` wired: TSDuckMonitor startup, event handlers, SRT suspend/resume
+- 188 tests pass
+- PR #15 open: `feat/phase3-tsduck-monitor`
 
-**Active branch:** none — on main, idle until Phase 2 PR ready for review
+**Active branch:** `feat/phase3-tsduck-monitor` (PR #15 open — awaiting operator merge)
 
 **Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
 
