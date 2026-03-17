@@ -1,6 +1,22 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.58)
+Date: 2026-03-17 (latest: v3.1.59)
+
+## v3.1.59 — 2026-03-17
+
+### Feat: severity-aware probe scheduling — alarm streams poll up to 4× faster
+
+**`src/ts-analyser.js` — `_effectiveProbeIntervalMs()`:**
+
+- Streams in `warning` severity now probe at 50% of `baseIntervalMs` (default: 2.5 s instead of 5 s)
+- Streams in `critical` severity probe at 25% of `baseIntervalMs` (default: 1.25 s)
+- `ok` severity (or no result yet) retains the full base interval — no change to normal operation
+- Floor of 1 s enforced regardless of `baseIntervalMs` setting to prevent probe storms
+- Effective interval exposed in `probeDiagnostics.scheduler.effectiveIntervalMs` and `priorityBoost` fields
+- Global heavy-probe semaphore (max 3 concurrent) still caps parallel load across all streams
+
+**Operator impact:** Alarm conditions detected and recovered faster. A stream that goes critical will
+re-probe within ~1–2 s rather than waiting up to 5 s for the next cycle. No configuration change needed.
 
 ## v3.1.58 — 2026-03-17
 
