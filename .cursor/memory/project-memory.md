@@ -1,5 +1,28 @@
 # Labotech Project Memory
 
+## Product Identity
+
+Labotech is a **DVB-IP stream processor** — SRT encapsulation, multicast routing,
+MPEG-TS analysis, multiview monitoring, and ETR 290 compliance checking.
+It is NOT a broadcast encoder. Transcoding (1080p→1080i) is present but secondary
+and currently limited. Never describe Labotech as an encoder in any output.
+`SRTEncoder` / `encoder.js` are legacy class/file names — they perform SRT
+encapsulation, not broadcast encoding.
+
+## Agent Collaboration
+
+You are **Cursor (Agent B)**. Claude Code is **Agent A**.
+**Read `docs/agent-status.md` at the start of every session** — it contains:
+- Current phase gates (hard stops you must not cross without operator clearance)
+- Agent A's active branch and last completed work
+- The frozen IPC contracts both agents share
+- The merge log and known conflict files
+
+Update the Agent B block in `docs/agent-status.md` before ending every session.
+Branch prefix for all your work: `cursor/`
+
+Current version: **3.1.58** — 149 tests passing.
+
 ## Runtime and Network
 
 - Target host is an HPE DL360 on Ubuntu with Docker host networking.
