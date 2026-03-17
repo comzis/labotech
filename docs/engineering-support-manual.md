@@ -1131,9 +1131,23 @@ This policy was established after several sessions where UI refactoring (thumbna
 
 ---
 
-## 14) CPU and Memory Tuning (gva-boro-probe, 2026-03-15)
+## 14) CPU and Memory Tuning (gva-boro-probe)
 
-### Problem
+### Hardware — gva-boro-probe
+
+| | |
+|---|---|
+| CPU | 2× Intel Xeon Gold 5120 @ 2.2 GHz |
+| Physical cores | 14 per socket × 2 = **28 cores** |
+| Logical threads | 56 (Hyper-Threading enabled) |
+| RAM | 64 GB (32 GB per socket, Advanced ECC) |
+| NUMA topology | Node 0: CPUs 0-13, 28-41 · Node 1: CPUs 14-27, 42-55 |
+
+Verify with: `numactl --hardware`
+
+---
+
+### Phase 1 fix — 2026-03-15 (initial scale-out)
 
 With 9 concurrent decoder lanes, the `labotech` container was hitting 401% CPU utilisation against a 4-core (cpuset 0-3) ceiling. Each lane spawns three concurrent processes:
 
@@ -1145,48 +1159,101 @@ With 9 concurrent decoder lanes, the `labotech` container was hitting 401% CPU u
 
 9 lanes × 3 processes = **27 concurrent heavy processes on 4 cores**. Under CPU starvation each FFmpeg instance failed to schedule its receive socket read in time, causing internal UDP buffer drops reported as `Packet corrupt (stream = N, dts = ...)` — which the ETR 290 analyser correctly logged as `transport_error` P2 alarms. This created false alarm noise on the timeline despite the source signal being clean.
 
-The container also had a 4 GB memory limit. Node.js inside a cgroup auto-detects ~25% as its V8 heap budget (~1 GB), leaving little headroom for in-memory event rings, WebSocket state, and active decoder maps across 9 lanes.
+Interim fix: raised to `cpuset 0-15` (16 cores), `mem_limit 8192m`, heap 6 GB.
 
-### Fix applied
+---
 
-`docker-env.txt` updated:
+### Phase 2 fix — 2026-03-17 (NUMA-aligned full allocation, v3.1.43)
+
+The Phase 1 fix crossed NUMA boundaries (`cpuset 0-15` spans socket 0 cores 0-13 and socket 1 cores 14-15), introducing cross-socket memory latency for all child process allocations. With the server dedicated exclusively to Labotech, full NUMA-aligned allocation was applied.
+
+#### Current allocation (`docker-env.txt`)
 
 ```
-LABOTECH_CPUS=16.0
-LABOTECH_CPUSET=0-15
-LABOTECH_MEM_LIMIT=8192m
-NODE_OPTIONS=--max-old-space-size=6144
-ENCAPSULATOR_CPUSET=16-19   # moved to avoid overlap
+# labotech — NUMA node 0
+LABOTECH_CPUS=24.0
+LABOTECH_CPUSET=0-13,28-41
+LABOTECH_MEM_LIMIT=24g
+LABOTECH_SHM_SIZE=1g
+NODE_OPTIONS=--max-old-space-size=20480
+
+# encapsulator — NUMA node 1
+ENCAPSULATOR_CPUS=16.0
+ENCAPSULATOR_CPUSET=14-27,42-55
+ENCAPSULATOR_MEM_LIMIT=8g
+
+# Probe concurrency
+TS_HEAVY_PROBE_MAX_CONCURRENT=8
+THUMBNAIL_MAX_CONCURRENT=4
 ```
 
-Applied with `docker compose up -d --force-recreate labotech` (no rebuild needed for env changes).
+#### Why NUMA matters here
 
-### Server context (gva-boro-probe)
+ffprobe, tsanalyze, and ffmpeg each spawn as separate OS processes. When a process allocates memory it prefers the NUMA node local to the core it's running on. If the process is scheduled on socket 0 but memory is allocated from socket 1, every cache miss crosses the inter-socket QPI link (node distance 21 vs 10 for local). With 8+ simultaneous heavy probes this compounds into measurable latency.
 
-- Total logical cores: **56** (`nproc`)
-- Allocation post-fix: labotech 0-15 (16 cores), encapsulator 16-19 (4 cores), ~36 cores free for OS and future services
+Pinning `labotech` to `0-13,28-41` ensures all its child processes stay on NUMA node 0 and allocate from node 0's 32 GB. The encapsulator is pinned to NUMA node 1 for the same reason.
+
+#### Probe concurrency
+
+`TS_HEAVY_PROBE_MAX_CONCURRENT` raised from 3 → 8. Each heavy probe is primarily NIC I/O wait (ffprobe must buffer ~2.5 s of multicast packets before analysis; tsanalyze runs for up to 9 s). On 28 logical threads, 8 simultaneous probes leaves ample headroom for the event loop and ETR monitors.
+
+#### FFmpeg / transcoder thread behaviour
+
+FFmpeg auto-detects available cores from the cgroup cpuset. No `-threads` override is needed — each transcode or encode job sees 24 logical threads and schedules itself accordingly. If multiple simultaneous transcodes are observed saturating CPU, add `-threads 6` (or similar) to `buildFFmpegArgs()` in `src/encoder.js` to cap per-job usage.
+
+#### Encapsulator guardrails
+
+`ENCAP_CAPACITY_PER_CORE=20` and `ENCAP_CAPACITY_STREAM_MBPS=22` are per-core multipliers, so they scale automatically with the 16-core allocation. The `ENCAP_CPU_BLOCK_PCT=75` ceiling is the primary safety net regardless of core count.
+
+---
 
 ### Scaling reference
 
-| Active decoder lanes | Recommended CPUSET | Recommended MEM_LIMIT |
+| Active decoder lanes | Recommended CPUSET (NUMA 0) | Recommended MEM_LIMIT |
 |---|---|---|
-| 1–4 | 0-7 (8 cores) | 4096m |
-| 5–9 | 0-15 (16 cores) | 8192m |
-| 10–16 | 0-23 (24 cores) | 12288m |
-| 17+ | 0-31 (32 cores) | 16384m |
+| 1–4 | `0-7` (8 cores) | 8g |
+| 5–9 | `0-13` (14 cores) | 16g |
+| 10–20 | `0-13,28-41` (28 threads) | 24g |
+| 20+ | `0-13,28-41` + raise `TS_HEAVY_PROBE_MAX_CONCURRENT` | 24g |
 
 Rule of thumb: **~1.5–2 cores and ~400 MB per active decoder lane** (ETR + analyser + IAT sniffer combined).
 
-### ETR noise suppression (related)
+---
+
+### ETR noise suppression (related, Phase 1)
 
 CPU starvation also caused spurious `transport_error` and `pcr_disc` alarms. Two changes were made to `src/etr290-analyser.js`:
 
 1. **Burst window**: `_pendingCounts` resets if the last match for a check was >30s ago (`PENDING_BURST_WINDOW_MS=30000`). Converts threshold from "N hits ever" to "N hits within 30s".
 2. **Higher defaults for noisy checks**: `transport_error` and `pcr_disc` default threshold raised from 1 to 3 — requires a genuine burst of 3 occurrences within 30s before an incident is raised. Overridable per-monitor via profile thresholds.
 
-### Node.js heap note
+---
 
-Without `NODE_OPTIONS=--max-old-space-size=6144`, Node.js 20 inside a 4 GB cgroup limits its V8 heap to ~1 GB. With 9 active lanes the in-memory structures (event ring 1000 entries, timeline maps, WebSocket broadcast state, per-analyser probe results) approach this limit under sustained load, causing GC pressure and event loop latency that presents as UI unresponsiveness rather than a hard crash.
+### Analyser state persistence (v3.1.42)
+
+Prior to v3.1.42, active TS analysers (decoder lanes) were not saved to `config/state.json`. Every container restart wiped all decoder registrations — the TS timeline went dead and operators had to re-add decoders manually.
+
+Fix: `state-persistence.js` now saves `{ id, url, interval, nicName }` for every running analyser. `restoreState()` in `api.js` always restores analysers on boot (no env var gate). `routes/analyse.js` calls `saveState()` on every `POST /analyse/start` and `DELETE /analyse/:id`.
+
+**Operator action**: add decoders once after upgrading to v3.1.42 — they will survive all future deploys automatically.
+
+---
+
+### Diagnostics
+
+```bash
+# Full health snapshot
+bash scripts/diagnose.sh
+
+# Confirm NUMA topology
+numactl --hardware
+
+# Confirm cgroup CPU assignment for running container
+docker inspect labotech | grep -A5 Cpuset
+
+# Live CPU usage per container
+docker stats --no-stream labotech labotech-encapsulator
+```
 
 ---
 
