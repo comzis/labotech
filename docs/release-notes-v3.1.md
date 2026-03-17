@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.52)
+Date: 2026-03-17 (latest: v3.1.53)
 
 ## Overview
 
@@ -10,6 +10,18 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.53 — 2026-03-17
+
+### Fix: SRT probe serialisation — 0 PIDs/services despite full bitrate
+
+**Root cause:** `Promise.all` launched all heavy probes simultaneously (TSDuck, ffmpeg bitrate, ffprobe audio, tsDisc, CC). For SRT sources that accept only one caller, only the first process to connect received TS data — typically the transport bitrate probe. All others were rejected, returning empty results. Result: correct bitrate, 0 PIDs, 0 services, 0 CC errors.
+
+**Fix:** SRT heavy probes now run sequentially — one SRT connection at a time. RTP/UDP multicast keeps `Promise.all` (unlimited simultaneous receivers). The thumbnail suspend budget is extended to `latencyMs + 70s` to cover the full sequential probe window; `resume()` in the `finally` block still cancels it early as soon as all probes finish.
+
+Trade-off: SRT probe cycles are longer (sum of probe durations vs max), but all probes now succeed and populate the full dashboard.
 
 ---
 
