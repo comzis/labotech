@@ -36,35 +36,28 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 |---|---|---|---|
 | **Phase 0a** — TSDuck tsp spike on gva-boro-probe | ✅ CLEARED | Cursor | Finding: `tsp` `monitor`/`etr290` plugins NOT present on production host. Persistent tsp real-time ETR/PCR path is blocked. Fallback confirmed: Phase 1 reduced-interval tsanalyze. Phase 3 scope adjusted — see roadmap §3. `docs/tsduck-spike-findings.md` to be written by Cursor. |
 | **Phase 0b** — SRT arbitration decision (Option A / B / C) | ✅ CLEARED | Agent A | Moot for current Phase 3 scope. Persistent tsp is not available. Phase 3 becomes enhanced tsanalyze cadence only. No SRT relay architecture needed. Revisit if TSDuck is upgraded on host. |
-| **Phase 1 merged to main** | ✅ CLEARED | operator | PR #13 + #14 merged 2026-03-17. Agent B: rebase `cursor/phase2-thumbnail-worker` onto main, then add the ~3-line ts-analyser.js constructor param. |
+| **Phase 1 merged to main** | ✅ CLEARED | operator | PR #13 + #14 merged 2026-03-17. Agent B: branch `cursor/phase2-thumbnail-worker` off main, add ~3-line ts-analyser.js constructor param. |
 
 ---
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Phase 1 — severity-aware probe scheduling (`feat/phase1-probe-scheduling`)
+**Current task:** Reviewing Agent B Phase 2 PR when ready. Planning Phase 3 (enhanced tsanalyze cadence).
 
 **Owns:**
-- `src/ts-analyser.js` (Phase 1 scheduling changes; Phase 3 TSDuckMonitor wiring)
+- `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
 - `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
-- `docs/release-notes-v3.1.md` (Phase 1 entry)
 - `docs/release-notes-v3.3.md` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Delivered v3.1.58: PCR metrics, multiview persistence, gray text legibility
-- Delivered: CC rolling window, multiview export/import, thumbnail backoff
-- Delivered: agent infrastructure (sync script, roadmap, CLAUDE.md corrections)
-- Phase 1 implementation: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% of base interval
-- PR #13 open: `cursor/phase0a-tsduck-findings` → main (all above work)
+- Phase 1 DONE: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% base interval, 156 tests pass
+- PR #13 + #14 merged to main (v3.1.59)
+- All gates cleared
 
-**Active branch:** `feat/phase1-probe-scheduling` (off `cursor/phase0a-tsduck-findings`)
+**Active branch:** none — on main, idle until Phase 2 PR ready for review
 
-**Review request for Agent B:**
-- Check `_effectiveProbeIntervalMs()` in `src/ts-analyser.js` — does the 0.25/0.5 multiplier suit the probe-storm risk given the global semaphore (max 3 concurrent heavy)?
-- Confirm the 1 s floor is appropriate for your Phase 2 suspend/resume timing
-
-**Open questions for operator:** none — both Phase 0 gates cleared.
+**Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
@@ -175,7 +168,7 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | Date | Agent | Branch | PR | What merged |
 |---|---|---|---|---|
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
-| 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | TSDuck findings, SRT hardening, multiview export, thumbnail backoff |
+| 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | SRT hardening, multiview export, thumbnail backoff, agent infra |
 | 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |
 
 ---
