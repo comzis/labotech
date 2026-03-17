@@ -5,6 +5,11 @@ alwaysApply: true
 
 # Labotech Core Standards
 
+**Labotech is a DVB-IP stream processor** (SRT encapsulation, multicast routing,
+MPEG-TS analysis, multiview, ETR 290). It is NOT a broadcast encoder. Never use
+the word "encoder" to describe the product. `SRTEncoder` / `encoder.js` are legacy
+names for the SRT encapsulation engine.
+
 - Keep backend in plain Node.js ES6 with `require()`.
 - Use `child_process.spawn` or `execFile` for process calls; avoid shell string interpolation with untrusted input.
 - Keep API binding aligned with project contract (`API_HOST` management NIC and expected `API_PORT`).

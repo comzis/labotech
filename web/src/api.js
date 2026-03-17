@@ -90,3 +90,7 @@ export const clearEvents = () => request('DELETE', '/api/events');
 
 export const getMonitoringPolicy = () => request('GET', '/monitoring-policy');
 export const setMonitoringProfile = (profile) => request('PUT', '/monitoring-policy/profile', { profile });
+
+// Multiview config export / import
+export const exportMultiviewConfig = () => request('GET', '/api/multiview/export');
+export const importMultiviewConfig = (bundle) => request('POST', '/api/multiview/import', bundle);

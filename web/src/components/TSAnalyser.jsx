@@ -381,7 +381,10 @@ export default function TSAnalyser({ lastMessage }) {
   const bps = transportRate.mbps != null ? Number(transportRate.mbps.toFixed(3)) : null;
   const packets = Number(activeResult?.dvb?.packets || activeResult?.packetCount || 0);
   const ccErrors = Number(activeResult?.dvb?.continuityCounterErrors?.count || 0);
-  const pcrJitter = activeResult?.dvb?.pcr?.jitterMs;
+  const pcrMetrics = activeResult?.dvb?.pcrMetrics || null;
+  // pcrMetrics populated by TSDuck heavy probe (repetitionMaxMs = interval, accuracyMaxMs = jitter)
+  const pcrJitter = pcrMetrics?.accuracyMaxMs ?? activeResult?.dvb?.pcr?.jitterMs ?? null;
+  const pcrIntervalMs = pcrMetrics?.repetitionMaxMs ?? activeResult?.dvb?.pcr?.intervalMs ?? null;
   const pcrPidLike =
     activeResult?.dvb?.pcr?.pid ??
     activeResult?.dvb?.pcr?.pidHex ??
@@ -954,8 +957,14 @@ export default function TSAnalyser({ lastMessage }) {
                 <span style={{ fontSize: 9, color: C.muted }}>PCR PID</span>
                 <PidRef pidLike={pcrPidLike} color={C.accent} />
               </div>
-              <KV k="PCR Interval" v={activeResult?.dvb?.pcr?.intervalMs != null ? `${activeResult.dvb.pcr.intervalMs} ms` : "-"} vc={C.ok} />
-              <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter} ms` : "-"} vc={pcrJitter != null && pcrJitter > 5 ? C.warn : C.ok} />
+              <KV k="PCR Interval" v={pcrIntervalMs != null ? `${pcrIntervalMs.toFixed(1)} ms` : "-"} vc={pcrIntervalMs != null && pcrIntervalMs > 40 ? C.warn : C.ok} />
+              <KV k="PCR Jitter" v={pcrJitter != null ? `${pcrJitter.toFixed(2)} ms` : "-"} vc={pcrJitter != null && pcrJitter > 0.5 ? C.warn : C.ok} />
+              {pcrMetrics?.discontIndicatorErrors > 0 && (
+                <KV k="PCR Disc Ind" v={String(pcrMetrics.discontIndicatorErrors)} vc={C.err} />
+              )}
+              {pcrMetrics?.crcErrors > 0 && (
+                <KV k="CRC Errors" v={String(pcrMetrics.crcErrors)} vc={C.err} />
+              )}
               <KV k="CC Errors" v={String(ccErrors)} vc={ccErrors > 0 ? C.err : C.ok} />
             </Panel>
 

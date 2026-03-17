@@ -66,6 +66,57 @@ describe('TSAnalyser', () => {
       expect(d.cadence.baseIntervalMs).toBe(2000);
       expect(d.cadence.heavyProbeIntervalMs).toBe(4000);
     });
+
+    describe('_effectiveProbeIntervalMs — severity-aware scheduling', () => {
+      const cadence = {
+        baseIntervalMs: 5000,
+        minLoopDelayMs: 250,
+      };
+
+      test('ok severity returns baseIntervalMs unchanged', () => {
+        analyser.lastResult = { severity: 'ok' };
+        expect(analyser._effectiveProbeIntervalMs(cadence)).toBe(5000);
+      });
+
+      test('null lastResult (startup) returns baseIntervalMs', () => {
+        analyser.lastResult = null;
+        expect(analyser._effectiveProbeIntervalMs(cadence)).toBe(5000);
+      });
+
+      test('warning halves the interval (floor 1 s)', () => {
+        analyser.lastResult = { severity: 'warning' };
+        expect(analyser._effectiveProbeIntervalMs(cadence)).toBe(2500);
+      });
+
+      test('critical quarters the interval (floor 1 s)', () => {
+        analyser.lastResult = { severity: 'critical' };
+        expect(analyser._effectiveProbeIntervalMs(cadence)).toBe(1250);
+      });
+
+      test('floor enforced: critical on a 2 s base stays >= 1 s', () => {
+        analyser.lastResult = { severity: 'critical' };
+        const shortCadence = { baseIntervalMs: 2000, minLoopDelayMs: 250 };
+        const result = analyser._effectiveProbeIntervalMs(shortCadence);
+        expect(result).toBeGreaterThanOrEqual(1000);
+      });
+
+      test('priorityBoost in diagnostics is null when ok', () => {
+        analyser.lastResult = { severity: 'ok' };
+        const d = analyser._schedulerDiagnostics(false);
+        expect(d.priorityBoost).toBeNull();
+        expect(d.effectiveIntervalMs).toBe(d.cadence.baseIntervalMs);
+      });
+
+      test('priorityBoost in diagnostics reflects severity when alarmed', () => {
+        analyser.monitoringPolicy = {
+          probeCadence: { baseIntervalMs: 5000, minLoopDelayMs: 250 },
+        };
+        analyser.lastResult = { severity: 'critical' };
+        const d = analyser._schedulerDiagnostics(true);
+        expect(d.priorityBoost).toBe('critical');
+        expect(d.effectiveIntervalMs).toBeLessThan(d.cadence.baseIntervalMs);
+      });
+    });
   });
 
   describe('parseStructure', () => {

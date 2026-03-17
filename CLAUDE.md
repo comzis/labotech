@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Labotech** is a professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu. It manages SRT streams, handles 1080p→1080i transcoding, routes multicast traffic, and analyses MPEG-TS structure.
+**Labotech** is a professional DVB-IP stream processor for an HPE DL360 server running Ubuntu. It handles SRT encapsulation, multicast routing, MPEG-TS analysis, multiview monitoring, and ETR 290 compliance checking. Transcoding (1080p→1080i interlace conversion) is present but considered a secondary and currently limited feature. There is no broadcast encoding capability — the product is an encapsulator, analyser, and multiview platform.
 
 **Server target:** HPE DL360, Ubuntu Server, Docker with `network_mode: host`
 - **eno1:** Management NIC → `10.67.18.29` → Web UI + API on port `4000`
@@ -54,7 +54,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 - **`multicast-forward.js`** — `MulticastForwarder` extends `EventEmitter` directly (not `SRTEncoder`). Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
 - **`ts-analyser.js`** — `TSAnalyser` extends `EventEmitter` directly (not `SRTEncoder`). Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
-- **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active encoders.
+- **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active stream processors.
 
 ### Routes (`routes/`)
 
@@ -90,7 +90,7 @@ This rule applies to Claude Code and Cursor equally. No exceptions for "small" f
 
 ## Build Order
 
-See `labotech-project.md` for the full phased build sequence (Phases 1–5). Start with Phase 1 (Dockerfile → encoder.js → api.js + streams route → basic React shell) before moving to transcoding, multicast, TS analysis, and advanced features.
+See `labotech-project.md` for the full phased build sequence (Phases 1–5). Start with Phase 1 (Dockerfile → encoder.js → api.js + streams route → basic React shell) before moving to transcoding, multicast, TS analysis, and advanced features. Note: `encoder.js` / `SRTEncoder` is the SRT encapsulation engine — the class name is a legacy artefact; it does not perform broadcast encoding.
 
 ## Known Pitfalls
 
@@ -148,6 +148,13 @@ Acceptable without consultation:
 
 See `docs/engineering-support-manual.md §13` and `.cursor/rules/change-safety-explicit-approval.mdc` for detail.
 
+## Agent Collaboration
+
+Claude Code (Agent A) and Cursor (Agent B) work in parallel on this repository.
+**`docs/agent-status.md` is the shared logbook — read it at the start of every session.**
+It contains: current phase gates, each agent's active branch, the frozen IPC contracts,
+the merge log, and known conflict files. Update your status block before ending a session.
+
 ## Development Workflow
 
 **Three AI tools are active on this repo. Read this section before making any changes.**
@@ -176,6 +183,6 @@ See `WORKFLOW.md` for the full day-to-day process.
 
 ## Configuration
 
-- `config/presets.json` — 64 encoder preset slots
+- `config/presets.json` — 64 encapsulator/transcoder preset slots
 - `config/multicast.json` — `{ nic: "eno2", subnet: "239.100.25.0/26", address: "239.100.25.29" }`
 - `.env` — copy from `.env.example`; never commit `.env`
