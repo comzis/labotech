@@ -137,6 +137,30 @@ class PersistentThumbnailCapture extends EventEmitter {
     if (this._proc) { try { this._proc.kill('SIGTERM'); } catch (_) {} this._proc = null; }
   }
 
+  /**
+   * Temporarily yield the SRT connection slot for a probe.
+   * Kills the current ffmpeg process (freeing the SRT caller slot) and schedules
+   * an automatic restart after `durationMs`.  Does NOT set _running=false, so the
+   * existing _scheduleRestart(5000) guard in the close handler fires but exits
+   * immediately (this._restartTimer is already set), preventing a premature restart
+   * that would reclaim the slot mid-probe.
+   */
+  suspend(durationMs) {
+    if (!this._running) return;
+    // Detach the process reference before killing so the close handler's
+    // `this._proc = null` is harmless (it's already null).
+    const proc = this._proc;
+    this._proc = null;
+    // Set restart timer BEFORE killing — the close handler's _scheduleRestart(5000)
+    // sees this._restartTimer is already set and exits early, preventing a 5s restart.
+    if (this._restartTimer) clearTimeout(this._restartTimer);
+    this._restartTimer = setTimeout(() => {
+      this._restartTimer = null;
+      if (this._running) this._spawn();
+    }, durationMs);
+    if (proc) { try { proc.kill('SIGTERM'); } catch (_) {} }
+  }
+
   _buildSrc() {
     const url = this._inputUrl;
     if (url.startsWith('udp://') || url.startsWith('rtp://')) {

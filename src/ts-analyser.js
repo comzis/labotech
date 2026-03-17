@@ -200,6 +200,25 @@ class TSAnalyser extends EventEmitter {
           // concurrent analysers, preventing the thundering-herd problem when
           // multiple decoders are started simultaneously.
           if (runHeavyProbe) await _acquireHeavyProbeSlot();
+
+          // SRT single-connection yield: PersistentThumbnailCapture holds the only
+          // SRT caller slot indefinitely.  Before running the heavy probe burst, we
+          // suspend it for the probe budget so the transport bitrate probe can connect.
+          // suspend() sets a restart timer BEFORE killing — the close handler's own
+          // _scheduleRestart(5000) sees the timer already set and exits early, so the
+          // thumbnail does not reclaim the slot mid-probe.
+          const isSrtHeavy = runHeavyProbe &&
+            this.url && this.url.startsWith('srt://') &&
+            this._persistentThumb;
+          if (isSrtHeavy) {
+            const srtLatMs = parseSrtLatency(this.url);
+            // Budget = latency window + all sub-probe timeouts + 5s margin
+            const suspendMs = srtLatMs + 30000;
+            this._persistentThumb.suspend(suspendMs);
+            // Brief pause to let the SRT connection close before probes connect.
+            await new Promise(r => setTimeout(r, 600));
+          }
+
           let heavyProbeResults;
           try {
             heavyProbeResults = await Promise.all([
