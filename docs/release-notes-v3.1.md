@@ -1,6 +1,28 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.59)
+Date: 2026-03-17 (latest: v3.1.60)
+
+## v3.1.60 — 2026-03-17
+
+### Feat: TSDuckMonitor — continuous PCR + SI table + bitrate sampling (Phase 3)
+
+**New `src/tsduck-monitor.js`:**
+
+- Periodic sampler using confirmed-available tsp plugins: `pcrverify`, `tables --json-line`, `bitrate_monitor`
+- Each sample run spawns `tsp` for a configurable window (default 5 s), parses output, emits structured events, then exits — no persistent tsp process competing for SRT connection slots
+- ETR 290 thresholds enforced: PCR repetition ≤ 40 ms (P2.1), PCR accuracy ≤ 500 ns (P2.2), PAT/PMT interval ≤ 500 ms (P3), NIT ≤ 10 s, SDT ≤ 2 s
+- Emits: `pcr`, `si`, `bitrate`, `alarm` (priority `p1`/`p2`/`p3`), `error`, `sample`
+- Supports `srt://`, `udp://`, `rtp://` input URLs; gracefully skips unsupported schemes
+- `suspend()` / `resume()` API for SRT connection serialisation
+
+**`src/ts-analyser.js` — Phase 3 wiring:**
+
+- `startContinuous()` now creates and starts a `TSDuckMonitor` instance per stream
+- TSDuckMonitor `alarm` events forwarded as `health_alarm` (p1 → `critical`, p2 → `warning`, p3 → `warning`)
+- PCR metrics merged into `lastResult.dvb.pcrMetrics`; SI table counts into `lastResult.dvb.siMonitor`; tsp bitrate into `lastResult.tsduckBitrateMonitor`
+- For SRT streams: TSDuckMonitor is suspended alongside `_persistentThumb` during heavy sequential probes and resumed 1.5 s after probes complete — ensures the SRT connection slot is free
+
+**Operator impact:** PCR jitter, SI table presence/absence, and independent tsp-derived bitrate are now monitored continuously between tsanalyze heavy probe cycles (every 10 s by default, configurable via `TSDUCK_MONITOR_INTERVAL_MS`). ETR 290 P1–P3 alarms appear in the alarm log immediately on detection. No configuration change required — falls back silently if `tsp` is not installed.
 
 ## v3.1.59 — 2026-03-17
 

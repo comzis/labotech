@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId, PersistentThumbnailCapture, parseSrtLatency } = require('./monitoring');
 const IATSniffer = require('./iat-sniffer');
+const TSDuckMonitor = require('./tsduck-monitor');
 const DolbyEAdapter = require('./dolbye-adapter');
 const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
 let _multicastConfig = null;
@@ -97,6 +98,7 @@ class TSAnalyser extends EventEmitter {
     this._nextProbeAt = 0;
     this.nicName = options.nicName || _getNicName();
     this._iatSniffer = null;
+    this._tsduckMonitor = null;
     // Alarm hysteresis: require HYSTERESIS_N consecutive warning-or-worse probes before
     // escalating to 'warning'. 'critical' escalates immediately (already gated by higher
     // thresholds). 'ok' recovers immediately to clear alarms without delay.
@@ -225,6 +227,7 @@ class TSAnalyser extends EventEmitter {
             // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
             const suspendMs = srtLatMs + 70000;
             this._persistentThumb.suspend(suspendMs);
+            if (this._tsduckMonitor) this._tsduckMonitor.suspend();
             await new Promise(r => setTimeout(r, 600));
           }
 
@@ -257,6 +260,7 @@ class TSAnalyser extends EventEmitter {
               // the last probe connection closed.  Avoid immediate rejection of the thumbnail.
               setTimeout(() => {
                 if (this._persistentThumb) this._persistentThumb.resume();
+                if (this._tsduckMonitor) this._tsduckMonitor.resume();
               }, 1500);
             }
           }
@@ -2577,6 +2581,28 @@ class TSAnalyser extends EventEmitter {
       this._iatSniffer.start();
     }
 
+    // ── TSDuckMonitor — PCR + SI table sampler ─────────────────────────────────
+    // Runs periodic tsp samples using confirmed-available plugins (pcrverify,
+    // tables, bitrate_monitor).  Does NOT use monitor/etr290 (absent on host).
+    // PCR/bitrate metrics are merged into lastResult between probe cycles.
+    if (!this._tsduckMonitor) {
+      const tsduckIntervalMs = parseInt(process.env.TSDUCK_MONITOR_INTERVAL_MS, 10) || 10000;
+      this._tsduckMonitor = new TSDuckMonitor({
+        id: `${this.id}-tsduck`,
+        url:  this.url,
+        intervalMs:     tsduckIntervalMs,
+        sampleWindowMs: Math.floor(tsduckIntervalMs * 0.5),
+      });
+      this._tsduckMonitor.on('pcr', (data) => this._onTsduckPcr(data));
+      this._tsduckMonitor.on('si',  (data) => this._onTsduckSi(data));
+      this._tsduckMonitor.on('bitrate', (data) => this._onTsduckBitrate(data));
+      this._tsduckMonitor.on('alarm',   (data) => this._onTsduckAlarm(data));
+      this._tsduckMonitor.on('error',   (err)  => {
+        this.emit('info', { message: `TSDuckMonitor: ${err.message}` });
+      });
+      this._tsduckMonitor.start();
+    }
+
     // ── Thumbnail capture ──────────────────────────────────────────────────────
     const thumbIntervalSec = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
     const thumbIntervalMs  = thumbIntervalSec * 1000;
@@ -2673,7 +2699,50 @@ class TSAnalyser extends EventEmitter {
       this._iatSniffer.stop();
       this._iatSniffer = null;
     }
+    if (this._tsduckMonitor) {
+      this._tsduckMonitor.stop();
+      this._tsduckMonitor = null;
+    }
     this.emit('stopped', { id: this.id });
+  }
+
+  // ── TSDuckMonitor event handlers ────────────────────────────────────────────
+
+  // Merge real-time PCR metrics into lastResult so the PCR panel stays live
+  // between heavy probe cycles (which only run every ~15–30 s).
+  _onTsduckPcr(data) {
+    if (!this.lastResult) return;
+    if (!this.lastResult.dvb) this.lastResult.dvb = {};
+    this.lastResult.dvb.pcrMetrics = {
+      repetitionMaxMs:  data.repetitionMaxMs,
+      accuracyMaxMs:    data.accuracyMaxMs,
+      discontIndicatorErrors: data.discontErrors,
+      crcErrors:        data.crcErrors,
+      source:           'tsduck-monitor',
+      ts:               data.ts,
+    };
+  }
+
+  _onTsduckSi(data) {
+    if (!this.lastResult) return;
+    if (!this.lastResult.dvb) this.lastResult.dvb = {};
+    this.lastResult.dvb.siMonitor = { tables: data.tables, ts: data.ts };
+  }
+
+  _onTsduckBitrate(data) {
+    if (!this.lastResult) return;
+    this.lastResult.tsduckBitrateMonitor = { bps: data.bps, ts: data.ts };
+  }
+
+  // Route TSDuckMonitor alarms into the existing ETR 290 alarm infrastructure.
+  _onTsduckAlarm(alarm) {
+    this.emit('health_alarm', {
+      severity:  alarm.priority === 'p1' ? 'critical' : 'warning',
+      source:    'tsduck-monitor',
+      checkId:   alarm.checkId,
+      message:   alarm.message,
+      ts:        alarm.ts,
+    });
   }
 
   toJSON() {
