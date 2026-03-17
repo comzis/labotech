@@ -1,6 +1,26 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.61)
+Date: 2026-03-17 (latest: v3.1.62)
+
+## v3.1.62 — 2026-03-17
+
+### Feat: Phase 2 thumbnail worker — api.js wiring and analyser lifecycle integration
+
+**`src/api.js`:**
+
+- Creates `ThumbnailWorkerClient` on startup, before route mounting.
+- Wires `frame` events to WebSocket broadcast as `{ type: 'thumbnail_frame', id, url, path }`.
+- Passes client to the analyse route so analyser start/stop automatically manages thumbnail captures.
+- `restoreState()` now calls `thumbnailClient.start()` for each restored analyser on boot.
+- SIGTERM handler: awaits `thumbnailClient.shutdown()` for clean worker teardown before `process.exit(0)`.
+
+**`routes/analyse.js`:**
+
+- `POST /analyse/start` calls `thumbnailClient.start(id, url, THUMBNAIL_INTERVAL_SEC)` after analyser starts.
+- `DELETE /analyse/:id` calls `thumbnailClient.stop(id)` when analyser is removed.
+- `thumbnailClient` is optional (null-safe) — test and standalone usage unaffected.
+
+**Operator impact:** Confidence Monitor thumbnails are now driven by the isolated worker process. Thumbnail capture failures no longer affect the main API process; the worker restarts automatically with exponential backoff. No UI change required — the frontend already consumes `thumbnail_frame` events.
 
 ## v3.1.61 — 2026-03-17
 
