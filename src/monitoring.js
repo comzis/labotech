@@ -124,6 +124,7 @@ class PersistentThumbnailCapture extends EventEmitter {
     // a stale close event from a suspend()-killed process from nulling out this._proc
     // or scheduling a spurious restart after resume() has already spawned a new process.
     this._epoch     = 0;
+    this._restartDelay = 5000;
     const safeId    = sanitizeStreamId(streamId);
     this._outPath   = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
     this._tmpPath   = `${this._outPath}.ptmp.jpg`;
@@ -151,6 +152,7 @@ class PersistentThumbnailCapture extends EventEmitter {
    * finds this._restartTimer already set and exits early — no premature restart.
    */
   suspend(durationMs) {
+    this._restartDelay = 5000;
     if (!this._running) return;
     const proc = this._proc;
     this._proc = null;
@@ -170,6 +172,7 @@ class PersistentThumbnailCapture extends EventEmitter {
    * for the full fallback budget.
    */
   resume() {
+    this._restartDelay = 5000;
     if (!this._running) return;
     if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
     if (!this._proc) this._spawn();
@@ -196,7 +199,7 @@ class PersistentThumbnailCapture extends EventEmitter {
     // with a 2s GOP at 25fps, worst case is 2000ms after data starts flowing.
     // Use latencyMs + 2000ms as a reliable baseline across all GOP sizes.
     // Non-SRT: 2s covers UDP/RTP multicast join artefacts + first IDR.
-    const analyzeDurUs = isSrt ? String((latencyMs + 2000) * 1000) : '2000000';
+    const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
     // -skip_frame nokey already ensures the decoder only ever sees keyframes (I-frames).
@@ -232,23 +235,23 @@ class PersistentThumbnailCapture extends EventEmitter {
       fs.writeFile(this._tmpPath, frameBuffer, (writeErr) => {
         if (writeErr) return;
         fs.rename(this._tmpPath, this._outPath, (renErr) => {
-          if (!renErr) this.emit('frame', this._outPath);
+          if (!renErr) { this._restartDelay = 5000; this.emit('frame', this._outPath); }
         });
       });
     });
 
     proc.stdout.on('data', (chunk) => extractor.push(chunk));
-    proc.stderr.on('data', () => {}); // suppress — loglevel error keeps it quiet
+    proc.stderr.on('data', (d) => { const t = d.toString().trim(); if (t) console.error(`[thumb:${this._streamId}] ffmpeg: ${t.slice(0, 200)}`); });
     proc.on('error', () => {
       // Stale guard: if epoch no longer matches, suspend()+resume() has already
       // spawned a new process — ignore this event to avoid a spurious restart.
       if (this._epoch !== epoch) return;
-      this._scheduleRestart(5000);
+      this._scheduleRestart(this._restartDelay);
     });
     proc.on('close', () => {
       if (this._epoch !== epoch) return; // stale close from suspend()-killed process
       this._proc = null;
-      if (this._running) this._scheduleRestart(5000);
+      if (this._running) this._scheduleRestart(this._restartDelay);
     });
   }
 
@@ -258,6 +261,7 @@ class PersistentThumbnailCapture extends EventEmitter {
       this._restartTimer = null;
       this._spawn();
     }, delayMs);
+    this._restartDelay = Math.min(this._restartDelay * 2, 30000);
   }
 }
 
@@ -299,15 +303,14 @@ function getThumbnailCaptureSettings() {
     };
   }
   return {
-    width: 640,
-    qv: 2,
+    width: 320,
+    qv: 4,
     pick: 4,
     scaler: 'lanczos',
     // pp=de applies H.264-style loop deblocking as a post-processing pass,
     // smoothing DCT block boundaries before JPEG encode.
     deblock: true,
-    // Temporal+spatial denoise: reduces compression noise between block boundaries.
-    denoise: 'hqdn3d=2:2:6:6',
+    denoise: null,
   };
 }
 
