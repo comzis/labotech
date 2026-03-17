@@ -100,12 +100,21 @@ class TSAnalyser extends EventEmitter {
     // Alarm hysteresis: require HYSTERESIS_N consecutive warning-or-worse probes before
     // escalating to 'warning'. 'critical' escalates immediately (already gated by higher
     // thresholds). 'ok' recovers immediately to clear alarms without delay.
-    this._healthHysteresis = { warnCount: 0, critCount: 0, lastReported: 'ok' };
+    this._healthHysteresis = { warnCount: 0, critCount: 0, okCount: 0, lastReported: 'ok' };
     // Startup grace: hold 'ok' for the first STARTUP_GRACE_N continuous probes so that
     // SRT connection establishment, key negotiation, IAT estimator warm-up, and initial
     // ffprobe PSI lock do not produce false CRITICAL hits in the live-view timeline.
     // SRT streams get a longer grace (8 probes ≈ 40s) than UDP/RTP (4 probes ≈ 20s).
     this._startupGraceRemaining = null;  // lazily initialised on first continuous probe
+    // CC rolling window: last 3 heavy-probe CC counts for RTP/UDP average scoring.
+    // Smooths out per-probe ffprobe join artefacts (1–10 errors on reconnect) so
+    // that only persistent CC error rates breach the threshold.
+    this._ccRollingWindow = [];
+    // Lifetime CC error accumulator — never reset between probe cycles.
+    // Provides monotonically increasing total for cross-cycle detection of
+    // persistent low-rate CC errors that never breach the per-cycle floor.
+    this._ccTotal = 0;
+    this._ccHeavyCount = 0; // heavy CC probe cycles completed
   }
 
   probe(options = {}) {
@@ -243,7 +252,13 @@ class TSAnalyser extends EventEmitter {
             }
           } finally {
             if (runHeavyProbe) _releaseHeavyProbeSlot();
-            if (isSrtHeavy && this._persistentThumb) this._persistentThumb.resume();
+            if (isSrtHeavy && this._persistentThumb) {
+              // Brief settle delay: SRT sources may have a 1–2s reconnect cooldown after
+              // the last probe connection closed.  Avoid immediate rejection of the thumbnail.
+              setTimeout(() => {
+                if (this._persistentThumb) this._persistentThumb.resume();
+              }, 1500);
+            }
           }
           const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
@@ -293,12 +308,33 @@ class TSAnalyser extends EventEmitter {
             nonMonotonousDts: 0,
             lastMessages: [],
           };
-          result.dvb.continuityCounterErrors = ccProbe?.data || {
-            count: 0,
-            pidScopedCount: 0,
-            genericCount: 0,
-            lastMessages: [],
-          };
+          // On heavy cycles use the fresh probe result.
+          // On light cycles (ccProbe === null) carry forward the last known result
+          // so health assessment does not silently score CC as 0 between heavy cycles.
+          if (ccProbe !== null) {
+            const ccData = ccProbe?.data || {
+              count: 0, pidScopedCount: 0, genericCount: 0, lastMessages: [],
+            };
+            // Update rolling window (last 3 heavy-probe counts) for RTP/UDP averaging.
+            this._ccRollingWindow.push(ccData.count);
+            if (this._ccRollingWindow.length > 3) this._ccRollingWindow.shift();
+            this._ccTotal += ccData.count;
+            this._ccHeavyCount += 1;
+            result.dvb.continuityCounterErrors = {
+              ...ccData,
+              rollingAvg: this._ccRollingWindow.length > 0
+                ? Math.round(this._ccRollingWindow.reduce((s, v) => s + v, 0) / this._ccRollingWindow.length)
+                : ccData.count,
+              heavyCycles: this._ccRollingWindow.length,
+              ccTotal: this._ccTotal,
+              ccHeavyCount: this._ccHeavyCount,
+            };
+          } else {
+            result.dvb.continuityCounterErrors = this.lastResult?.dvb?.continuityCounterErrors || {
+              count: 0, pidScopedCount: 0, genericCount: 0, lastMessages: [],
+              rollingAvg: 0, heavyCycles: 0,
+            };
+          }
           result.dvb.dolbyE = dolbyEProbe || {
             available: false,
             ok: false,
@@ -574,12 +610,14 @@ class TSAnalyser extends EventEmitter {
           if (currentCh == null) continue;
           const peakM = line.match(/Peak level dB:\s*(-?[\d.]+|inf|-inf)/i);
           if (peakM) {
-            const val = parseFloat(peakM[1]);
+            const raw = peakM[1].toLowerCase();
+            const val = raw === '-inf' ? -90 : raw === 'inf' ? 0 : parseFloat(raw);
             if (Number.isFinite(val)) channelPeak[currentCh] = val;
           }
           const rmsM = line.match(/RMS level dB:\s*(-?[\d.]+|inf|-inf)/i);
           if (rmsM) {
-            const val = parseFloat(rmsM[1]);
+            const raw = rmsM[1].toLowerCase();
+            const val = raw === '-inf' ? -90 : raw === 'inf' ? 0 : parseFloat(raw);
             if (Number.isFinite(val)) channelRms[currentCh] = val;
           }
         }
@@ -983,6 +1021,8 @@ class TSAnalyser extends EventEmitter {
           const pids = this._extractTSDuckPidRows(raw);
           const siIntervalsSec = this._extractTSDuckSIIntervalsSec(raw);
           const arrivalMetrics = this._extractTSDuckArrivalMetrics(raw);
+          const pcrMetrics = this._extractTSDuckPcrMetrics(raw);
+          const unreferencedPids = this._extractUnreferencedPids(raw);
           resolve({
             available: true,
             ok: true,
@@ -992,6 +1032,8 @@ class TSAnalyser extends EventEmitter {
               pids,
               siIntervalsSec,
               arrivalMetrics,
+              pcrMetrics,
+              unreferencedPids,
               stderr: stderr.trim() || null,
             },
             error: null,
@@ -1298,6 +1340,14 @@ class TSAnalyser extends EventEmitter {
       };
       next.dvb.si = { intervalsSec: si, compliance };
     }
+    // PCR analysis (ETR 290 Priority 2)
+    if (tsduckData && tsduckData.pcrMetrics) {
+      next.dvb.pcrMetrics = tsduckData.pcrMetrics;
+    }
+    // Unreferenced PIDs (ETR 290 Priority 3)
+    if (tsduckData && Array.isArray(tsduckData.unreferencedPids) && tsduckData.unreferencedPids.length > 0) {
+      next.dvb.unreferencedPids = tsduckData.unreferencedPids;
+    }
     if (nicMetrics && nicMetrics.sampleCount > 0) {
       next.dvb.arrival = {
         iatMs: nicMetrics.iatMs,
@@ -1520,6 +1570,89 @@ class TSAnalyser extends EventEmitter {
     const hasIat = Object.values(metrics.iatMs).some((v) => v != null);
     if (!hasIat && metrics.jitterMs == null && metrics.packetLossPct == null) return null;
     return metrics;
+  }
+
+  _extractTSDuckPcrMetrics(raw) {
+    // Extract PCR analysis from tsanalyze JSON. TSDuck reports PCR repetition and
+    // accuracy per PID. ETR 290 P2 thresholds: repetition ≤ 40ms, accuracy ≤ 0.5ms.
+    const metrics = {
+      repetitionMaxMs: null,
+      repetitionMeanMs: null,
+      accuracyMaxMs: null,
+      discontinuityCount: 0,
+      discontIndicatorErrors: 0,
+      crcErrors: 0,
+    };
+    const parseN = (v) => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+      return Number.isFinite(n) ? n : null;
+    };
+    const setMax = (key, v) => {
+      const n = parseN(v);
+      if (n == null) return;
+      if (metrics[key] == null || n > metrics[key]) metrics[key] = n;
+    };
+    const addCount = (key, v) => {
+      const n = parseN(v);
+      if (n != null && n > 0) metrics[key] += Math.round(n);
+    };
+
+    const visit = (obj, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach((v, i) => visit(v, `${path}[${i}]`)); return; }
+      for (const [k, v] of Object.entries(obj)) {
+        const key = k.toLowerCase();
+        // PCR repetition (ETR 290 P2.1: PCR must repeat every ≤40ms)
+        if (/pcr.*(repetition|interval).*(max|maximum)/i.test(key) || /pcr.*(repetition|interval).*(max|maximum)/i.test(path + '.' + key)) {
+          setMax('repetitionMaxMs', v);
+        }
+        if (/pcr.*(repetition|interval).*(mean|avg|average)/i.test(key)) {
+          const n = parseN(v); if (n != null && (metrics.repetitionMeanMs == null || n > metrics.repetitionMeanMs)) metrics.repetitionMeanMs = n;
+        }
+        // PCR accuracy (ETR 290 P2.2: accuracy ≤ 500ns = 0.0005ms; practical threshold ≤ 0.5ms)
+        if (/pcr.*accuracy.*(max|maximum)/i.test(key)) {
+          setMax('accuracyMaxMs', v);
+        }
+        // PCR discontinuity indicator errors (ETR 290 P2.4)
+        if (/pcr.*(discontinu|discon).*(count|error)/i.test(key) || /discon.*indicator.*error/i.test(key)) {
+          addCount('discontIndicatorErrors', v);
+        }
+        // CRC errors on PSI sections (ETR 290 P2.2)
+        if (/crc.*(error|invalid|bad)/i.test(key) || /(invalid|bad).*crc/i.test(key) || key === 'crc_error_count' || key === 'invalid_sections') {
+          addCount('crcErrors', v);
+        }
+        if (typeof v === 'object') visit(v, `${path}.${key}`);
+      }
+    };
+    visit(raw, 'root');
+    const hasData = metrics.repetitionMaxMs != null || metrics.accuracyMaxMs != null
+      || metrics.discontIndicatorErrors > 0 || metrics.crcErrors > 0;
+    return hasData ? metrics : null;
+  }
+
+  _extractUnreferencedPids(raw) {
+    // Detect PIDs present in the TS but not referenced by any PMT (ETR 290 P3.5).
+    // TSDuck may tag these as "unreferenced" in its JSON output.
+    const unreferenced = [];
+    const visit = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach(visit); return; }
+      // TSDuck may use "unreferenced" or "is_unreferenced" flags on PID entries
+      const isUnref = obj.unreferenced === true || obj.is_unreferenced === true
+        || String(obj.type || '').toLowerCase() === 'unreferenced'
+        || String(obj.referenced || '').toLowerCase() === 'false';
+      const pid = obj.pid ?? obj.id ?? obj.PID;
+      if (isUnref && pid != null) {
+        const pidNum = typeof pid === 'number' ? pid : parseInt(String(pid).replace(/0x/i, ''), 16);
+        if (Number.isFinite(pidNum) && pidNum > 0 && pidNum <= 8191) {
+          unreferenced.push(pidNum);
+        }
+      }
+      Object.values(obj).forEach(visit);
+    };
+    visit(raw);
+    return [...new Set(unreferenced)]; // deduplicate
   }
 
   _parseBitrateValue(raw) {
@@ -2058,6 +2191,7 @@ class TSAnalyser extends EventEmitter {
     //   ok       → recover immediately to clear alarms without delay
     const HYSTERESIS_N = 2;
     const CRIT_HYSTERESIS_N = 3;
+    const OK_HYSTERESIS_N = 2;
     const raw = assessment.severity;
     const h = this._healthHysteresis;
 
@@ -2065,7 +2199,7 @@ class TSAnalyser extends EventEmitter {
     if (this._startupGraceRemaining !== null && this._startupGraceRemaining > 0) {
       this._startupGraceRemaining -= 1;
       h.lastReported = 'ok';
-      return { ...result, dvb: { ...result.dvb, health: { ...assessment, severity: 'ok', startupGrace: true, hysteresis: { raw, warnCount: 0, critCount: 0 } } } };
+      return { ...result, dvb: { ...result.dvb, health: { ...assessment, severity: 'ok', startupGrace: true, hysteresis: { raw, warnCount: 0, critCount: 0, okCount: 0 } } } };
     }
 
     if (isInconclusiveProbe) {
@@ -2073,10 +2207,13 @@ class TSAnalyser extends EventEmitter {
     } else if (raw === 'critical') {
       h.critCount++;
       h.warnCount = 0;
+      h.okCount = 0;
     } else if (raw === 'warning') {
       h.warnCount++;
       h.critCount = 0;
+      h.okCount = 0;
     } else {
+      h.okCount++;
       h.warnCount = 0;
       h.critCount = 0;
     }
@@ -2086,6 +2223,9 @@ class TSAnalyser extends EventEmitter {
       reported = 'critical';
     } else if (h.warnCount >= HYSTERESIS_N) {
       reported = 'warning';
+    } else if (h.lastReported !== 'ok' && h.okCount < OK_HYSTERESIS_N) {
+      // Hold-down: keep previous alarm until N consecutive OK probes confirm recovery.
+      reported = h.lastReported;
     } else {
       reported = 'ok';
     }
@@ -2118,7 +2258,7 @@ class TSAnalyser extends EventEmitter {
       ...result,
       dvb: {
         ...result.dvb,
-        health: { ...assessment, severity: reported, hysteresis: { raw, warnCount: h.warnCount, critCount: h.critCount } },
+        health: { ...assessment, severity: reported, hysteresis: { raw, warnCount: h.warnCount, critCount: h.critCount, okCount: h.okCount } },
       },
     };
   }
@@ -2213,11 +2353,62 @@ class TSAnalyser extends EventEmitter {
     }
 
     const cc = dvb.continuityCounterErrors || null;
-    const ccCount = Number(cc?.count || 0);
+    // For RTP/UDP: use the rolling average (last 3 heavy probes) rather than the
+    // single-cycle count.  This smooths out the 1–10 CC errors that ffprobe always
+    // produces on multicast join without masking genuine persistent CC error rates.
+    // For SRT and light cycles (rollingAvg absent): use per-cycle count as before.
+    const isRtpUdp = this._isRtpUrl(this.url) || (this.url && this.url.startsWith('udp://'));
+    const ccCount = isRtpUdp && cc && Number.isFinite(cc.rollingAvg)
+      ? cc.rollingAvg
+      : Number(cc?.count || 0);
     if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccCriticalCount) {
-      pushPenalty(24, `CC errors ${ccCount} exceed critical threshold`);
+      pushPenalty(24, `CC errors ${ccCount} (3-probe avg) exceed critical threshold`);
     } else if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccWarnCount) {
-      pushPenalty(10, `CC errors ${ccCount} exceed warning threshold`);
+      pushPenalty(10, `CC errors ${ccCount} (3-probe avg) exceed warning threshold`);
+    }
+
+    // PCR analysis (ETR 290 Priority 2) — from TSDuck
+    const pcrMetrics = dvb.pcrMetrics || null;
+    if (pcrMetrics) {
+      // ETR 290 §5.2.1: PCR repetition must be ≤ 40ms
+      if (pcrMetrics.repetitionMaxMs != null && pcrMetrics.repetitionMaxMs > 40) {
+        pushPenalty(
+          pcrMetrics.repetitionMaxMs > 100 ? 20 : 10,
+          `PCR repetition ${pcrMetrics.repetitionMaxMs.toFixed(0)}ms exceeds 40ms ETR 290 P2 limit`
+        );
+      }
+      // ETR 290 §5.2.2: PCR accuracy — practical threshold 10ms for IP networks
+      if (pcrMetrics.accuracyMaxMs != null && pcrMetrics.accuracyMaxMs > 10) {
+        pushPenalty(
+          pcrMetrics.accuracyMaxMs > 50 ? 16 : 8,
+          `PCR accuracy error ${pcrMetrics.accuracyMaxMs.toFixed(1)}ms`
+        );
+      }
+      // ETR 290 §5.2.4: PCR discontinuity indicator errors
+      if (pcrMetrics.discontIndicatorErrors > 0) {
+        pushPenalty(12, `PCR discontinuity indicator errors: ${pcrMetrics.discontIndicatorErrors}`);
+      }
+      // ETR 290 §5.2.2: PSI section CRC errors
+      if (pcrMetrics.crcErrors > 0) {
+        pushPenalty(pcrMetrics.crcErrors >= 3 ? 20 : 10, `PSI section CRC errors: ${pcrMetrics.crcErrors}`);
+      }
+    }
+
+    // Unreferenced PIDs (ETR 290 Priority 3)
+    const unreferencedPids = dvb.unreferencedPids || null;
+    if (Array.isArray(unreferencedPids) && unreferencedPids.length > 0) {
+      pushPenalty(6, `Unreferenced PIDs in TS: ${unreferencedPids.slice(0, 4).join(', ')}${unreferencedPids.length > 4 ? ` +${unreferencedPids.length - 4} more` : ''}`);
+    }
+
+    // Lifetime CC accumulator check — catches persistent low-rate errors below per-cycle floor
+    const ccCumul = dvb.continuityCounterErrors?.ccTotal ?? this._ccTotal;
+    const ccCumulCycles = dvb.continuityCounterErrors?.ccHeavyCount ?? this._ccHeavyCount;
+    if (ccCumulCycles >= 5 && ccCumul > 0) {
+      const avgPerCycle = ccCumul / ccCumulCycles;
+      // Only flag if the lifetime average is above 1 per cycle AND above the per-cycle warn threshold
+      if (avgPerCycle >= 1 && avgPerCycle >= (healthThresholds.ccWarnCount || 1)) {
+        pushPenalty(8, `CC errors: ${ccCumul} total over ${ccCumulCycles} probes (avg ${avgPerCycle.toFixed(1)}/cycle)`);
+      }
     }
 
     const smpte20227 = dvb.smpte20227 || null;

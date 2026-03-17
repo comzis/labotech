@@ -1637,7 +1637,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 </div>
 
                 {/* ── Stream Profile ───────────────────────────────────── */}
-                <PanelBox>
+                <PanelBox style={{ overflow: "visible" }}>
                   <SectionHead icon="📡" title="Stream Profile" />
                   <div style={{ padding: "8px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
                     {/* Service / Transport */}
