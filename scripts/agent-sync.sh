@@ -87,6 +87,22 @@ if echo "$TASK_B" | grep -qiE 'awaiting|checklist ready|waiting'; then
   echo -e "  ${YLW}► Cursor is waiting — check Agent B status above${RST}"
   ACTIONS=$((ACTIONS+1))
 fi
+
+# ── unanswered Q&A ────────────────────────────────────────────────────────────
+UNANSWERED=$(awk '/^## AGENT Q&A LOG/,/^---/' "$STATUS_FILE" \
+  | grep -E '^\| [0-9]' | grep -v 'ANSWERED' || true)
+if [[ -n "$UNANSWERED" ]]; then
+  echo ""
+  echo -e "  ${YLW}► Unanswered questions in Q&A log — trigger the answering agent:${RST}"
+  echo "$UNANSWERED" | while IFS='|' read -r _ num asker question _rest; do
+    printf "    %s  (asked by %s): %s\n" \
+      "$(echo "$num" | xargs)" \
+      "$(echo "$asker" | xargs)" \
+      "$(echo "$question" | xargs | cut -c1-60)"
+  done
+  ACTIONS=$((ACTIONS+1))
+fi
+
 if [[ $ACTIONS -eq 0 ]]; then
   echo -e "  ${GRN}None — both agents are active or idle${RST}"
 fi
