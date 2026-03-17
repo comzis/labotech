@@ -5,6 +5,7 @@ import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
+import { exportMultiviewConfig, importMultiviewConfig } from '../api';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v3';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'BES';
@@ -460,6 +461,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [showCatalog, setShowCatalog] = useState(false);
   const catalogRef = useRef(null);
   const importFileRef = useRef(null);
+  const configImportFileRef = useRef(null);
   // Debounce timer for server-side panel sync
   const serverSyncTimerRef = useRef(null);
 
@@ -491,8 +493,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             .map((p, idx) => ({
               id: String(p?.id || `panel-${idx + 1}`),
               name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
-              // decoderIds are NOT restored — timestamp-based, stale after restart
-              decoderIds: [],
+              // Restore decoderIds — stale entries filtered by auto-seed on server restart
+              decoderIds: Array.isArray(p?.decoderIds) ? p.decoderIds : [],
               // streams from localStorage as initial fallback until server responds
               streams: Array.isArray(p?.streams) ? p.streams : [],
             }))
@@ -732,6 +734,88 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     exportStreamsCsv(activePanel.streams || [], activePanel.name);
   }, [activePanel]);
 
+  // Export full workstation config (decoders + panels with assignments) as JSON.
+  const handleExportConfig = useCallback(async () => {
+    try {
+      // Server provides running decoders + server-side panel registry.
+      const serverData = await exportMultiviewConfig();
+      // Merge client-side panel→decoder assignments (decoderIds) from React state.
+      // The server only persists streams[]; decoderIds[] live in the browser.
+      const panelMap = {};
+      panels.forEach((p) => { panelMap[p.id] = p.decoderIds || []; });
+      const bundle = {
+        ...serverData,
+        panels: (serverData.panels || []).map((p) => ({
+          ...p,
+          decoderIds: panelMap[p.id] || [],
+        })),
+        // Include any panels that exist in React state but not yet synced to server.
+        _clientPanelIds: panels.map((p) => ({ id: p.id, name: p.name, decoderIds: p.decoderIds || [] })),
+      };
+      const filename = `labotech-multiview-${new Date().toISOString().slice(0, 10)}.json`;
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    } catch (err) {
+      alert(`Export failed: ${err.message}`);
+    }
+  }, [panels]);
+
+  // Import full workstation config from a previously exported JSON file.
+  const handleImportConfig = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const bundle = JSON.parse(ev.target?.result || '{}');
+        if (bundle.exportVersion !== 1) {
+          alert('This file is not a valid LaboTech multiview config export.');
+          return;
+        }
+        if (!window.confirm(
+          `Import config from ${bundle.exportedAt?.slice(0, 10) || 'unknown date'}?\n\n` +
+          `This will start ${(bundle.decoders || []).length} decoder(s) and restore ${(bundle.panels || []).length} panel(s).\n\n` +
+          `Already-running decoders with the same ID will be skipped.`
+        )) return;
+
+        const result = await importMultiviewConfig(bundle);
+
+        // Restore client-side panel state (including decoderIds assignments).
+        // Prefer _clientPanelIds which has the full decoderIds from the origin workstation.
+        const importedPanels = bundle._clientPanelIds || bundle.panels || [];
+        if (importedPanels.length > 0) {
+          setPanels(importedPanels.map((p) => ({
+            id: String(p.id),
+            name: String(p.name || ''),
+            decoderIds: Array.isArray(p.decoderIds) ? p.decoderIds : [],
+            streams: Array.isArray(p.streams) ? p.streams : [],
+          })));
+          setActivePanelId(importedPanels[0].id);
+        }
+
+        // Refresh to pick up newly started decoders.
+        refreshActives();
+
+        const skipMsgs = (result.errors || []).filter(Boolean);
+        alert(
+          `Import complete.\n` +
+          `Started: ${(result.started || []).length} decoder(s)\n` +
+          (skipMsgs.length ? `Skipped/errors:\n${skipMsgs.join('\n')}` : '')
+        );
+      } catch (err) {
+        alert(`Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }, [refreshActives]);
+
   const handleCreate = async () => {
     if (!probeUrl) return;
     const id = decoderId || `decoder-${Date.now()}`;
@@ -848,6 +932,32 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                 Export
               </button>
             )}
+            {/* Full workstation config export / import */}
+            <input
+              ref={configImportFileRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImportConfig}
+            />
+            <button
+              onClick={handleExportConfig}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#c4b5fd', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(139,92,246,0.12)' }}
+              title="Export full multiview config — all decoders, panels and assignments"
+            >
+              <Download className="w-3 h-3" />
+              Config
+            </button>
+            <button
+              onClick={() => configImportFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#c4b5fd', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(139,92,246,0.12)' }}
+              title="Import full multiview config onto this workstation"
+            >
+              <Upload className="w-3 h-3" />
+              Config
+            </button>
           </div>
         </div>
 

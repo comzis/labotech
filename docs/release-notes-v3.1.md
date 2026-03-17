@@ -1,6 +1,33 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.53)
+Date: 2026-03-17 (latest: v3.1.58)
+
+## v3.1.58 — 2026-03-17
+
+### Fix: PCR metrics wired to analyser panel, multiview persistence across tab switches, improved muted-text legibility
+
+**TSAnalyser.jsx — PCR / Timing panel now shows live data:**
+
+- PCR Interval now reads from `dvb.pcrMetrics.repetitionMaxMs` (populated by TSDuck heavy probe). Previously read from `dvb.pcr.intervalMs` which was never populated. ETR 290 P2.1 limit is 40ms — value shown amber if exceeded.
+- PCR Jitter now reads from `dvb.pcrMetrics.accuracyMaxMs`. ETR 290 P2.2 practical threshold 0.5ms — value shown amber if exceeded.
+- PCR Discontinuity Indicator row appears when `discontIndicatorErrors > 0`.
+- CRC Errors row appears when `crcErrors > 0`.
+- Both fields fall back gracefully to the legacy `dvb.pcr` path if available (forward-compat for any future direct PCR extraction).
+
+**DecoderMultiviewPanel.jsx — multiview layout survives tab navigation:**
+
+- `decoderIds[]` per panel is now persisted to and restored from localStorage on mount. Previously blanked on every restore, causing the operator to lose all tile assignments on every tab switch.
+- The existing auto-seed logic (line 661: `anyActive` check) still handles server-restart staleness: if restored IDs are all stale (none match current active analysers), the panel re-seeds from the current active set automatically.
+
+**tailwind.config.js — muted text legibility improvement:**
+
+- `gray-500` lifted from `#6b7280` → `#8b95a8` (contrast ratio on `#070b14` improved from ~3.5:1 to ~5.0:1, crossing WCAG AA threshold for small text).
+- `gray-600` lifted from `#4b5563` → `#6b7587`.
+- Affects all panels uniformly. Active/accent/alarm colours are unchanged (neon/led palette).
+
+**Operator impact:** PCR interval and jitter now show real values in the Analyser panel whenever TSDuck has run a heavy probe. Multiview tile layout is no longer lost when switching tabs. All label and metadata text is easier to read on dark displays.
+
+---
 
 ## Overview
 
@@ -10,6 +37,92 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.57 — 2026-03-17
+
+### Professional-grade backend improvements: PCR/ETR 290, alarm hold-down, CC accumulator, thumbnail backoff
+
+**monitoring.js — PersistentThumbnailCapture improvements:**
+
+- **Reduced high-profile thumbnail resolution** from 640px to 320px, quality from qv=2 to qv=4, and removed hqdn3d denoise filter. Reduces CPU load per capture without operator-visible quality loss at MCR distance.
+- **Exponential backoff on restart:** `_scheduleRestart()` now doubles `_restartDelay` (capped at 30s) on each consecutive failure. Resets to 5s on successful frame write, on `resume()`, and on `suspend()` so transient failures do not permanently stall thumbnails.
+- **stderr logging:** ffmpeg stderr is now forwarded to console.error with stream ID prefix (first 200 chars) for diagnosing capture failures in journalctl.
+- **SRT post-probe settle delay:** `analyzeduration` for SRT increased by 1s (`latencyMs + 3000ms`) to give sources with a 1–2s reconnect cooldown time to accept the new connection.
+
+**ts-analyser.js — ETR 290 / alarm accuracy improvements:**
+
+- **Lifetime CC accumulator:** `_ccTotal` and `_ccHeavyCount` now accumulate CC errors across all probe cycles (never reset). Health assessment deducts 8pts if the lifetime average per cycle reaches the warn threshold after ≥5 cycles, catching persistent low-rate errors that individually never breach the per-cycle floor.
+- **Alarm hold-down on recovery:** Added `OK_HYSTERESIS_N = 2` — after an alarm, requires 2 consecutive clean probes before reporting 'ok'. Prevents single-probe flicker from causing false clear alarms in the event log.
+- **PCR metrics extraction (`_extractTSDuckPcrMetrics`):** Walks TSDuck JSON output to extract PCR repetition max/mean, PCR accuracy max, PCR discontinuity indicator errors, and PSI CRC errors. ETR 290 Priority 2 scoring: repetition >40ms (10pts, >100ms 20pts), accuracy >10ms (8pts, >50ms 16pts), discontinuity indicators (12pts), CRC errors (10pts, ≥3 errors 20pts).
+- **Unreferenced PIDs extraction (`_extractUnreferencedPids`):** Detects PIDs in the TS stream not referenced by any PMT (ETR 290 P3.5). Applies a 6pt penalty when found.
+- **SRT thumbnail post-probe settle delay:** `this._persistentThumb.resume()` is now called after a 1500ms settle delay to avoid immediate connection rejection from SRT sources with a reconnect cooldown.
+
+**Operator impact:** More accurate health scores (fewer false positives from PCR/CC/unreferenced PID faults), more resilient thumbnail capture with diagnostic logging, and reduced false alarm flicker on stream recovery.
+
+---
+
+## v3.1.56 — 2026-03-17
+
+### Feat: Multiview config export / import for workstation migration
+
+Operators can now save the complete multiview configuration — all decoders, panel names, stream catalogs, and panel→decoder assignments — to a single JSON file, and restore it on any other workstation.
+
+**Export** (`↓ Config` button in the Decoder Multiview header):
+- Calls `GET /api/multiview/export` (server provides running decoder URLs + panel stream registry)
+- Merges client-side panel→decoder assignments from browser state
+- Downloads `labotech-multiview-YYYY-MM-DD.json`
+- SRT passphrases, latency, and pbkeylen are included in the bundle
+
+**Import** (`↑ Config` button):
+- Reads the exported JSON, shows a confirmation prompt
+- Calls `POST /api/multiview/import`: starts all decoders, writes `multiview-panels.json`
+- Restores the panel→decoder layout in the browser without a full page reload
+- Already-running decoders with the same ID are skipped; any skipped IDs are reported
+
+**Export format** (`exportVersion: 1`):
+- `panels[]` — panel id, name, stream catalog, decoderIds assignment
+- `decoders[]` — id, url, interval, nicName, plus `parsed{}` with human-readable host/port/protocol/latency/passphrase for reference
+- `_clientPanelIds[]` — full client-side panel state for round-trip fidelity
+
+**Operator impact:** Commissioning a second monitoring workstation now takes seconds: export from the primary, import on the secondary. No manual re-entry of decoder URLs or passphrases.
+
+**Backend route changes:** `routes/multiview.js` factory now accepts `(analysers, saveState, broadcast)` so it can start decoders on import. `src/api.js` updated accordingly.
+
+---
+
+## v3.1.55 — 2026-03-17
+
+### Fix: Monitoring Policy dropdown clipped by Stream Profile panel
+
+The Policy chip in the Stream Profile panel opens an absolute-positioned dropdown. `PanelBox` has `overflow: hidden` (required for border-radius clipping on most panels), which clipped the dropdown against the panel's lower edge — making profile options unreachable.
+
+Fix: added `overflow: visible` to the specific Stream Profile `PanelBox` instance only. All other `PanelBox` components are unchanged. The dropdown now renders above the panel boundary and is fully interactive.
+
+---
+
+## v3.1.54 — 2026-03-17
+
+### Fix: Audio meter bars showing reversed colours — silence appeared full/red
+
+**Root cause:** `_probeAudioLevels()` in `ts-analyser.js` parsed `RMS level dB` and `Peak level dB` from ffmpeg astats output using `Number.isFinite()` to validate the parsed value. For truly silent channels, ffmpeg reports `RMS level dB: -inf` and `Peak level dB: -inf`. `parseFloat('-inf')` returns `-Infinity`, and `Number.isFinite(-Infinity)` is `false` — so silent channels were silently dropped. The fallback behaviour left those channels unset, causing them to be excluded entirely or coerced to 0 dBFS downstream. `dbToPercent(0)` maps to 100% bar width; `meterColor(0)` maps to red.
+
+**Fix:** Explicitly handle `-inf`/`inf` string literals before calling `parseFloat`. Silent channels (`-inf`) are stored as −90 dBFS — a floor value that renders as an empty (green) bar at MCR distance. Clipping channels (`inf`) are stored as 0 dBFS. `Number.isFinite()` validation still guards numeric parse results.
+
+**Operator impact:** Silence no longer shows as a full red bar. Silent channels render with an empty green meter, consistent with broadcast convention (silence = no signal, green = no alarm).
+
+---
+
+### Fix: CC errors not flagging on RTP/UDP feeds — carry-forward and 3-probe rolling average
+
+Two compounding issues prevented CC errors from registering on RTP/UDP multicast feeds:
+
+1. **Light probe carry-forward**: On light probe cycles (`runHeavyProbe = false`), `continuityCounterErrors` was unconditionally reset to `{count: 0}`. Health assessment scored CC as clean every light cycle (which is ~2 of every 3 probe cycles). Fix: light cycles now carry forward the last known heavy-probe CC result.
+
+2. **Per-probe ffprobe join artefacts**: Each `_probeContinuityCounterErrors()` call spawns a new ffprobe that reconnects to the multicast group and always produces 1–10 CC errors while syncing to the first keyframe. The broadcast-balanced-v1 floor (`ccWarnCount ≥ 3`) was designed to absorb these, but it also suppressed genuine single-digit CC error rates. Fix: the per-cycle count is now replaced with a 3-probe rolling average for RTP/UDP CC scoring. Join artefacts from a clean stream average out to ~1–2 per cycle; a genuinely degraded feed sustains an average ≥ 3 and crosses the threshold.
+
+**Operator impact:** Persistent CC errors on RTP/UDP contribution feeds now register as warnings/critical within 3 heavy probe cycles (~3–6 minutes depending on profile). Previously they were permanently suppressed.
 
 ---
 
