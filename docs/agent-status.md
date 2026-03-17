@@ -36,7 +36,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 |---|---|---|---|
 | **Phase 0a** — TSDuck tsp spike on gva-boro-probe | ✅ CLEARED | Cursor | Finding: `tsp` `monitor`/`etr290` plugins NOT present on production host. Persistent tsp real-time ETR/PCR path is blocked. Fallback confirmed: Phase 1 reduced-interval tsanalyze. Phase 3 scope adjusted — see roadmap §3. `docs/tsduck-spike-findings.md` to be written by Cursor. |
 | **Phase 0b** — SRT arbitration decision (Option A / B / C) | ✅ CLEARED | Agent A | Moot for current Phase 3 scope. Persistent tsp is not available. Phase 3 becomes enhanced tsanalyze cadence only. No SRT relay architecture needed. Revisit if TSDuck is upgraded on host. |
-| **Phase 1 merged to main** | 🔴 PENDING | operator | Agent B can start Phase 2 NEW FILES now on `cursor/phase2-thumbnail-worker` (branch off `cursor/phase0a-tsduck-findings`). Do NOT edit `src/ts-analyser.js` constructor until this gate clears — add the ~3-line option param during rebase onto main after merge. |
+| **Phase 1 merged to main** | ✅ CLEARED | operator | PR #13 + #14 merged 2026-03-17. Agent B: rebase `cursor/phase2-thumbnail-worker` onto main, then add the ~3-line ts-analyser.js constructor param. |
 
 ---
 
@@ -175,6 +175,8 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | Date | Agent | Branch | PR | What merged |
 |---|---|---|---|---|
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
+| 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | TSDuck findings, SRT hardening, multiview export, thumbnail backoff |
+| 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |
 
 ---
 
