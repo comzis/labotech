@@ -684,26 +684,52 @@ class TSAnalyser extends EventEmitter {
     //   pktRecvTotal=12345  pktRcvLossTotal=0  pktRetransTotal=0
     //   pktSentACKTotal=100  pktSentNAKTotal=0  pktRcvDrop=0
     // Fallback patterns cover simplified formats that may appear in older builds.
-    const rateMbps = num(last(/(?:mbpsRecvRate|mbpsSendRate|rate)[\s=]+([\d.]+)/i));
-    const bwMbps   = num(last(/(?:mbpsBandwidth|bw)[\s=]+([\d.]+)/i));
-    const rttMs    = num(last(/(?:msRTT|rtt)[\s=]+([\d.]+)/i));
+    const rateMbps   = num(last(/(?:mbpsRecvRate|mbpsSendRate|rate)[\s=]+([\d.]+)/i));
+    const bwMbps     = num(last(/(?:mbpsBandwidth|bw)[\s=]+([\d.]+)/i));
+    const maxBwMbps  = num(last(/(?:mbpsMaxBW|maxBW)[\s=]+([\d.]+)/i));
+    const rttMs      = num(last(/(?:msRTT|rtt)[\s=]+([\d.]+)/i));
     const pktTotal   = num(last(/(?:pktRecvTotal|total)[\s=]+(\d+)/i));
     const pktRetrans = num(last(/(?:pktRetransTotal|pktRcvRetrans|retrans)[\s=]+(\d+)/i));
     const pktLost    = num(last(/(?:pktRcvLossTotal|pktRcvLoss|loss|lost)[\s=]+(\d+)/i));
-    const pktDropped = num(last(/(?:pktRcvDrop|pktRcvDropTotal|drop|dropped)[\s=]+(\d+)/i));
+    // pktRcvDrop / pktSndDrop: non-zero = latency window too short (per Haivision SRT spec)
+    const pktRcvDrop = num(last(/(?:pktRcvDrop\b|pktRcvDropTotal)[\s=]+(\d+)/i));
+    const pktSndDrop = num(last(/(?:pktSndDrop\b|pktSndDropTotal)[\s=]+(\d+)/i));
+    // pktRcvBelated: arrived after latency deadline — warning indicator
+    const pktRcvBelated        = num(last(/(?:pktRcvBelated)[\s=]+(\d+)/i));
+    const pktRcvAvgBelatedTime = num(last(/(?:pktRcvAvgBelatedTime)[\s=]+([\d.]+)/i));
+    // Buffer headroom: byteAvailRcvBuf / msRcvBuf show receive buffer fill level
+    const byteAvailRcvBuf = num(last(/(?:byteAvailRcvBuf)[\s=]+(\d+)/i));
+    const msRcvBuf        = num(last(/(?:msRcvBuf)[\s=]+([\d.]+)/i));
+    // Flow window: available receive window slots
+    const pktFlowWindow   = num(last(/(?:pktFlowWindow)[\s=]+(\d+)/i));
     const pktNak     = num(last(/(?:pktSentNAKTotal|pktSentNAK|nak)[\s=]+(\d+)/i));
     const pktAck     = num(last(/(?:pktSentACKTotal|pktRecvACK|ack)[\s=]+(\d+)/i));
-    if (rateMbps != null) srt.rateMbps = rateMbps;
-    if (bwMbps != null) srt.bwMbps = bwMbps;
-    if (rttMs != null) srt.rttMs = rttMs;
-    if (pktTotal != null) srt.pktTotal = pktTotal;
+    if (rateMbps   != null) srt.rateMbps   = rateMbps;
+    if (bwMbps     != null) srt.bwMbps     = bwMbps;
+    if (maxBwMbps  != null) srt.maxBwMbps  = maxBwMbps;
+    if (rttMs      != null) srt.rttMs      = rttMs;
+    if (pktTotal   != null) srt.pktTotal   = pktTotal;
     if (pktRetrans != null) srt.pktRetrans = pktRetrans;
-    if (pktLost != null) srt.pktLost = pktLost;
-    if (pktDropped != null) srt.pktDropped = pktDropped;
+    if (pktLost    != null) srt.pktLost    = pktLost;
+    if (pktRcvDrop != null) srt.pktRcvDrop = pktRcvDrop;
+    if (pktSndDrop != null) srt.pktSndDrop = pktSndDrop;
+    if (pktRcvBelated        != null) srt.pktRcvBelated        = pktRcvBelated;
+    if (pktRcvAvgBelatedTime != null) srt.pktRcvAvgBelatedTime = pktRcvAvgBelatedTime;
+    if (byteAvailRcvBuf != null) srt.byteAvailRcvBuf = byteAvailRcvBuf;
+    if (msRcvBuf        != null) srt.msRcvBuf         = msRcvBuf;
+    if (pktFlowWindow   != null) srt.pktFlowWindow     = pktFlowWindow;
     if (pktNak != null) srt.pktNak = pktNak;
     if (pktAck != null) srt.pktAck = pktAck;
     if (srt.pktTotal > 0 && srt.pktLost != null) {
       srt.lossPercent = parseFloat(((srt.pktLost / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Retransmit ratio per Haivision SRT spec: >5% = warning, >25% = critical
+    if (srt.pktTotal > 0 && srt.pktRetrans != null) {
+      srt.retransRatio = parseFloat(((srt.pktRetrans / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Aggregate drop count for legacy pktDropped consumers
+    if (pktRcvDrop != null || pktSndDrop != null) {
+      srt.pktDropped = (srt.pktRcvDrop || 0) + (srt.pktSndDrop || 0);
     }
     return Object.keys(srt).length > 0 ? srt : null;
   }
@@ -2172,6 +2198,43 @@ class TSAnalyser extends EventEmitter {
         pushPenalty(10, `Bitrate drift ${bitrateStability.deltaPct}% exceeds critical envelope`);
       } else if (bitrateStability.state === 'warning') {
         pushPenalty(4, `Bitrate drift ${bitrateStability.deltaPct}% exceeds warning envelope`);
+      }
+    }
+
+    // SRT link health — Haivision SRT spec + Eurovision broadcast thresholds
+    // Applied only when SRT stats are present in the probe result.
+    const srtStats = result.srtStats || dvb.srtStats || null;
+    if (srtStats && this.url && this.url.startsWith('srt://')) {
+      const srtLatencyMs = parseSrtLatency(this.url);
+      // Drops (pktRcvDrop / pktSndDrop): non-zero means latency window too short.
+      // Per Haivision spec this is the most critical SRT indicator — the link cannot
+      // deliver reliable broadcast quality without increasing SRTO_LATENCY or fixing RTT.
+      const rcvDrop = Number(srtStats.pktRcvDrop || 0);
+      const sndDrop = Number(srtStats.pktSndDrop || 0);
+      if (rcvDrop > 0) pushPenalty(30, `SRT receiver drop ${rcvDrop} pkt — latency window too short for link RTT`);
+      if (sndDrop > 0) pushPenalty(30, `SRT sender drop ${sndDrop} pkt — sender could not retransmit within latency window`);
+
+      // Belated packets: arrived after deadline — early warning before drops occur
+      const belated = Number(srtStats.pktRcvBelated || 0);
+      if (belated > 0) pushPenalty(12, `SRT ${belated} pkt arrived after latency deadline (pktRcvBelated) — consider increasing latency`);
+
+      // RTT vs latency ratio: per SRT spec, RTT > SRTO_LATENCY/2 means retransmits
+      // may not complete before the receiver deadline.  RTT > SRTO_LATENCY = impossible.
+      const rttMs = Number(srtStats.rttMs || 0);
+      if (rttMs > 0 && srtLatencyMs > 0) {
+        if (rttMs >= srtLatencyMs) {
+          pushPenalty(25, `SRT RTT ${rttMs}ms ≥ latency ${srtLatencyMs}ms — ARQ cannot recover lost packets`);
+        } else if (rttMs > srtLatencyMs / 2) {
+          pushPenalty(10, `SRT RTT ${rttMs}ms > latency/2 (${srtLatencyMs / 2}ms) — retransmits may miss receiver deadline`);
+        }
+      }
+
+      // Retransmit ratio: per Haivision spec >5% = link congestion, >25% = critical
+      const retransRatio = Number(srtStats.retransRatio || 0);
+      if (retransRatio > 25) {
+        pushPenalty(20, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds critical threshold (25%)`);
+      } else if (retransRatio > 5) {
+        pushPenalty(8, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds warning threshold (5%)`);
       }
     }
 

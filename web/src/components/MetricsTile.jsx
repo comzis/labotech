@@ -5,9 +5,15 @@ import { AreaChart, Area, ResponsiveContainer, YAxis, Tooltip } from 'recharts';
 
 const MAX_HISTORY = 60;
 
-// Broadcast-standard thresholds (EBU / SMPTE)
-const rttColor  = ms  => !ms  ? 'text-gray-500' : ms  < 30  ? 'text-green-400' : ms  < 80  ? 'text-yellow-400' : 'text-red-400';
-const lossColor = pct => !pct && pct !== 0 ? 'text-gray-500' : pct === 0 ? 'text-green-400' : pct < 1 ? 'text-yellow-400' : 'text-red-400';
+// Broadcast-standard thresholds (EBU / SMPTE / Haivision SRT spec)
+const rttColor       = ms  => !ms  ? 'text-gray-500' : ms  < 30  ? 'text-green-400' : ms  < 80  ? 'text-yellow-400' : 'text-red-400';
+const lossColor      = pct => !pct && pct !== 0 ? 'text-gray-500' : pct === 0 ? 'text-green-400' : pct < 1 ? 'text-yellow-400' : 'text-red-400';
+// retransRatio: >5% = warning (yellow), >25% = critical (red) per Haivision SRT spec
+const retransColor   = r   => r == null ? 'text-gray-500' : r === 0 ? 'text-green-400' : r < 5 ? 'text-green-400' : r < 25 ? 'text-yellow-400' : 'text-red-400';
+// drops: any drop is critical (latency window too short)
+const dropColor      = n   => n == null ? 'text-gray-500' : n === 0 ? 'text-green-400' : 'text-red-400';
+// belated: non-zero = warning (approaching drop threshold)
+const belatedColor   = n   => n == null ? 'text-gray-500' : n === 0 ? 'text-green-400' : 'text-yellow-400';
 
 function parseFpsValue(value) {
   if (value === undefined || value === null) return null;
@@ -199,32 +205,38 @@ export default function MetricsTile({
               <span className="text-[10px] font-bold uppercase tracking-widest text-neon-cyan">SRT Link</span>
             </div>
 
+            {/* Row 1: RTT / BW / Send Rate */}
             <div className="grid grid-cols-3 gap-2 text-xs">
-              <Metric label="RTT"       value={srtStats.rttMs    != null ? `${srtStats.rttMs}ms`       : '—'} color={rttColor(srtStats.rttMs)}    />
-              <Metric label="BW Avail"  value={srtStats.bwMbps   != null ? `${srtStats.bwMbps}Mbps`    : '—'} color="text-sky-300"                 />
-              <Metric label="Send Rate" value={srtStats.rateMbps != null ? `${srtStats.rateMbps}Mbps`  : '—'} color="text-indigo-300"              />
+              <Metric label="RTT"       value={srtStats.rttMs    != null ? `${srtStats.rttMs.toFixed(1)}ms`    : '—'} color={rttColor(srtStats.rttMs)}    />
+              <Metric label="BW Avail"  value={srtStats.bwMbps   != null ? `${srtStats.bwMbps}Mbps`            : '—'} color="text-sky-300"                 />
+              <Metric label="Recv Rate" value={srtStats.rateMbps != null ? `${srtStats.rateMbps}Mbps`          : '—'} color="text-indigo-300"              />
             </div>
-            {srtStats.link?.status && (
-              <div className="text-[10px] uppercase tracking-wide text-gray-500">
-                Link status:
-                <span className={
-                  srtStats.link.status === 'healthy'
-                    ? ' text-green-400'
-                    : srtStats.link.status === 'degraded'
-                      ? ' text-yellow-400'
-                      : srtStats.link.status === 'critical'
-                        ? ' text-red-400'
-                        : ' text-gray-400'
-                }>
-                  {` ${srtStats.link.status}`}
-                </span>
-              </div>
-            )}
+
+            {/* Row 2: Packet counts */}
             <div className="grid grid-cols-4 gap-2 text-xs">
               <Metric label="Total"   value={srtStats.pktTotal   ?? '—'} color="text-gray-400"   />
-              <Metric label="Retrans" value={srtStats.pktRetrans ?? '—'} color="text-orange-400" />
-              <Metric label="Loss"    value={srtStats.pktLoss    ?? '—'} color={lossColor(srtStats.lossPercent)} />
-              <Metric label="NAK"     value={srtStats.pktNak     ?? '—'} color="text-red-400"    />
+              <Metric label="Retrans" value={srtStats.pktRetrans ?? '—'} color={retransColor(srtStats.retransRatio)} />
+              <Metric label="Loss"    value={srtStats.pktLost    ?? '—'} color={lossColor(srtStats.lossPercent)} />
+              <Metric label="NAK"     value={srtStats.pktNak     ?? '—'} color="text-gray-400"   />
+            </div>
+
+            {/* Row 3: Drop / Belated / Retrans% — critical broadcast indicators */}
+            <div className="grid grid-cols-3 gap-2 text-xs">
+              <Metric
+                label="RcvDrop"
+                value={srtStats.pktRcvDrop != null ? srtStats.pktRcvDrop : '—'}
+                color={dropColor(srtStats.pktRcvDrop)}
+              />
+              <Metric
+                label="Belated"
+                value={srtStats.pktRcvBelated != null ? srtStats.pktRcvBelated : '—'}
+                color={belatedColor(srtStats.pktRcvBelated)}
+              />
+              <Metric
+                label="Retrans%"
+                value={srtStats.retransRatio != null ? `${srtStats.retransRatio.toFixed(1)}%` : '—'}
+                color={retransColor(srtStats.retransRatio)}
+              />
             </div>
 
             {/* Loss % bar — broadcast-standard traffic light */}

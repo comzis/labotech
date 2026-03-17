@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.45)
+Date: 2026-03-17 (latest: v3.1.46)
 
 ## Overview
 
@@ -10,6 +10,38 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.46 — 2026-03-17
+
+### Feat: SRT professional broadcast health thresholds (Haivision spec + Eurovision dashboard)
+
+SRT link quality assessment aligned to Haivision SRT specification and Eurovision contribution link data (RTT ~19ms, 22–24 Mbps, all drops at 0).
+
+**Backend (`ts-analyser.js`):**
+
+*New stats parsed from libsrt verbose output:*
+- `pktRcvDrop` / `pktSndDrop` — drops due to latency window too short (per Haivision spec: non-zero = critical)
+- `pktRcvBelated` / `pktRcvAvgBelatedTime` — packets arriving after deadline (warning: raise latency)
+- `byteAvailRcvBuf` / `msRcvBuf` — receiver buffer fill level
+- `pktFlowWindow` — available flow window slots
+- `mbpsMaxBW` — sender max bandwidth limit
+- `retransRatio` — `pktRetrans / pktTotal × 100%` (>5% = warning, >25% = critical per Haivision spec)
+
+*New health penalties in `_buildHealthAssessment()`:*
+- `pktRcvDrop > 0` → −30pts critical: receiver drops, latency window too short for link RTT
+- `pktSndDrop > 0` → −30pts critical: sender could not retransmit within latency window
+- `pktRcvBelated > 0` → −12pts warning: packets arriving after deadline, consider raising latency
+- `RTT ≥ SRTO_LATENCY` → −25pts critical: ARQ cannot recover (mathematically impossible)
+- `RTT > SRTO_LATENCY/2` → −10pts warning: retransmits may miss receiver deadline
+- `retransRatio > 25%` → −20pts critical; `> 5%` → −8pts warning
+
+**Frontend (`MetricsTile.jsx`):**
+
+SRT Link panel gains a third row: **RcvDrop / Belated / Retrans%** with broadcast traffic-light colouring (green=0, yellow=warning, red=critical). RTT value now shows one decimal place. Retrans count colour-coded to retransRatio threshold.
+
+Operator impact: SRT drops and belated arrivals are now visible in the MCR tile immediately, with the health score and alarm system picking them up within one probe cycle.
 
 ---
 
