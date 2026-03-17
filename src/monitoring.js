@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn, execFile } = require('child_process');
+const { EventEmitter } = require('events');
 const dgram = require('dgram');
 const fs = require('fs');
 const path = require('path');
@@ -41,6 +42,171 @@ const SAFE_STREAM_ID_RE  = /^[A-Za-z0-9_-]{1,64}$/;
 
 if (!fs.existsSync(THUMBNAIL_DIR)) {
   fs.mkdirSync(THUMBNAIL_DIR, { recursive: true });
+}
+
+// ─── SRT helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Parse the SRT latency value from a URL query string.
+ * Returns latency in milliseconds; defaults to 2000 ms if not specified.
+ */
+function parseSrtLatency(url) {
+  try {
+    const m = String(url || '').match(/[?&]latency=(\d+)/i);
+    return m ? Math.max(200, parseInt(m[1], 10)) : 2000;
+  } catch (_) { return 2000; }
+}
+
+/**
+ * Build an SRT input URL with caller mode and connection timeout appended
+ * (if not already present).
+ */
+function _buildSrtSrc(inputUrl) {
+  let src = inputUrl;
+  const sep = src.includes('?') ? '&' : '?';
+  if (!src.includes('mode=')) src += `${sep}mode=caller`;
+  if (!src.includes('timeout=')) src += '&timeout=8000000';
+  return src;
+}
+
+// ─── JPEG frame boundary extractor ───────────────────────────────────────────
+
+class JpegFrameExtractor {
+  constructor(onFrame) {
+    this._onFrame = onFrame;
+    this._buf = Buffer.alloc(0);
+  }
+  push(chunk) {
+    this._buf = Buffer.concat([this._buf, chunk]);
+    this._extract();
+  }
+  _extract() {
+    while (true) {
+      const soi = this._findMarker(0xFF, 0xD8, 0);
+      if (soi < 0) { this._buf = Buffer.alloc(0); return; }
+      const eoi = this._findMarker(0xFF, 0xD9, soi + 2);
+      if (eoi < 0) { if (soi > 0) this._buf = this._buf.slice(soi); return; }
+      this._onFrame(Buffer.from(this._buf.slice(soi, eoi + 2)));
+      this._buf = this._buf.slice(eoi + 2);
+    }
+  }
+  _findMarker(a, b, from) {
+    for (let i = from; i < this._buf.length - 1; i++) {
+      if (this._buf[i] === a && this._buf[i + 1] === b) return i;
+    }
+    return -1;
+  }
+}
+
+// ─── Persistent thumbnail capture ─────────────────────────────────────────────
+
+/**
+ * Long-lived ffmpeg process that writes JPEG frames to pipe:1 indefinitely.
+ * Replaces the timer-based captureThumbnail() for continuous decoder lanes:
+ * - No reconnect overhead after first connection
+ * - Near real-time refresh (one frame per intervalSec)
+ * - SRT-aware: latency window honoured via parseSrtLatency()
+ * - Auto-restarts on process exit with 5 s backoff
+ *
+ * Emits: 'frame' (outPath) on each successfully written thumbnail.
+ */
+class PersistentThumbnailCapture extends EventEmitter {
+  constructor({ streamId, inputUrl, intervalSec }) {
+    super();
+    this._streamId  = streamId;
+    this._inputUrl  = inputUrl;
+    this._intervalSec = Math.max(1, intervalSec || THUMBNAIL_INTERVAL);
+    this._running   = false;
+    this._proc      = null;
+    this._restartTimer = null;
+    const safeId    = sanitizeStreamId(streamId);
+    this._outPath   = path.join(THUMBNAIL_DIR, `${safeId}.jpg`);
+    this._tmpPath   = `${this._outPath}.ptmp.jpg`;
+  }
+
+  start() {
+    if (this._running) return this;
+    this._running = true;
+    this._spawn();
+    return this;
+  }
+
+  stop() {
+    this._running = false;
+    if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
+    if (this._proc) { try { this._proc.kill('SIGTERM'); } catch (_) {} this._proc = null; }
+  }
+
+  _buildSrc() {
+    const url = this._inputUrl;
+    if (url.startsWith('udp://') || url.startsWith('rtp://')) {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}fifo_size=${TS_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${TS_INPUT_TIMEOUT_US}&reorder_queue_size=${TS_INPUT_REORDER_QUEUE_SIZE}`;
+    }
+    if (url.startsWith('srt://')) return _buildSrtSrc(url);
+    return url;
+  }
+
+  _spawn() {
+    if (!this._running) return;
+    const capture   = getThumbnailCaptureSettings();
+    const isSrt     = this._inputUrl.startsWith('srt://');
+    const latencyMs = isSrt ? parseSrtLatency(this._inputUrl) : 0;
+    // analyzeduration must exceed the SRT latency window; add 3 s of headroom.
+    const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
+    const src = this._buildSrc();
+
+    const vf = [
+      `fps=1/${this._intervalSec}`,
+      'select=eq(pict_type\\,I)',
+      `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+      capture.denoise || null,
+    ].filter(Boolean).join(',');
+
+    const args = [
+      '-hide_banner', '-loglevel', 'error',
+      '-fflags', '+discardcorrupt+genpts',
+      '-err_detect', 'ignore_err',
+      '-skip_frame', 'nokey',
+      '-analyzeduration', analyzeDurUs,
+      '-probesize', '7000000',
+      '-rtbufsize', '128M',
+      '-i', src,
+      '-vf', vf,
+      '-f', 'image2pipe',
+      '-q:v', String(capture.qv),
+      '-vcodec', 'mjpeg',
+      'pipe:1',
+    ];
+
+    const proc = spawn('ffmpeg', args);
+    this._proc = proc;
+
+    const extractor = new JpegFrameExtractor((frameBuffer) => {
+      fs.writeFile(this._tmpPath, frameBuffer, (writeErr) => {
+        if (writeErr) return;
+        fs.rename(this._tmpPath, this._outPath, (renErr) => {
+          if (!renErr) this.emit('frame', this._outPath);
+        });
+      });
+    });
+
+    proc.stdout.on('data', (chunk) => extractor.push(chunk));
+    proc.stderr.on('data', () => {}); // suppress — loglevel error keeps it quiet
+    proc.on('error', () => this._scheduleRestart(5000));
+    proc.on('close', () => {
+      this._proc = null;
+      if (this._running) this._scheduleRestart(5000);
+    });
+  }
+
+  _scheduleRestart(delayMs) {
+    if (!this._running || this._restartTimer) return;
+    this._restartTimer = setTimeout(() => {
+      this._restartTimer = null;
+      this._spawn();
+    }, delayMs);
+  }
 }
 
 function sanitizeStreamId(streamId) {
@@ -108,15 +274,11 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       const sep = inputUrl.includes('?') ? '&' : '?';
       src = `${inputUrl}${sep}fifo_size=${TS_INPUT_FIFO_SIZE}&overrun_nonfatal=1&timeout=${TS_INPUT_TIMEOUT_US}&reorder_queue_size=${TS_INPUT_REORDER_QUEUE_SIZE}`;
     } else if (isSrtUrl) {
-      // SRT caller: ensure mode=caller and a generous connection timeout.
-      // ffmpeg SRT timeout is in microseconds; 8s covers latency windows up to ~5s.
-      const sep = inputUrl.includes('?') ? '&' : '?';
-      let srtSrc = inputUrl;
-      if (!srtSrc.includes('mode=')) srtSrc += `${sep}mode=caller`;
-      const modeAdded = !inputUrl.includes('mode=');
-      if (!srtSrc.includes('timeout=')) srtSrc += `${modeAdded ? '&' : sep}timeout=8000000`;
-      src = srtSrc;
+      src = _buildSrtSrc(inputUrl);
     }
+    // For SRT, derive analyze duration from the stream's own latency parameter.
+    const srtLatencyMs = isSrtUrl ? parseSrtLatency(inputUrl) : 0;
+    const srtAnalyzeDurUs = isSrtUrl ? String((srtLatencyMs + 3000) * 1000) : '6000000';
 
     const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
       // I-frame path: select only keyframes → apply quality filters → output first matching frame.
@@ -146,10 +308,9 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         // noref (previous value) only skipped non-reference B-frames — P-frames still
         // decoded without their reference I-frame, causing the visible macroblocking.
         ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
-        // SRT needs a longer analyze window: the SRT latency window (typically 2-5s)
-        // must fill before any data flows. For SRT use 6s; RTP/UDP 2s is sufficient.
-        // Fallback path always uses 7s regardless of protocol.
-        '-analyzeduration', iFrameOnly ? (isSrtUrl ? '6000000' : '2000000') : '7000000',
+        // SRT analyze window must exceed the SRT latency parameter (no data flows until it fills).
+        // Duration derived from parseSrtLatency() + 3 s headroom. Fallback always uses 7s.
+        '-analyzeduration', iFrameOnly ? (isSrtUrl ? srtAnalyzeDurUs : '2000000') : '7000000',
         '-probesize', iFrameOnly ? (isSrtUrl ? '7000000' : '3000000') : '7000000',
         '-rtbufsize', '128M',
         '-i', src,
@@ -292,4 +453,4 @@ function sendSyslog(message, severity = 6) {
   client.send(buf, 0, buf.length, SYSLOG_PORT, SYSLOG_HOST, () => client.close());
 }
 
-module.exports = { captureThumbnail, sanitizeStreamId, sendSnmpTrap, sendSyslog, THUMBNAIL_DIR };
+module.exports = { captureThumbnail, sanitizeStreamId, sendSnmpTrap, sendSyslog, THUMBNAIL_DIR, PersistentThumbnailCapture, parseSrtLatency };
