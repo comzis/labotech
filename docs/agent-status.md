@@ -42,7 +42,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Reviewing Agent B Phase 2 PR when ready. Phase 3 PR open.
+**Current task:** Phase 2 merged. Wiring `ThumbnailWorkerClient` into `api.js`. Phase 3 PR #16 open.
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
@@ -51,11 +51,11 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Last session:** 2026-03-17
 - Phase 3 DONE: `src/tsduck-monitor.js` — continuous PCR+SI+bitrate sampler, 27 tests
-- `src/ts-analyser.js` wired: TSDuckMonitor startup, event handlers, SRT suspend/resume
-- 188 tests pass
-- PR #15 open: `feat/phase3-tsduck-monitor`
+- Phase 2 merged: wiring ThumbnailWorkerClient into api.js (in progress)
+- 161 tests pass (pre-wiring)
+- PR #16 open: `feat/phase3-tsduck-monitor`
 
-**Active branch:** `feat/phase3-tsduck-monitor` (PR #15 open — awaiting operator merge)
+**Active branch:** `cursor/phase2-thumbnail-worker` → merging to main
 
 **Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
 
