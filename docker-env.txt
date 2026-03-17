@@ -21,7 +21,7 @@ ENCAPSULATOR_PORT=4100
 
 # ── Node.js heap ─────────────────────────────────────────────────────────────
 # mem_limit is 24 GB — leave ~4 GB headroom for child process overhead.
-NODE_OPTIONS=--max-old-space-size=20480
+NODE_OPTIONS=--max-old-space-size=16384
 
 # ── TS probe concurrency ─────────────────────────────────────────────────────
 # Each heavy probe spawns ffprobe + tsanalyze — mostly NIC I/O wait, not CPU.

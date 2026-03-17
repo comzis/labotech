@@ -24,12 +24,12 @@ Previously using 16 of 56 available logical CPUs. Now NUMA-pinned:
 | labotech | `0-13,28-41` (NUMA 0) | 24.0 | 24 GB |
 | labotech-encapsulator | `14-27,42-55` (NUMA 1) | 16.0 | 8 GB |
 
-- Node.js heap: 6 GB → **20 GB**
-- `TS_HEAVY_PROBE_MAX_CONCURRENT`: 3 → **8** (8 simultaneous ffprobe+tsanalyze spawns)
+- Node.js heap: 6 GB → **16 GB** (conservative ceiling; leaves 8 GB for concurrent child processes)
+- `TS_HEAVY_PROBE_MAX_CONCURRENT`: 3 → **8** (8 simultaneous ffprobe+tsanalyze spawns; I/O-bound, safe on 28 threads)
 - `THUMBNAIL_MAX_CONCURRENT`: 2 → **4**
 - `shm_size` labotech: 512 MB → 1 GB
 
-Operator impact: faster probe cycles under load, no cross-socket memory latency, thumbnails refresh 2× faster.
+Operator impact: significantly reduced cross-socket memory latency, more headroom for concurrent probe cycles, faster thumbnail refresh. Pending soak validation under full lane load before further heap increase.
 
 ---
 
