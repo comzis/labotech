@@ -1149,20 +1149,29 @@ export default function TSAnalyser({ lastMessage }) {
         const srt = activeResult?.dvb?.srtStats || null;
         const isSrtUrl = String(activeUrl || "").startsWith("srt://");
         const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
-        const rttMs      = num(srt?.rttMs);
-        const rateMbps   = num(srt?.rateMbps);
-        const bwMbps     = num(srt?.bwMbps);
+        const rttMs       = num(srt?.rttMs);
+        const rateMbps    = num(srt?.rateMbps);
+        const bwMbps      = num(srt?.bwMbps);
+        const maxBwMbps   = num(srt?.maxBwMbps);
         const lossPercent = num(srt?.lossPercent);
-        const nak     = srt?.pktNak     ?? null;
-        const ack     = srt?.pktAck     ?? null;
-        const retrans = srt?.pktRetrans  ?? null;
-        const dropped = srt?.pktDropped  ?? null;
-        const lost    = srt?.pktLost     ?? null;
-        const total   = srt?.pktTotal    ?? null;
+        const retransRatio = num(srt?.retransRatio);
+        const nak     = srt?.pktNak          ?? null;
+        const ack     = srt?.pktAck          ?? null;
+        const retrans = srt?.pktRetrans       ?? null;
+        const rcvDrop = srt?.pktRcvDrop       ?? null;
+        const sndDrop = srt?.pktSndDrop       ?? null;
+        const belated = srt?.pktRcvBelated    ?? null;
+        const msRcvBuf = num(srt?.msRcvBuf);
+        const flowWin = srt?.pktFlowWindow    ?? null;
+        const lost    = srt?.pktLost          ?? null;
+        const total   = srt?.pktTotal         ?? null;
+        // Traffic-light colour helpers — per Haivision SRT spec
         const rttColor      = rttMs != null ? (rttMs > 200 ? C.err : rttMs > 80 ? C.warn : C.ok) : C.muted;
-        const nakColor      = nak  > 0 ? C.warn : C.ok;
-        const retransColor  = retrans > 0 ? C.warn : C.ok;
-        const droppedColor  = dropped > 0 ? C.err : C.ok;
+        const nakColor      = (nak  > 0) ? C.warn : C.ok;
+        const retransColor  = retransRatio != null ? (retransRatio > 25 ? C.err : retransRatio > 5 ? C.warn : C.ok) : (retrans > 0 ? C.warn : C.ok);
+        const rcvDropColor  = (rcvDrop > 0) ? C.err : C.ok;
+        const sndDropColor  = (sndDrop > 0) ? C.err : C.ok;
+        const belatedColor  = (belated > 0) ? C.warn : C.ok;
         const lostColor     = lossPercent > 0.1 ? C.err : lossPercent > 0 ? C.warn : C.ok;
         const Stat = ({ label, value, color }) => (
           <div style={{ background: C.panelB, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 8px", textAlign: "center" }}>
@@ -1184,24 +1193,54 @@ export default function TSAnalyser({ lastMessage }) {
                 </div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {/* Link Quality */}
                   <div>
                     <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Link Quality</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 5 }}>
                       <Stat label="RTT" value={rttMs != null ? `${rttMs.toFixed(1)} ms` : "-"} color={rttColor} />
-                      <Stat label="Rate" value={rateMbps != null ? `${rateMbps.toFixed(3)} Mbps` : "-"} color={C.ok} />
+                      <Stat label="Recv Rate" value={rateMbps != null ? `${rateMbps.toFixed(3)} Mbps` : "-"} color={C.ok} />
                       <Stat label="Bandwidth" value={bwMbps != null ? `${bwMbps.toFixed(3)} Mbps` : "-"} color={C.text} />
                       <Stat label="Loss %" value={lossPercent != null ? `${lossPercent.toFixed(3)} %` : "-"} color={lostColor} />
                     </div>
                   </div>
+                  {/* ARQ Counters */}
                   <div>
                     <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>ARQ Counters (per probe interval)</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5 }}>
-                      <Stat label="NAK sent" value={nak ?? "-"} color={nakColor} />
-                      <Stat label="ACK sent" value={ack ?? "-"} color={C.ok} />
-                      <Stat label="Retransmitted" value={retrans ?? "-"} color={retransColor} />
-                      <Stat label="Dropped (too late)" value={dropped ?? "-"} color={droppedColor} />
-                      <Stat label="Lost (unrecovered)" value={lost ?? "-"} color={lostColor} />
-                      <Stat label="Total received" value={total ?? "-"} color={C.text} />
+                      <Stat label="NAK sent"        value={nak     ?? "-"} color={nakColor} />
+                      <Stat label="ACK sent"         value={ack     ?? "-"} color={C.ok} />
+                      <Stat label="Retransmitted"    value={retrans ?? "-"} color={retransColor} />
+                      <Stat label="Lost (unrecovered)" value={lost  ?? "-"} color={lostColor} />
+                      <Stat label="Total received"   value={total   ?? "-"} color={C.text} />
+                      <Stat label="Retrans %"        value={retransRatio != null ? `${retransRatio.toFixed(2)} %` : "-"} color={retransColor} />
+                    </div>
+                  </div>
+                  {/* Latency Health — critical Haivision indicators */}
+                  <div>
+                    <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Latency Health (Haivision spec)</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5 }}>
+                      <Stat label="RcvDrop (late)" value={rcvDrop ?? "-"} color={rcvDropColor} />
+                      <Stat label="SndDrop (late)" value={sndDrop ?? "-"} color={sndDropColor} />
+                      <Stat label="Belated pkts"   value={belated ?? "-"} color={belatedColor} />
+                    </div>
+                    {(rcvDrop > 0 || sndDrop > 0) && (
+                      <div style={{ fontSize: 9, color: C.err, background: C.panelB, borderRadius: 2, padding: "4px 8px", border: `1px solid ${C.err}`, marginTop: 5 }}>
+                        Drops detected — SRT latency window is too short for the link RTT. Increase <Mono v="latency=" c={C.warn} size={9} /> in the probe URL.
+                      </div>
+                    )}
+                    {(belated > 0 && rcvDrop === 0 && sndDrop === 0) && (
+                      <div style={{ fontSize: 9, color: C.warn, background: C.panelB, borderRadius: 2, padding: "4px 8px", border: `1px solid ${C.warn}`, marginTop: 5 }}>
+                        Belated arrivals — packets are approaching the latency deadline. Monitor for drops.
+                      </div>
+                    )}
+                  </div>
+                  {/* Buffer & Flow */}
+                  <div>
+                    <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 5 }}>Buffer &amp; Flow</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 5 }}>
+                      <Stat label="Rcv Buf (ms)"  value={msRcvBuf != null ? `${msRcvBuf.toFixed(0)} ms` : "-"} color={C.text} />
+                      <Stat label="Flow Window"   value={flowWin  ?? "-"} color={C.text} />
+                      <Stat label="Max BW"        value={maxBwMbps != null ? `${maxBwMbps.toFixed(1)} Mbps` : "-"} color={C.muted} />
                     </div>
                   </div>
                   {!srt && (

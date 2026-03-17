@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.46)
+Date: 2026-03-17 (latest: v3.1.47)
 
 ## Overview
 
@@ -10,6 +10,27 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.47 — 2026-03-17
+
+### Fix: SRT stats showing false zeros ("STATS OK" but all 0.0)
+
+**Root cause:** `_extractSrtStatsFromLog()` searched the entire ffmpeg stderr string with overly-broad patterns. The `rate` alias matched `bitrate=0.0kbits/s` from `ffmpeg -progress pipe:2`, `total` matched `total_size=N`, and `bw` / `rtt` hit other unrelated fields — all returning 0. This made `srtStats` truthy (showing "STATS OK") but with all-zero values.
+
+**Fix (ts-analyser.js):**
+- Pre-filter stderr to only lines containing a genuine libsrt marker (`msRTT=`, `mbpsRecvRate=`, `mbpsBandwidth=`) before parsing — lines from `-progress pipe:2` are excluded entirely
+- Removed all short-word fallback aliases (`rate`, `bw`, `total`, `rtt`, `retrans`, `loss`, `lost`, `nak`, `ack`) — replaced with exact libsrt field names using `\b` word boundary anchors
+- Returns `null` (not a falsy empty object) when no libsrt stat lines are present — UI correctly shows "AWAITING" instead of "STATS OK" with zeros
+
+**Fix (TSAnalyser.jsx):** SRT Transport tab reorganised with four sections:
+- **Link Quality** — RTT, Recv Rate, Bandwidth, Loss %
+- **ARQ Counters** — NAK, ACK, Retransmitted, Lost, Total, Retrans %
+- **Latency Health** — RcvDrop, SndDrop, Belated (with inline drop/belated banners)
+- **Buffer & Flow** — Rcv Buf (ms), Flow Window, Max BW
+
+Operator impact: SRT Transport tab now correctly shows "AWAITING" until the first transport probe completes, then populates with real libsrt counters. Drops/belated events surface with colour coding and diagnostic messages in-panel.
 
 ---
 
