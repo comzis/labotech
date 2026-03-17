@@ -4,6 +4,19 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Boost gray-500/600 for MCR legibility on dark background
+        gray: {
+          50:  '#f9fafb',
+          100: '#f3f4f6',
+          200: '#e5e7eb',
+          300: '#d1d5db',
+          400: '#9ca3af',
+          500: '#8b95a8',  // lifted from #6b7280 — improved dark-bg contrast
+          600: '#6b7587',  // lifted from #4b5563 — improved dark-bg contrast
+          700: '#374151',
+          800: '#1f2937',
+          900: '#111827',
+        },
         // Legacy tokens kept for existing panel components
         brand: {
           900: '#080808',
