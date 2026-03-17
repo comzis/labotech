@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-17 (latest: v3.1.49)
+Date: 2026-03-17 (latest: v3.1.50)
 
 ## Overview
 
@@ -10,6 +10,20 @@ v3.1 is a broadcast-operator readiness release focused on four areas:
 2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
 3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
 4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.50 — 2026-03-17
+
+### Fix: SRT thumbnail first-frame latency — redundant I-frame filter and oversized analyze window
+
+Two compounding delays before the first thumbnail appeared after each spawn/resume:
+
+1. **`analyzeduration = latencyMs + 3000ms`** — the 3s headroom was added for the transport bitrate probe (which needs a full measurement window) but was also applied to the thumbnail process, which only needs the SRT latency window to fill. Reduced to `latencyMs + 500ms`.
+
+2. **`select=eq(pict_type\,I)` in the vf chain was redundant and harmful** — `-skip_frame nokey` already instructs the decoder to skip all non-keyframes, so every frame reaching the filter graph is already an I-frame. The `select` filter only passed frames that fell on the `fps=1/N` time grid, which could skip the very first keyframe and delay the first thumbnail by up to one full interval (e.g. 30s). Removed.
+
+Result: first thumbnail after spawn/resume now appears at `latencyMs + ~500ms + time-to-first-keyframe` instead of `latencyMs + 3000ms + interval`.
 
 ---
 

@@ -185,13 +185,21 @@ class PersistentThumbnailCapture extends EventEmitter {
     const capture   = getThumbnailCaptureSettings();
     const isSrt     = this._inputUrl.startsWith('srt://');
     const latencyMs = isSrt ? parseSrtLatency(this._inputUrl) : 0;
-    // analyzeduration must exceed the SRT latency window; add 3 s of headroom.
-    const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
+    // SRT: analyzeduration only needs to cover the protocol latency window + a small
+    // margin for the first keyframe to arrive.  500 ms headroom is sufficient —
+    // SRT itself guarantees data delivery after latencyMs.  The previous 3000 ms
+    // headroom delayed the first thumbnail by 3+ s on every spawn/resume.
+    // Non-SRT: 2 s is enough for UDP/RTP multicast join + first keyframe.
+    const analyzeDurUs = isSrt ? String((latencyMs + 500) * 1000) : '2000000';
     const src = this._buildSrc();
 
+    // -skip_frame nokey already ensures the decoder only ever sees keyframes (I-frames).
+    // select=eq(pict_type,I) is therefore redundant AND harmful: it only passes frames
+    // that fall exactly on the fps=1/N time grid, which can skip the very first keyframe
+    // and delay the thumbnail by up to one full interval.  Remove it — every decoded
+    // frame is already an I-frame; fps=1/N alone throttles the output rate.
     const vf = [
       `fps=1/${this._intervalSec}`,
-      'select=eq(pict_type\\,I)',
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
     ].filter(Boolean).join(',');
