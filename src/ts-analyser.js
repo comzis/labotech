@@ -1965,6 +1965,12 @@ class TSAnalyser extends EventEmitter {
 
   _withLiveInputHints(url) {
     if (!url) return url;
+    // SRT — bind caller socket to eno1 (10.67.18.29) so ffprobe routes via the
+    // management NIC, not eno2 (no IP). Hardwired for now; configurable in future.
+    if (url.startsWith('srt://')) {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}adapter=10.67.18.29`;
+    }
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
     return `${url}${sep}fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
