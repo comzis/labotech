@@ -100,6 +100,10 @@ class SRTRelay extends EventEmitter {
     if (!src.includes('mode='))    src += `${sep}mode=caller`;
     if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
     if (!src.includes('timeout=')) src += '&timeout=8000000';
+    // Give the SRT receive buffer 500 ms headroom unless the URL already sets it.
+    // Without this, transient network jitter (>latency ms) causes RCV-DROPPED which
+    // corrupts the TS and makes consumers see glitches.
+    if (!src.includes('latency=') && !src.includes('rcvlatency=')) src += '&rcvlatency=500';
     return src;
   }
 
@@ -111,7 +115,13 @@ class SRTRelay extends EventEmitter {
     const outputUrl = `${this.localUrl}?pkt_size=1316`;
 
     const args = [
-      '-loglevel', 'error',      // suppress mid-GOP H.264 PPS/slice-header warnings (copy mode artefacts)
+      '-loglevel', 'error',
+      '-fflags', '+discardcorrupt',
+      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening an H.264
+      // parser context, which eliminates the wall of 'non-existing PPS / decode_slice_header'
+      // warnings that appear when joining a live stream mid-GOP. The relay only
+      // copies TS packets; it never needs to understand the elementary streams.
+      '-f', 'mpegts',
       '-i', inputUrl,
       '-c', 'copy',
       '-f', 'mpegts',

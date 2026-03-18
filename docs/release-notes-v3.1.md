@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.91 / web 3.1.113)
+Date: 2026-03-18 (latest: v3.1.91 / web 3.1.114)
+
+## web 3.1.114 — 2026-03-18
+
+### Fix: SRT relay — eliminate H.264 parse warnings and RCV-DROPPED drops
+
+- **Problem 1 (H.264 warnings):** Relay ffmpeg auto-detected the H.264 codec and opened a parser context. Joining mid-GOP (before a keyframe) produced a continuous wall of `non-existing PPS / decode_slice_header error / mmco: unref short failure` log entries. These appeared even at `-loglevel error` because they originate from the H.264 parser, not ffmpeg's application logger.
+- **Fix 1:** Added `-f mpegts` to the relay's input args. ffmpeg now treats the SRT payload as raw MPEG-TS and copies TS packets without ever opening a codec context. H.264 parser is never invoked — warnings are gone regardless of GOP position.
+- **Problem 2 (RCV-DROPPED):** Transient network jitter caused SRT to drop packets whose arrival exceeded the latency buffer deadline (`RCV-DROPPED … delayed for 4–8 ms`). Dropped packets corrupted the TS stream, caused the relay ffmpeg to emit errors, and could trigger restarts.
+- **Fix 2:** Added `rcvlatency=500` (500 ms) to the relay input URL when no latency is set. This gives the SRT receive buffer 500 ms of headroom to absorb path jitter without dropping packets. Analysis/monitoring consumers are latency-insensitive.
+- **Also added:** `-fflags +discardcorrupt` so any residual corrupt TS units from a brief drop are silently skipped rather than producing an error exit.
+- **Operator impact:** Relay logs are now clean under normal operation. SRT streams with up to ~250 ms of path jitter will be absorbed without drops.
 
 ## web 3.1.113 — 2026-03-18
 
