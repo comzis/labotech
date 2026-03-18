@@ -9,6 +9,7 @@ const IATSniffer = require('./iat-sniffer');
 const TSDuckMonitor = require('./tsduck-monitor');
 const DolbyEAdapter = require('./dolbye-adapter');
 const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
+const { isSltAvailable } = require('./tooling-preflight');
 let _multicastConfig = null;
 
 // Module-level semaphore: cap simultaneous heavy probes to prevent thundering
@@ -237,16 +238,18 @@ class TSAnalyser extends EventEmitter {
               // Sequential: one SRT connection at a time.
               const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
               const transport = await (runHeavyProbe ? this._probeTransportBitrateBps()     : Promise.resolve(null));
+              const srtLink   = await (runHeavyProbe ? this._probeSrtLinkStats()            : Promise.resolve(null));
               const audio     = await this._probeAudioLevels();
               const tsDisc    = await (runHeavyProbe ? this._probeTimestampDiscontinuities(): Promise.resolve(null));
               const cc        = await (runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null));
               const dolby     = await (runHeavyProbe ? this._probeDolbyE()                  : Promise.resolve(null));
-              heavyProbeResults = [tsduck, transport, audio, tsDisc, cc, dolby];
+              heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
             } else {
               // RTP/UDP multicast: parallel is fine — unlimited simultaneous receivers.
               heavyProbeResults = await Promise.all([
                 runHeavyProbe ? this._probeTSDuck()                   : Promise.resolve(null),
                 runHeavyProbe ? this._probeTransportBitrateBps()      : Promise.resolve(null),
+                Promise.resolve(null), // srtLink — SRT-only, skip for RTP/UDP
                 this._probeAudioLevels(),
                 runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
                 runHeavyProbe ? this._probeContinuityCounterErrors()  : Promise.resolve(null),
@@ -264,7 +267,7 @@ class TSAnalyser extends EventEmitter {
               }, 1500);
             }
           }
-          const [tsduckProbe, transportProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
+          const [tsduckProbe, transportProbe, srtLinkProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
           const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
             ? this._iatSniffer.getMetrics()
             : null;
@@ -357,7 +360,9 @@ class TSAnalyser extends EventEmitter {
               result.dvb.bitrateSource = 'measured';
             }
           }
-          if (transportProbe && transportProbe.srtStats) {
+          if (srtLinkProbe) {
+            result.dvb.srtStats = srtLinkProbe;
+          } else if (transportProbe && transportProbe.srtStats) {
             result.dvb.srtStats = transportProbe.srtStats;
           } else if (this.lastResult?.dvb?.srtStats) {
             // Keep last known libsrt counters between heavy probe intervals.
@@ -1019,6 +1024,57 @@ class TSAnalyser extends EventEmitter {
         programConfig: null,
         error: err && err.message ? err.message : 'Dolby E probe failed',
       }));
+  }
+
+  // Run srt-live-transmit for (latency + 2s) and parse its JSON stats output.
+  // This is the only reliable way to get RTT, loss, NAK, retransmit for SRT RX —
+  // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format.
+  _probeSrtLinkStats() {
+    return new Promise((resolve) => {
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      const latencyMs = parseSrtLatency(this.url);
+      const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
+      const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
+      const proc = spawn('srt-live-transmit', ['-s', '1000', '-pf', 'json', inputUrl, 'file:///dev/null']);
+      let lastStats = null;
+      const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch (_) {} }, runMs);
+      proc.stdout.on('data', (d) => {
+        for (const line of d.toString().split('\n')) {
+          const t = line.trim();
+          if (!t) continue;
+          try {
+            const obj = JSON.parse(t);
+            if (obj && (obj.recv || obj.link)) lastStats = obj;
+          } catch (_) {}
+        }
+      });
+      proc.on('error', () => { clearTimeout(timer); resolve(null); });
+      proc.on('close', () => {
+        clearTimeout(timer);
+        if (!lastStats) return resolve(null);
+        const recv = lastStats.recv || {};
+        const link = lastStats.link || {};
+        const srt = {};
+        const rttMs    = Number(link.rtt);
+        const bwMbps   = Number(link.bandwidth);
+        const rateMbps = Number(recv.mbitRate);
+        const pktTotal   = Number(recv.packets);
+        const pktLost    = Number(recv.packetsLost);
+        const pktDropped = Number(recv.packetsDropped);
+        const pktRetrans = Number(recv.packetsRetransmitted);
+        if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
+        if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
+        if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
+        if (Number.isFinite(pktTotal))   srt.pktTotal   = pktTotal;
+        if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
+        if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
+        if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+        if (pktTotal > 0 && Number.isFinite(pktLost)) {
+          srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+        }
+        resolve(Object.keys(srt).length > 0 ? srt : null);
+      });
+    });
   }
 
   _probeTSDuck() {

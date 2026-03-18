@@ -1964,7 +1964,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
           {subTab === "srt" && (() => {
             const srt = selectedResult?.dvb?.srtStats || null;
-            const isSrtUrl = String(legAUrl || "").startsWith("srt://");
+            const isSrtUrl = String(selectedResult?.url || legAUrl || "").startsWith("srt://");
             const rttMs = toFiniteNumber(srt?.rttMs);
             const lossPercent = toFiniteNumber(srt?.lossPercent);
             const rateMbps = toFiniteNumber(srt?.rateMbps);
