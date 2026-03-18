@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.68)
+Date: 2026-03-18 (latest: v3.1.69)
+
+## v3.1.69 — 2026-03-18
+
+### Fix: Replace 4-attempt I-frame ladder with 2-attempt thumbnail=pick (long-GOP streams)
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `-skip_frame nokey` and the 4-attempt fallback ladder from `_doCaptureThumbnail`.
+- Now uses 2 attempts: (1) `thumbnail=pick + pp=de/de + scale`, (2) `thumbnail=pick + scale` (handles builds without the `pp` filter).
+- `thumbnail=N` buffers N frames and picks the least-blurry one — no keyframe wait required.
+
+**Why:** Broadcast contribution links (Eurovision, GNVE) commonly use GOPs of 10–25 s. `-skip_frame nokey -frames:v 1` waited up to one full GOP for a keyframe — reliably hitting the 8 s timeout on all three I-frame attempts every cycle. The fallback (attempt 4) also failed intermittently, causing the 5 s reschedule to fire before any frame was written. First thumbnail was appearing at 40–45 s. `thumbnail=pick` needs only a small frame window (160 ms at 25 fps) — no keyframe alignment required.
+
+**Operator impact:** First thumbnail expected within 4–6 s of decoder start regardless of GOP length.
 
 ## v3.1.68 — 2026-03-18
 
