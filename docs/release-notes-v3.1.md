@@ -1,6 +1,30 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.77 / web 3.1.93)
+Date: 2026-03-18 (latest: v3.1.78 / web 3.1.95)
+
+## web v3.1.95 — 2026-03-18
+
+### Decoder Provisioning: stream catalog, latency default 4 s, button glow removed
+
+**Stream catalog** — a search field now appears above the provisioning rows when the multiview stream catalog (`/api/multiview/catalog`) contains entries. Typing filters by name or IP across grouped categories. Selecting an entry populates the first empty row's host, port, decoder ID, and mode in one click. Same catalog data and category grouping as the Multiview panel.
+
+**SRT latency default** — changed from 2000 ms to 4000 ms. Field remains fully editable; placeholder shows `4000`. Paste-from-URI still overwrites with the URI's `tsbpddelay` value.
+
+**Button glow removed** — `boxShadow` bloom on Start, Start Batch, and Apply ETR Config buttons toned down to none. Active state is indicated by filled background and border colour only — no halogen spread.
+
+**Operator impact:** Stream catalog shortcut eliminates manual host/port/ID entry for known sources. Latency default now matches the typical broadcast contribution SRT window.
+
+## v3.1.78 / web v3.1.94 — 2026-03-18
+
+### SRT decoder: real-time link stats via srt-live-transmit (RTT, loss, NAK, retransmit, drop)
+
+Added `_probeSrtLinkStats()` to `TSAnalyser`. On every heavy probe cycle for SRT streams, a `srt-live-transmit` process connects as a receiver for `latency + 3 s`, emitting one JSON stats line per second. The last received stats object is parsed to extract: `rttMs`, `bwMbps`, `rateMbps`, `pktTotal`, `pktLost`, `pktDropped`, `pktRetrans`, and `lossPercent`. These are written to `result.dvb.srtStats` and surfaced in the SRT Transport tab.
+
+This replaces the previous `_extractSrtStatsFromLog()` path which parsed libsrt verbose log format from ffmpeg stderr — that format uses different field names than srt-live-transmit JSON and was never matching, leaving `srtStats` always null and the Transport tab showing "NOT SRT / AWAITING STATS".
+
+RTP/UDP streams receive a null placeholder in the probe results array so array destructuring indices remain consistent.
+
+**Operator impact:** SRT Transport tab now shows live RTT, bandwidth, receive rate, packet loss %, dropped and retransmitted packet counts. No configuration required.
 
 ## web v3.1.93 — 2026-03-18
 
