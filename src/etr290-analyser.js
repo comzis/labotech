@@ -239,16 +239,33 @@ class ETR290Analyser extends EventEmitter {
     proc.on('exit', (code, signal) => {
       if (this._epoch !== epoch) return; // killed by suspend() — not a real stop
       this._proc = null;
+      const wasExplicitStop = this._stopping || signal === 'SIGTERM';
+      this._stopping = false;
+
+      // Unexpected exit while still enabled — auto-restart to maintain monitoring.
+      // On SRT (single-listener source): use a long retry delay to avoid competing
+      // with the thumbnail's persistent connection.  A short retry would cause a
+      // fight loop (thumbnail ↔ ETR kicking each other) that destabilises the source.
+      if (!wasExplicitStop && this.isRunning) {
+        const isSrt = this.url && this.url.startsWith('srt://');
+        const retryMs = isSrt ? 60000 : 5000;
+        if (this._suspendTimer) clearTimeout(this._suspendTimer);
+        this._suspendTimer = setTimeout(() => {
+          this._suspendTimer = null;
+          if (this.isRunning) this._spawnProc();
+        }, retryMs);
+        return; // keep isRunning = true; status timer keeps broadcasting
+      }
+
       if (this._statusTimer) {
         clearInterval(this._statusTimer);
         this._statusTimer = null;
       }
       this.isRunning = false;
       // FFmpeg handles SIGTERM internally and exits with code 255 — treat as clean stop
-      if (code !== 0 && code !== null && !(this._stopping && code === 255) && signal !== 'SIGTERM') {
+      if (code !== 0 && code !== null && !(wasExplicitStop && code === 255)) {
         this.emit('error', new Error(`FFmpeg exited with code ${code}`));
       }
-      this._stopping = false;
       this.emit('stopped', { id: this.id });
     });
 
