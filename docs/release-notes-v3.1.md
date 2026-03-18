@@ -1,6 +1,30 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.81 / web 3.1.100)
+Date: 2026-03-18 (latest: v3.1.84 / web 3.1.102)
+
+## v3.1.84 — 2026-03-18
+
+### Fix: ETR290 analyser no longer holds SRT connection during heavy probes (SNAG-027)
+
+- **Problem:** `ETR290Analyser` runs ffmpeg as a persistent process, holding the SRT caller slot permanently. On streams served by a single-listener SRT source (one caller permitted), this blocked all other probes: the thumbnail capture showed AWAITING FRAME, the transport bitrate probe failed to connect, `srt-live-transmit` got rejected, and the TSDuck probe timed out — all because ETR already held the only connection slot.
+- **Fix:** Added `suspend(durationMs)` and `resume()` methods to `ETR290Analyser` (epoch-guarded, same pattern as `PersistentThumbnailCapture`). Added `setEtrMonitor(mon)` / `clearEtrMonitor()` to `TSAnalyser`. During SRT heavy probe cycles, `TSAnalyser` now suspends ETR alongside the thumbnail and TSDuck monitor before starting sequential probes, then resumes all three after probes complete.
+- **Wiring:** `routes/etr290.js` receives the `analysers` map (passed from `api.js`) and calls `linkedAnalyser.setEtrMonitor(mon)` on ETR start and `clearEtrMonitor()` on ETR stop/delete. The orphan watchdog in `api.js` also clears the link.
+- **Operator impact:** On single-listener SRT sources, thumbnail, SRT transport stats, bitrate, and TSDuck PCR metrics now populate correctly. ETR resumes monitoring automatically between probe windows.
+
+## v3.1.83 / web v3.1.102 — 2026-03-18
+
+### Fix: S302M ES excluded from amerge audio level probe
+
+- **Problem:** `_probeAudioLevels()` in `ts-analyser.js` counted S302M audio ESes (AES3/SMPTE 302M) in `audioEsCount` and included them in the ffmpeg `amerge` filter. S302M carries SMPTE 337M data bursts (Dolby E, AC-3 metadata) encoded as PCM, which presents as constant near-full-scale audio to astats. All VU meter pairs showed at maximum level regardless of actual programme audio.
+- **Fix (backend):** `audioEsCount` now excludes streams where `s302m` is truthy, so the amerge only includes programme audio ESes.
+- **Fix (frontend):** `audioEsCount` in `DecoderPanelRevamp.jsx` `pairCount` calculation also excludes S302M ESes, preventing phantom channel-pair placeholders in the audio meter panel.
+- **Operator impact:** Audio level meters now show correct levels for streams containing embedded S302M/Dolby E metadata. The S302M panel (AES3 section) still shows S302M structure independently.
+
+### Fix: Thumbnail `fps=1/N` — remove `setpts=N*AVTB` (SNAG-026)
+
+- **Problem:** PR #51 added `setpts=N*AVTB` alongside `select=eq(pict_type,I)` to reset I-frame PTS values. This compressed all I-frame timestamps to near-zero (video-frame-rate intervals, ~40 ms apart at 25fps), causing `fps=1/N` to interpret stream-seconds as microseconds. After the first frame, the filter produced no further output — thumbnail remained frozen at the first frame.
+- **Fix:** Removed `setpts=N*AVTB` from the vf chain. `select=eq(pict_type,I)` alone is sufficient — I-frames are self-contained and the `fps=1/N` limiter operates correctly on the original stream timestamps.
+- **Operator impact:** Confidence Monitor thumbnail now refreshes continuously at the configured interval for both H.264 and HEVC SRT streams.
 
 ## v3.1.81 — 2026-03-18
 
