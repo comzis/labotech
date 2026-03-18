@@ -559,31 +559,36 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             </div>
           )}
 
-          {/* UMD — content-width label, top-left of thumbnail */}
+          {/* UMD — bottom-left overlay, Labotech cyan style */}
           <div style={{
-            position: 'absolute', top: 0, left: 0,
-            maxWidth: '88%',
-            height: 18,
-            background: 'rgba(0,0,0,0.82)',
+            position: 'absolute', bottom: 0, left: 0,
+            maxWidth: '92%',
+            background: 'linear-gradient(90deg, rgba(0,12,22,0.92) 0%, rgba(0,8,16,0.72) 100%)',
             display: 'inline-flex', alignItems: 'center',
             overflow: 'hidden',
+            padding: '2px 8px 2px 6px',
+            gap: 6,
           }}>
-            {/* Tally strip */}
-            <div style={{ width: 3, alignSelf: 'stretch', background: statusColor, flexShrink: 0 }} />
-            {/* Service name — no flex:1, takes only what it needs */}
+            {/* Status tally — 1px left accent */}
+            <div style={{ width: 1, alignSelf: 'stretch', background: `${statusColor}bb`, flexShrink: 0 }} />
+            {/* Service name */}
             <span style={{
-              color: '#f0f0f0', fontFamily: 'monospace', fontSize: '11px', fontWeight: 700,
-              letterSpacing: '0.07em', textTransform: 'uppercase',
+              color: '#c8eaf0',
+              fontFamily: "'Courier New', Courier, monospace",
+              fontSize: '10px', fontWeight: 700,
+              letterSpacing: '0.09em', textTransform: 'uppercase',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-              padding: '0 4px 0 5px',
             }}>
               {svc}
             </span>
-            {/* Bitrate immediately after name */}
+            {/* Bitrate — dimmer cyan */}
             {rate.mbps != null && (
               <span style={{
-                color: '#3a5878', fontFamily: 'monospace', fontSize: '9px',
-                whiteSpace: 'nowrap', paddingRight: 5, fontVariantNumeric: 'tabular-nums',
+                color: '#1a7a8a',
+                fontFamily: "'Courier New', Courier, monospace",
+                fontSize: '9px', fontWeight: 600,
+                whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '0.05em',
               }}>
                 {rate.mbps.toFixed(1)} Mb/s
               </span>
@@ -1585,26 +1590,6 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             ))}
           </div>
 
-          {/* Bottom status bus — 26px */}
-          <div style={{
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-            padding: '0 16px',
-            height: 26,
-            background: '#050505',
-            borderTop: '1px solid #0d0d0d',
-            flexShrink: 0,
-            gap: 12,
-          }}>
-            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-              LABOTECH MVW · {activePanel?.name || '—'}
-            </span>
-            <span style={{ color: '#1a2a36', fontSize: '8px', letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>
-              {utcDate} {utcTime} UTC
-            </span>
-            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
-              {liveCount > 0 ? `${liveCount} LIVE` : 'NO SIGNAL'} / {visibleIds.length} STREAM{visibleIds.length !== 1 ? 'S' : ''}
-            </span>
-          </div>
         </div>
       );
     })()}
