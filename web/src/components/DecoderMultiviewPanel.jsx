@@ -485,7 +485,10 @@ function FsVuBar({ rmsDb, peakDb }) {
 
 // Evertz-style fullscreen tile: thumbnail + vertical audio meters, thin label bar below
 function FullscreenThumbTile({ id, result, nowMs }) {
-  const svc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || '—';
+  const rawSvc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || null;
+  const [svcLatch, setSvcLatch] = useState(null);
+  useEffect(() => { if (rawSvc) setSvcLatch(rawSvc); }, [rawSvc]);
+  const svc = rawSvc || svcLatch || '—';
   const hasTelemetry = Boolean(result?.probeTime);
   const severity = result?.health?.severity;
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;

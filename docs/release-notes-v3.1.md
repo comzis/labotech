@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.73)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.74)
+
+## web v3.1.74 — 2026-03-18
+
+### Fix: fullscreen UMD service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- `FullscreenThumbTile` now latches the last known-good service name in `svcLatch` state — same pattern as `DecoderCard.svcSnapshot`. `rawSvc` is derived from `result.dvb.services[0].serviceName` or `result.programs[0].name`; when the result momentarily clears between probe cycles, `svcLatch` keeps the UMD label stable. The name only ever updates forward — it never reverts to `'—'` once a service name has been seen.
+
+**Operator impact:** UMD service name no longer flickers/disappears between probe cycles.
+
+
 
 ## web v3.1.73 — 2026-03-18
 
