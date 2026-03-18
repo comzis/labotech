@@ -193,6 +193,36 @@ _No open snags at time of writing (2026-03-18)._
 
 ---
 
+### SNAG-019 — SRT ffprobe routed via eno2 (no IP) — analyser probe exits code 1
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.76 · **PR:** #39
+- **Symptom:** SRT decoder provisioning never connected. `ffprobe` exited code 1 immediately. No PID data, no bitrate, no SRT transport stats on the SRT Transport tab.
+- **Root cause:** `_withLiveInputHints()` in `ts-analyser.js` added `fifo_size` hints for UDP/RTP but did not handle `srt://` URLs. ffprobe used the default routing table, which pointed SRT traffic to eno2 (multicast NIC — no IP address). Connection was immediately refused at the OS level.
+- **Fix:** `_withLiveInputHints()` now detects `url.startsWith('srt://')` and appends `adapter=10.67.18.29` before any other query params, binding the ffprobe caller socket explicitly to eno1 (management NIC). Also corrected the Capture NIC placeholder in Decoder Provisioning to show `eno1 (SRT / management)` in SRT mode instead of the misleading `eno2 (recommended)`.
+- **Lesson:** Every process that opens an `srt://` URL in caller mode must include `adapter=10.67.18.29` to bind to eno1. The default routing table will silently route SRT to eno2. Applies to ffprobe, ffmpeg, and srt-live-transmit.
+
+---
+
+### SNAG-020 — SRT thumbnails blank — `_buildSrtSrc()` in monitoring.js missing adapter
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.77 · **PR:** #40
+- **Symptom:** Confidence Monitor showed a blank thumbnail for SRT decoders even after SNAG-019 was fixed. All other decoder data (bitrate, PID tree, ETR 290) populated correctly.
+- **Root cause:** `_buildSrtSrc()` in `src/monitoring.js` — used by both `captureThumbnail()` (single-shot) and `PersistentThumbnailCapture` (continuous mode) — added `mode=caller` and `timeout=8000000` but not `adapter=10.67.18.29`. The thumbnail ffmpeg process routed via eno2 and silently failed to connect. No error was surfaced to the UI.
+- **Fix:** Added `if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';` to `_buildSrtSrc()`. Both thumbnail paths now bind to eno1.
+- **Lesson:** `_withLiveInputHints()` (analyser) and `_buildSrtSrc()` (monitoring) are separate code paths — a fix in one does not automatically apply to the other. Any new SRT connection point must be audited independently for adapter binding.
+
+---
+
+### SNAG-021 — srt-live-transmit ABI mismatch — GLIBCXX_3.4.32 not found in container
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.75 · **PR:** #38
+- **Symptom:** `srt-live-transmit` binary from Ubuntu 24.04 host failed immediately inside the Docker container with `version 'GLIBCXX_3.4.32' not found`.
+- **Root cause:** The runtime container is based on `node:20-slim` (Debian Bookworm). The host binary was compiled against Ubuntu 24.04's newer libstdc++ (`GLIBCXX_3.4.32`). Bookworm ships an older libstdc++ that does not include that symbol version. Volume-mounting the host binary is an ABI incompatibility.
+- **Fix:** Added a `srt-builder` multi-stage build step to the Dockerfile using `debian:bookworm-slim` as the base. SRT v1.5.3 is compiled from source inside that stage (`cmake`, `libssl-dev`, static link `-DENABLE_SHARED=OFF`). The resulting binary links only against Bookworm's libstdc++ and is copied into the runtime stage via `COPY --from=srt-builder`.
+- **Lesson:** Never volume-mount a binary compiled on a different Linux distribution into a container. For native binaries with heavy C++ runtime dependencies, always compile inside the target distro in a multi-stage build.
+
+---
+
 ## Invariants Produced
 
 These rules were extracted from the snags above and are now enforced in `CLAUDE.md`:
@@ -210,6 +240,9 @@ These rules were extracted from the snags above and are now enforced in `CLAUDE.
 | I-9 | `-af` must not follow a `-filter_complex` mapped output — embed in the chain | SNAG-013 |
 | I-10 | Latch all probe-derived display values: `rawValue \|\| latch \|\| fallback` | SNAG-018 |
 | I-11 | All multicast decoders require a startup grace window (≥5 s) before alarm scoring | SNAG-015 |
+| I-12 | Every `srt://` caller must include `adapter=10.67.18.29` — applies to ffprobe, ffmpeg, srt-live-transmit | SNAG-019, SNAG-020 |
+| I-13 | `_withLiveInputHints()` and `_buildSrtSrc()` are independent code paths — fix each separately | SNAG-020 |
+| I-14 | Container native binaries must be compiled inside the target distro (multi-stage build) — never volume-mount from host | SNAG-021 |
 
 ---
 

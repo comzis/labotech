@@ -49,19 +49,22 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
 
-**Last session:** 2026-03-17
-- Phase 3 implementation complete on PR #16 (`feat/phase3-tsduck-monitor`)
-- API wiring follow-up merged via PR #17 (`feat/phase2-api-wiring`)
-- Monitoring test suite passing on server validation
+**Last session:** 2026-03-18
 
-**Active branch:** `feat/phase3-tsduck-monitor` (PR #16 open)
+**Completed this session:**
+- PR #35 — `feat/srt-live-transmit-engine`: srt-live-transmit as preferred encapsulation engine, FFmpeg copy fallback. Preflight checks for `srtProtocol` and `srtLiveTransmit` in `/health`. Engine badge on stream cards. (v3.1.75 / web 3.1.85)
+- PR #38 — `fix/srt-binary-volume-mount`: Compile srt-live-transmit v1.5.3 from source in `debian:bookworm-slim` multi-stage Dockerfile to fix GLIBCXX ABI mismatch.
+- PR #39 — `fix/srt-analyser-eno1-binding`: `_withLiveInputHints()` adds `adapter=10.67.18.29` for srt:// probe URLs; Capture NIC placeholder is mode-aware. (v3.1.76 / web 3.1.86)
+- PR #40 — `fix/srt-thumbnail-eno1-binding`: `_buildSrtSrc()` in monitoring.js adds `adapter=10.67.18.29` to all SRT thumbnail ffmpeg calls. (v3.1.77 / web 3.1.88)
+- PR #41 — `feat/landing-bebas-srt-paste`: Bebas Neue 72px silver landing hero, SRT URI smart-paste auto-fills host/port/passphrase/latency/pbkeylen. (web 3.1.89)
 
-**Waiting for:** Operator review/merge for PR #16
+**Active branch:** `main` (all branches merged)
+
+**Waiting for:** Operator to run `bash scripts/update-and-deploy-safe.sh` on gva-boro-probe
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
 - `src/thumbnail-worker-client.js`
-- `src/monitoring.js` (except minor imports if needed for Phase 3 integration)
 
 ---
 
@@ -169,6 +172,13 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
 | 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | SRT hardening, multiview export, thumbnail backoff, agent infra |
 | 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |
+| 2026-03-18 | A | feat/audio-vu-bars | #32 | feat(ui): audio VU bars in Decoder Confidence Monitor |
+| 2026-03-18 | A | fix/audio-probe-and-ghost-filter | #36 | fix: ghost null-PID filter + audio probe all tracks |
+| 2026-03-18 | A | feat/srt-live-transmit-engine | #35 | feat(encap): srt-live-transmit preferred engine (v3.1.75) |
+| 2026-03-18 | A | fix/srt-binary-volume-mount | #37/#38 | fix(docker): build srt-live-transmit from source in Bookworm stage |
+| 2026-03-18 | A | fix/srt-analyser-eno1-binding | #39 | fix(analyser): bind SRT ffprobe to eno1 (v3.1.76) |
+| 2026-03-18 | A | fix/srt-thumbnail-eno1-binding | #40 | fix(monitoring): bind SRT thumbnail ffmpeg to eno1 (v3.1.77) |
+| 2026-03-18 | A | feat/landing-bebas-srt-paste | #41 | feat(ui): Bebas Neue landing + SRT URI smart-paste (web 3.1.89) |
 
 ---
 
