@@ -2775,10 +2775,13 @@ class TSAnalyser extends EventEmitter {
     if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
     if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
 
-    if (this._relay || (this.url && this.url.startsWith('srt://'))) {
-      // SRT: persistent long-lived ffmpeg avoids reconnect on every frame
-      // (reconnect costs a full SRT latency window each time).
-      // When relay is active, inputUrl is the local UDP copy — same benefit applies.
+    if (!this._relay && this.url && this.url.startsWith('srt://')) {
+      // Direct SRT (no relay): persistent long-lived ffmpeg avoids paying the full
+      // SRT latency window on every reconnect. Safe because only one consumer
+      // (PersistentThumbnailCapture) ever reads this SRT URL.
+      // When relay IS active we fall through to the one-shot timer path below —
+      // loopback unicast UDP (the relay output) cannot be bound by two simultaneous
+      // readers, so we must release the socket between captures.
       this._persistentThumb = new PersistentThumbnailCapture({
         streamId: this.id,
         inputUrl: this._effectiveUrl,
@@ -2792,9 +2795,11 @@ class TSAnalyser extends EventEmitter {
         if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
       }, thumbStartJitterMs);
     } else {
-      // RTP / UDP multicast: one-shot timer loop.  Multicast join is near-instant
-      // so per-frame reconnect is fine, and the proven captureThumbnail() path
-      // avoids the silent-failure modes of a persistent process on multicast.
+      // RTP / UDP multicast, OR relay-backed SRT: one-shot timer loop.
+      // Multicast join is near-instant so per-frame reconnect is fine.
+      // For relay-backed SRT, releasing the loopback UDP socket between captures
+      // is mandatory — ffprobe probes need to bind the same port and unicast UDP
+      // does not support simultaneous multiple receivers.
       //
       // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
       // Subsequent captures use the full thumbIntervalMs cadence.

@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.91 / web 3.1.114)
+Date: 2026-03-18 (latest: v3.1.92 / web 3.1.114)
+
+## v3.1.92 — 2026-03-18
+
+### Fix: SRT relay thumbnail — switch to one-shot timer to free loopback UDP socket
+
+- **Problem:** When `TSAnalyser` starts a `SRTRelay`, the relay re-outputs the stream as `udp://127.0.0.1:55xx` (loopback unicast). `PersistentThumbnailCapture` was used for relay-backed streams — it runs a continuous ffmpeg process that permanently binds the UDP port. This left no window for ffprobe probes to bind the same port, causing EADDRINUSE on every probe cycle → "Probe Method UNAVAILABLE" and no thumbnails.
+- **Root cause:** Loopback unicast UDP does not support simultaneous multiple receivers (unlike multicast). SO_REUSEPORT distributes packets round-robin rather than fanning out to all receivers.
+- **Fix:** Changed the thumbnail branch in `startContinuous()` so that relay-backed streams use the periodic one-shot `captureThumbnail()` timer (same as RTP/UDP multicast) instead of `PersistentThumbnailCapture`. Each capture runs briefly, writes the JPEG, and releases the socket. ffprobe probes bind the port in the windows between captures. Direct SRT (no relay) still uses `PersistentThumbnailCapture` to avoid paying the SRT latency reconnect cost on every frame.
+- **Operator impact:** Decoders using SRT sources now show continuous thumbnails and full probe telemetry simultaneously. The thumbnail cadence is unchanged (default 5 s interval).
 
 ## web 3.1.114 — 2026-03-18
 
