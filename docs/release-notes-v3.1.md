@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.83 / web 3.1.102)
+Date: 2026-03-18 (latest: v3.1.84 / web 3.1.102)
+
+## v3.1.84 — 2026-03-18
+
+### Fix: ETR290 analyser no longer holds SRT connection during heavy probes (SNAG-027)
+
+- **Problem:** `ETR290Analyser` runs ffmpeg as a persistent process, holding the SRT caller slot permanently. On streams served by a single-listener SRT source (one caller permitted), this blocked all other probes: the thumbnail capture showed AWAITING FRAME, the transport bitrate probe failed to connect, `srt-live-transmit` got rejected, and the TSDuck probe timed out — all because ETR already held the only connection slot.
+- **Fix:** Added `suspend(durationMs)` and `resume()` methods to `ETR290Analyser` (epoch-guarded, same pattern as `PersistentThumbnailCapture`). Added `setEtrMonitor(mon)` / `clearEtrMonitor()` to `TSAnalyser`. During SRT heavy probe cycles, `TSAnalyser` now suspends ETR alongside the thumbnail and TSDuck monitor before starting sequential probes, then resumes all three after probes complete.
+- **Wiring:** `routes/etr290.js` receives the `analysers` map (passed from `api.js`) and calls `linkedAnalyser.setEtrMonitor(mon)` on ETR start and `clearEtrMonitor()` on ETR stop/delete. The orphan watchdog in `api.js` also clears the link.
+- **Operator impact:** On single-listener SRT sources, thumbnail, SRT transport stats, bitrate, and TSDuck PCR metrics now populate correctly. ETR resumes monitoring automatically between probe windows.
 
 ## v3.1.83 / web v3.1.102 — 2026-03-18
 
