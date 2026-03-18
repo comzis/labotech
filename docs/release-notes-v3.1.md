@@ -2,13 +2,20 @@
 
 Date: 2026-03-18 (latest: v3.1.80 / web 3.1.99)
 
+## web v3.1.100 — 2026-03-18
+
+### Fix: Error boundary — panel crash no longer blacks out entire app
+
+- Added `PanelErrorBoundary` React class component wrapping each tab panel in `App.jsx`. Any future uncaught render error in a panel shows a red inline error message with a Retry button instead of unmounting the entire React root (blank page).
+- **Operator impact:** A broken tab shows its error in-place; all other tabs remain functional.
+
 ## web v3.1.99 — 2026-03-18
 
-### Fix: Decoder panel blank (ReferenceError `pidRows`)
+### Fix: Decoder tab blank page (ReferenceError `pidRows`)
 
-- **Problem:** The S302M / AES3 section added in v3.1.98 referenced `pidRows` instead of `pids` (the correct variable name). This caused a `ReferenceError` at render time which crashed the entire Decoder tab to a blank/black screen on every page load, regardless of whether any S302M stream was present.
-- **Fix:** Changed `pidRows` → `pids` in the S302M section IIFE. No logic change.
-- **Operator impact:** Decoder tab restored. S302M panel displays correctly when AES3/SMPTE 302M audio is detected.
+- **Problem:** The S302M / AES3 section added in v3.1.98 referenced `pidRows` instead of `pids` (the correct variable name at component scope). This caused a `ReferenceError` on every render, crashing the entire React tree — no error boundary existed, so the whole page went black.
+- **Fix:** `pidRows` → `pids` in the S302M IIFE. Error boundary added (see above) so this class of bug cannot recur.
+- **Operator impact:** Full application restored.
 
 ## v3.1.80 / web v3.1.97 — 2026-03-18
 
