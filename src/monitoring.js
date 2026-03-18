@@ -219,7 +219,10 @@ class PersistentThumbnailCapture extends EventEmitter {
       '-hide_banner', '-loglevel', 'error',
       '-fflags', '+discardcorrupt+genpts',
       '-err_detect', 'ignore_err',
-      '-skip_frame', 'nokey',
+      // -skip_frame nokey is omitted: it breaks HEVC decoder initialisation by
+      // skipping frames that carry VPS/SPS/PPS context, causing "PPS id out of
+      // range" errors and zero output.  The fps=1/N vf filter alone is sufficient
+      // to limit the output rate without corrupting the decoder state.
       '-analyzeduration', analyzeDurUs,
       '-probesize', '7000000',
       '-rtbufsize', '128M',
