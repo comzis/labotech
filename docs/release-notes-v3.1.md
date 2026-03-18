@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.77 / web 3.1.90)
+Date: 2026-03-18 (latest: v3.1.77 / web 3.1.91)
+
+## web v3.1.91 — 2026-03-18
+
+### Fix SRT URI smart-paste — BroadcastUI Input was not forwarding onPaste
+
+`BroadcastUI.jsx Input` component did not accept or forward the `onPaste` prop, causing the full `srt://` URI to land in the Host/IP field verbatim and corrupt the probe URL to `srt://srt://...`. Fixed by adding `onPaste` to the Input component signature and forwarding it to the underlying `<input>`. Also added `handleHostChange` so that pasting via keyboard shortcut or browser autofill that bypasses `onPaste` also triggers URI extraction via `onChange`. Both `onPaste` and `onChange` paths call the same `_applySrtUri()` helper.
+
+**Operator impact:** Pasting an `srt://` connection string now correctly populates host, port, passphrase, pbkeylen, and latency. Previous deployments of web 3.1.89 should be upgraded immediately — any host field containing a full `srt://` URI must be cleared and re-entered.
 
 ## web v3.1.90 — 2026-03-18
 

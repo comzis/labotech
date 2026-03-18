@@ -168,6 +168,7 @@ export const Label = ({ children, required = false }) => (
 export const Input = ({
   value,
   onChange,
+  onPaste,
   placeholder,
   mono = false,
   disabled = false,
@@ -179,6 +180,7 @@ export const Input = ({
     <input
       value={value}
       onChange={onChange}
+      onPaste={onPaste}
       placeholder={placeholder}
       disabled={disabled}
       readOnly={readOnly}
