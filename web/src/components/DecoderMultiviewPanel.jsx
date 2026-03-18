@@ -569,24 +569,22 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             padding: '2px 8px 2px 6px',
             gap: 6,
           }}>
-            {/* Status tally — 1px left accent */}
-            <div style={{ width: 1, alignSelf: 'stretch', background: `${statusColor}bb`, flexShrink: 0 }} />
-            {/* Service name */}
+            {/* Service name — Labotech cyan, monospace */}
             <span style={{
-              color: '#c8eaf0',
+              color: '#7ecfdc',
               fontFamily: "'Courier New', Courier, monospace",
-              fontSize: '10px', fontWeight: 700,
+              fontSize: '10px', fontWeight: 600,
               letterSpacing: '0.09em', textTransform: 'uppercase',
               whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
             }}>
               {svc}
             </span>
-            {/* Bitrate — dimmer cyan */}
+            {/* Bitrate — dim steel */}
             {rate.mbps != null && (
               <span style={{
-                color: '#1a7a8a',
+                color: '#2d6272',
                 fontFamily: "'Courier New', Courier, monospace",
-                fontSize: '9px', fontWeight: 600,
+                fontSize: '9px', fontWeight: 500,
                 whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
                 letterSpacing: '0.05em',
               }}>
