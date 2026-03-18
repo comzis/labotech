@@ -1514,10 +1514,12 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         {activeIds.map((id) => <option key={id} value={id}>{id}</option>)}
                       </select>
                     </Field>
-    <button onClick={startEtrForSelected} disabled={!selectedId || busy}
-                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedId && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
-                        border: `1px solid ${selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
-                        color: selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.muted,
+    <button onClick={startEtrForSelected} disabled={!selectedId || busy || selectedDecoderUrl?.startsWith('srt://')}
+                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700,
+                        cursor: selectedId && !busy && !selectedDecoderUrl?.startsWith('srt://') ? "pointer" : "not-allowed",
+                        opacity: busy || selectedDecoderUrl?.startsWith('srt://') ? 0.4 : 1,
+                        border: `1px solid ${selectedId && !busy && !selectedDecoderUrl?.startsWith('srt://') ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
+                        color: selectedId && !busy && !selectedDecoderUrl?.startsWith('srt://') ? (selectedEtrExists ? C.ok : C.info) : C.muted,
                         background: selectedEtrExists ? `${C.ok}10` : "transparent" }}>
                       {busy ? "…" : selectedEtrExists ? "● RUNNING" : "▶ Enable ETR"}
                     </button>
@@ -1528,6 +1530,14 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       ■ Stop
                     </button>
                   </div>
+                  {selectedDecoderUrl?.startsWith('srt://') && (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 8, background: `${C.warn}18`, border: `1px solid ${C.warn}55`, borderRadius: 3, padding: "7px 10px" }}>
+                      <span style={{ color: C.warn, fontSize: 13, lineHeight: 1, flexShrink: 0 }}>⚠</span>
+                      <div style={{ fontSize: 10, color: C.warn, lineHeight: 1.5 }}>
+                        <strong>SRT source — ETR290 unavailable.</strong> The thumbnail capture holds the sole SRT caller slot. To monitor ETR 290, use a <strong>UDP/RTP multicast</strong> feed from the same encoder.
+                      </div>
+                    </div>
+                  )}
                   {(enableEtrHint || (!selectedEtrExists && !busy ? "No running ETR monitor for selected decoder." : "")) && (
                     <div style={{ display: "grid", gap: 2, fontSize: 9, color: C.muted, marginTop: -2 }}>
                       {(enableEtrHint || "No running ETR monitor for selected decoder.") ? (
