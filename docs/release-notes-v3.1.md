@@ -1,6 +1,28 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.70 / web 3.1.68)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.68)
+
+## v3.1.71 — 2026-03-18
+
+### Fix: TSDuckMonitor — 4 correctness issues (Phase 3 pre-merge)
+
+**`src/tsduck-monitor.js`:**
+
+- **SRT caller mode** (`_inputPluginArgs`): replaced `--listener --local-port` with `--caller --remote-host HOST --remote-port PORT`. `--listener` made tsp open a local port waiting for an inbound connection — wrong direction for monitoring a remote encoder/mux. tsp must connect TO the source.
+- **Remove `--all-sections`** from `tables` plugin args: incompatible with `--json-line` on TSDuck 3.44-4581 (the version on gva-boro-probe). Absence detection still works — without `--all-sections`, tables are emitted on version change; complete table absence within a sample window is still detectable.
+- **SI stale detection fix** (`_checkSiIntervals`): `_siTableTimes` persisted across sample runs, so `lastSeen == null` was only ever true on the very first sample. After that, tables were never flagged absent even if they stopped appearing. Fix: `_parseOutput` now passes `windowStartMs` (the `startMs` of the current `tsp` run) through to `_checkSiIntervals`. A table is absent from the current window if `lastSeen < windowStartMs`.
+
+**`src/ts-analyser.js`:**
+
+- **health_alarm hysteresis** (`_onTsduckAlarm`): previously emitted `health_alarm` directly on every alarm event, bypassing the probe-level hysteresis. A single `pcrverify` error during stream join was immediately generating a P1/P2 alarm in the event log. Fix: `_tsduckAlarmState` map tracks consecutive alarm count per `checkId`; `health_alarm` is held until the same check fires on 2 consecutive sample windows. Counter resets when the alarm is absent for >2 sample intervals.
+
+**`test/tsduck-monitor.test.js`:**
+
+- Updated SRT test to assert `--caller`, `--remote-host`, `--remote-port` present and `--listener` absent.
+- Updated `_buildTspArgs` test to assert `--all-sections` is absent.
+- Added SI stale detection test: table seen in a previous window triggers alarm in the next window where it is absent.
+
+**Operator impact:** ETR 290 PCR/SI alarms from TSDuckMonitor are now: (1) directionally correct for SRT streams, (2) working correctly for repeated absent-table detection, (3) gated behind a 2-consecutive-window threshold so stream-join transients do not generate false alarms.
 
 ## web v3.1.68 — 2026-03-18
 
