@@ -448,16 +448,32 @@ LABOTECH supports Dolby E via an optional external decoder adapter. This path is
 Add to `.env`:
 
 ```bash
+# --- Required to activate ---
 DOLBYE_ENABLED=true
 DOLBYE_DECODER_PATH=/usr/local/bin/dolbye-decoder
-# Preferred (exact tokenization):
-DOLBYE_DECODER_ARGS_JSON=["--input","{url}","--json"]
-# Fallback template if *_JSON is empty:
-# DOLBYE_DECODER_ARGS=--input {url} --json
-DOLBYE_DECODER_TIMEOUT_MS=4000
 
-# Optional strict policy:
-DOLBYE_REQUIRED_WHEN_DETECTED=true
+# --- Decoder arguments (choose one) ---
+# Preferred — exact tokenisation, no shell-splitting ambiguity:
+DOLBYE_DECODER_ARGS_JSON=["--input","{url}","--json"]
+# Fallback template (used when *_JSON is empty):
+# DOLBYE_DECODER_ARGS=--input {url} --json
+
+# --- Timing ---
+DOLBYE_DECODER_TIMEOUT_MS=4000          # default 4 000 ms
+
+# --- Health scoring (optional overrides) ---
+# Penalty applied when Dolby E is detected but external decoder is unavailable
+# (only active when DOLBYE_REQUIRED_WHEN_DETECTED=true).
+TS_HEALTH_DOLBYE_MISSING_PENALTY=10     # default 10 pts
+# Penalty applied when Dolby E is detected but decoder returns decoded=false.
+TS_HEALTH_DOLBYE_DECODE_FAIL_PENALTY=18 # default 18 pts
+
+# --- Strict mode ---
+# When true: if Dolby E is detected but the decoder binary is unavailable,
+# a health penalty is applied (uses TS_HEALTH_DOLBYE_MISSING_PENALTY).
+# When false (default): the missing-decoder state is silent; only a failed
+# decode (decoder present but decoded=false) triggers a penalty.
+DOLBYE_REQUIRED_WHEN_DETECTED=false
 ```
 
 Decoder output (recommended JSON shape):
@@ -471,6 +487,24 @@ Decoder output (recommended JSON shape):
   "ok": true
 }
 ```
+
+All fields are optional. The adapter also accepts plain text output — it looks for `/dolby\s*e/i` to infer `detected` and `/decoded|success|ok/i` to infer `decoded`.
+
+#### Health scoring logic
+
+```
+Dolby E enabled AND detected in stream:
+  DOLBYE_REQUIRED_WHEN_DETECTED=true AND decoder unavailable
+    → penalty: TS_HEALTH_DOLBYE_MISSING_PENALTY (default −10 pts)
+  Decoder available but decoded=false
+    → penalty: TS_HEALTH_DOLBYE_DECODE_FAIL_PENALTY (default −18 pts)
+  Decoded successfully
+    → bonus: +2 pts
+
+Dolby E disabled OR not detected → no scoring impact.
+```
+
+Penalties accumulate against the stream health score (0–100). Scores below 70 → warning; below 50 → critical.
 
 #### Install/permission checks
 
@@ -490,7 +524,7 @@ ldd /usr/local/bin/dolbye-decoder
 1. Restart service:
 
 ```bash
-sudo systemctl restart labotech
+docker compose restart   # or: sudo systemctl restart labotech
 ```
 
 2. Run an analyser session on known Dolby E content.
@@ -501,12 +535,19 @@ sudo systemctl restart labotech
    - `dvb.probeDiagnostics.dolbyE` (`enabled`, `configured`, `ok`, `error`)
 4. Confirm health impact appears when Dolby E is detected but not decoded:
    - `dvb.health.reasons` should include Dolby E decode/missing-decoder reason.
+5. To verify tooling preflight sees the adapter:
+   - Check `dvb.probeDiagnostics.dolbyE.enabled === true` and `configured === true`.
 
 #### Failure semantics
 
-- Adapter disabled/unset path: no crash; Dolby E state marked unavailable.
-- Decoder command timeout/non-zero exit: no crash; error captured under `dvb.dolbyE.error`.
-- Strict mode (`DOLBYE_REQUIRED_WHEN_DETECTED=true`): health score penalized when Dolby E is present but external decode path is not available.
+| Condition | Result |
+|---|---|
+| `DOLBYE_ENABLED=false` or unset | No probe, no scoring impact, `dvb.dolbyE.available=false` |
+| `DOLBYE_DECODER_PATH` missing/not executable | `configured=false`, probe skipped, no crash |
+| Decoder command timeout or non-zero exit | `ok=false`, error captured in `dvb.dolbyE.error`, no crash |
+| Decoder returns empty output | `ok=false`, `error: "Dolby E decoder returned empty output"` |
+| Strict mode + decoder unavailable | Health penalty (−10 default) when Dolby E is detected |
+| Decode succeeds | `detected=true`, `decoded=true`, +2 health bonus |
 
 ---
 
