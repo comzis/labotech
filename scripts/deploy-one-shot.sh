@@ -294,6 +294,20 @@ health_assertions() {
   echo "${json}" | jq '{status, release, tooling: {status: .tooling.status, tsanalyze: .tooling.tools.tsanalyze, nicCapture: .tooling.nicCapture}}'
 }
 
+show_deployed_version() {
+  local be_ver web_ver
+  be_ver="$(${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
+    'node -e "process.stdout.write(require(\"/app/package.json\").version)"' 2>/dev/null || echo '?')"
+  web_ver="$(${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
+    'node -e "process.stdout.write(require(\"/app/web/package.json\").version)"' 2>/dev/null || echo '?')"
+  echo ""
+  echo "  ┌──────────────────────────────────────┐"
+  echo "  │  Deployed versions                   │"
+  printf "  │  Backend : %-26s│\n" "${be_ver}"
+  printf "  │  Web     : %-26s│\n" "${web_ver}"
+  echo "  └──────────────────────────────────────┘"
+}
+
 main() {
   run_stage_or_die "require commands" require_cmds || return 1
   log "compose command: ${COMPOSE_BIN}"
@@ -320,6 +334,7 @@ main() {
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "health assertions (tsanalyze required)" health_assertions || return 1
   run_stage_warn "prune dangling images and build cache" docker image prune -f
+  show_deployed_version
 
   echo
   echo "[deploy] summary: PASS=${PASS_COUNT} FAIL=${FAIL_COUNT}"
