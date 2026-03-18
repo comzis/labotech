@@ -147,6 +147,40 @@ function codecTypeScore(t) {
   return 0; // "unknown" or anything else
 }
 
+// Vertical audio VU bar for Confidence Monitor (3 px wide, bottom-up fill, −60→0 dBFS)
+function DecoderVuBar({ rmsDb, peakDb }) {
+  const active = rmsDb != null && Number.isFinite(rmsDb);
+  const clampRms = active ? Math.max(-60, Math.min(0, rmsDb)) : -60;
+  const rmsH = active ? ((clampRms + 60) / 60) * 100 : 0;
+  const peakH =
+    peakDb != null && Number.isFinite(peakDb)
+      ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
+      : null;
+  const rmsColor = !active
+    ? "#0c0c0c"
+    : rmsDb > -9
+    ? "#cc1020"
+    : rmsDb > -18
+    ? "#b87800"
+    : "#007a28";
+  const peakColor =
+    (peakDb ?? -60) > -9 ? "#cc1020" : (peakDb ?? -60) > -18 ? "#b87800" : "#007a28";
+  return (
+    <div style={{ width: 3, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, position: "relative", background: "#060606", overflow: "hidden" }}>
+        {/* −18 dBFS tick (50% mark) */}
+        <div style={{ position: "absolute", bottom: "50%", left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.07)" }} />
+        {/* −9 dBFS tick (85% mark) */}
+        <div style={{ position: "absolute", bottom: "85%", left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.07)" }} />
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: "height 0.1s linear" }} />
+        {peakH != null && active && (
+          <div style={{ position: "absolute", bottom: `${peakH}%`, left: 0, right: 0, height: 1, background: peakColor }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function preferredPidRow(a, b) {
   // Prefer the more specific codec type — ffprobe over tsduck/fallback.
   const ctA = codecTypeScore(a.codecType);
@@ -1155,20 +1189,58 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           <PanelBox>
             <SectionHead icon="🎬" title="Confidence Monitor" />
             <div style={{ padding: 8 }}>
-              {selectedResult?.thumbnailUrl ? (
-                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
-                  <img
-                    src={selectedResult.thumbnailUrl}
-                    alt="Confidence monitor"
-                    style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                    onError={(e) => { e.target.style.display = "none"; }}
-                  />
-                </div>
-              ) : (
-                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
-                  <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
-                </div>
-              )}
+              {/* Thumbnail + vertical audio meters side by side */}
+              {(() => {
+                const channels = selectedResult?.audioLevels?.channels || [];
+                // Count real audio ES (null-PID filtered)
+                const allAudioEs = (selectedResult?.programs || [])
+                  .flatMap((p) => (p.streams || []).filter((s) => s.codecType === "audio"));
+                const hasRealPidAudio = allAudioEs.some((s) => s.pid != null);
+                const audioEsCount = hasRealPidAudio
+                  ? allAudioEs.filter((s) => s.pid != null).length
+                  : allAudioEs.length;
+                const measuredPairs = Math.ceil(channels.length / 2);
+                const pairCount = Math.max(measuredPairs, audioEsCount, 0);
+                const hasMeter = pairCount > 0;
+                // audio panel: 4px per bar + 1px gap, 2 bars per pair + 1px gap between pairs
+                const panelW = hasMeter ? pairCount * (3 + 3 + 2) + (pairCount - 1) * 2 + 4 : 0;
+                return (
+                  <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                    {/* Thumbnail — flex: 1 so it takes remaining width */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {selectedResult?.thumbnailUrl ? (
+                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
+                          <img
+                            src={selectedResult.thumbnailUrl}
+                            alt="Confidence monitor"
+                            style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                            onError={(e) => { e.target.style.display = "none"; }}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
+                          <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                        </div>
+                      )}
+                    </div>
+                    {/* Vertical audio meters */}
+                    {hasMeter && (
+                      <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
+                        {Array.from({ length: pairCount }, (_, i) => {
+                          const lCh = channels[i * 2];
+                          const rCh = channels[i * 2 + 1];
+                          return (
+                            <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                              <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
+                              <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {selectedResult?.programs?.[0]?.serviceName && (
                 <div style={{ fontSize: 9, color: C.cyan, padding: "4px 0 0", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   {selectedResult.programs[0].serviceName}
