@@ -15,7 +15,9 @@ let _snapshot = {
     tsanalyze: { available: false, version: null, error: 'pending' },
     tshark: { available: false, version: null, error: 'pending' },
     tcpdump: { available: false, version: null, error: 'pending' },
+    srtLiveTransmit: { available: false, version: null, error: 'pending' },
   },
+  srtProtocol: { available: null, reason: 'preflight pending' },
   nicCapture: {
     required: true,
     state: 'pending',
@@ -132,14 +134,34 @@ async function _checkNicCapture(toolName, nicName) {
   };
 }
 
+async function _checkSrtProtocol() {
+  const res = await _runCommand('ffmpeg', ['-protocols']);
+  if (!res.ok && res.code !== 1) {
+    // ffmpeg -protocols exits 1 on older builds but still writes valid output
+    if (!res.stdout && !res.stderr) {
+      return { available: false, reason: 'ffmpeg not found or produced no output' };
+    }
+  }
+  const output = (res.stdout + res.stderr).toLowerCase();
+  if (output.includes('\nsrt') || output.includes(' srt') || /\bsrt\b/.test(output)) {
+    return { available: true, reason: 'libsrt compiled in' };
+  }
+  return {
+    available: false,
+    reason: 'srt protocol not listed — ffmpeg may need --enable-libsrt rebuild or ffmpeg-srt PPA',
+  };
+}
+
 async function refreshToolingPreflight() {
   const nicName = _readNicName();
-  const [ffmpeg, ffprobe, tsanalyze, tshark, tcpdump] = await Promise.all([
+  const [ffmpeg, ffprobe, tsanalyze, tshark, tcpdump, srtLiveTransmit, srtProtocol] = await Promise.all([
     _checkTool('ffmpeg', ['-version']),
     _checkTool('ffprobe', ['-version']),
     _checkTool('tsanalyze', ['--version']),
     _checkTool('tshark', ['-v']),
     _checkTool('tcpdump', ['--version']),
+    _checkTool('srt-live-transmit', ['--help']),
+    _checkSrtProtocol(),
   ]);
 
   const preferredCaptureTool = tshark.available ? 'tshark' : (tcpdump.available ? 'tcpdump' : null);
@@ -154,10 +176,15 @@ async function refreshToolingPreflight() {
     status,
     checkedAt: Date.now(),
     nicName,
-    tools: { ffmpeg, ffprobe, tsanalyze, tshark, tcpdump },
+    tools: { ffmpeg, ffprobe, tsanalyze, tshark, tcpdump, srtLiveTransmit },
+    srtProtocol,
     nicCapture,
   };
   return _snapshot;
+}
+
+function isSltAvailable() {
+  return _snapshot.tools.srtLiveTransmit.available === true;
 }
 
 function getToolingPreflightSnapshot() {
@@ -177,4 +204,5 @@ module.exports = {
   refreshToolingPreflight,
   getToolingPreflightSnapshot,
   startToolingPreflightAutoRefresh,
+  isSltAvailable,
 };

@@ -10,6 +10,7 @@ const {
   parseHaivisionStatsLine,
   classifyHaivisionLink,
 } = require('./haivision-srt');
+const { isSltAvailable } = require('./tooling-preflight');
 
 // ─── Bitrate normalisation ───────────────────────────────────────────────────
 // Accepts plain numbers and appends the correct unit so FFmpeg never sees
@@ -416,15 +417,43 @@ class SRTEncoder extends EventEmitter {
   }
 
   // ─── Lifecycle ──────────────────────────────────────────────────────────────
+
+  // Returns true if srt-live-transmit should be used for this stream.
+  // SLT handles raw byte relay — it cannot strip RTP headers, so RTP inputs
+  // must go through FFmpeg which properly demuxes RTP → MPEG-TS before SRT output.
+  _shouldUseSlt() {
+    const effectiveMode = this.outputMode || (this.host ? 'srt' : 'null');
+    const inputType = this.detectInputType(this.input);
+    return (
+      this.videoCodec === 'copy' &&
+      effectiveMode === 'srt' &&
+      (inputType === 'udp' || inputType === 'srt') &&
+      isSltAvailable()
+    );
+  }
+
   start() {
     if (this.isRunning) throw new Error(`Encoder ${this.id} is already running`);
-
-    const args = this.buildFFmpegArgs();
-    this.process = spawn('ffmpeg', args);
     this.isRunning = true;
     this.startTime = Date.now();
     this._stderrBuffer = [];
-    this.srtLink = { status: 'starting', reason: 'awaiting first haivision sample', updatedAt: new Date().toISOString() };
+    this.srtLink = { status: 'starting', reason: 'awaiting first sample', updatedAt: new Date().toISOString() };
+
+    if (this._shouldUseSlt()) {
+      this.engine = 'srt-live-transmit';
+      this._startSlt();
+    } else {
+      this.engine = 'ffmpeg';
+      this._startFfmpeg();
+    }
+
+    this.emit('started', { id: this.id, input: this.input, engine: this.engine });
+    return this;
+  }
+
+  _startFfmpeg() {
+    const args = this.buildFFmpegArgs();
+    this.process = spawn('ffmpeg', args);
 
     this.process.stderr.on('data', (data) => {
       data.toString().split('\n').forEach(line => {
@@ -437,9 +466,7 @@ class SRTEncoder extends EventEmitter {
     this.process.on('exit', (code, signal) => {
       this.isRunning = false;
       this.srtLink = { status: 'stopped', reason: 'process exited', updatedAt: new Date().toISOString() };
-      if (typeof this._stopInputBitrateWatcher === 'function') {
-        this._stopInputBitrateWatcher();
-      }
+      if (typeof this._stopInputBitrateWatcher === 'function') this._stopInputBitrateWatcher();
       this.process = null;
       // FFmpeg handles SIGTERM internally and exits with code 255 rather than
       // propagating the signal — treat 255 as a clean stop when we requested it.
@@ -458,12 +485,99 @@ class SRTEncoder extends EventEmitter {
       this.emit('error', err);
     });
 
-    this.emit('started', { id: this.id, input: this.input });
     const inputType = this.detectInputType(this.input);
     if ((inputType === 'udp' || inputType === 'rtp' || inputType === 'srt') && !this.inputBitrate) {
       this._startInputBitrateWatcher();
     }
-    return this;
+  }
+
+  _startSlt() {
+    // srt-live-transmit -s <stats_ms> -pf json <input_uri> <output_srt_uri>
+    // -s 1000 = emit stats every 1 second to stdout
+    // -pf json = machine-readable JSON format
+    const args = ['-s', '1000', '-pf', 'json', this.input, this.buildSRTUrl()];
+    this.process = spawn('srt-live-transmit', args);
+
+    // SLT writes stats JSON to stdout
+    this.process.stdout.on('data', (data) => {
+      data.toString().split('\n').forEach(line => {
+        if (!line.trim()) return;
+        this._parseSltStats(line);
+      });
+    });
+
+    // SLT writes errors/warnings to stderr
+    this.process.stderr.on('data', (data) => {
+      data.toString().split('\n').forEach(line => {
+        if (!line.trim()) return;
+        this._stderrBuffer = [...this._stderrBuffer.slice(-9), line];
+      });
+    });
+
+    this.process.on('exit', (code, signal) => {
+      this.isRunning = false;
+      this.srtLink = { status: 'stopped', reason: 'process exited', updatedAt: new Date().toISOString() };
+      this.process = null;
+      // srt-live-transmit exits 0 on clean SIGTERM
+      if (signal === 'SIGTERM' || code === 0 || this._stopping) {
+        this._stopping = false;
+        this.emit('stopped', { id: this.id, code, signal });
+      } else {
+        this._stopping = false;
+        const context = (this._stderrBuffer || []).slice(-5).join(' | ');
+        this.emit('error', new Error(`srt-live-transmit exited with code ${code}: ${context}`));
+      }
+    });
+
+    this.process.on('error', (err) => {
+      this.isRunning = false;
+      this.emit('error', err);
+    });
+  }
+
+  // Parse JSON stats lines emitted by srt-live-transmit -pf json -s 1000
+  _parseSltStats(line) {
+    let obj;
+    try { obj = JSON.parse(line.trim()); } catch (_) { return; }
+    if (!obj || typeof obj !== 'object') return;
+
+    const send = obj.send || {};
+    const link = obj.link || {};
+
+    const srt = {};
+    const rateMbps = Number(send.mbitRate);
+    const rttMs    = Number(link.rtt);
+    const bwMbps   = Number(link.bandwidth);
+    const pktTotal   = Number(send.packets);
+    const pktLoss    = Number(send.packetsLost);
+    const pktRetrans = Number(send.packetsRetransmitted);
+
+    if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
+    if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
+    if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
+    if (Number.isFinite(pktTotal))   srt.pktTotal   = pktTotal;
+    if (Number.isFinite(pktLoss))    srt.pktLoss    = pktLoss;
+    if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+    if (pktTotal > 0 && Number.isFinite(pktLoss)) {
+      srt.lossPercent = parseFloat(((pktLoss / pktTotal) * 100).toFixed(2));
+    }
+
+    if (Object.keys(srt).length === 0) return;
+
+    this.srtStats = srt;
+    const linkStatus = classifyHaivisionLink(srt);
+    this.srtLink = { status: linkStatus.status, reason: linkStatus.reason, updatedAt: new Date().toISOString() };
+    this.emit('srtStats', { ...srt, link: this.srtLink });
+
+    if (srt.rateMbps > 0) {
+      const kbps = Math.round(srt.rateMbps * 1000);
+      const noDirectMeasure = !this.inputBitrateSource || this.inputBitrateSource === 'srt-stats';
+      if (noDirectMeasure && kbps !== this.inputBitrate) {
+        this.inputBitrate = kbps;
+        this.inputBitrateSource = 'srt-stats';
+        this.emit('stats', { inputBitrate: this.inputBitrate });
+      }
+    }
   }
 
   stop() {
@@ -706,6 +820,7 @@ class SRTEncoder extends EventEmitter {
     return {
       id: this.id,
       input: this.input,
+      engine: this.engine || 'ffmpeg',
       outputMode: this.outputMode || (this.host ? 'srt' : 'null'),
       host: this.host,
       port: this.port,
