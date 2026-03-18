@@ -78,6 +78,9 @@ ip link set $MULTICAST_NIC multicast on
 ip addr add 169.254.0.2/16 dev $MULTICAST_NIC 2>/dev/null || true
 ip route add 239.0.0.0/8 dev $MULTICAST_NIC 2>/dev/null || true
 ip route add $MULTICAST_SUBNET dev $MULTICAST_NIC 2>/dev/null || true
+# Labotech IAT sniffer — restore tcpdump capability after apt upgrades
+TCPDUMP_BIN="\$(command -v tcpdump || true)"
+[[ -n "\$TCPDUMP_BIN" ]] && setcap cap_net_raw,cap_net_admin=eip "\$TCPDUMP_BIN" || true
 EOF
 fi
 
