@@ -588,16 +588,18 @@ class TSAnalyser extends EventEmitter {
       const inputUrl = this._withLiveInputHints(this.url);
       let args;
       if (mergeInputs > 1) {
-        // amerge: [0:a:0][0:a:1]...[0:a:N-1]amerge=inputs=N[aout]
+        // amerge all audio ESes into one N-channel stream, then astats.
+        // astats MUST be inside filter_complex — mixing -filter_complex output
+        // with a separate -af causes FFmpeg to reject the graph and produce no
+        // channel stats, so we embed astats at the end of the chain.
         const amergeInputs = Array.from({ length: mergeInputs }, (_, i) => `[0:a:${i}]`).join('');
-        const filterComplex = `${amergeInputs}amerge=inputs=${mergeInputs}[aout]`;
+        const filterComplex = `${amergeInputs}amerge=inputs=${mergeInputs},astats=reset=1[aout]`;
         args = [
           '-hide_banner', '-nostats', '-loglevel', 'info',
           '-t', '2.0',
           '-i', inputUrl,
           '-filter_complex', filterComplex,
           '-map', '[aout]',
-          '-af', 'astats=reset=1',
           '-f', 'null', '-',
         ];
       } else {

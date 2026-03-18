@@ -1442,9 +1442,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             // Keep audio rows stable across probe cycles to avoid perceived "rotation".
             const audioStreams = allStreams
               .filter((s) => s.codecType === "audio")
+              // Ghost suppression: ffprobe emits each ES twice — once in the
+              // program list (with PID) and once in the global stream array
+              // (without PID). If any audio stream has a real PID, suppress
+              // all null-PID audio rows — they are duplicates.
+              .filter((() => {
+                const hasRealPid = allStreams.some((s) => s.codecType === "audio" && s.pid != null);
+                return hasRealPid ? (s) => s.pid != null : () => true;
+              })())
               .slice()
               .sort((a, b) => {
-                // Prefer streams with a valid PID; null PID sorts last (not first).
                 const pidA = a?.pid != null && Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
                 const pidB = b?.pid != null && Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
                 if (pidA !== pidB) return pidA - pidB;
