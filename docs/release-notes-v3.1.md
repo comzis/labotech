@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.91 / web 3.1.112)
+Date: 2026-03-18 (latest: v3.1.91 / web 3.1.113)
+
+## web 3.1.113 — 2026-03-18
+
+### Fix: SRT relay log noise suppressed — mid-GOP H.264 warnings removed
+
+- **Problem:** `docker compose logs` was flooded with `non-existing PPS 0 referenced` / `decode_slice_header error` / `mmco: unref short failure` warnings from the relay's ffmpeg process. These appear when ffmpeg joins a live H.264 SRT stream mid-GOP before seeing the SPS/PPS headers. With `-c copy` the stream is not decoded — the warnings are cosmetic only and stop after the first keyframe.
+- **Fix:** Changed relay ffmpeg from `-loglevel warning` to `-loglevel error`. Genuine SRT connection failures still surface; mid-GOP parse noise is suppressed.
+- **Operator impact:** Logs are clean. Relay is working correctly — the previous flood of warnings was not indicative of a fault.
 
 ## v3.1.91 — 2026-03-18
 
