@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.75 / web 3.1.85)
+Date: 2026-03-18 (latest: v3.1.76 / web 3.1.86)
+
+## v3.1.76 / web v3.1.86 — 2026-03-18
+
+### SRT analyser: bind ffprobe to eno1 + correct Capture NIC hint
+
+`_withLiveInputHints()` in `ts-analyser.js` now appends `adapter=10.67.18.29` to all `srt://` probe URLs — same fix already applied to the encapsulator. Without this, ffprobe routed SRT connections via eno2 (no IP) causing code 1 exits. Decoder Provisioning form placeholder updated to show `eno1 (SRT / management)` when SRT mode is selected instead of the misleading `eno2 (recommended)`.
+
+**Operator impact:** SRT decoder provisioning now connects correctly via eno1 without any manual NIC configuration.
 
 ## v3.1.75 / web v3.1.85 — 2026-03-18
 
