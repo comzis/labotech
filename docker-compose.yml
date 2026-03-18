@@ -18,7 +18,6 @@ services:
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
-      - /usr/bin/srt-live-transmit:/usr/local/bin/srt-live-transmit:ro
     env_file:
       - docker-env.txt
     restart: unless-stopped
@@ -53,7 +52,6 @@ services:
     volumes:
       - ./config:/app/config
       - ./logs:/app/logs
-      - /usr/bin/srt-live-transmit:/usr/local/bin/srt-live-transmit:ro
     env_file:
       - docker-env.txt
     environment:

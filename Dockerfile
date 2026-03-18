@@ -1,4 +1,19 @@
-# Stage 1: Build the frontend
+# Stage 1: Build srt-live-transmit from source inside Debian Bookworm
+# so the binary links against the same libstdc++ as the runtime container.
+FROM debian:bookworm-slim AS srt-builder
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential cmake git libssl-dev pkg-config ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+RUN git clone --depth 1 --branch v1.5.3 https://github.com/Haivision/srt.git /srt
+RUN cmake -S /srt -B /srt/build \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DENABLE_SHARED=OFF \
+      -DENABLE_APPS=ON \
+      -DENABLE_ENCRYPTION=ON && \
+    cmake --build /srt/build --target srt-live-transmit -j$(nproc) && \
+    strip /srt/build/srt-live-transmit
+
+# Stage 2: Build the frontend
 FROM node:20-slim AS builder
 WORKDIR /app
 COPY package*.json ./
@@ -10,7 +25,7 @@ ARG LABOTECH_RELEASE
 ENV LABOTECH_RELEASE=$LABOTECH_RELEASE
 RUN cd web && npm run build
 
-# Stage 2: Production runtime
+# Stage 3: Production runtime
 FROM node:20-slim
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
@@ -33,13 +48,15 @@ RUN apt-get update && \
     rm -f /tmp/tsduck.deb && \
     tsanalyze --version >/dev/null 2>&1 && \
     rm -rf /var/lib/apt/lists/*
+# Copy srt-live-transmit built against Debian Bookworm libstdc++
+COPY --from=srt-builder /srt/build/srt-live-transmit /usr/local/bin/srt-live-transmit
 WORKDIR /app
 COPY package*.json ./
 RUN npm install --omit=dev
 COPY src/ ./src/
 COPY routes/ ./routes/
 COPY config/ ./config/
-# Grab the compiled frontend from Stage 1
+# Grab the compiled frontend from Stage 2
 COPY --from=builder /app/web/dist ./web/dist
 RUN mkdir -p /app/logs
 EXPOSE 4000
