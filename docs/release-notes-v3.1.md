@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.75)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.76)
+
+## web v3.1.76 — 2026-03-18
+
+### Fix: UMD bitrate shows "Mb" unit
+
+Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `8.2`.
+
+
 
 ## web v3.1.75 — 2026-03-18
 
