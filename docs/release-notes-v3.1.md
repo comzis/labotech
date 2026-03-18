@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.76)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.77)
+
+## web v3.1.77 — 2026-03-18
+
+### Fix: bitrate units corrected to Mb/s throughout
+
+`Mbps` and bare `Mb` replaced with `Mb/s` — the correct SI-derived notation used in EBU/DVB/SMPTE documentation. Affects: UMD overlay (`DecoderMultiviewPanel`), TS Rate stat cells (`formatMbps` in `transportBitrate.js`).
+
+
 
 ## web v3.1.76 — 2026-03-18
 
