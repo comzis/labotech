@@ -10,6 +10,7 @@ const TSDuckMonitor = require('./tsduck-monitor');
 const DolbyEAdapter = require('./dolbye-adapter');
 const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
 const { isSltAvailable } = require('./tooling-preflight');
+const SRTRelay = require('./srt-relay');
 let _multicastConfig = null;
 
 // Module-level semaphore: cap simultaneous heavy probes to prevent thundering
@@ -119,6 +120,8 @@ class TSAnalyser extends EventEmitter {
     // persistent low-rate CC errors that never breach the per-cycle floor.
     this._ccTotal = 0;
     this._ccHeavyCount = 0; // heavy CC probe cycles completed
+    this._relay        = null;        // SRTRelay instance (srt:// sources only)
+    this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
   }
 
   probe(options = {}) {
@@ -176,24 +179,24 @@ class TSAnalyser extends EventEmitter {
 
       (async () => {
         try {
-          const primaryUrl = this._withLiveInputHints(this.url);
+          const primaryUrl = this._withLiveInputHints(this._effectiveUrl);
           let raw = null;
           try {
             raw = await runFfprobeJson(primaryUrl);
           } catch (primaryErr) {
             if (this._isLiveInputHintMemoryError(primaryErr)) {
               // Host cannot allocate hinted UDP buffers; retry without hints.
-              raw = await runFfprobeJson(this.url);
+              raw = await runFfprobeJson(this._effectiveUrl);
             } else {
               // RTP multicast feeds often need UDP/mpegts probing for one-shot ffprobe.
-              if (!this._isRtpUrl(this.url)) throw primaryErr;
-              const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
+              if (!this._isRtpUrl(this._effectiveUrl)) throw primaryErr;
+              const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this._effectiveUrl) || '');
               if (!udpUrl) throw primaryErr;
               try {
                 raw = await runFfprobeJson(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
               } catch (fallbackErr) {
                 if (this._isLiveInputHintMemoryError(fallbackErr)) {
-                  const plainUdp = this._rtpToUdpUrl(this.url) || '';
+                  const plainUdp = this._rtpToUdpUrl(this._effectiveUrl) || '';
                   raw = await runFfprobeJson(plainUdp, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
                 } else {
                   throw new Error(`${primaryErr.message} | RTP UDP fallback failed: ${fallbackErr.message}`);
@@ -214,16 +217,10 @@ class TSAnalyser extends EventEmitter {
           // multiple decoders are started simultaneously.
           if (runHeavyProbe) await _acquireHeavyProbeSlot();
 
-          // SRT single-connection serialisation:
-          // Many SRT sources (contribution encoders, CDN ingest) accept only ONE
-          // simultaneous caller.  Promise.all launches all probes concurrently —
-          // only the first to connect gets TS data; the rest get rejected, producing
-          // "0 PIDs / 0 services" while the bitrate probe (which won the slot)
-          // reports full bitrate.  For SRT we run probes sequentially so each one
-          // gets the sole connection slot in turn.  The thumbnail's PersistentCapture
-          // (if active) is suspended for the full sequential budget before probes start.
-          const isSrt = runHeavyProbe && this.url && this.url.startsWith('srt://');
-          const isSrtHeavy = isSrt && this._persistentThumb;
+          // When a relay is active, all probes read from local UDP — no SRT slot
+          // contention. Only suspend/sequential-mode when running direct SRT (no relay).
+          const isSrtDirect = runHeavyProbe && this.url && this.url.startsWith('srt://') && !this._relay;
+          const isSrtHeavy  = isSrtDirect && this._persistentThumb;
           if (isSrtHeavy) {
             const srtLatMs = parseSrtLatency(this.url);
             // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
@@ -237,11 +234,11 @@ class TSAnalyser extends EventEmitter {
           let heavyProbeResults;
           // Small settle between sequential SRT probes: gives the SRT source time
           // to reset its accept state after a caller disconnects before the next
-          // caller connects.  Rapid connect/disconnect sequences can cause some
-          // sources to stall or drop packets on the subsequent connection.
+          // caller connects.  When relay is active, probes use UDP — no settle needed,
+          // but the sequential path is still used for isSrtDirect for backward compat.
           const _srtSettle = () => new Promise(r => setTimeout(r, 1000));
           try {
-            if (isSrt) {
+            if (isSrtDirect) {
               // Sequential: one SRT connection at a time.
               const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
               await _srtSettle();
@@ -475,7 +472,7 @@ class TSAnalyser extends EventEmitter {
           if (runThumbnailCapture) {
             // One-shot probe: capture synchronously so the caller gets a fresh frame.
             try {
-              await captureThumbnail(this.id, this.url);
+              await captureThumbnail(this.id, this._effectiveUrl);
               result.thumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
               this._lastThumbnailUrl = result.thumbnailUrl;
             } catch (err) {
@@ -606,7 +603,7 @@ class TSAnalyser extends EventEmitter {
 
       // Build args: if >1 audio ES, amerge all streams into one multi-channel
       // stream so astats sees all channels in a single pass.
-      const inputUrl = this._withLiveInputHints(this.url);
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
       let args;
       if (mergeInputs > 1) {
         // amerge all audio ESes into one N-channel stream, then astats.
@@ -716,7 +713,7 @@ class TSAnalyser extends EventEmitter {
 
   _probeTransportBitrateBps() {
     return new Promise((resolve) => {
-      const inputUrl = this._withLiveInputHints(this.url);
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
       // SRT streams: use verbose log level so libsrt stats appear in stderr.
       // For all other protocols use error-only to keep stderr clean.
       const isSrt = String(inputUrl).startsWith('srt://');
@@ -890,7 +887,7 @@ class TSAnalyser extends EventEmitter {
 
   _probeTimestampDiscontinuities() {
     return new Promise((resolve) => {
-      const inputUrl = this._withLiveInputHints(this.url);
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
       const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -964,7 +961,7 @@ class TSAnalyser extends EventEmitter {
 
   _probeContinuityCounterErrors() {
     return new Promise((resolve) => {
-      const inputUrl = this._withLiveInputHints(this.url);
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
       const args = [
         '-hide_banner',
         '-loglevel', 'warning',
@@ -1030,7 +1027,7 @@ class TSAnalyser extends EventEmitter {
   }
 
   _probeDolbyE() {
-    return DolbyEAdapter.probe(this.url)
+    return DolbyEAdapter.probe(this._effectiveUrl)
       .catch((err) => ({
         available: DolbyEAdapter.isConfigured(),
         ok: false,
@@ -1047,7 +1044,7 @@ class TSAnalyser extends EventEmitter {
   // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format.
   _probeSrtLinkStats() {
     return new Promise((resolve) => {
-      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://') || this._relay) return resolve(null);
       const latencyMs = parseSrtLatency(this.url);
       const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
       const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
@@ -1168,7 +1165,7 @@ class TSAnalyser extends EventEmitter {
     // '--input-timeout' is not supported on all TSDuck versions installed in
     // production.  The probe is already wrapped in a hard kill-timer, so we
     // rely on that rather than a TSDuck-level flag to bound execution time.
-    return ['--json', this.url];
+    return ['--json', this._effectiveUrl];
   }
 
   _mapStream(s) {
@@ -1863,11 +1860,11 @@ class TSAnalyser extends EventEmitter {
       });
     });
 
-    const primaryUrl = this._withLiveInputHints(this.url);
+    const primaryUrl = this._withLiveInputHints(this._effectiveUrl);
     return tryFfprobeStreams(primaryUrl).then((rows) => {
       if (rows.length > 0) return this._buildPidProbeResult(rows);
-      if (this._isRtpUrl(this.url)) {
-        const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this.url) || '');
+      if (this._isRtpUrl(this._effectiveUrl)) {
+        const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this._effectiveUrl) || '');
         if (udpUrl) {
           return tryFfprobeStreams(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts'])
             .then((udpRows) => this._buildPidProbeResult(udpRows));
@@ -2733,7 +2730,7 @@ class TSAnalyser extends EventEmitter {
       const tsduckIntervalMs = parseInt(process.env.TSDUCK_MONITOR_INTERVAL_MS, 10) || 10000;
       this._tsduckMonitor = new TSDuckMonitor({
         id: `${this.id}-tsduck`,
-        url:  this.url,
+        url:  this._effectiveUrl,
         intervalMs:     tsduckIntervalMs,
         sampleWindowMs: Math.floor(tsduckIntervalMs * 0.5),
       });
@@ -2745,6 +2742,22 @@ class TSAnalyser extends EventEmitter {
         this.emit('info', { message: `TSDuckMonitor: ${err.message}` });
       });
       this._tsduckMonitor.start();
+    }
+
+    // ── SRT Relay ──────────────────────────────────────────────────────────
+    // For srt:// sources: launch one long-lived relay that holds the single
+    // SRT caller slot and re-outputs as local UDP. All probes and the
+    // thumbnail then read from the unlimited-reader UDP copy.
+    if (this.url && this.url.startsWith('srt://') && !this._relay) {
+      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay` });
+      this._effectiveUrl = this._relay.localUrl;
+      this._relay.on('error', (err) => {
+        this.emit('info', { message: `SRT relay error: ${err.message}` });
+      });
+      this._relay.on('ready', ({ localUrl }) => {
+        this.emit('info', { message: `SRT relay ready → ${localUrl}` });
+      });
+      this._relay.start();
     }
 
     // ── Thumbnail capture ──────────────────────────────────────────────────────
@@ -2762,12 +2775,13 @@ class TSAnalyser extends EventEmitter {
     if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
     if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
 
-    if (this.url && this.url.startsWith('srt://')) {
+    if (this._relay || (this.url && this.url.startsWith('srt://'))) {
       // SRT: persistent long-lived ffmpeg avoids reconnect on every frame
       // (reconnect costs a full SRT latency window each time).
+      // When relay is active, inputUrl is the local UDP copy — same benefit applies.
       this._persistentThumb = new PersistentThumbnailCapture({
         streamId: this.id,
-        inputUrl: this.url,
+        inputUrl: this._effectiveUrl,
         intervalSec: thumbIntervalSec,
       });
       this._persistentThumb.on('frame', () => {
@@ -2790,7 +2804,7 @@ class TSAnalyser extends EventEmitter {
         this._thumbnailTimer = null;
         if (!this.isRunning) return;
         try {
-          await captureThumbnail(this.id, this.url);
+          await captureThumbnail(this.id, this._effectiveUrl);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
         } catch (err) {
           console.error(`[thumb:${this.id}] capture failed: ${err && err.message}`);
@@ -2852,10 +2866,20 @@ class TSAnalyser extends EventEmitter {
    * Returns 0 for non-SRT streams (no slot contention).
    */
   getEtrStartDelay() {
+    // When relay is active, ETR reads from local UDP — no SRT slot delay needed.
+    if (this._relay) return 0;
     if (this._persistentThumb && this.url && this.url.startsWith('srt://')) {
       return parseSrtLatency(this.url) + 15000;
     }
     return 0;
+  }
+
+  /**
+   * Returns the local UDP relay URL if an SRTRelay is active, or null.
+   * Used by routes/etr290.js to transparently redirect ETR to the UDP copy.
+   */
+  getRelayUrl() {
+    return this._relay ? this._relay.localUrl : null;
   }
 
   stop() {
@@ -2881,6 +2905,11 @@ class TSAnalyser extends EventEmitter {
     if (this._tsduckMonitor) {
       this._tsduckMonitor.stop();
       this._tsduckMonitor = null;
+    }
+    if (this._relay) {
+      this._relay.stop();
+      this._relay = null;
+      this._effectiveUrl = this.url;
     }
     this.emit('stopped', { id: this.id });
   }

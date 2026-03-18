@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.89 / web 3.1.110)
+Date: 2026-03-18 (latest: v3.1.90 / web 3.1.111)
+
+## v3.1.90 / web 3.1.111 — 2026-03-18
+
+### Feature: SRTRelay — single-connection SRT fan-out via local UDP
+
+- **Problem:** SRT contribution encoders accept exactly one simultaneous caller. All Labotech consumers (thumbnail, tsanalyze, ffprobe, ETR) each attempted independent SRT connections, starving each other. Thumbnail would hold the slot; ETR and probe cycles would be dropped or compete. Result: AWAITING FRAME, Probe Method UNAVAILABLE, and ETR silently blocked.
+- **Fix:** New `SRTRelay` class (`src/srt-relay.js`). When `TSAnalyser.startContinuous()` detects an `srt://` URL, it starts a relay — one persistent ffmpeg process that holds the single SRT caller slot and re-outputs as `udp://127.0.0.1:PORT` (deterministic djb2 hash, range 5500–5599). All consumers (thumbnail, tsanalyze, ffprobe, ETR) transparently read the local UDP copy via `this._effectiveUrl`.
+- **ETR on SRT:** `routes/etr290.js` is now relay-aware — when an SRT analyser has an active relay, ETR gets the relay's UDP URL instead of returning 422. The Enable ETR button is no longer disabled for SRT sources; the proactive SRT warning banner is removed.
+- **Relay resilience:** Exponential backoff (5 s → 10 s → 20 s → 30 s cap) on ffmpeg restart. Epoch guard prevents stale close callbacks from triggering restarts after intentional stop.
+- **Tests:** 26 new tests in `test/srt-relay.test.js` covering port hashing, lifecycle, restart behaviour, backoff doubling, and epoch guard. Full suite: 220 tests passing.
+- **Operator impact:** SRT decoders now deliver continuous thumbnails, full probe telemetry, and ETR 290 monitoring simultaneously — no slot conflicts. No configuration change required; relay starts automatically on SRT decoder activation.
 
 ## web 3.1.110 — 2026-03-18
 
