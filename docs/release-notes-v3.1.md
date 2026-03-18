@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.63)
+Date: 2026-03-18 (latest: v3.1.64)
+
+## v3.1.64 — 2026-03-18
+
+### Fix: Thumbnails not displaying after thumbnail worker wiring (regression v3.1.62)
+
+**`src/api.js`:**
+
+- In the `thumbnail_frame` handler, when the worker emits a new frame, the corresponding `TSAnalyser` instance's `_lastThumbnailUrl` is now updated immediately.
+
+**Why:** The v3.1.62 wiring moved thumbnail capture out of `ts-analyser.js` into the worker process. However, `TSAnalyser._lastThumbnailUrl` was never updated by the worker — it was only set when `runThumbnailCapture` (one-shot probe mode) ran. In continuous mode (`runThumbnailCapture = false`), the `analyse_result` events propagated `thumbnailUrl: undefined`, causing the Confidence Monitor and multiview tiles to show "AWAITING FRAME" indefinitely.
+
+**Operator impact:** Confidence Monitor and multiview thumbnails display correctly again.
 
 ## v3.1.63 — 2026-03-18
 
