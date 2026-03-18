@@ -4,7 +4,6 @@ const express    = require('express');
 const WebSocket  = require('ws');
 const TSAnalyser = require('../src/ts-analyser');
 
-const THUMBNAIL_INTERVAL_SEC = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
 
 module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null) {
   const router = express.Router();
@@ -48,7 +47,11 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
 
     analyser.startContinuous();
     analysers.set(id, analyser);
-    if (thumbnailClient) thumbnailClient.start(id, url, THUMBNAIL_INTERVAL_SEC);
+    // NOTE: thumbnailClient is intentionally NOT started here.
+    // TSAnalyser.startContinuous() manages its own thumbnail capture internally
+    // (captureThumbnail timer for RTP/UDP; PersistentThumbnailCapture for SRT).
+    // Starting the worker on top creates duplicate ffmpeg processes that compete
+    // for CPU and delay the first frame by minutes instead of seconds.
     if (saveState) saveState();
     broadcast({ type: 'analyse_started', id, message: `${id} analyser started` });
     res.status(201).json(analyser.toJSON());
@@ -67,7 +70,6 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
     if (!a) return res.status(404).json({ error: 'Analyser not found' });
     a.stop();
     analysers.delete(req.params.id);
-    if (thumbnailClient) thumbnailClient.stop(req.params.id);
     if (saveState) saveState();
     broadcast({ type: 'analyse_stopped', id: req.params.id, message: `${req.params.id} analyser stopped` });
     res.json({ stopped: req.params.id });
