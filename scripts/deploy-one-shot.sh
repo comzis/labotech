@@ -302,6 +302,44 @@ check_tcpdump_capability() {
   return 1
 }
 
+check_srt_relay_status() {
+  local analyse_json srt_ids srt_count relay_count id url
+
+  analyse_json="$(curl -fsS "http://${API_HOST}:${API_PORT}/analyse" 2>/dev/null)" || {
+    echo "[relay] /analyse endpoint unreachable — skipping relay check"
+    return 1
+  }
+
+  srt_count="$(echo "${analyse_json}" | jq '[.[] | select(.url // "" | startswith("srt://"))] | length' 2>/dev/null || echo 0)"
+
+  if [[ "${srt_count}" -eq 0 ]]; then
+    echo "[relay] no SRT decoders active — relay check skipped"
+    return 0
+  fi
+
+  echo "[relay] SRT decoders active: ${srt_count}"
+  echo "${analyse_json}" | jq -r '.[] | select(.url // "" | startswith("srt://")) | "  \(.id)  \(.url // "?")"' 2>/dev/null || true
+
+  # Count relay ffmpeg processes: relay outputs to udp://127.0.0.1:55xx (port range 5500–5599)
+  relay_count="$(${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
+    "ps aux 2>/dev/null | grep 'udp://127\.0\.0\.1:5[5][0-9][0-9]' | grep -v grep | wc -l" 2>/dev/null || echo 0)"
+  relay_count="${relay_count//[[:space:]]/}"
+
+  echo "[relay] relay ffmpeg processes found: ${relay_count} / ${srt_count} expected"
+
+  if [[ "${relay_count}" -lt "${srt_count}" ]]; then
+    echo "[relay] WARN: relay missing for $((srt_count - relay_count)) SRT decoder(s)"
+    echo "[relay] Cause: SRT relay starts only when decoder is (re)started after deploy."
+    echo "[relay] Fix:   Stop and restart each SRT decoder from the UI, or run:"
+    echo "[relay]          curl -s http://${API_HOST}:${API_PORT}/analyse | jq -r '.[] | select(.url | startswith(\"srt://\")) | .id'"
+    echo "[relay]        then POST /analyse/start for each — relay will start automatically."
+    return 1
+  fi
+
+  echo "[relay] all SRT decoders have an active relay process"
+  return 0
+}
+
 health_assertions() {
   local json
   json="$(curl -fsS "${HEALTH_URL}")" || return 1
@@ -352,6 +390,7 @@ main() {
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "health assertions (tsanalyze required)" health_assertions || return 1
   run_stage_warn "tcpdump NIC capture capability" check_tcpdump_capability
+  run_stage_warn "SRT relay processes" check_srt_relay_status
   run_stage_warn "prune dangling images and build cache" docker image prune -f
   show_deployed_version
 
