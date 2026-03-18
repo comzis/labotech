@@ -65,7 +65,7 @@ const LOGIN_PROFILES = {
   admin: { password: 'labotech', role: ROLES.BES },
   evc: { password: 'evcpass', role: ROLES.OPS },
 };
-const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
+const OPS_HIDDEN_TABS = new Set(['transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
@@ -314,20 +314,22 @@ function LandingAuth({ onLogin, punchline }) {
                 <div className="text-[9px] uppercase tracking-[0.22em]" style={{ color: '#4e6a8f', fontFamily: "'Courier New', monospace" }}>
                   Operator Access
                 </div>
-                <div
-                  className="font-black uppercase"
-                  style={{
-                    fontSize: 42,
-                    lineHeight: 1,
-                    letterSpacing: '0.18em',
-                    color: '#7b879a',
-                    textShadow: '0 1px 0 rgba(0,0,0,0.5)',
-                  }}
-                >
-                  LABOTECH
-                </div>
-                <div style={{ fontFamily: '"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif', fontStyle: 'italic', fontSize: 9, color: '#738199', letterSpacing: '0.05em', marginTop: 2 }}>
-                  Powered by Docker
+                <div style={{ marginTop: 10 }}>
+                  <div
+                    className="font-black uppercase"
+                    style={{
+                      fontSize: 42,
+                      lineHeight: 1,
+                      letterSpacing: '0.18em',
+                      color: '#7b879a',
+                      textShadow: '0 1px 0 rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    LABOTECH
+                  </div>
+                  <div style={{ fontFamily: '"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif', fontStyle: 'italic', fontSize: 9, color: '#738199', letterSpacing: '0.05em', marginTop: 3 }}>
+                    Powered by Docker
+                  </div>
                 </div>
                 <div style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: '#3d5470', letterSpacing: '0.04em', marginTop: 6 }}>
                   Stream Management Platform

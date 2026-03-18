@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.77 / web 3.1.91)
+Date: 2026-03-18 (latest: v3.1.77 / web 3.1.93)
+
+## web v3.1.93 — 2026-03-18
+
+### evc workspace: SRT Encapsulator tab now visible; landing page spacing fix
+
+Removed `streams` from `OPS_HIDDEN_TABS` — evc (OPS role) can now access the SRT Encapsulator tab. Previously hidden alongside transcode/multicast/api; only transcode, multicast, and api remain hidden for OPS.
+
+Landing page: LABOTECH block pushed down 10px from the "Operator Access" label, and "Powered by Docker" gap tightened to 3px — proportions now match the header badge.
+
+**Operator impact:** evc operators can provision and monitor SRT encapsulation streams without switching to admin login.
+
+## web v3.1.92 — 2026-03-18
+
+### Landing hero 42px + Powered by Docker
 
 ## web v3.1.91 — 2026-03-18
 
