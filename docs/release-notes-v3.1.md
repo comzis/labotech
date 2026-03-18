@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.90 / web 3.1.111)
+Date: 2026-03-18 (latest: v3.1.91 / web 3.1.111)
+
+## v3.1.91 — 2026-03-18
+
+### Fix: Multicast probe IGMP join pinned to eno2 — eliminates IGMP snooping churn on IP analysers
+
+- **Problem:** When `TSAnalyser` probed a multicast URL (`rtp://239.100.25.29:PORT` or `udp://239.100.25.29:PORT`), ffprobe sent an IGMP membership report via **eno1** (management NIC) because no interface was specified and the default route points to eno1. Each 30–60 s probe cycle sent an IGMP Join on eno1 and an IGMP Leave when ffprobe exited. On IGMP-snooping switches this caused 100s of resync events on downstream IP probes (e.g. VB330 showing 142 resyncs, RTP sequence errors, MDI DF spikes to 907 ms, latched "No lock" alarm).
+- **Fix:** `_withLiveInputHints()` in `ts-analyser.js` now detects multicast destination addresses (224.0.0.0–239.255.255.255) and appends `localaddr=169.254.0.2` (eno2's link-local IP as assigned by `setup-host.sh`) to the probe URL. This pins the IGMP membership report to eno2, matching the multicast source interface. Unicast URLs (relay local copies, SRT) are unaffected.
+- **Config:** Override via `MULTICAST_NIC_LOCALADDR` env var if eno2 is assigned a different IP.
+- **Tests:** 5 new tests in `test/ts-analyser.test.js`; full suite 225 tests passing.
+- **Operator action:** On the external IP analyser, click "Reset Alarms" to clear the latched "No lock". It will not re-alarm as long as probes are running.
 
 ## v3.1.90 / web 3.1.111 — 2026-03-18
 
