@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.69)
+Date: 2026-03-18 (latest: v3.1.69 / web 3.1.67)
+
+## web v3.1.67 — 2026-03-18
+
+### Multiview tile: PID breakdown and service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **PIDs stat** now shows `NV NA ND` (e.g. `1V 2A 3D`) using `result.dvb.streamBreakdown` instead of a raw count — gives immediate clarity on stream composition at MCR distance. Falls back to raw count if breakdown is absent (older probe result).
+- **Service name latch**: last known-good `serviceName` and `serviceProvider` are persisted in component state so the tile never flickers back to "Unknown" between probe cycles or during the initial fast-probe window.
+
+**Operator impact:** PID cell shows video/audio/data counts; service name no longer briefly shows "Unknown" when a new result arrives without DVB-SI tags.
 
 ## v3.1.69 — 2026-03-18
 
