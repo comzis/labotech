@@ -66,6 +66,9 @@ function _buildSrtSrc(inputUrl) {
   const sep = src.includes('?') ? '&' : '?';
   if (!src.includes('mode=')) src += `${sep}mode=caller`;
   if (!src.includes('timeout=')) src += '&timeout=8000000';
+  // Bind caller socket to eno1 (management NIC) so ffmpeg routes SRT via
+  // 10.67.18.29 and not eno2 which has no IP address.
+  if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
   return src;
 }
 
