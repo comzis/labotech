@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.65)
+Date: 2026-03-18 (latest: v3.1.66)
+
+## v3.1.66 — 2026-03-18
+
+### Fix: RTP/UDP first thumbnail fires after jitter only, not jitter + interval
+
+**`src/ts-analyser.js`:**
+
+- Extracted capture logic into `doCapture()` in the RTP/UDP thumbnail loop.
+- First call schedules `doCapture` after `thumbStartJitterMs` (0–1.5 s hash-based).
+- Subsequent calls continue on the normal `thumbIntervalMs` cadence via `scheduleThumb()`.
+
+**Why:** First capture previously waited `thumbStartJitterMs + thumbIntervalMs` (5–6.5 s of dead time) before even starting. The interval wait serves its purpose between captures but not before the first one — there is no previous capture to space from. Thundering-herd jitter is preserved (hash-based per stream ID).
+
+**Operator impact:** First thumbnail frame appears within ~3–5 s of decoder start instead of ~10–15 s. Subsequent refresh cadence is unchanged.
 
 ## v3.1.65 — 2026-03-18
 
