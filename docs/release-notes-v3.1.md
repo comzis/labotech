@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.78 / web 3.1.94)
+Date: 2026-03-18 (latest: v3.1.78 / web 3.1.95)
+
+## web v3.1.95 — 2026-03-18
+
+### Decoder Provisioning: stream catalog, latency default 4 s, button glow removed
+
+**Stream catalog** — a search field now appears above the provisioning rows when the multiview stream catalog (`/api/multiview/catalog`) contains entries. Typing filters by name or IP across grouped categories. Selecting an entry populates the first empty row's host, port, decoder ID, and mode in one click. Same catalog data and category grouping as the Multiview panel.
+
+**SRT latency default** — changed from 2000 ms to 4000 ms. Field remains fully editable; placeholder shows `4000`. Paste-from-URI still overwrites with the URI's `tsbpddelay` value.
+
+**Button glow removed** — `boxShadow` bloom on Start, Start Batch, and Apply ETR Config buttons toned down to none. Active state is indicated by filled background and border colour only — no halogen spread.
+
+**Operator impact:** Stream catalog shortcut eliminates manual host/port/ID entry for known sources. Latency default now matches the typical broadcast contribution SRT window.
 
 ## v3.1.78 / web v3.1.94 — 2026-03-18
 
