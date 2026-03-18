@@ -157,7 +157,12 @@ class ETR290Analyser extends EventEmitter {
     return true;
   }
 
-  start() {
+  /**
+   * @param {number} [delayMs=0]  Defer the first ffmpeg spawn by this many ms.
+   *   Use this when starting ETR alongside a persistent SRT thumbnail capture so
+   *   the thumbnail can win the SRT caller slot before ETR tries to connect.
+   */
+  start(delayMs = 0) {
     if (this.isRunning) return;
     this.isRunning = true;
 
@@ -171,7 +176,17 @@ class ETR290Analyser extends EventEmitter {
     this._startedAt = Date.now();
     this.emit('started', { id: this.id });
     this.emit('etr290', this._buildStatus());
-    this._spawnProc();
+
+    if (delayMs > 0) {
+      // Use the suspend timer slot so stop() / resume() cancel it correctly.
+      if (this._suspendTimer) clearTimeout(this._suspendTimer);
+      this._suspendTimer = setTimeout(() => {
+        this._suspendTimer = null;
+        if (this.isRunning) this._spawnProc();
+      }, delayMs);
+    } else {
+      this._spawnProc();
+    }
   }
 
   /**

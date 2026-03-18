@@ -82,19 +82,24 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
     mon.on('error',  err    => broadcast({ type: 'error', id, message: err.message }));
     mon.on('stopped', ()    => broadcast({ type: 'etr290_stopped', id }));
 
-    mon.start();
-    etr290monitors.set(id, mon);
-
-    // If this ETR monitor uses a managed ID (etr-<analyser-id>), link it to the
-    // TSAnalyser so that SRT heavy probes can suspend/resume ETR in lockstep.
+    // Link to TSAnalyser BEFORE starting so the start delay can be computed.
+    // On SRT streams the analyser's thumbnail already holds the caller slot —
+    // ETR must wait (latency + 15 s) before its first ffmpeg spawn to avoid
+    // being immediately rejected by the single-listener SRT source.
+    let startDelay = 0;
     if (analysers && /^etr-/i.test(id)) {
       const linkedId = id.slice(4);
       const linkedAnalyser = analysers.get(linkedId);
       if (linkedAnalyser && typeof linkedAnalyser.setEtrMonitor === 'function') {
         linkedAnalyser.setEtrMonitor(mon);
+        if (typeof linkedAnalyser.getEtrStartDelay === 'function') {
+          startDelay = linkedAnalyser.getEtrStartDelay();
+        }
       }
     }
 
+    mon.start(startDelay);
+    etr290monitors.set(id, mon);
     res.status(201).json(mon.toJSON());
   });
 

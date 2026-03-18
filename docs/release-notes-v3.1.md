@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.84 / web 3.1.102)
+Date: 2026-03-18 (latest: v3.1.85 / web 3.1.102)
+
+## v3.1.85 — 2026-03-18
+
+### Fix: ETR290 immediate exit code 1 on SRT — startup slot race
+
+- **Problem:** When a decoder started on a single-listener SRT source, `ETR290Analyser` spawned ffmpeg immediately (via `start()` → `_spawnProc()`), racing the persistent thumbnail capture for the single SRT caller slot. Thumbnail won; ETR was rejected → `FFmpeg exited with code 1` on every startup. The `suspend()`/`resume()` coordination (v3.1.84) only kicks in during heavy probe cycles — it did not prevent this initial race.
+- **Fix:** `ETR290Analyser.start(delayMs)` accepts an optional delay; first spawn is deferred via the suspend-timer slot. `TSAnalyser.getEtrStartDelay()` returns `srtLatency + 15000` ms when thumbnail is active on SRT, or 0 otherwise. `routes/etr290.js` links ETR to the analyser **before** calling `mon.start()` and passes the computed delay. On a 4000 ms SRT latency stream, ETR waits 19 s before its first connection attempt.
+- **Operator impact:** ETR290 monitoring starts cleanly on single-listener SRT sources. "FFmpeg exited with code 1" alarm on decoder start is eliminated.
 
 ## v3.1.84 — 2026-03-18
 
