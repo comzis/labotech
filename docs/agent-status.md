@@ -42,7 +42,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** SRT stability fixes deployed — awaiting server confirmation.
+**Current task:** SRT stability fixes merged — awaiting server deploy and confirmation.
 
 **Owns:**
 - `src/ts-analyser.js`
@@ -59,11 +59,13 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - PR #52 — `fix/s302m-audio-thumbnail-fps`: Remove `setpts=N*AVTB` (thumbnail fps freeze); exclude S302M from amerge audio probe; ETR290 `suspend()`/`resume()` for SRT slot coordination. (v3.1.83–3.1.84 / web 3.1.102)
 - PR #53 — `chore/deploy-version-banner`: Print deployed backend/web versions at end of deploy-one-shot.sh.
 - PR #54 — `fix/deploy-web-version`: Read web version from host filesystem (not container — web/package.json not in final image).
-- SNAG-025, SNAG-026, SNAG-027 documented; invariants I-19, I-20, I-21 added to snag list.
+- PR #55 — `chore/snag-docs-update`: SNAG-025/026/027, invariants I-19–I-21 documented.
+- PR #56 — `fix/etr-srt-startup-race`: ETR290 deferred start on SRT — `start(delayMs)`, `getEtrStartDelay()`, link before start in route. (v3.1.85 / web 3.1.103)
+- SNAG-028 documented; invariants I-22, I-23 added.
 
 **Active branch:** `main` (all branches merged)
 
-**Current versions:** backend `3.1.84` / web `3.1.102` — 194 tests passing.
+**Current versions:** backend `3.1.85` / web `3.1.103` — 194 tests passing.
 
 **Waiting for:** Server deploy confirmation — thumbnail refresh, SRT Transport stats, correct audio VU levels on S302M stream.
 
