@@ -1,6 +1,26 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.85 / web 3.1.102)
+Date: 2026-03-18 (latest: v3.1.86 / web 3.1.103)
+
+## v3.1.86 — 2026-03-18
+
+### Fix: HEVC 4:2:2 Rext thumbnail AWAITING FRAME — `select=key` + `format=yuv420p`
+
+- **Problem:** Confidence Monitor thumbnail remained "AWAITING FRAME" on HEVC Main 4:2:2 Range Extensions streams (yuv422p10le, 10-bit). Two compounding causes: (1) The HEVC decoder does not set the `pict_type` AVFrame field for 4:2:2 Rext — frames remain `AV_PICTURE_TYPE_NONE`, so `select=eq(pict_type,I)` matches nothing and ffmpeg produces zero output. Server log showed `PPS id out of range: 0` × 17 followed by `Could not find ref with POC` errors. (2) The mjpeg encoder has no 10-bit pixel format support; `yuv422p10le` input is incompatible, causing silent encode failure.
+- **Fix:** Changed `select=eq(pict_type\\,I)` to `select=key` — uses the `key_frame` AVFrame flag, which all decoders (including HEVC Rext) set reliably. Added `format=yuv420p` as the last vf filter to downconvert 10-bit 4:2:2 to 8-bit 4:2:0 before the mjpeg encoder. Both changes are in `src/monitoring.js` `PersistentThumbnailCapture._spawn()`.
+- **Operator impact:** Confidence Monitor thumbnail now works for HEVC 4:2:2 10-bit SRT streams.
+
+### Fix: ETR/thumbnail SRT slot fight — ETR auto-restart with 60 s SRT retry delay
+
+- **Problem:** On single-listener SRT sources, `ETR290Analyser` and `PersistentThumbnailCapture` both attempt to maintain persistent connections simultaneously. When ETR connects it kicks the thumbnail; when thumbnail reconnects (5 s backoff) it kicks ETR; ETR exited permanently (`isRunning = false`) — but on each heavy-probe-window resume, ETR tried again, causing periodic 1–2 minute dropouts visible on the SRT stats graph as send-rate falling to 0.
+- **Fix:** `ETR290Analyser._spawnProc()` exit handler now detects unexpected exits (not triggered by `stop()` or `suspend()`): when `isRunning` is still true, schedule auto-restart instead of permanent stop. SRT URLs use a 60 s retry delay; non-SRT uses 5 s. The long SRT delay prevents the rapid fight loop — thumbnail holds the slot for a clean 60 s window between ETR attempts.
+- **Operator impact:** SRT source connection is stable. The periodic ~1-minute send-rate dropouts are eliminated.
+
+### Fix: Inter-probe SRT settle delay — 1 s gap between sequential probes
+
+- **Problem:** Sequential SRT probes (tsanalyze → ffmpeg transport → srt-live-transmit → audio → ts-disc → CC → Dolby E) were chained with zero delay between them. Rapid connect/disconnect cycles may cause some SRT sources to stall or produce packet loss on the subsequent connection before their accept state fully resets.
+- **Fix:** Added a 1 s `_srtSettle()` await between each sequential SRT probe in `ts-analyser.js`. Adds ≤6 s to the probe cycle; negligible against the per-probe latency-window fill time.
+- **Operator impact:** More stable probe cycle on strict single-listener SRT sources.
 
 ## v3.1.85 — 2026-03-18
 
