@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.70)
+Date: 2026-03-18 (latest: v3.1.70 / web 3.1.68)
+
+## web v3.1.68 — 2026-03-18
+
+### Feature: Fullscreen multiview — Evertz-style thumbnail wall
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- Added **FULL SCREEN** button (amber, visible when tiles are active). Invokes the browser Fullscreen API on the overlay container; ESC exits natively.
+- Fullscreen overlay renders `FullscreenThumbTile` components in a responsive grid (2/3/4/5 columns by tile count) with no UI chrome.
+- Each tile: 16:9 thumbnail fills the cell, thin left-edge status accent (green/amber/red), LED dot in corner, decoder-ID badge (top-right, dimmed), service name + bitrate label bar at the bottom.
+- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · Eurovision Services logo (right) · EXIT button.
+- Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
+
+**Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
 
 ## v3.1.70 — 2026-03-18
 
@@ -13,6 +27,17 @@ Date: 2026-03-18 (latest: v3.1.70)
 **Why:** With thumbnails still not appearing at expected latency after v3.1.69, the silent catch made it impossible to diagnose whether the issue was ffmpeg errors, network/multicast access, filesystem permissions, or something else.
 
 **Operator impact:** Thumbnail capture failures are now visible in server logs for diagnosis.
+
+## web v3.1.67 — 2026-03-18
+
+### Multiview tile: PID breakdown and service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **PIDs stat** now shows `NV NA ND` (e.g. `1V 2A 3D`) using `result.dvb.streamBreakdown` instead of a raw count — gives immediate clarity on stream composition at MCR distance. Falls back to raw count if breakdown is absent (older probe result).
+- **Service name latch**: last known-good `serviceName` and `serviceProvider` are persisted in component state so the tile never flickers back to "Unknown" between probe cycles or during the initial fast-probe window.
+
+**Operator impact:** PID cell shows video/audio/data counts; service name no longer briefly shows "Unknown" when a new result arrives without DVB-SI tags.
 
 ## v3.1.69 — 2026-03-18
 
