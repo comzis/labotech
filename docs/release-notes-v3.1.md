@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.69 / web 3.1.68)
+Date: 2026-03-18 (latest: v3.1.70 / web 3.1.68)
 
 ## web v3.1.68 — 2026-03-18
 
@@ -15,6 +15,18 @@ Date: 2026-03-18 (latest: v3.1.69 / web 3.1.68)
 - Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
 
 **Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
+
+## v3.1.70 — 2026-03-18
+
+### Fix: Log thumbnail capture failures to docker logs
+
+**`src/ts-analyser.js`:**
+
+- The `doCapture` catch block in `startContinuous()` was silently swallowing errors. Added `console.error` so failures appear in `docker compose logs labotech` as `[thumb:<id>] capture failed: <message>`.
+
+**Why:** With thumbnails still not appearing at expected latency after v3.1.69, the silent catch made it impossible to diagnose whether the issue was ffmpeg errors, network/multicast access, filesystem permissions, or something else.
+
+**Operator impact:** Thumbnail capture failures are now visible in server logs for diagnosis.
 
 ## web v3.1.67 — 2026-03-18
 
