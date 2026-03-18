@@ -223,6 +223,26 @@ _No open snags at time of writing (2026-03-18). SNAG-022 and SNAG-023 fixed and 
 
 ---
 
+### SNAG-025 — HEVC SRT thumbnail blank — `PPS id out of range` after join mid-GOP
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.82 · **PR:** #51
+- **Symptom:** After the SNAG-022 fix (removed `-skip_frame nokey`), thumbnail ffmpeg connected to HEVC SRT streams but produced zero JPEG output. Server log: `[hevc] PPS id out of range: 0` (×23) followed by `Could not find ref with POC 50/52/56/64`.
+- **Root cause:** When ffmpeg connects to an SRT stream mid-GOP, the SRT buffer (≤latency ms) delivers B and P frames that reference parameter sets and reference frames from before the connection point. Without an IDR in the buffer, the HEVC decoder never receives the PPS/SPS and cannot decode any frame. `-err_detect ignore_err` suppresses the error but cannot invent the missing parameter sets — output is always empty.
+- **Fix:** Added `select=eq(pict_type\,I),setpts=N*AVTB` before `fps=1/N` in the vf filter chain. I-frames carry their own parameter sets; they have no reference frame dependencies. The decoder initialises correctly on the first I-frame regardless of where in the GOP the connection was made.
+- **Lesson:** For thumbnail capture from any live stream that may be joined mid-GOP, filter to I-frames only (`select=eq(pict_type,I)`). This is mandatory for HEVC and also works correctly for H.264. Never assume the SRT latency buffer will contain an IDR.
+
+---
+
+### SNAG-024 — ETR290 analyser SRT ffmpeg missing `adapter=` — exits code 1
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.81 · **PR:** #51
+- **Symptom:** ETR 290 alarm monitoring emitted `FFmpeg exited with code 1` immediately on all SRT streams. ETR was non-functional for SRT RX decoders.
+- **Root cause:** `ETR290Analyser._buildFFmpegArgs()` passed `this.url` raw to ffmpeg for SRT inputs. ffmpeg bound the SRT caller socket to eno2 (multicast NIC, no IP assigned) instead of eno1 (management NIC, 10.67.18.29). The SRT source rejected the connection → ffmpeg exit code 1.
+- **Fix:** Added `adapter=10.67.18.29` to the SRT URL in `_buildFFmpegArgs()`. The `srt` input type is now handled explicitly: `url?adapter=10.67.18.29`.
+- **Lesson:** Every new code path that opens an SRT connection must add `adapter=10.67.18.29`. This invariant (I-12) applies to ffprobe, ffmpeg, srt-live-transmit, and tsp equally. When adding a new tool or analyser class, search for `srt://` handling and verify the adapter parameter is present.
+
+---
+
 ### SNAG-022 — SRT RX HEVC thumbnail blank — `PPS id out of range: 0`
 
 - **Reported:** 2026-03-18 · **Fixed:** v3.1.79 · **PR:** #48
@@ -265,6 +285,8 @@ These rules were extracted from the snags above and are now enforced in `CLAUDE.
 | I-14 | Container native binaries must be compiled inside the target distro (multi-stage build) — never volume-mount from host | SNAG-021 |
 | I-15 | `-skip_frame nokey` is H.264-only — never apply globally; HEVC parameter sets ride non-IDR frames | SNAG-022 |
 | I-16 | CLI tool availability must gate on observable output, not exit code — `--help` often exits non-zero | SNAG-023 |
+| I-17 | Every new SRT-opening code path (ffmpeg, ffprobe, tsp, srt-live-transmit) must add `adapter=10.67.18.29` | SNAG-024 |
+| I-18 | Thumbnail capture from any live stream must use `select=eq(pict_type,I)` — never rely on SRT buffer containing an IDR | SNAG-025 |
 
 ---
 

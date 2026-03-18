@@ -205,11 +205,16 @@ class PersistentThumbnailCapture extends EventEmitter {
     const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
-    // -skip_frame nokey already ensures the decoder only ever sees keyframes (I-frames).
-    // select=eq(pict_type\,I) is therefore redundant AND harmful: it only passes frames
-    // that fall exactly on the fps=1/N time grid, potentially skipping the very first
-    // keyframe.  Remove it — fps=1/N alone throttles the output rate.
+    // select=eq(pict_type,I) passes only IDR/CRA frames (HEVC) or IDR (H.264).
+    // I-frames are fully self-contained: they carry their own VPS/SPS/PPS and have
+    // no reference frame dependencies.  This prevents the "PPS id out of range" and
+    // "Could not find ref with POC" errors that occur when the decoder joins an HEVC
+    // stream mid-GOP and receives B/P frames before seeing the parameter sets.
+    // setpts=N*AVTB resets timestamps after select so the fps filter receives a
+    // monotonically increasing sequence even when I-frame intervals are irregular.
     const vf = [
+      `select=eq(pict_type\\,I)`,
+      `setpts=N*AVTB`,
       `fps=1/${this._intervalSec}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
