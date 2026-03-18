@@ -1,6 +1,27 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.89 / web 3.1.110)
+Date: 2026-03-18 (latest: v3.1.91 / web 3.1.111)
+
+## v3.1.91 — 2026-03-18
+
+### Fix: Multicast probe IGMP join pinned to eno2 — eliminates IGMP snooping churn on IP analysers
+
+- **Problem:** When `TSAnalyser` probed a multicast URL (`rtp://239.100.25.29:PORT` or `udp://239.100.25.29:PORT`), ffprobe sent an IGMP membership report via **eno1** (management NIC) because no interface was specified and the default route points to eno1. Each 30–60 s probe cycle sent an IGMP Join on eno1 and an IGMP Leave when ffprobe exited. On IGMP-snooping switches this caused 100s of resync events on downstream IP probes (e.g. VB330 showing 142 resyncs, RTP sequence errors, MDI DF spikes to 907 ms, latched "No lock" alarm).
+- **Fix:** `_withLiveInputHints()` in `ts-analyser.js` now detects multicast destination addresses (224.0.0.0–239.255.255.255) and appends `localaddr=169.254.0.2` (eno2's link-local IP as assigned by `setup-host.sh`) to the probe URL. This pins the IGMP membership report to eno2, matching the multicast source interface. Unicast URLs (relay local copies, SRT) are unaffected.
+- **Config:** Override via `MULTICAST_NIC_LOCALADDR` env var if eno2 is assigned a different IP.
+- **Tests:** 5 new tests in `test/ts-analyser.test.js`; full suite 225 tests passing.
+- **Operator action:** On the external IP analyser, click "Reset Alarms" to clear the latched "No lock". It will not re-alarm as long as probes are running.
+
+## v3.1.90 / web 3.1.111 — 2026-03-18
+
+### Feature: SRTRelay — single-connection SRT fan-out via local UDP
+
+- **Problem:** SRT contribution encoders accept exactly one simultaneous caller. All Labotech consumers (thumbnail, tsanalyze, ffprobe, ETR) each attempted independent SRT connections, starving each other. Thumbnail would hold the slot; ETR and probe cycles would be dropped or compete. Result: AWAITING FRAME, Probe Method UNAVAILABLE, and ETR silently blocked.
+- **Fix:** New `SRTRelay` class (`src/srt-relay.js`). When `TSAnalyser.startContinuous()` detects an `srt://` URL, it starts a relay — one persistent ffmpeg process that holds the single SRT caller slot and re-outputs as `udp://127.0.0.1:PORT` (deterministic djb2 hash, range 5500–5599). All consumers (thumbnail, tsanalyze, ffprobe, ETR) transparently read the local UDP copy via `this._effectiveUrl`.
+- **ETR on SRT:** `routes/etr290.js` is now relay-aware — when an SRT analyser has an active relay, ETR gets the relay's UDP URL instead of returning 422. The Enable ETR button is no longer disabled for SRT sources; the proactive SRT warning banner is removed.
+- **Relay resilience:** Exponential backoff (5 s → 10 s → 20 s → 30 s cap) on ffmpeg restart. Epoch guard prevents stale close callbacks from triggering restarts after intentional stop.
+- **Tests:** 26 new tests in `test/srt-relay.test.js` covering port hashing, lifecycle, restart behaviour, backoff doubling, and epoch guard. Full suite: 220 tests passing.
+- **Operator impact:** SRT decoders now deliver continuous thumbnails, full probe telemetry, and ETR 290 monitoring simultaneously — no slot conflicts. No configuration change required; relay starts automatically on SRT decoder activation.
 
 ## web 3.1.110 — 2026-03-18
 
