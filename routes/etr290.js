@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const ETR290Analyser = require('../src/etr290-analyser');
 const ETR290ProfileStore = require('../src/etr290-profile-store');
 
-module.exports = function (etr290monitors, wss, broadcastFn = null) {
+module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = null) {
   const router = express.Router();
   const profileStore = new ETR290ProfileStore();
 
@@ -84,6 +84,17 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
 
     mon.start();
     etr290monitors.set(id, mon);
+
+    // If this ETR monitor uses a managed ID (etr-<analyser-id>), link it to the
+    // TSAnalyser so that SRT heavy probes can suspend/resume ETR in lockstep.
+    if (analysers && /^etr-/i.test(id)) {
+      const linkedId = id.slice(4);
+      const linkedAnalyser = analysers.get(linkedId);
+      if (linkedAnalyser && typeof linkedAnalyser.setEtrMonitor === 'function') {
+        linkedAnalyser.setEtrMonitor(mon);
+      }
+    }
+
     res.status(201).json(mon.toJSON());
   });
 
@@ -121,11 +132,19 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
 
   // DELETE /etr290/:id
   router.delete('/:id', (req, res) => {
-    const mon = etr290monitors.get(req.params.id);
+    const id = req.params.id;
+    const mon = etr290monitors.get(id);
     if (!mon) return res.status(404).json({ error: 'Monitor not found' });
     mon.stop();
-    etr290monitors.delete(req.params.id);
-    res.json({ stopped: req.params.id });
+    etr290monitors.delete(id);
+    // Unlink from TSAnalyser if managed
+    if (analysers && /^etr-/i.test(id)) {
+      const linkedAnalyser = analysers.get(id.slice(4));
+      if (linkedAnalyser && typeof linkedAnalyser.clearEtrMonitor === 'function') {
+        linkedAnalyser.clearEtrMonitor();
+      }
+    }
+    res.json({ stopped: id });
   });
 
   return router;

@@ -178,6 +178,11 @@ function startEtrOrphanWatchdog() {
       }
       etr290monitors.delete(monitorId);
       missingSince.delete(monitorId);
+      // Unlink from TSAnalyser
+      const orphanAnalyser = analysers.get(linkedAnalyserId);
+      if (orphanAnalyser && typeof orphanAnalyser.clearEtrMonitor === 'function') {
+        orphanAnalyser.clearEtrMonitor();
+      }
       console.log(`[health] Auto-stopped orphan ETR monitor ${monitorId} (linked analyser ${linkedAnalyserId} not running)`);
     }
   }, checkEveryMs);
@@ -322,7 +327,7 @@ function start() {
   app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
   app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast, saveState, _thumbnailClient));
-  app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast));
+  app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast, analysers));
   app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));
   app.use('/scte35',    require('../routes/scte35')());
   app.use('/monitoring-policy', require('../routes/monitoring-policy')());

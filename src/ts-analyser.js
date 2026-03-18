@@ -94,6 +94,7 @@ class TSAnalyser extends EventEmitter {
     this.isRunning = false;
     this.lastResult = null;
     this._continuousProbeCount = 0;
+    this._etrMonitor = null; // set via setEtrMonitor() when an ETR290Analyser is linked
     this._lastThumbnailAt = 0;
     this._nextHeavyProbeAt = 0;
     this._nextProbeAt = 0;
@@ -229,6 +230,7 @@ class TSAnalyser extends EventEmitter {
             const suspendMs = srtLatMs + 70000;
             this._persistentThumb.suspend(suspendMs);
             if (this._tsduckMonitor) this._tsduckMonitor.suspend();
+            if (this._etrMonitor) this._etrMonitor.suspend(suspendMs + 5000);
             await new Promise(r => setTimeout(r, 600));
           }
 
@@ -264,6 +266,7 @@ class TSAnalyser extends EventEmitter {
               setTimeout(() => {
                 if (this._persistentThumb) this._persistentThumb.resume();
                 if (this._tsduckMonitor) this._tsduckMonitor.resume();
+                if (this._etrMonitor) this._etrMonitor.resume();
               }, 1500);
             }
           }
@@ -584,8 +587,10 @@ class TSAnalyser extends EventEmitter {
       // stream so astats reports every pair.  Without this, FFmpeg's default
       // stream selection picks only the first audio ES and all other pairs
       // show dark placeholders in the multiview meters.
+      // Exclude S302M ESes — they carry SMPTE 337M data bursts (Dolby E etc.) and
+      // appear as constant near-full-scale PCM to amerge, producing spurious VU bars.
       const audioEsCount = (this.lastResult?.programs || []).reduce((acc, p) =>
-        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null && !s.s302m).length, 0);
       const mergeInputs = Math.min(Math.max(audioEsCount, 1), 8);
 
       // Build args: if >1 audio ES, amerge all streams into one multi-channel
@@ -2814,6 +2819,19 @@ class TSAnalyser extends EventEmitter {
     this._timer = setTimeout(run, probeStartJitterMs);
     this.emit('started', { id: this.id });
     return this;
+  }
+
+  /**
+   * Link an ETR290Analyser that shares the same SRT source URL.
+   * TSAnalyser will suspend/resume it in lockstep with the thumbnail capture
+   * during heavy SRT probe cycles so only one caller occupies the SRT slot.
+   */
+  setEtrMonitor(mon) {
+    this._etrMonitor = mon || null;
+  }
+
+  clearEtrMonitor() {
+    this._etrMonitor = null;
   }
 
   stop() {
