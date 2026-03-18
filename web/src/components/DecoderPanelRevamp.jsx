@@ -1997,7 +1997,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ fontSize: 9, color: C.muted, background: C.dim, borderRadius: 2, padding: "6px 8px", border: `1px solid ${C.border}` }}>
                       <span style={{ color: C.info, fontWeight: 700 }}>Note:</span> SRT ARQ retransmissions produce higher IAT P95 and jitter than UDP multicast.
                       Health thresholds are automatically relaxed for SRT streams (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms).
-                      Use the <span style={{ color: C.info }}>SRT Contribution</span> monitoring policy for additional tuning.
                     </div>
 
                     {!srt && (
