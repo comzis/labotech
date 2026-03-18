@@ -1112,7 +1112,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Capture NIC (optional)">
-                  <Input value={captureNic} onChange={(e) => setCaptureNic(e.target.value)} placeholder="eno2 (recommended)" mono />
+                  <Input value={captureNic} onChange={(e) => setCaptureNic(e.target.value)} placeholder={mode === "srt" ? "eno1 (SRT / management)" : "eno2 (multicast)"} mono />
                 </Field>
                 <Field label="Refresh">
                   <Select
