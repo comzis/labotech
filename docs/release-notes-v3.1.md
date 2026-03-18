@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.79)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.80)
+
+## web v3.1.80 — 2026-03-18
+
+### Fullscreen: remove status bar + redesign UMD overlay
+
+- **Bottom status bar removed** — cleaner, minimal fullscreen look; no dead chrome below the tile grid.
+- **UMD overlay redesigned**: moved to bottom-left of thumbnail; Labotech cyan palette (`#c8eaf0` service name, `#1a7a8a` bitrate); gradient semi-transparent background (`rgba(0,12,22,0.92)→rgba(0,8,16,0.72)`); 1px status-colour tally accent on left edge. Courier New monospace, uppercase, tight letter-spacing — broadcast MCR style.
+
+**Operator impact:** Fullscreen multiview is fully edge-to-edge with no footer bar. Service name and bitrate remain visible as a professional UMD overlay at the bottom of each tile.
+
+
 
 ## web v3.1.79 — 2026-03-18
 
