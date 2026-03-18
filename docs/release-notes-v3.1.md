@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.86 / web 3.1.103)
+Date: 2026-03-18 (latest: v3.1.87 / web 3.1.105)
+
+## v3.1.87 — 2026-03-18
+
+### Fix: Ghost decoder thumbnails — URL dedup on restore + stale JPEG cleanup on stop
+
+- **Problem:** When a user started a new decoder without stopping an old one pointing to the same SRT source, both decoder IDs were persisted in `config/state.json`. On the next container restart/deploy, both were restored and both thumbnail ffmpeg processes competed for the single SRT caller slot, causing repeated "Peer rejected connection" errors in the logs and unstable SRT graphs.
+- **Fix 1 (api.js restore):** URL dedup on state restore — if multiple saved analysers share the same source URL, only the most recently started one (last index in state) is restored. Superseded entries are logged and skipped.
+- **Fix 2 (routes/analyse.js):** On `DELETE /analyse/:id` (decoder stop), the thumbnail JPEG for that decoder is immediately deleted from `logs/thumbnails/`. This prevents stale images persisting across restarts and old decoder IDs leaving ghost files that could conflict with a fresh decoder using the same stream.
+- **Operator impact:** Clean slate on every deploy — no more ghost thumbnail processes competing for SRT slots after a container restart.
 
 ## v3.1.86 — 2026-03-18
 
