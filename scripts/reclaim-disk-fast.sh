@@ -49,8 +49,6 @@ need_cmd du
 COMPOSE_BIN=""
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_BIN="docker compose"
-elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE_BIN="docker-compose"
 fi
 
 show_space() {

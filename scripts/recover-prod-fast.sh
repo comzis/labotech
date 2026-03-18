@@ -19,10 +19,8 @@ COMPOSE_BIN=""
 
 if docker compose version >/dev/null 2>&1; then
   COMPOSE_BIN="docker compose"
-elif command -v docker-compose >/dev/null 2>&1; then
-  COMPOSE_BIN="docker-compose"
 else
-  echo "ERROR: missing docker compose (v2) and docker-compose (v1)"
+  echo "ERROR: docker compose v2 plugin required — run: sudo apt-get install docker-compose-plugin"
   exit 2
 fi
 

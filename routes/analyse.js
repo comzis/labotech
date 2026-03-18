@@ -4,7 +4,8 @@ const express    = require('express');
 const WebSocket  = require('ws');
 const TSAnalyser = require('../src/ts-analyser');
 
-module.exports = function(analysers, wss, broadcastFn = null, saveState = null) {
+
+module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -46,6 +47,11 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null) 
 
     analyser.startContinuous();
     analysers.set(id, analyser);
+    // NOTE: thumbnailClient is intentionally NOT started here.
+    // TSAnalyser.startContinuous() manages its own thumbnail capture internally
+    // (captureThumbnail timer for RTP/UDP; PersistentThumbnailCapture for SRT).
+    // Starting the worker on top creates duplicate ffmpeg processes that compete
+    // for CPU and delay the first frame by minutes instead of seconds.
     if (saveState) saveState();
     broadcast({ type: 'analyse_started', id, message: `${id} analyser started` });
     res.status(201).json(analyser.toJSON());
