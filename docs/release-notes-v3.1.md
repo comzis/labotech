@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.68)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.70)
+
+## web v3.1.70 — 2026-03-18
+
+### Fullscreen multiview: vertical audio meters + rack background
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **Vertical audio meters** embedded in each fullscreen tile. Per-channel `audioLevels.channels` data is paired into L/R pairs and rendered as vertical VU bars filling bottom-to-top (−60→0 dBFS). Zone tick marks at −18 and −9 dBFS. Peak-hold marker per bar. Color: green (nominal) / amber (−18 to −9) / red (> −9). Panel width is `clamp(44px, 20%, 110px)` — scales proportionally with tile size. Falls back to aggregate mean bar when only `meanDb` is available; hides the panel entirely when no audio data is present.
+- **Rack background** applied to the fullscreen overlay container — same `broadcast-rack-bays.svg` + blue radial gradient as the main app background. The 1px tile separator lines let it show through, matching the engineering console aesthetic of the other tabs.
+
+**Operator impact:** Active audio pairs visible at MCR distance inside each fullscreen tile. Fullscreen view now matches the platform's rack aesthetic.
 
 ## v3.1.71 — 2026-03-18
 
