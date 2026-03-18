@@ -60,11 +60,18 @@ describe('TSDuckMonitor', () => {
       expect(args).toContain('ip');
     });
 
-    test('returns srt args for srt:// URL', () => {
+    test('returns srt caller args for srt:// URL', () => {
       const m = makeMonitor({ url: 'srt://10.0.0.1:9001' });
       const args = m._inputPluginArgs('srt://10.0.0.1:9001');
       expect(args).toContain('-I');
       expect(args).toContain('srt');
+      // Must use caller mode — not listener — so tsp connects to the remote source
+      expect(args).toContain('--caller');
+      expect(args).not.toContain('--listener');
+      expect(args).toContain('--remote-host');
+      expect(args).toContain('10.0.0.1');
+      expect(args).toContain('--remote-port');
+      expect(args).toContain('9001');
     });
 
     test('returns null for unsupported scheme', () => {
@@ -77,14 +84,18 @@ describe('TSDuckMonitor', () => {
   // ── _buildTspArgs ───────────────────────────────────────────────────────────
 
   describe('_buildTspArgs', () => {
-    test('includes pcrverify, tables, bitrate_monitor, drop', () => {
+    test('includes pcrverify, tables --json-line, bitrate_monitor, drop; no --all-sections', () => {
       const m = makeMonitor({ url: 'udp://239.0.0.1:1234' });
       const args = m._buildTspArgs();
       expect(args).not.toBeNull();
-      expect(args.join(' ')).toMatch(/pcrverify/);
-      expect(args.join(' ')).toMatch(/tables/);
-      expect(args.join(' ')).toMatch(/bitrate_monitor/);
-      expect(args.join(' ')).toMatch(/drop/);
+      const joined = args.join(' ');
+      expect(joined).toMatch(/pcrverify/);
+      expect(joined).toMatch(/tables/);
+      expect(joined).toMatch(/--json-line/);
+      // --all-sections is incompatible with --json-line on TSDuck 3.44 — must be absent
+      expect(joined).not.toMatch(/--all-sections/);
+      expect(joined).toMatch(/bitrate_monitor/);
+      expect(joined).toMatch(/drop/);
     });
 
     test('returns null when URL scheme is unsupported', () => {
@@ -194,6 +205,24 @@ describe('TSDuckMonitor', () => {
       m._parseTableJsonLines(lines, Date.now());
 
       expect(alarms.some(a => a.checkId === 'si_absent_nit')).toBe(true);
+    });
+
+    test('alarms when table seen in previous window is absent from current window', () => {
+      const m = new TSDuckMonitor({
+        id: 'x', url: 'udp://1.2.3.4:1000',
+        intervalMs: 15000, sampleWindowMs: 12000,
+      });
+      const alarms = [];
+      m.on('alarm', (a) => alarms.push(a));
+
+      const windowStart1 = Date.now() - 15000;
+      // First window: PAT present — sets _siTableTimes.PAT to ~windowStart1
+      m._siTableTimes.set('PAT', windowStart1 + 100);
+
+      // Second window starts now — PAT was last seen before windowStart2
+      const windowStart2 = Date.now();
+      m._checkSiIntervals(Date.now(), windowStart2);
+      expect(alarms.some(a => a.checkId === 'si_absent_pat')).toBe(true);
     });
 
     test('ignores non-JSON lines gracefully', () => {

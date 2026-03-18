@@ -2637,19 +2637,28 @@ class TSAnalyser extends EventEmitter {
       // RTP / UDP multicast: one-shot timer loop.  Multicast join is near-instant
       // so per-frame reconnect is fine, and the proven captureThumbnail() path
       // avoids the silent-failure modes of a persistent process on multicast.
+      //
+      // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
+      // Subsequent captures use the full thumbIntervalMs cadence.
+      // This cuts first-frame latency from (jitter + interval) ~6.5 s down to
+      // jitter-only ~1.5 s max without removing the thundering-herd jitter.
+      const doCapture = async () => {
+        this._thumbnailTimer = null;
+        if (!this.isRunning) return;
+        try {
+          await captureThumbnail(this.id, this.url);
+          this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+        } catch (err) {
+          console.error(`[thumb:${this.id}] capture failed: ${err && err.message}`);
+        }
+        scheduleThumb();
+      };
       const scheduleThumb = () => {
         if (!this.isRunning) return;
-        this._thumbnailTimer = setTimeout(async () => {
-          this._thumbnailTimer = null;
-          if (!this.isRunning) return;
-          try {
-            await captureThumbnail(this.id, this.url);
-            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-          } catch (_) { /* captureThumbnail logs internally */ }
-          scheduleThumb();
-        }, thumbIntervalMs);
+        this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
       };
-      this._thumbnailTimer = setTimeout(scheduleThumb, thumbStartJitterMs);
+      // First capture: jitter only — no extra thumbIntervalMs wait
+      this._thumbnailTimer = setTimeout(doCapture, thumbStartJitterMs);
     }
 
     const run = async () => {
@@ -2735,7 +2744,24 @@ class TSAnalyser extends EventEmitter {
   }
 
   // Route TSDuckMonitor alarms into the existing ETR 290 alarm infrastructure.
+  // Hysteresis: require CONSECUTIVE_REQUIRED consecutive sample windows with the
+  // same alarm before emitting health_alarm.  A single pcrverify error during
+  // stream join or a transient blip must not immediately page the operator.
+  // The counter resets when the alarm stops firing (elapsed > 2 sample windows).
   _onTsduckAlarm(alarm) {
+    const CONSECUTIVE_REQUIRED = 2;
+    if (!this._tsduckAlarmState) this._tsduckAlarmState = new Map();
+
+    const monitorInterval = this._tsduckMonitor ? this._tsduckMonitor.intervalMs : 15000;
+    const prev = this._tsduckAlarmState.get(alarm.checkId) || { count: 0, lastTs: 0 };
+    const elapsed = alarm.ts - prev.lastTs;
+    // If the alarm has been absent for >2 sample windows it is not consecutive.
+    const consecutive = elapsed < monitorInterval * 2.5;
+    const newCount = consecutive ? prev.count + 1 : 1;
+    this._tsduckAlarmState.set(alarm.checkId, { count: newCount, lastTs: alarm.ts });
+
+    if (newCount < CONSECUTIVE_REQUIRED) return;
+
     this.emit('health_alarm', {
       severity:  alarm.priority === 'p1' ? 'critical' : 'warning',
       source:    'tsduck-monitor',

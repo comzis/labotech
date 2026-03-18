@@ -47,10 +47,8 @@ rotate_app_logs() {
   local compose_bin
   if docker compose version >/dev/null 2>&1; then
     compose_bin="docker compose"
-  elif command -v docker-compose >/dev/null 2>&1; then
-    compose_bin="docker-compose"
   else
-    log "docker compose not found — skipping app log rotation"
+    log "docker compose v2 plugin not found — skipping app log rotation"
     return
   fi
 
