@@ -261,9 +261,23 @@ async function restoreState(broadcast, thumbnailClient) {
   }
 
   // Analysers always restore — decoders must survive container restarts.
+  // Dedup by URL: if multiple saved analysers point to the same source URL,
+  // only restore the last one (highest index = most recently started).
+  // This prevents ghost thumbnail processes competing for single-listener SRT
+  // slots when a user starts a new decoder without stopping the old one.
   const TSAnalyser = require('./ts-analyser');
-  for (const cfg of (state.analysers || [])) {
+  const savedAnalysers = state.analysers || [];
+  const urlToLatestIdx = new Map();
+  savedAnalysers.forEach((cfg, i) => { if (cfg.url) urlToLatestIdx.set(cfg.url, i); });
+
+  for (let i = 0; i < savedAnalysers.length; i++) {
+    const cfg = savedAnalysers[i];
     if (analysers.has(cfg.id)) continue;
+    // Skip superseded duplicate — a newer analyser for this URL will be restored instead.
+    if (cfg.url && urlToLatestIdx.get(cfg.url) !== i) {
+      console.log(`[state] Skipping duplicate analyser ${cfg.id} (URL already claimed by a newer entry)`);
+      continue;
+    }
     try {
       const a = new TSAnalyser({ id: cfg.id, url: cfg.url, interval: cfg.interval, nicName: cfg.nicName });
       a.on('result',       result => broadcast({ type: 'analyse_result', id: cfg.id, ...result }));

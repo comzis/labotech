@@ -54,6 +54,20 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (etr290monitors.has(id)) return res.status(409).json({ error: `ETR290 monitor ${id} already exists` });
 
+    // ETR290 monitoring is not supported on single-listener SRT sources.
+    // SRT sources in contribution mode accept exactly one simultaneous caller.
+    // The persistent thumbnail process already holds that slot; a second ETR
+    // ffmpeg process would be rejected immediately or kick the thumbnail,
+    // causing a fight loop that destabilises the SRT link.
+    // Use UDP/RTP multicast (unlimited receivers) for ETR290 monitoring.
+    if (url.startsWith('srt://')) {
+      return res.status(422).json({
+        error: 'ETR290 monitoring is not available on single-listener SRT sources. ' +
+          'The thumbnail capture already holds the sole SRT caller slot. ' +
+          'Use a UDP/RTP multicast feed for ETR290 monitoring.',
+      });
+    }
+
     let profileConfig = {};
     if (profileName) {
       const profile = profileStore.get(profileName);
