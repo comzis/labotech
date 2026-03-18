@@ -728,6 +728,30 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     setDecoderRows((rows) => rows.map((r) => (r.key === rowKey ? { ...r, ...patch } : r)));
   };
 
+  // Smart-paste: if the user pastes an srt:// URI into the Host/IP field,
+  // extract host, port, passphrase, latency, and pbkeylen automatically.
+  const handleHostPaste = (rowKey, e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (!text.startsWith('srt://')) return; // let normal paste proceed
+    e.preventDefault();
+    try {
+      // srt://host:port?param=value…
+      const withoutScheme = text.slice('srt://'.length);
+      const [hostPort, query = ''] = withoutScheme.split('?');
+      const lastColon = hostPort.lastIndexOf(':');
+      const host = lastColon >= 0 ? hostPort.slice(0, lastColon) : hostPort;
+      const port = lastColon >= 0 ? hostPort.slice(lastColon + 1) : '';
+      const params = new URLSearchParams(query);
+      updateRow(rowKey, { host: host.trim(), port: port.trim() });
+      setMode('srt');
+      if (params.get('passphrase')) setPassphrase(decodeURIComponent(params.get('passphrase')));
+      if (params.get('pbkeylen'))   setPbkeylen(Number(params.get('pbkeylen')));
+      if (params.get('tsbpddelay')) setLatency(params.get('tsbpddelay'));
+    } catch (_) {
+      // malformed URI — fall back to default paste
+    }
+  };
+
   const addDecoderRow = () => setDecoderRows((rows) => [...rows, newDecoderRow()]);
   const removeDecoderRow = (rowKey) => {
     setDecoderRows((rows) => {
@@ -999,8 +1023,15 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
-                  <Field label="Host / IP">
-                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="Host / IP" mono style={{ color: row.host ? C.text : C.head }} />
+                  <Field label="Host / IP — paste srt:// URI to auto-fill">
+                    <Input
+                      value={row.host}
+                      onChange={(e) => updateRow(row.key, { host: e.target.value })}
+                      onPaste={(e) => handleHostPaste(row.key, e)}
+                      placeholder="Host / IP  or paste srt:// URI"
+                      mono
+                      style={{ color: row.host ? C.text : C.head }}
+                    />
                   </Field>
                   <Field label="Port">
                     <Input
