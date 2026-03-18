@@ -294,6 +294,19 @@ _No open snags at time of writing (2026-03-18). SNAG-022 and SNAG-023 fixed and 
 
 ---
 
+### SNAG-028 — ETR290 `FFmpeg exited with code 1` on every decoder start (SRT startup slot race)
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.85 · **PR:** #56
+- **Symptom:** Immediately after starting an SRT decoder, the alarm log showed `etr-<id>: FFmpeg exited with code 1`. ETR monitoring never established. Thumbnail also showed AWAITING FRAME. Stats appeared only after a 60–70 s delay (one full heavy probe suspend budget).
+- **Root cause:** `routes/etr290.js` called `mon.start()` before `setEtrMonitor()`, so the ETR analyser spawned ffmpeg immediately with no knowledge of the thumbnail. Both `PersistentThumbnailCapture` (thumbnail) and `ETR290Analyser` (ETR) connected to the SRT URL at the same instant. The source only accepts one caller. Thumbnail won the race; ETR was rejected → exit code 1. The `suspend()`/`resume()` coordination added in SNAG-027 only activates during heavy probe cycles — it cannot prevent this initial race because ETR starts before `setEtrMonitor` is called.
+- **Fix:** Three-part:
+  1. `ETR290Analyser.start(delayMs)` — optional delay defers the first `_spawnProc()` via the suspend-timer slot so `stop()`/`resume()` cancel it correctly.
+  2. `TSAnalyser.getEtrStartDelay()` — returns `srtLatency + 15000` ms when a persistent thumbnail capture is active on an SRT URL; 0 for non-SRT.
+  3. `routes/etr290.js` — calls `setEtrMonitor()` **before** `mon.start()`, then passes `getEtrStartDelay()` as the start delay. On a 4000 ms latency stream ETR waits 19 s, by which time thumbnail is fully established.
+- **Lesson:** When starting any SRT-consuming process, always check whether a thumbnail capture is already active. If so, defer the new process by at least `srtLatency + 15s`. The call order in routes matters: link to the analyser before starting, not after.
+
+---
+
 ## Invariants Produced
 
 These rules were extracted from the snags above and are now enforced in `CLAUDE.md`:
@@ -321,6 +334,8 @@ These rules were extracted from the snags above and are now enforced in `CLAUDE.
 | I-19 | Never combine `select=eq(pict_type,I)` with `setpts` in a thumbnail vf chain — setpts breaks the `fps=1/N` rate limiter | SNAG-025 |
 | I-20 | S302M ESes must never be included in an `amerge` audio level probe — they carry SMPTE 337M data bursts, not programme audio | SNAG-026 |
 | I-21 | Any persistent SRT caller process must implement `suspend()`/`resume()` and register with `TSAnalyser.setEtrMonitor()` | SNAG-027 |
+| I-22 | In routes: call `setEtrMonitor()` **before** `mon.start()` — not after — so the start delay can be computed before ffmpeg spawns | SNAG-028 |
+| I-23 | Any new SRT-consuming process started alongside an active thumbnail must delay its first connect by `srtLatency + 15s` | SNAG-028 |
 
 ---
 
