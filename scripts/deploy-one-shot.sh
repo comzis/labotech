@@ -298,8 +298,9 @@ show_deployed_version() {
   local be_ver web_ver
   be_ver="$(${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
     'node -e "process.stdout.write(require(\"/app/package.json\").version)"' 2>/dev/null || echo '?')"
-  web_ver="$(${COMPOSE_BIN} exec -T "${SERVICE}" sh -lc \
-    'node -e "process.stdout.write(require(\"/app/web/package.json\").version)"' 2>/dev/null || echo '?')"
+  # web/package.json is not copied to the final image (only web/dist is).
+  # Read from the host checkout instead.
+  web_ver="$(node -e "process.stdout.write(require('./web/package.json').version)" 2>/dev/null || echo '?')"
   echo ""
   echo "  ┌──────────────────────────────────────┐"
   echo "  │  Deployed versions                   │"
