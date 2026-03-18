@@ -1049,10 +1049,21 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             </button>
             <button
               onClick={() => setOpenCreate(v => !v)}
-              className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] px-3 py-1.5 rounded border transition-all duration-150"
+              style={{
+                color: '#67e8f9',
+                borderColor: 'rgba(34,211,238,0.55)',
+                background: openCreate
+                  ? 'rgba(34,211,238,0.22)'
+                  : 'rgba(34,211,238,0.10)',
+                boxShadow: openCreate
+                  ? '0 0 14px rgba(34,211,238,0.35), inset 0 1px 0 rgba(255,255,255,0.12)'
+                  : '0 0 8px rgba(34,211,238,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+              }}
+              title="Add a new decoder tile"
             >
-              <Plus className="w-3 h-3" />
-              Decoder
+              <Plus className="w-3.5 h-3.5" />
+              + Decoder
             </button>
             <input
               ref={importFileRef}
