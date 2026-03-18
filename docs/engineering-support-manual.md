@@ -1351,3 +1351,87 @@ After upgrade, open a running decoder and confirm:
 - Health chip shows OK on a stable clean source.
 - `dvb.health.reasons` array does not contain a bitrate-drift entry.
 - `bitrateSource` field in analyser telemetry confirms which path is active.
+
+---
+
+## 16) SRT Receiver — Caller Mode (2026-03-18)
+
+### Overview
+
+Labotech supports SRT in **caller mode only** for decoder inputs. The system connects outbound to the gateway/encoder; there is no listener/rendezvous mode. All SRT connections use eno1 (management NIC, `10.67.18.29`) — eno2 has no IP address and must never be used for SRT.
+
+### Provisioning an SRT decoder
+
+**Option A — Smart paste (recommended)**
+
+Paste the full SRT connection string provided by the gateway directly into the **Host / IP** field of Decoder Provisioning. The UI auto-extracts:
+
+| Field | Source in URI |
+|---|---|
+| Host | `srt://<host>:...` |
+| Port | `...:<port>` |
+| Passphrase | `passphrase=...` |
+| Key length | `pbkeylen=...` |
+| Latency | `tsbpddelay=...` (ms) |
+| Mode | switched to SRT automatically |
+
+Example string: `srt://185.148.228.45:40002?mode=caller&passphrase=CF95BE5316EC&tsbpddelay=4000&pbkeylen=32`
+
+**Option B — Manual entry**
+
+Set Mode to `SRT`, enter Host / IP and Port manually, then set Passphrase and Key Length in the SRT Options section.
+
+### Engine selection
+
+The system automatically selects the optimal encapsulation engine:
+
+| Condition | Engine |
+|---|---|
+| SRT or UDP input + SRT output + copy mode + srt-live-transmit installed | `srt-live-transmit` (SLT) |
+| Any other configuration | `ffmpeg` |
+
+Stream cards show a green `SLT` badge or grey `FFmpeg` badge. `/health` reports `tooling.tools.srtLiveTransmit: true/false`.
+
+### NIC binding — mandatory
+
+Every SRT caller connection must include `adapter=10.67.18.29`. This is applied automatically in:
+- `ts-analyser.js` → `_withLiveInputHints()` (ffprobe probes)
+- `monitoring.js` → `_buildSrtSrc()` (thumbnail capture)
+- `encoder.js` → `_buildSltInputUri()` / `buildInputArgs()` (encapsulator)
+
+If adding any new code that opens an `srt://` URL, this parameter is mandatory (see SNAG-019, SNAG-020, Invariant I-12).
+
+### SRT Transport stats
+
+The **SRT Transport** tab in Decoder Provisioning shows live stats once the first transport probe completes (~10–15 s after start). Stats are parsed from libsrt verbose log output. Health thresholds are relaxed for SRT vs UDP:
+- IAT P95 critical: ≥ 400 ms (vs 200 ms for UDP)
+- Jitter critical: ≥ 40 ms (vs 20 ms for UDP)
+
+This accounts for ARQ retransmission windows which naturally increase IAT variance.
+
+### Troubleshooting SRT decoder
+
+| Symptom | Likely cause | Check |
+|---|---|---|
+| SRT Transport tab shows "NOT SRT / AWAITING STATS" | Input URL does not use `srt://` scheme | Verify mode is set to SRT, not UDP/RTP |
+| Blank Confidence Monitor after start | ffmpeg thumbnail routed via eno2 | Verify v3.1.77+ is deployed (`/health` version field) |
+| ffprobe exits code 1 immediately | Missing `adapter=` in probe URL | Verify v3.1.76+ deployed; check `journalctl -u labotech | grep adapter=` |
+| `srtLiveTransmit: false` in `/health` | Binary not in container | Rebuild image with `docker compose build --no-cache`; verify Dockerfile `srt-builder` stage present |
+| Connection timeout | Passphrase mismatch or wrong pbkeylen | Confirm passphrase and key length match gateway config exactly |
+
+---
+
+## 17) Landing Page — Operator Identity (2026-03-18)
+
+The landing page uses **Bebas Neue** (Google Fonts, loaded via `index.html`) for the `LABOTECH` hero title. This font is industry-standard for broadcast MCR signage and lower-third graphics.
+
+Layout:
+```
+OPERATOR ACCESS          ← 9px Courier New, tracked, muted blue
+LABOTECH                 ← Bebas Neue 72px, silver #b8c8dc
+Stream Management Platform  ← 11px Courier New, dim
+[ENTER LABOTECH button]
+```
+
+If Bebas Neue fails to load (no internet on isolated deployment), the browser falls back to `"Arial Narrow", Arial, sans-serif` which degrades gracefully. For air-gapped deployments, self-host the font file and update the `<link>` in `web/index.html`.
+
