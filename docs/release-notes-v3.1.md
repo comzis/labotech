@@ -1,6 +1,21 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.71)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.72)
+
+## web v3.1.72 — 2026-03-18
+
+### Fullscreen multiview: refined audio meters + tighter tile grid
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **VU bar styling**: removed bar border, zone ticks reduced to `rgba(255,255,255,0.04)` (near-invisible), peak hold thinned to 1px with no glow, bar colors slightly desaturated for MCR legibility. Inactive bars render at 20% opacity.
+- **Audio panel**: narrowed to `clamp(20px, 7%, 42px)` — significantly slimmer footprint preserving more thumbnail area. dBFS header label removed. Padding and gap reduced.
+- **Audio pair count from PMT**: pair count is now derived from `result.programs[].streams` filtered to `codecType === 'audio'` — so tiles show the correct number of L/R pairs matching the actual ES audio stream count, not just what astats happened to measure. Real level data fills pairs that were probed; unmeasured pairs render as dark/inactive bars.
+- **Tile grid gap**: reduced from 2px to 1px with 1px padding on `#010203` background — tighter seams, rack SVG shows through more subtly as a bezel.
+
+**Operator impact:** Audio meters are slimmer and better integrated visually. Pair count reflects actual audio ESes in the transport stream. Grid lines are nearly invisible.
+
+
 
 ## web v3.1.71 — 2026-03-18
 
