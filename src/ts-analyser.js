@@ -12,14 +12,6 @@ const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
 const { isSltAvailable } = require('./tooling-preflight');
 const SRTRelay = require('./srt-relay');
 let _multicastConfig = null;
-// IP of the multicast NIC (eno2). Used to pin IGMP joins via eno2 so probes
-// do not send IGMP membership reports on eno1 (management) and confuse IGMP
-// snooping switches. Default matches the address assigned by setup-host.sh.
-const MULTICAST_NIC_LOCALADDR = process.env.MULTICAST_NIC_LOCALADDR || '169.254.0.2';
-function _isMulticastHost(host) {
-  const first = parseInt(String(host || '').split('.')[0], 10);
-  return first >= 224 && first <= 239;
-}
 
 // Module-level semaphore: cap simultaneous heavy probes to prevent thundering
 // herd when many analysers are started in batch.  Each heavy probe spawns
@@ -2078,18 +2070,7 @@ class TSAnalyser extends EventEmitter {
     }
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
-    let hints = `fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
-    // Pin IGMP join to eno2 (multicast NIC) for multicast destinations.
-    // Without localaddr, the kernel uses the default route (eno1/management)
-    // which causes IGMP membership reports to arrive on the wrong switch port,
-    // producing 100s of resyncs on downstream IP probes via IGMP snooping churn.
-    try {
-      const parsed = new URL(url.replace(/^rtp:\/\//, 'udp://'));
-      if (_isMulticastHost(parsed.hostname)) {
-        hints += `&localaddr=${MULTICAST_NIC_LOCALADDR}`;
-      }
-    } catch (_) { /* malformed URL — skip localaddr hint */ }
-    return `${url}${sep}${hints}`;
+    return `${url}${sep}fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
   }
 
   _isLiveInputHintMemoryError(err) {
