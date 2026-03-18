@@ -111,7 +111,7 @@ class SRTRelay extends EventEmitter {
     const outputUrl = `${this.localUrl}?pkt_size=1316`;
 
     const args = [
-      '-loglevel', 'warning',
+      '-loglevel', 'error',      // suppress mid-GOP H.264 PPS/slice-header warnings (copy mode artefacts)
       '-i', inputUrl,
       '-c', 'copy',
       '-f', 'mpegts',
