@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.78)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.79)
+
+## web v3.1.79 — 2026-03-18
+
+### Fullscreen tiles: subtle 1px semi-transparent status border
+
+Top border reduced from `2px solid` to `1px solid` at 33% opacity (`statusColor55`). Side/bottom borders darkened to `#080808`. Status color still readable as tally indicator without forming bold continuous lines across the screen.
+
+
 
 ## web v3.1.78 — 2026-03-18
 

@@ -533,8 +533,8 @@ function FullscreenThumbTile({ id, result, nowMs }) {
     <div style={{
       display: 'flex', flexDirection: 'column',
       background: '#030405',
-      border: '1px solid #0e0e0e',
-      borderTop: `2px solid ${statusColor}`,
+      border: '1px solid #080808',
+      borderTop: `1px solid ${statusColor}55`,
       overflow: 'hidden', minWidth: 0,
       aspectRatio: '16 / 9',
     }}>
