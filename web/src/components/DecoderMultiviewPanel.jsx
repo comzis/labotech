@@ -583,7 +583,7 @@ function FullscreenThumbTile({ id, result, nowMs }) {
                 color: '#3a5878', fontFamily: 'monospace', fontSize: '9px',
                 whiteSpace: 'nowrap', paddingRight: 5, fontVariantNumeric: 'tabular-nums',
               }}>
-                {rate.mbps.toFixed(1)} Mb
+                {rate.mbps.toFixed(1)} Mb/s
               </span>
             )}
           </div>
