@@ -1,4 +1,28 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
+
+class PanelErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ margin: 24, padding: 16, background: '#1a0505', border: '1px solid #7a1515', borderRadius: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#ff5555', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+            Panel error — {this.props.label || 'unknown panel'}
+          </div>
+          <div style={{ fontSize: 10, color: '#cc4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+            {this.state.err.message}
+          </div>
+          <button
+            style={{ marginTop: 10, fontSize: 10, padding: '3px 10px', background: '#2a0808', border: '1px solid #7a1515', borderRadius: 3, color: '#ff5555', cursor: 'pointer' }}
+            onClick={() => this.setState({ err: null })}
+          >Retry</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { motion } from 'framer-motion';
 import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart, LogIn, Lock } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -1052,13 +1076,13 @@ export default function App() {
           transition={{ duration: 0.15 }}
           className="py-4"
         >
-          {tab === 'streams'    && <StreamsPanel lastMessage={lastMessage} />}
-          {tab === 'transcode'  && <TranscodePanel lastMessage={lastMessage} />}
-          {tab === 'multicast'  && <MulticastPanel lastMessage={lastMessage} />}
-          {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} />}
-          {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
-          {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
-          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} />}
+          {tab === 'streams'    && <PanelErrorBoundary label="SRT Encapsulator"><StreamsPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'transcode'  && <PanelErrorBoundary label="Transcoder"><TranscodePanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'multicast'  && <PanelErrorBoundary label="Forwarding"><MulticastPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'decoder'    && <PanelErrorBoundary label="Decoder"><DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} /></PanelErrorBoundary>}
+          {tab === 'analyse'    && <PanelErrorBoundary label="TS Analyser"><TSAnalyser lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'decoders'   && <PanelErrorBoundary label="Multiview"><DecoderMultiviewPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'streamView' && <PanelErrorBoundary label="Live View"><StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} /></PanelErrorBoundary>}
           {tab === 'alarms'     && (
             <EventLogPanel
               events={eventLog}
