@@ -1,6 +1,68 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.73)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.79)
+
+## web v3.1.79 — 2026-03-18
+
+### Fullscreen tiles: subtle 1px semi-transparent status border
+
+Top border reduced from `2px solid` to `1px solid` at 33% opacity (`statusColor55`). Side/bottom borders darkened to `#080808`. Status color still readable as tally indicator without forming bold continuous lines across the screen.
+
+
+
+## web v3.1.78 — 2026-03-18
+
+### Fullscreen multiview: true 16:9 tiles + correct audio pair count
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **True 16:9 tile aspect ratio**: `aspectRatio: '16/9'` added to `FullscreenThumbTile` root. Grid changed from `gridAutoRows: '1fr'` (stretches tiles to fill height, causing anamorphic distortion) to `gridAutoRows: 'auto'` with `alignContent: 'center'` — tiles maintain 16:9 and are centred vertically; unused background shows as black bars rather than stretching the video.
+- **Correct audio pair count**: `pairCount = Math.max(measuredPairs, audioEsCount)` — always shows as many meter pairs as there are audio Elementary Streams in the PMT, even when only the primary ES was probed. Unprobed pairs render as dark/inactive bars, showing the channel slot exists.
+- **Ghost null-PID audio ES fix**: PMT audio ES count now filters `s.pid != null` — ffprobe emits each ES twice (once in the program list with a PID, once in the global stream array without). The null-PID ghost was inflating the audio pair count by 1 for every stream.
+
+**Operator impact:** Thumbnails are true 16:9 at all tile counts. All 4 audio tracks on the current multicast streams now show meter slots. The phantom 5th audio track disappears.
+
+
+
+## web v3.1.77 — 2026-03-18
+
+### Fix: bitrate units corrected to Mb/s throughout
+
+`Mbps` and bare `Mb` replaced with `Mb/s` — the correct SI-derived notation used in EBU/DVB/SMPTE documentation. Affects: UMD overlay (`DecoderMultiviewPanel`), TS Rate stat cells (`formatMbps` in `transportBitrate.js`).
+
+
+
+## web v3.1.76 — 2026-03-18
+
+### Fix: UMD bitrate shows "Mb" unit
+
+Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `8.2`.
+
+
+
+## web v3.1.75 — 2026-03-18
+
+### Fix: UMD label shrink-wraps content, maximises thumbnail area
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- UMD overlay changed from `display:flex; left:0; right:0` (full tile width) to `display:inline-flex; left:0` with no `right` — background covers only the service name + bitrate text. `maxWidth:88%` prevents overflow. Service name span no longer uses `flex:1`; bitrate rendered only when available and sits immediately after the name. Thumbnail video is unobscured everywhere outside the label.
+
+**Operator impact:** UMD background is now exactly as wide as the label text, leaving the thumbnail image visible behind it rather than blacked out across the full top strip.
+
+
+
+## web v3.1.74 — 2026-03-18
+
+### Fix: fullscreen UMD service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- `FullscreenThumbTile` now latches the last known-good service name in `svcLatch` state — same pattern as `DecoderCard.svcSnapshot`. `rawSvc` is derived from `result.dvb.services[0].serviceName` or `result.programs[0].name`; when the result momentarily clears between probe cycles, `svcLatch` keeps the UMD label stable. The name only ever updates forward — it never reverts to `'—'` once a service name has been seen.
+
+**Operator impact:** UMD service name no longer flickers/disappears between probe cycles.
+
+
 
 ## web v3.1.73 — 2026-03-18
 

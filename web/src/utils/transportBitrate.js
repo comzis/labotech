@@ -27,6 +27,6 @@ export function resolveTransportBitrate(result) {
 
 export function formatMbps(mbps, digits = 2) {
   if (!Number.isFinite(Number(mbps)) || Number(mbps) <= 0) return '-';
-  return `${Number(mbps).toFixed(digits)} Mbps`;
+  return `${Number(mbps).toFixed(digits)} Mb/s`;
 }
 

@@ -485,7 +485,10 @@ function FsVuBar({ rmsDb, peakDb }) {
 
 // Evertz-style fullscreen tile: thumbnail + vertical audio meters, thin label bar below
 function FullscreenThumbTile({ id, result, nowMs }) {
-  const svc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || '—';
+  const rawSvc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || null;
+  const [svcLatch, setSvcLatch] = useState(null);
+  useEffect(() => { if (rawSvc) setSvcLatch(rawSvc); }, [rawSvc]);
+  const svc = rawSvc || svcLatch || '—';
   const hasTelemetry = Boolean(result?.probeTime);
   const severity = result?.health?.severity;
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
@@ -501,15 +504,16 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const thumbUrl = result?.thumbnailUrl || null;
   const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Count actual audio ES streams from the PMT to know how many pairs to display.
-  // audioLevels.channels contains measured level data for as many channels as the
-  // backend probed (typically the primary audio ES, all its channels).
-  // Pair measured channels into L/R; index into channels[] for real levels.
+  // Count audio ESes from PMT, filtering null-PID entries — ffprobe emits each ES
+  // twice: once inside the program list (with PID) and once in the global stream
+  // array (without PID). The null-PID ghost must not inflate the pair count.
   const audioEsCount = (result?.programs || []).reduce((acc, p) =>
-    acc + (p.streams || []).filter((s) => s.codecType === 'audio').length, 0);
-  const pairCount = channels.length > 0
-    ? Math.ceil(channels.length / 2)            // real measured pairs
-    : audioEsCount > 0 ? audioEsCount : 0;      // ES count as placeholder pairs
+    acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+  // Show whichever is larger: measured channel pairs OR PMT ES count.
+  // This ensures all 4 audio PIDs show meter slots even when only the primary
+  // stream is probed (2 measured channels → 1 real pair, 3 dark placeholders).
+  const measuredPairs = channels.length > 0 ? Math.ceil(channels.length / 2) : 0;
+  const pairCount = Math.max(measuredPairs, audioEsCount);
 
   const pairs = [];
   for (let i = 0; i < pairCount; i++) {
@@ -529,9 +533,10 @@ function FullscreenThumbTile({ id, result, nowMs }) {
     <div style={{
       display: 'flex', flexDirection: 'column',
       background: '#030405',
-      border: '1px solid #0e0e0e',
-      borderTop: `2px solid ${statusColor}`,
+      border: '1px solid #080808',
+      borderTop: `1px solid ${statusColor}55`,
       overflow: 'hidden', minWidth: 0,
+      aspectRatio: '16 / 9',
     }}>
       {/* Content row: thumbnail | audio meters */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -554,33 +559,35 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             </div>
           )}
 
-          {/* UMD — broadcast-style source label at top of thumbnail */}
+          {/* UMD — content-width label, top-left of thumbnail */}
           <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0,
+            position: 'absolute', top: 0, left: 0,
+            maxWidth: '88%',
             height: 18,
             background: 'rgba(0,0,0,0.82)',
-            display: 'flex', alignItems: 'center',
+            display: 'inline-flex', alignItems: 'center',
             overflow: 'hidden',
           }}>
-            {/* Tally strip — status color */}
+            {/* Tally strip */}
             <div style={{ width: 3, alignSelf: 'stretch', background: statusColor, flexShrink: 0 }} />
-            {/* Service name */}
+            {/* Service name — no flex:1, takes only what it needs */}
             <span style={{
-              flex: 1, minWidth: 0,
               color: '#f0f0f0', fontFamily: 'monospace', fontSize: '11px', fontWeight: 700,
               letterSpacing: '0.07em', textTransform: 'uppercase',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              padding: '0 5px',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              padding: '0 4px 0 5px',
             }}>
               {svc}
             </span>
-            {/* Bitrate */}
-            <span style={{
-              color: '#2a4060', fontFamily: 'monospace', fontSize: '9px',
-              flexShrink: 0, paddingRight: 4, fontVariantNumeric: 'tabular-nums',
-            }}>
-              {rate.mbps != null ? `${rate.mbps.toFixed(1)}` : ''}
-            </span>
+            {/* Bitrate immediately after name */}
+            {rate.mbps != null && (
+              <span style={{
+                color: '#3a5878', fontFamily: 'monospace', fontSize: '9px',
+                whiteSpace: 'nowrap', paddingRight: 5, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {rate.mbps.toFixed(1)} Mb/s
+              </span>
+            )}
           </div>
 
           {/* Decoder ID — very dim, bottom-right corner */}
@@ -1561,7 +1568,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             flex: 1,
             display: 'grid',
             gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
-            gridAutoRows: '1fr',
+            gridAutoRows: 'auto',
+            alignContent: 'center',
             overflow: 'hidden',
             gap: '1px',
             padding: '1px',
