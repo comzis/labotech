@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.72 / web 3.1.81)
+Date: 2026-03-18 (latest: v3.1.72 / web 3.1.82)
+
+## web v3.1.82 — 2026-03-18
+
+### Fullscreen multiview: full-frame thumbnails, no crop
+
+`objectFit: cover` cropped picture edges — visible as the leftmost character of service names being clipped. Changed to `objectFit: contain` with black background; full 16:9 frame is always preserved. Broadcast-correct: no picture content is ever cropped.
+
+
 
 ## web v3.1.81 — 2026-03-18
 
