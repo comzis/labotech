@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.69 / web 3.1.67)
+Date: 2026-03-18 (latest: v3.1.69 / web 3.1.68)
+
+## web v3.1.68 — 2026-03-18
+
+### Feature: Fullscreen multiview — Evertz-style thumbnail wall
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- Added **FULL SCREEN** button (amber, visible when tiles are active). Invokes the browser Fullscreen API on the overlay container; ESC exits natively.
+- Fullscreen overlay renders `FullscreenThumbTile` components in a responsive grid (2/3/4/5 columns by tile count) with no UI chrome.
+- Each tile: 16:9 thumbnail fills the cell, thin left-edge status accent (green/amber/red), LED dot in corner, decoder-ID badge (top-right, dimmed), service name + bitrate label bar at the bottom.
+- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · Eurovision Services logo (right) · EXIT button.
+- Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
+
+**Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
 
 ## web v3.1.67 — 2026-03-18
 
