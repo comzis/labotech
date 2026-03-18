@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.89 / web 3.1.109)
+Date: 2026-03-18 (latest: v3.1.89 / web 3.1.110)
+
+## web 3.1.110 — 2026-03-18
+
+### UX: Proactive SRT warning in ETR 290 section — button disabled, amber banner shown
+
+- **Problem:** Operator selected an SRT decoder in the ETR Monitor section and clicked Enable ETR, receiving no visible feedback (fixed in 3.1.109 with a toast). But the button was still clickable and the limitation wasn't communicated upfront.
+- **Fix:** When the selected decoder URL starts with `srt://`, the ETR 290 section now shows an amber inline banner — *"SRT source — ETR290 unavailable. The thumbnail capture holds the sole SRT caller slot. Use a UDP/RTP multicast feed."* — and the Enable ETR button is disabled (greyed out, `not-allowed` cursor) immediately on decoder selection, before any click.
+- **Operator impact:** The SRT constraint is communicated proactively. No click required to understand why ETR is unavailable.
 
 ## web 3.1.109 — 2026-03-18
 
