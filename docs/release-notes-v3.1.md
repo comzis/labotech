@@ -1,6 +1,26 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.79 / web 3.1.96)
+Date: 2026-03-18 (latest: v3.1.80 / web 3.1.98)
+
+## v3.1.80 / web v3.1.97 — 2026-03-18
+
+### SMPTE 302M (AES3) audio recognition and channel-map display
+
+**Backend** — `_mapStream()` now detects SMPTE 302M streams (ffprobe `codec_name: s302m` or PCM codec on stream types 0x06/0x82/0x83) and extracts:
+- `bitDepth` — 16/20/24-bit from `bits_per_raw_sample`
+- `pairCount` — AES3 stereo pair count (channels ÷ 2)
+- `channels` — total channel count
+- `sampleRate` — always 48 kHz for broadcast S302M
+- `theoreticalBps` — raw PCM bitrate (sampleRate × bitDepth × channels)
+- `pairs` — array of `{ pair, ch: [L, R] }` sequential channel assignments from Ch 1
+
+**Streams tab PID table** — S302M rows now show a gold `S302M` type badge and an inline description: `AES3 / 24-bit / 4 pairs (8ch) / 48kHz` with per-pair channel chips (`P1: 1/2`, `P2: 3/4`, …).
+
+**Confidence Monitor — Dolby E pair indicator** — when `dvb.dolbyE.detected` is true, audio pair(s) carrying SMPTE 337M non-PCM data burst are replaced by a solid amber block (`DolbyEPairBlock`): dark amber background, amber top/bottom rails, vertical "DE" label — broadcast standard visual convention for non-PCM data channels. Pair identification uses a heuristic: constant near-equal amplitude on both channels (L/R symmetry < 3 dB, −35 to −8 dBFS average). When Dolby E is detected but the pair heuristic has not yet fired (e.g. first probe cycle), a stream-level amber banner shows "Dolby E · SMPTE 337M carrier detected". When the program config is known (e.g. "5.1+2"), it is appended to the indicator.
+
+**AES3 / SMPTE 302M Audio panel** — appears below the PID table whenever S302M streams are present. Shows: bit depth, sample rate, total pairs/channels summary grid, per-PID channel strip with actual and theoretical bitrate, and a note that SMPTE 337M non-PCM carrier detection requires the Dolby E adapter.
+
+**Operator impact:** S302M audio content (professional PCM audio encapsulation used in broadcast IP gateways and SRT contribution feeds) is now identified and its channel structure shown without needing an external analyser.
 
 ## v3.1.79 / web v3.1.96 — 2026-03-18
 
