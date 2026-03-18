@@ -285,6 +285,23 @@ container_tool_parity() {
     'ffmpeg -version | sed -n "1p"; ffprobe -version | sed -n "1p"; tshark -v | sed -n "1p"; tcpdump --version | sed -n "1p"; tsanalyze --version | sed -n "1p"'
 }
 
+check_tcpdump_capability() {
+  local bin
+  bin="$(command -v tcpdump 2>/dev/null || true)"
+  if [[ -z "$bin" ]]; then
+    echo "[deploy] tcpdump not found on host — NIC capture (IAT sniffer) will be UNAVAILABLE"
+    return 1
+  fi
+  if getcap "$bin" 2>/dev/null | grep -q "cap_net_raw"; then
+    echo "[deploy] tcpdump capability OK: $(getcap "$bin")"
+    return 0
+  fi
+  echo "[deploy] tcpdump missing cap_net_raw — Probe Method will show UNAVAILABLE in UI"
+  echo "[deploy] fix: sudo setcap cap_net_raw,cap_net_admin=eip $bin"
+  echo "[deploy] then: docker compose restart labotech"
+  return 1
+}
+
 health_assertions() {
   local json
   json="$(curl -fsS "${HEALTH_URL}")" || return 1
@@ -334,6 +351,7 @@ main() {
   run_stage_or_die "preflight script" bash scripts/preflight-monitoring-tools.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "post-deploy smoke script" bash scripts/post-deploy-smoke.sh "${API_HOST}" "${API_PORT}" || return 1
   run_stage_or_die "health assertions (tsanalyze required)" health_assertions || return 1
+  run_stage_warn "tcpdump NIC capture capability" check_tcpdump_capability
   run_stage_warn "prune dangling images and build cache" docker image prune -f
   show_deployed_version
 
