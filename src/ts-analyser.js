@@ -572,17 +572,44 @@ class TSAnalyser extends EventEmitter {
       // astats WITHOUT metadata=1 prints a channel summary to stderr on exit.
       // metadata=1 stores stats as frame AVDictionary entries which are never
       // printed to stderr with -f null, so the old approach always returned null.
-      const args = [
-        '-hide_banner',
-        '-nostats',
-        '-loglevel', 'info',
-        '-t', '2.0',
-        '-i', this._withLiveInputHints(this.url),
-        '-vn',
-        '-af', 'astats=reset=1',
-        '-f', 'null',
-        '-',
-      ];
+
+      // Determine how many audio ESes the stream carries using the last known
+      // PMT state (one probe cycle behind — acceptable; stream structure is
+      // stable).  With multiple ESes we must amerge them into one N-channel
+      // stream so astats reports every pair.  Without this, FFmpeg's default
+      // stream selection picks only the first audio ES and all other pairs
+      // show dark placeholders in the multiview meters.
+      const audioEsCount = (this.lastResult?.programs || []).reduce((acc, p) =>
+        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+      const mergeInputs = Math.min(Math.max(audioEsCount, 1), 8);
+
+      // Build args: if >1 audio ES, amerge all streams into one multi-channel
+      // stream so astats sees all channels in a single pass.
+      const inputUrl = this._withLiveInputHints(this.url);
+      let args;
+      if (mergeInputs > 1) {
+        // amerge: [0:a:0][0:a:1]...[0:a:N-1]amerge=inputs=N[aout]
+        const amergeInputs = Array.from({ length: mergeInputs }, (_, i) => `[0:a:${i}]`).join('');
+        const filterComplex = `${amergeInputs}amerge=inputs=${mergeInputs}[aout]`;
+        args = [
+          '-hide_banner', '-nostats', '-loglevel', 'info',
+          '-t', '2.0',
+          '-i', inputUrl,
+          '-filter_complex', filterComplex,
+          '-map', '[aout]',
+          '-af', 'astats=reset=1',
+          '-f', 'null', '-',
+        ];
+      } else {
+        args = [
+          '-hide_banner', '-nostats', '-loglevel', 'info',
+          '-t', '2.0',
+          '-i', inputUrl,
+          '-vn',
+          '-af', 'astats=reset=1',
+          '-f', 'null', '-',
+        ];
+      }
 
       const proc = spawn('ffmpeg', args);
       let stderr = '';
@@ -638,12 +665,21 @@ class TSAnalyser extends EventEmitter {
             channels: [],
           });
         }
-        const channelData = channels.map((ch) => ({
-          ch,
-          label: ch === 0 ? 'L' : ch === 1 ? 'R' : `Ch${ch + 1}`,
-          peakDb: channelPeak[ch] ?? null,
-          rmsDb:  channelRms[ch]  ?? null,
-        }));
+        // With amerge, channels are laid out as:
+        //   0=ES0L  1=ES0R  2=ES1L  3=ES1R  4=ES2L  5=ES2R  ...
+        // Label each as "P1L", "P1R", "P2L", ... so the frontend can render
+        // correct pair numbers in the VU bar tooltips / aria labels.
+        const channelData = channels.map((ch) => {
+          const pair = Math.floor(ch / 2) + 1;
+          const side = ch % 2 === 0 ? 'L' : 'R';
+          const label = mergeInputs > 1 ? `P${pair}${side}` : (ch === 0 ? 'L' : ch === 1 ? 'R' : `Ch${ch + 1}`);
+          return {
+            ch,
+            label,
+            peakDb: channelPeak[ch] ?? null,
+            rmsDb:  channelRms[ch]  ?? null,
+          };
+        });
         const allRms  = channelData.map((c) => c.rmsDb).filter((v) => v != null && Number.isFinite(v));
         const allPeak = channelData.map((c) => c.peakDb).filter((v) => v != null && Number.isFinite(v));
         resolve({
