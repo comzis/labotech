@@ -1387,9 +1387,11 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 const allAudioEs = (selectedResult?.programs || [])
                   .flatMap((p) => (p.streams || []).filter((s) => s.codecType === "audio"));
                 const hasRealPidAudio = allAudioEs.some((s) => s.pid != null);
+                // Exclude S302M ESes — they carry SMPTE 337M data bursts and would
+                // inflate pairCount with phantom channels not in the amerge probe.
                 const audioEsCount = hasRealPidAudio
-                  ? allAudioEs.filter((s) => s.pid != null).length
-                  : allAudioEs.length;
+                  ? allAudioEs.filter((s) => s.pid != null && !s.s302m).length
+                  : allAudioEs.filter((s) => !s.s302m).length;
                 const measuredPairs = Math.ceil(channels.length / 2);
                 const pairCount = Math.max(measuredPairs, audioEsCount, 0);
                 const hasMeter = pairCount > 0;
