@@ -2622,7 +2622,9 @@ class TSAnalyser extends EventEmitter {
         try {
           await captureThumbnail(this.id, this.url);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-        } catch (_) { /* captureThumbnail logs internally */ }
+        } catch (err) {
+          console.error(`[thumb:${this.id}] capture failed: ${err && err.message}`);
+        }
         scheduleThumb();
       };
       const scheduleThumb = () => {
