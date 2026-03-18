@@ -364,9 +364,12 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         // decoded without their reference I-frame, causing the visible macroblocking.
         ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
         // SRT analyze window must exceed the SRT latency parameter (no data flows until it fills).
-        // Duration derived from parseSrtLatency() + 3 s headroom. Fallback always uses 7s.
-        '-analyzeduration', iFrameOnly ? (isSrtUrl ? srtAnalyzeDurUs : '2000000') : '7000000',
-        '-probesize', iFrameOnly ? (isSrtUrl ? '7000000' : '3000000') : '7000000',
+        // Duration derived from parseSrtLatency() + 3 s headroom.
+        // Fallback (iFrameOnly=false): use same RTP/SRT durations as I-frame path — 7s
+        // was previously used for all fallback streams but left only 1s for thumbnail=pick
+        // buffering within the 8s RTP timeout, causing reliable timeouts on fallback attempts.
+        '-analyzeduration', isSrtUrl ? srtAnalyzeDurUs : '2000000',
+        '-probesize', isSrtUrl ? '7000000' : '3000000',
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
@@ -384,7 +387,14 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('exit', (code) => {
         clearTimeout(timer);
-        if (code === 0) return attemptResolve();
+        if (code === 0) {
+          // Guard against select=eq(pict_type\,I) finding no I-frame in the capture
+          // window: ffmpeg exits 0 but writes no file.  If we resolve here, the fallback
+          // chain short-circuits and fs.rename throws ENOENT — bypassing all remaining
+          // attempts.  Reject instead so the chain falls through to the next attempt.
+          if (fs.existsSync(tmpPath)) return attemptResolve();
+          return attemptReject(new Error('ffmpeg exited 0 but wrote no output frame (no I-frame in window)'));
+        }
         try { fs.unlinkSync(tmpPath); } catch (_) {}
         const detail = (stderr || '').trim();
         attemptReject(new Error(detail ? `Thumbnail capture failed with code ${code}: ${detail}` : `Thumbnail capture failed with code ${code}`));
