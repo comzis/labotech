@@ -1,6 +1,21 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.72)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.73)
+
+## web v3.1.73 — 2026-03-18
+
+### Fullscreen multiview: UMD service label + 2px audio bars
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **UMD overlay at top of thumbnail**: professional broadcast-style source label. Semi-transparent black strip (18px, `rgba(0,0,0,0.82)`) at the top of each thumbnail. Left-edge tally strip (3px, status color — green/amber/red). Service name in bold white monospace uppercase. Bitrate right-aligned in dim blue. Decoder ID moved to bottom-right corner of thumbnail at 18% opacity. Bottom label bar removed — UMD carries all info.
+- **2px VU bars**: each individual bar is fixed 2px wide (was `flex:1`). At 2px per bar + 1px L/R gap + 2px inter-pair gap, 4 stereo pairs fit in 30px total panel width. Labels removed from bars (too narrow). Zone ticks remain at 5% opacity.
+- **Audio panel**: fixed 30px width, uniform 2px padding — accommodates 4 pairs exactly.
+- **Top border**: reduced from 3px to 2px for a tighter tile chrome.
+
+**Operator impact:** Service names are now legible on each thumbnail at MCR distance. Audio meter column is minimal and non-intrusive. 4 stereo pairs visible per tile.
+
+
 
 ## web v3.1.72 — 2026-03-18
 
