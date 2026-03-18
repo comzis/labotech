@@ -1,6 +1,34 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.64)
+Date: 2026-03-18 (latest: v3.1.66)
+
+## v3.1.66 — 2026-03-18
+
+### Fix: RTP/UDP first thumbnail fires after jitter only, not jitter + interval
+
+**`src/ts-analyser.js`:**
+
+- Extracted capture logic into `doCapture()` in the RTP/UDP thumbnail loop.
+- First call schedules `doCapture` after `thumbStartJitterMs` (0–1.5 s hash-based).
+- Subsequent calls continue on the normal `thumbIntervalMs` cadence via `scheduleThumb()`.
+
+**Why:** First capture previously waited `thumbStartJitterMs + thumbIntervalMs` (5–6.5 s of dead time) before even starting. The interval wait serves its purpose between captures but not before the first one — there is no previous capture to space from. Thundering-herd jitter is preserved (hash-based per stream ID).
+
+**Operator impact:** First thumbnail frame appears within ~3–5 s of decoder start instead of ~10–15 s. Subsequent refresh cadence is unchanged.
+
+## v3.1.65 — 2026-03-18
+
+### Fix: Remove duplicate thumbnail capture in analyser streams (>1 min first-frame delay)
+
+**`routes/analyse.js`, `src/api.js`:**
+
+- Removed `thumbnailClient.start()` calls from `POST /analyse/start` and `restoreState()`.
+- Removed `thumbnailClient.stop()` call from `DELETE /analyse/:id`.
+- Removed now-unused `THUMBNAIL_INTERVAL_SEC` constant from both files.
+
+**Why:** `TSAnalyser.startContinuous()` already manages thumbnail capture internally — a `captureThumbnailTimer` loop for RTP/UDP and a `PersistentThumbnailCapture` for SRT. The v3.1.62 wiring introduced a second concurrent `PersistentThumbnailCapture` via the worker subprocess for every stream, creating two simultaneous ffmpeg processes per decoder. Under load this doubled CPU usage for thumbnail capture and caused resource contention that delayed the first frame from ~10 s to >1 minute.
+
+**Operator impact:** First thumbnail frame appears within 10–15 s of decoder start (jitter + first capture cycle). The `ThumbnailWorkerClient` infrastructure remains for future use with streams that do not have their own capture logic.
 
 ## v3.1.64 — 2026-03-18
 
