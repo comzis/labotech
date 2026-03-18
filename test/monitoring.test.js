@@ -42,10 +42,11 @@ describe('monitoring.captureThumbnail', () => {
     expect(out).toContain('/logs/thumbnails/decoder-1.jpg');
     expect(spawn).toHaveBeenCalledTimes(3);
 
-    // Attempt 1: I-frame + deblock + denoise
+    // Attempt 1: I-frame (skip_frame nokey) + deblock — select=eq(pict_type\,I) removed
+    // because -skip_frame nokey does not set pict_type, causing select to match nothing.
     const firstArgs = spawn.mock.calls[0][1];
     const firstFilter = firstArgs[firstArgs.indexOf('-vf') + 1];
-    expect(firstFilter).toContain('select=eq(pict_type\\,I)');
+    expect(firstFilter).not.toContain('select=eq(pict_type');
     expect(firstArgs).toContain('-skip_frame');
     const skipIdx1 = firstArgs.indexOf('-skip_frame');
     expect(firstArgs[skipIdx1 + 1]).toBe('nokey');
@@ -54,7 +55,7 @@ describe('monitoring.captureThumbnail', () => {
     // Attempt 2: I-frame, no deblock
     const secondArgs = spawn.mock.calls[1][1];
     const secondFilter = secondArgs[secondArgs.indexOf('-vf') + 1];
-    expect(secondFilter).toContain('select=eq(pict_type\\,I)');
+    expect(secondFilter).not.toContain('select=eq(pict_type');
     expect(secondArgs).toContain('-skip_frame');
     const skipIdx2 = secondArgs.indexOf('-skip_frame');
     expect(secondArgs[skipIdx2 + 1]).toBe('nokey');
@@ -63,7 +64,7 @@ describe('monitoring.captureThumbnail', () => {
     // Attempt 3: I-frame, bare scale (no quality filters)
     const thirdArgs = spawn.mock.calls[2][1];
     const thirdFilter = thirdArgs[thirdArgs.indexOf('-vf') + 1];
-    expect(thirdFilter).toContain('select=eq(pict_type\\,I)');
+    expect(thirdFilter).not.toContain('select=eq(pict_type');
     expect(thirdArgs).toContain('-skip_frame');
     const skipIdx3 = thirdArgs.indexOf('-skip_frame');
     expect(thirdArgs[skipIdx3 + 1]).toBe('nokey');

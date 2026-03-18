@@ -341,9 +341,13 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       // emitting, adding N×GOP seconds of latency (e.g. thumbnail=4 at 1 I-frame/sec = 4s delay).
       // Fallback path: thumbnail=pick gives decoder a short lookahead to find the least corrupted
       // frame when we cannot guarantee we start on a keyframe.
+      // I-frame path: -skip_frame nokey already guarantees the decoder only ever
+      // sees keyframes — select=eq(pict_type\,I) is redundant AND harmful because
+      // -skip_frame nokey does not set pict_type on the output frames, so the select
+      // filter matches nothing and ffmpeg exits 0 with no output file.
+      // Rely on -skip_frame nokey + -frames:v 1 alone (same reasoning as PersistentThumbnailCapture).
       const vf = iFrameOnly
         ? [
-            'select=eq(pict_type\\,I)',
             deblock ? 'pp=de/de' : null,
             `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
             denoise || null,
