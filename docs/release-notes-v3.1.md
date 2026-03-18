@@ -1,5 +1,6 @@
 # Labotech v3.1 Release Notes
 
+<<<<<<< HEAD
 Date: 2026-03-17 (latest: v3.1.60)
 
 ## v3.1.60 — 2026-03-17
@@ -23,6 +24,175 @@ Date: 2026-03-17 (latest: v3.1.60)
 - For SRT streams: TSDuckMonitor is suspended alongside `_persistentThumb` during heavy sequential probes and resumed 1.5 s after probes complete — ensures the SRT connection slot is free
 
 **Operator impact:** PCR jitter, SI table presence/absence, and independent tsp-derived bitrate are now monitored continuously between tsanalyze heavy probe cycles (every 10 s by default, configurable via `TSDUCK_MONITOR_INTERVAL_MS`). ETR 290 P1–P3 alarms appear in the alarm log immediately on detection. No configuration change required — falls back silently if `tsp` is not installed.
+=======
+Date: 2026-03-18 (latest: v3.1.70 / web 3.1.68)
+
+## web v3.1.68 — 2026-03-18
+
+### Feature: Fullscreen multiview — Evertz-style thumbnail wall
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- Added **FULL SCREEN** button (amber, visible when tiles are active). Invokes the browser Fullscreen API on the overlay container; ESC exits natively.
+- Fullscreen overlay renders `FullscreenThumbTile` components in a responsive grid (2/3/4/5 columns by tile count) with no UI chrome.
+- Each tile: 16:9 thumbnail fills the cell, thin left-edge status accent (green/amber/red), LED dot in corner, decoder-ID badge (top-right, dimmed), service name + bitrate label bar at the bottom.
+- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · Eurovision Services logo (right) · EXIT button.
+- Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
+
+**Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
+
+## v3.1.70 — 2026-03-18
+
+### Fix: Log thumbnail capture failures to docker logs
+
+**`src/ts-analyser.js`:**
+
+- The `doCapture` catch block in `startContinuous()` was silently swallowing errors. Added `console.error` so failures appear in `docker compose logs labotech` as `[thumb:<id>] capture failed: <message>`.
+
+**Why:** With thumbnails still not appearing at expected latency after v3.1.69, the silent catch made it impossible to diagnose whether the issue was ffmpeg errors, network/multicast access, filesystem permissions, or something else.
+
+**Operator impact:** Thumbnail capture failures are now visible in server logs for diagnosis.
+
+## web v3.1.67 — 2026-03-18
+
+### Multiview tile: PID breakdown and service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **PIDs stat** now shows `NV NA ND` (e.g. `1V 2A 3D`) using `result.dvb.streamBreakdown` instead of a raw count — gives immediate clarity on stream composition at MCR distance. Falls back to raw count if breakdown is absent (older probe result).
+- **Service name latch**: last known-good `serviceName` and `serviceProvider` are persisted in component state so the tile never flickers back to "Unknown" between probe cycles or during the initial fast-probe window.
+
+**Operator impact:** PID cell shows video/audio/data counts; service name no longer briefly shows "Unknown" when a new result arrives without DVB-SI tags.
+
+## v3.1.69 — 2026-03-18
+
+### Fix: Replace 4-attempt I-frame ladder with 2-attempt thumbnail=pick (long-GOP streams)
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `-skip_frame nokey` and the 4-attempt fallback ladder from `_doCaptureThumbnail`.
+- Now uses 2 attempts: (1) `thumbnail=pick + pp=de/de + scale`, (2) `thumbnail=pick + scale` (handles builds without the `pp` filter).
+- `thumbnail=N` buffers N frames and picks the least-blurry one — no keyframe wait required.
+
+**Why:** Broadcast contribution links (Eurovision, GNVE) commonly use GOPs of 10–25 s. `-skip_frame nokey -frames:v 1` waited up to one full GOP for a keyframe — reliably hitting the 8 s timeout on all three I-frame attempts every cycle. The fallback (attempt 4) also failed intermittently, causing the 5 s reschedule to fire before any frame was written. First thumbnail was appearing at 40–45 s. `thumbnail=pick` needs only a small frame window (160 ms at 25 fps) — no keyframe alignment required.
+
+**Operator impact:** First thumbnail expected within 4–6 s of decoder start regardless of GOP length.
+
+## v3.1.68 — 2026-03-18
+
+### Fix: Remove select=eq(pict_type\,I) from one-shot capture — incompatible with -skip_frame nokey
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `select=eq(pict_type\,I)` from the I-frame vf chain in `_doCaptureThumbnail` attempts 1–3.
+- `-skip_frame nokey` already guarantees only keyframes are decoded but does **not** set `pict_type` metadata on the output frames. The `select` filter therefore matched nothing, causing ffmpeg to exit code=0 with no output file on every I-frame attempt — even after the fallback-chain short-circuit fix in v3.1.67.
+- Now relies on `-skip_frame nokey` + `-frames:v 1` alone, matching the approach already in `PersistentThumbnailCapture`.
+
+**Operator impact:** Attempt 1 now captures the first keyframe reliably (~2–4 s). First thumbnail should appear within 5–8 s of decoder start.
+
+## v3.1.67 — 2026-03-18
+
+### Fix: captureThumbnail fallback chain short-circuit and fallback analyzeduration
+
+**`src/monitoring.js`:**
+
+- `runAttempt` now checks `fs.existsSync(tmpPath)` after `code === 0`. If ffmpeg exits cleanly but wrote no frame (e.g. `select=eq(pict_type\,I)` found no I-frame in the capture window), the attempt is **rejected** so the fallback chain continues to the next attempt. Previously `code === 0` unconditionally resolved, which then threw ENOENT in `fs.rename`, bypassing all remaining attempts and failing the entire capture in one shot.
+- Fallback attempt (`iFrameOnly=false`, `thumbnail=pick`) now uses the same `analyzeduration`/`probesize` as the I-frame path (`2000000 µs` / `3 MB` for RTP, SRT-latency-derived for SRT). The previous `7000000 µs` fallback value left only ~1 s for `thumbnail=pick` buffering within the 8 s RTP timeout, causing reliable timeouts on every fallback attempt.
+
+**Why:** For live RTP streams that are mid-GOP at connect time, `select=eq(pict_type\,I)` exits code=0 with no file. This silently short-circuited the 4-attempt ladder on the very first attempt, causing the capture to fail immediately and reschedule for 5 s later — repeated until ffmpeg happened to join near a keyframe. Combined with the fallback analyzeduration being too long to fit in the timeout budget, thumbnails were appearing after 35–50 s instead of 5–10 s.
+
+**Operator impact:** First thumbnail frame should now appear within 5–10 s of decoder start under normal live-stream conditions.
+
+## v3.1.66 — 2026-03-18
+
+### Fix: RTP/UDP first thumbnail fires after jitter only, not jitter + interval
+
+**`src/ts-analyser.js`:**
+
+- Extracted capture logic into `doCapture()` in the RTP/UDP thumbnail loop.
+- First call schedules `doCapture` after `thumbStartJitterMs` (0–1.5 s hash-based).
+- Subsequent calls continue on the normal `thumbIntervalMs` cadence via `scheduleThumb()`.
+
+**Why:** First capture previously waited `thumbStartJitterMs + thumbIntervalMs` (5–6.5 s of dead time) before even starting. The interval wait serves its purpose between captures but not before the first one — there is no previous capture to space from. Thundering-herd jitter is preserved (hash-based per stream ID).
+
+**Operator impact:** First thumbnail frame appears within ~3–5 s of decoder start instead of ~10–15 s. Subsequent refresh cadence is unchanged.
+
+## v3.1.65 — 2026-03-18
+
+### Fix: Remove duplicate thumbnail capture in analyser streams (>1 min first-frame delay)
+
+**`routes/analyse.js`, `src/api.js`:**
+
+- Removed `thumbnailClient.start()` calls from `POST /analyse/start` and `restoreState()`.
+- Removed `thumbnailClient.stop()` call from `DELETE /analyse/:id`.
+- Removed now-unused `THUMBNAIL_INTERVAL_SEC` constant from both files.
+
+**Why:** `TSAnalyser.startContinuous()` already manages thumbnail capture internally — a `captureThumbnailTimer` loop for RTP/UDP and a `PersistentThumbnailCapture` for SRT. The v3.1.62 wiring introduced a second concurrent `PersistentThumbnailCapture` via the worker subprocess for every stream, creating two simultaneous ffmpeg processes per decoder. Under load this doubled CPU usage for thumbnail capture and caused resource contention that delayed the first frame from ~10 s to >1 minute.
+
+**Operator impact:** First thumbnail frame appears within 10–15 s of decoder start (jitter + first capture cycle). The `ThumbnailWorkerClient` infrastructure remains for future use with streams that do not have their own capture logic.
+
+## v3.1.64 — 2026-03-18
+
+### Fix: Thumbnails not displaying after thumbnail worker wiring (regression v3.1.62)
+
+**`src/api.js`:**
+
+- In the `thumbnail_frame` handler, when the worker emits a new frame, the corresponding `TSAnalyser` instance's `_lastThumbnailUrl` is now updated immediately.
+
+**Why:** The v3.1.62 wiring moved thumbnail capture out of `ts-analyser.js` into the worker process. However, `TSAnalyser._lastThumbnailUrl` was never updated by the worker — it was only set when `runThumbnailCapture` (one-shot probe mode) ran. In continuous mode (`runThumbnailCapture = false`), the `analyse_result` events propagated `thumbnailUrl: undefined`, causing the Confidence Monitor and multiview tiles to show "AWAITING FRAME" indefinitely.
+
+**Operator impact:** Confidence Monitor and multiview thumbnails display correctly again.
+
+## v3.1.63 — 2026-03-18
+
+### Fix: ETR290Analyser 5s startup grace — suppress multicast join noise
+
+**`src/etr290-analyser.js`:**
+- Added `STARTUP_GRACE_MS = 5000` (overridable via `ETR290_STARTUP_GRACE_MS` env var).
+- `start()` sets `_startedAt = Date.now()`.
+- `_parseLine()` suppresses incident creation (but still increments `_counts`) for the first 5 seconds after start.
+
+**Why:** ffmpeg joining a multicast stream mid-stream emits `RTP: missed N packets` and similar lines within the first 1–3 seconds. With `transport_error` threshold set to 1, this fired a spurious alarm in the event log on every decoder start, with no corresponding count growth in the TS Analyser (which has its own 20s probe-cycle grace). The ETR290 and TS Analyser alarm logs were therefore inconsistent at startup.
+
+**Operator impact:** Transport Error and PCR Discontinuity alarms will no longer fire in the first 5 seconds after a decoder starts. Genuine persistent errors that begin immediately after the grace window still fire normally. The count totals in the UI still increment during the grace period.
+
+## v3.1.62 — 2026-03-17
+
+### Feat: Phase 2 thumbnail worker — api.js wiring and analyser lifecycle integration
+
+**`src/api.js`:**
+
+- Creates `ThumbnailWorkerClient` on startup, before route mounting.
+- Wires `frame` events to WebSocket broadcast as `{ type: 'thumbnail_frame', id, url, path }`.
+- Passes client to the analyse route so analyser start/stop automatically manages thumbnail captures.
+- `restoreState()` now calls `thumbnailClient.start()` for each restored analyser on boot.
+- SIGTERM handler: awaits `thumbnailClient.shutdown()` for clean worker teardown before `process.exit(0)`.
+
+**`routes/analyse.js`:**
+
+- `POST /analyse/start` calls `thumbnailClient.start(id, url, THUMBNAIL_INTERVAL_SEC)` after analyser starts.
+- `DELETE /analyse/:id` calls `thumbnailClient.stop(id)` when analyser is removed.
+- `thumbnailClient` is optional (null-safe) — test and standalone usage unaffected.
+
+**Operator impact:** Confidence Monitor thumbnails are now driven by the isolated worker process. Thumbnail capture failures no longer affect the main API process; the worker restarts automatically with exponential backoff. No UI change required — the frontend already consumes `thumbnail_frame` events.
+
+## v3.1.61 — 2026-03-17
+
+### Chore: Phase 2 thumbnail worker scaffolding (worker + client + tests)
+
+**Included in this PR:**
+
+- Added `src/thumbnail-worker.js` worker runtime using `child_process.fork()` IPC command handling.
+- Added `src/thumbnail-worker-client.js` with restart/backoff and active capture replay logic.
+- Added `test/thumbnail-worker.test.js` for command routing, shutdown handshake, and restart replay behavior.
+
+**Scope clarification:**
+
+- `src/api.js` wiring is intentionally deferred to a follow-up change after this Phase 2 scaffolding PR merges.
+- No frontend behavior changes in this entry.
+
+**Operator impact:** No immediate operator-facing behavior change from this scaffolding-only patch. Runtime integration (API wiring and activation path) lands in follow-up work.
+>>>>>>> origin/main
 
 ## v3.1.59 — 2026-03-17
 

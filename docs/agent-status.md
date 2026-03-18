@@ -42,22 +42,21 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Reviewing Agent B Phase 2 PR when ready. Planning Phase 3 (enhanced tsanalyze cadence).
+**Current task:** Phase 3 PR #16 open, awaiting operator review/merge.
 
 **Owns:**
 - `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
 - `src/tsduck-monitor.js` (new file, Phase 3 only)
 - `test/tsduck-monitor.test.js` (new file, Phase 3)
-- `docs/release-notes-v3.3.md` (new file, Phase 3)
 
 **Last session:** 2026-03-17
-- Phase 1 DONE: `_effectiveProbeIntervalMs()` — warning→50%, critical→25% base interval, 156 tests pass
-- PR #13 + #14 merged to main (v3.1.59)
-- All gates cleared
+- Phase 3 implementation complete on PR #16 (`feat/phase3-tsduck-monitor`)
+- API wiring follow-up merged via PR #17 (`feat/phase2-api-wiring`)
+- Monitoring test suite passing on server validation
 
-**Active branch:** none — on main, idle until Phase 2 PR ready for review
+**Active branch:** `feat/phase3-tsduck-monitor` (PR #16 open)
 
-**Waiting for:** Agent B Phase 2 PR → review IPC contract compliance, test coverage, SRT suspend/resume semantics
+**Waiting for:** Operator review/merge for PR #16
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
@@ -68,39 +67,25 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** START Phase 2 — `src/thumbnail-worker.js` + `src/thumbnail-worker-client.js`
+**Current task:** Phase 2 merged. Idle / supporting Phase 3 review.
 
-**Branch:** create `cursor/phase2-thumbnail-worker` off `cursor/phase0a-tsduck-findings`
+**Branch:** none (Phase 2 branch merged)
 
 **Owns:**
-- `src/thumbnail-worker.js` (new file, Phase 2)
-- `src/thumbnail-worker-client.js` (new file, Phase 2)
-- `test/thumbnail-worker.test.js` (new file, Phase 2)
-- `src/monitoring.js` (migrate module-level state to worker)
-- `docs/release-notes-v3.2.md` (new file, Phase 2 release)
+- `src/thumbnail-worker.js` (new file, Phase 2) ✅
+- `src/thumbnail-worker-client.js` (new file, Phase 2) ✅
+- `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
+- `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-17 — recorded Phase 0a spike findings (`docs/tsduck-spike-findings.md`).
+**Last session:** 2026-03-17 — Phase 2 merged (PR #15), release notes updated, server validation passed.
 
-**Active branch:** `cursor/phase0a-tsduck-findings` → create `cursor/phase2-thumbnail-worker` off it
+**Active branch:** `main`
 
-**Session start checklist:**
-1. `git checkout cursor/phase0a-tsduck-findings && git pull`
-2. `git checkout -b cursor/phase2-thumbnail-worker`
-3. Read `docs/architecture-roadmap-continuous-monitoring.md` §Phase 2 before writing code
-4. Read SHARED CONTRACT section below — IPC protocol is the integration boundary
-
-**Gate verification:**
-- Phase 0a: ✅ CLEARED
-- Phase 0b: ✅ CLEARED
-- Phase 1 (ts-analyser.js constructor edit): ⏳ do NOT add the ~3-line constructor param yet — add during rebase after Phase 1 merges to main
-
-**Review request for Agent A (Phase 1 PR):**
-- `_effectiveProbeIntervalMs()` multipliers look correct for our suspend/resume timing
-- 1 s floor is fine — suspend() has a 1.5 s settle delay already, so probes won't fire inside it
+**Waiting for:** Operator review of Phase 3 PR #16.
 
 **Do NOT touch (Agent A owns):**
-- `src/tsduck-monitor.js` (does not exist yet — leave for Agent A)
-- `src/ts-analyser.js` (beyond the ~3-line constructor addition — do that during rebase)
+- `src/tsduck-monitor.js`
+- `src/ts-analyser.js` (beyond the ~3-line constructor addition)
 - Any file in `web/src/` (UI Change Policy — operator approval required)
 
 ---
@@ -167,6 +152,20 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 
 | Date | Agent | Branch | PR | What merged |
 |---|---|---|---|---|
+| 2026-03-15 | A | fix/multiview-iframe-lock | #1 | fix(multiview): lock thumbnails to I-frames using  |
+| 2026-03-15 | A | fix/live-view-false-critical | #2 | fix(health): extend inconclusive-probe guard to li |
+| 2026-03-15 | A | chore/standardise-dev-workflow | #3 | chore(workflow): standardise Claude/Cursor/IDX bra |
+| 2026-03-15 | A | fix/header-srt-policy-ui | #4 | Fix/header srt policy UI |
+| 2026-03-15 | B | cursor/ide-config-updates | #5 | Cursor/ide config updates |
+| 2026-03-15 | A | fix/header-vertical-centering | #6 | fix(ui): increase header inner height to 140px for |
+| 2026-03-15 | A | fix/srt-health-tab-policy | #7 | Fix/srt health tab policy |
+| 2026-03-15 | A | fix/srt-health-tab-policy | #8 | Fix/srt health tab policy |
+| 2026-03-15 | A | fix/version-bump-3.1.0 | #9 | Fix/version bump 3.1.0 |
+| 2026-03-17 | A | feat/srt-broadcast-health-thresholds | #10 | feat(srt): professional broadcast health threshold |
+| 2026-03-17 | A | fix/rtp-thumbnail-regression | #11 | fix(thumbnail): scope PersistentThumbnailCapture t |
+| 2026-03-17 | A | fix/rtp-thumbnail-regression | #12 | fix(srt): serialise heavy probes + RTP thumbnail r |
+| 2026-03-17 | B | cursor/phase2-thumbnail-worker | #15 | feat(thumbnail-worker): Phase 2 — worker runtime,  |
+| 2026-03-17 | A | feat/phase2-api-wiring | #17 | feat(api): Phase 2 — wire ThumbnailWorkerClient in |
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
 | 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | SRT hardening, multiview export, thumbnail backoff, agent infra |
 | 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |

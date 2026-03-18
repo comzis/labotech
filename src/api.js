@@ -13,6 +13,7 @@ const { getToolingPreflightSnapshot, startToolingPreflightAutoRefresh } = requir
 
 const persistence = require('./state-persistence');
 const eventLog = require('./event-log');
+const { ThumbnailWorkerClient } = require('./thumbnail-worker-client');
 
 const API_HOST = process.env.API_HOST || '10.67.18.29';
 const API_PORT = parseInt(process.env.API_PORT, 10) || 4000;
@@ -28,6 +29,8 @@ const etr290monitors = new Map(); // id → ETR290Analyser
 
 let _lastCpuSample = null;
 let _etrOrphanWatchdog = null;
+let _thumbnailClient = null;
+
 
 function _sampleCpuPercent() {
   const cpus = os.cpus();
@@ -182,7 +185,7 @@ function startEtrOrphanWatchdog() {
 }
 
 // ─── Restore persisted engines after boot ────────────────────────────────────
-async function restoreState(broadcast) {
+async function restoreState(broadcast, thumbnailClient) {
   const state = persistence.load();
   if (!state) return;
   const restoreStreams = process.env.RESTORE_STREAMS_ON_BOOT === 'true';
@@ -263,6 +266,7 @@ async function restoreState(broadcast) {
       a.on('error',        err    => broadcast({ type: 'error',          id: cfg.id, message: err.message }));
       a.startContinuous();
       analysers.set(cfg.id, a);
+      // thumbnailClient.start() intentionally omitted — TSAnalyser manages thumbnails internally.
       console.log(`[state] Restored analyser: ${cfg.id}`);
     } catch (err) {
       console.error(`[state] Failed to restore analyser ${cfg.id}:`, err.message);
@@ -302,11 +306,22 @@ function start() {
     });
   }
 
+  // Thumbnail worker — start early so routes can reference it
+  _thumbnailClient = new ThumbnailWorkerClient();
+  _thumbnailClient.on('frame',        (id, url, filePath) => {
+    // Keep analyser._lastThumbnailUrl in sync so analyse_result events carry thumbnailUrl.
+    const a = analysers.get(id);
+    if (a) a._lastThumbnailUrl = `/logs/thumbnails/${path.basename(filePath)}?t=${Date.now()}`;
+    broadcast({ type: 'thumbnail_frame', id, url, path: filePath });
+  });
+  _thumbnailClient.on('worker_exit',  (e) => console.warn(`[thumbnail-worker] exited (code=${e.code} signal=${e.signal}), respawn in ${e.restartInMs}ms`));
+  _thumbnailClient.on('worker_error', (e) => console.error(`[thumbnail-worker] error id=${e.id}: ${e.message}`));
+
   app.use('/streams',   require('../routes/streams')(streams, wss, saveState, broadcast));
   app.use('/encap',     require('../routes/encap')());
   app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
-  app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast, saveState));
+  app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast, saveState, _thumbnailClient));
   app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast));
   app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));
   app.use('/scte35',    require('../routes/scte35')());
@@ -337,7 +352,13 @@ function start() {
     startToolingPreflightAutoRefresh();
     startEtrOrphanWatchdog();
     // Restore engines after a short delay to let the event loop settle
-    setTimeout(() => restoreState(broadcast), 2000);
+    setTimeout(() => restoreState(broadcast, _thumbnailClient), 2000);
+
+    process.on('SIGTERM', async () => {
+      console.log('[api] SIGTERM received — shutting down thumbnail worker');
+      if (_thumbnailClient) await _thumbnailClient.shutdown();
+      process.exit(0);
+    });
   });
 
   return { server, wss, streams, transcoders, forwarders, analysers, etr290monitors };

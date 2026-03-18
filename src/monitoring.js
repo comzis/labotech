@@ -335,38 +335,34 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     const srtLatencyMs = isSrtUrl ? parseSrtLatency(inputUrl) : 0;
     const srtAnalyzeDurUs = isSrtUrl ? String((srtLatencyMs + 3000) * 1000) : '6000000';
 
-    const runAttempt = ({ iFrameOnly, timeoutMs, deblock, denoise }) => new Promise((attemptResolve, attemptReject) => {
-      // I-frame path: select only keyframes → apply quality filters → output first matching frame.
-      // Do NOT use the thumbnail=N buffering filter here — it would buffer N I-frames before
-      // emitting, adding N×GOP seconds of latency (e.g. thumbnail=4 at 1 I-frame/sec = 4s delay).
-      // Fallback path: thumbnail=pick gives decoder a short lookahead to find the least corrupted
-      // frame when we cannot guarantee we start on a keyframe.
-      const vf = iFrameOnly
-        ? [
-            'select=eq(pict_type\\,I)',
-            deblock ? 'pp=de/de' : null,
-            `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
-            denoise || null,
-          ].filter(Boolean).join(',')
-        : [
-            `thumbnail=${capture.pick}`,
-            `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
-          ].filter(Boolean).join(',');
+    // One-shot thumbnail capture.
+    //
+    // Do NOT use -skip_frame nokey: broadcast contribution links (Eurovision, GNVE,
+    // etc.) commonly use long GOPs (10–25 s).  Waiting for a keyframe with
+    // -skip_frame nokey causes reliable 8 s timeouts on every attempt, making
+    // first-frame latency 30–45 s.  The thumbnail=N filter picks the "least blurry"
+    // frame from an N-frame window — at 25 fps, pick=4 is a 160 ms lookahead that
+    // reliably finds a reference frame without needing to wait for an I-frame.
+    //
+    // Two attempts:
+    //   1. thumbnail=pick + quality filters (deblock if available, scale with lanczos).
+    //   2. Bare scale only — handles ffmpeg builds without the pp filter.
+    // SRT uses a longer timeout to cover the latency-window fill time.
+    const runAttempt = ({ withDeblock, timeoutMs }) => new Promise((attemptResolve, attemptReject) => {
+      const vf = [
+        `thumbnail=${capture.pick}`,
+        withDeblock && capture.deblock ? 'pp=de/de' : null,
+        `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+        capture.denoise || null,
+      ].filter(Boolean).join(',');
       const args = [
         '-y',
         '-hide_banner',
         '-loglevel', 'error',
         '-fflags', '+discardcorrupt+genpts',
         '-err_detect', 'ignore_err',
-        // -skip_frame nokey: decoder skips ALL non-keyframe decoding (P and B frames).
-        // This prevents partial-GOP macroblocking when we join a live stream mid-GOP.
-        // noref (previous value) only skipped non-reference B-frames — P-frames still
-        // decoded without their reference I-frame, causing the visible macroblocking.
-        ...(iFrameOnly ? ['-skip_frame', 'nokey'] : []),
-        // SRT analyze window must exceed the SRT latency parameter (no data flows until it fills).
-        // Duration derived from parseSrtLatency() + 3 s headroom. Fallback always uses 7s.
-        '-analyzeduration', iFrameOnly ? (isSrtUrl ? srtAnalyzeDurUs : '2000000') : '7000000',
-        '-probesize', iFrameOnly ? (isSrtUrl ? '7000000' : '3000000') : '7000000',
+        '-analyzeduration', isSrtUrl ? srtAnalyzeDurUs : '2000000',
+        '-probesize', isSrtUrl ? '7000000' : '3000000',
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
@@ -379,15 +375,18 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       let stderr = '';
       const timer = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-        attemptReject(new Error(iFrameOnly ? 'Thumbnail timeout (I-frame)' : 'Thumbnail timeout (fallback)'));
+        attemptReject(new Error('Thumbnail capture timed out'));
       }, timeoutMs);
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
       proc.on('exit', (code) => {
         clearTimeout(timer);
-        if (code === 0) return attemptResolve();
+        if (code === 0) {
+          if (fs.existsSync(tmpPath)) return attemptResolve();
+          return attemptReject(new Error('ffmpeg exited 0 but wrote no output frame'));
+        }
         try { fs.unlinkSync(tmpPath); } catch (_) {}
         const detail = (stderr || '').trim();
-        attemptReject(new Error(detail ? `Thumbnail capture failed with code ${code}: ${detail}` : `Thumbnail capture failed with code ${code}`));
+        attemptReject(new Error(detail ? `Thumbnail capture failed (${code}): ${detail}` : `Thumbnail capture failed (${code})`));
       });
       proc.on('error', (err) => {
         clearTimeout(timer);
@@ -396,41 +395,9 @@ function _doCaptureThumbnail(streamId, inputUrl) {
       });
     });
 
-    // Progressive fallback ladder — MCR priority: image quality > speed > continuity.
-    // Attempts 1-3 enforce I-frame only to guarantee no macroblocking.
-    // Attempt 4 is the last-resort continuity fallback for streams with very long GOPs
-    // (e.g. CBR filler, test cards, static slides) — may show mild blocking artefacts
-    // but is better than a blank tile for extended periods.
-    // SRT caller streams need longer timeouts: latency window (up to 5s) + frame decode.
     const attemptTimeoutMs = isSrtUrl ? 14000 : 8000;
-    runAttempt({
-      // Attempt 1: full quality — I-frame + deblock + denoise
-      iFrameOnly: true,
-      timeoutMs: attemptTimeoutMs,
-      deblock: capture.deblock,
-      denoise: capture.denoise,
-    })
-      .catch(() => runAttempt({
-        // Attempt 2: I-frame, no deblock (handles ffmpeg builds without "pp" filter)
-        iFrameOnly: true,
-        timeoutMs: attemptTimeoutMs,
-        deblock: false,
-        denoise: capture.denoise,
-      }))
-      .catch(() => runAttempt({
-        // Attempt 3: I-frame, no quality filters (bare scale only)
-        iFrameOnly: true,
-        timeoutMs: attemptTimeoutMs,
-        deblock: false,
-        denoise: null,
-      }))
-      .catch(() => runAttempt({
-        // Attempt 4: last resort — allow any decodable frame (very long GOP / no-signal streams)
-        iFrameOnly: false,
-        timeoutMs: attemptTimeoutMs,
-        deblock: false,
-        denoise: null,
-      }))
+    runAttempt({ withDeblock: true, timeoutMs: attemptTimeoutMs })
+      .catch(() => runAttempt({ withDeblock: false, timeoutMs: attemptTimeoutMs }))
       .then(() => {
         fs.rename(tmpPath, outPath, (err) => {
           if (err) reject(err);

@@ -14,6 +14,9 @@ const PENDING_BURST_WINDOW_MS = parseInt(process.env.ETR290_PENDING_BURST_WINDOW
 // blip) before an incident is raised. Operators can override via profile
 // thresholds; these are the factory defaults.
 const NOISY_CHECK_DEFAULTS = { transport_error: 3, pcr_disc: 3 };
+// Suppress incident creation for this many ms after start() to absorb
+// multicast join artefacts (RTP: missed N packets, first GOP noise).
+const STARTUP_GRACE_MS = parseInt(process.env.ETR290_STARTUP_GRACE_MS || '5000', 10) || 5000;
 
 // ETR 290 (ETSI TR 101 290) check definitions by priority
 const CHECKS = {
@@ -89,6 +92,7 @@ class ETR290Analyser extends EventEmitter {
     this._counts = {};   // checkId → count
     this._status = {};   // checkId → 'ok' | 'error'
     this._activeIncidents = {}; // checkId -> incident
+    this._startedAt = null;     // set in start(); gates startup grace
     this._pendingCounts = {};       // checkId -> matches not yet escalated to incident
     this._pendingLastMatchAt = {};  // checkId -> ms timestamp of last pending match (burst window)
     this._incidentSeq = 0;
@@ -200,6 +204,7 @@ class ETR290Analyser extends EventEmitter {
       this.emit('etr290', this._buildStatus());
     }, 1000);
 
+    this._startedAt = Date.now();
     this.emit('started', { id: this.id });
     // Emit initial status immediately
     this.emit('etr290', this._buildStatus());
@@ -252,6 +257,13 @@ class ETR290Analyser extends EventEmitter {
 
           const existing = this._activeIncidents[c.id];
           const threshold = this._config.thresholds[c.id] || 1;
+          // Startup grace: absorb multicast join noise (RTP: missed N packets,
+          // first-GOP artefacts) without raising incidents. Counts still accumulate.
+          const inGrace = this._startedAt !== null && (now - this._startedAt) < STARTUP_GRACE_MS;
+          if (inGrace && !existing) {
+            matched = true;
+            break;
+          }
           if (!existing && this._pendingCounts[c.id] < threshold) {
             matched = true;
             break;
