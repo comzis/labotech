@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.67)
+Date: 2026-03-18 (latest: v3.1.68)
+
+## v3.1.68 — 2026-03-18
+
+### Fix: Remove select=eq(pict_type\,I) from one-shot capture — incompatible with -skip_frame nokey
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `select=eq(pict_type\,I)` from the I-frame vf chain in `_doCaptureThumbnail` attempts 1–3.
+- `-skip_frame nokey` already guarantees only keyframes are decoded but does **not** set `pict_type` metadata on the output frames. The `select` filter therefore matched nothing, causing ffmpeg to exit code=0 with no output file on every I-frame attempt — even after the fallback-chain short-circuit fix in v3.1.67.
+- Now relies on `-skip_frame nokey` + `-frames:v 1` alone, matching the approach already in `PersistentThumbnailCapture`.
+
+**Operator impact:** Attempt 1 now captures the first keyframe reliably (~2–4 s). First thumbnail should appear within 5–8 s of decoder start.
 
 ## v3.1.67 — 2026-03-18
 
