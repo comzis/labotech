@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.88 / web 3.1.106)
+Date: 2026-03-18 (latest: v3.1.88 / web 3.1.107)
+
+## web 3.1.107 — 2026-03-18
+
+### UI: Readability improvements — consistent label/value sizing across quality panels
+
+- **Problem:** Field labels in the Quality Dashboard (DecoderPanelRevamp), TS Analyser metric tiles, and Alarm Log were set at 8–9 px using the dark `C.muted` (#3e506a) palette entry — unreadable at MCR room distance and on secondary displays.
+- **Fix:** Targeted font-size and colour changes across three panels (no layout or structural changes):
+  - **DecoderPanelRevamp `StatBox`:** Label `8px → 10px`, colour `C.muted → C.head` (#6b82aa). Value `11px → 13px`. Applies to all Quality Dashboard, ETR counters, IAT, Stream Profile, and SRT Transport tiles.
+  - **TSAnalyser metric tiles (all three sets):** Label `8px → 10px`, colour `C.muted → C.head`. Value `11–12px → 13px`. Applies to bitrate / CC / PCR header strip, confidence/policy strip, per-lane arrival KPIs, and SRT `Stat` component.
+  - **EventLogPanel table body:** Base `fontSize 10 → 12`. Timestamp column colour `C.muted → C.head` for contrast.
+- **Operator impact:** All key telemetry values are now legible from MCR operator distance. No layout, colour scheme, tab structure, or canvas elements changed.
 
 ## v3.1.88 — 2026-03-18
 
