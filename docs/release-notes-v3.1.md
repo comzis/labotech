@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.77)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.78)
+
+## web v3.1.78 — 2026-03-18
+
+### Fullscreen multiview: true 16:9 tiles + correct audio pair count
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **True 16:9 tile aspect ratio**: `aspectRatio: '16/9'` added to `FullscreenThumbTile` root. Grid changed from `gridAutoRows: '1fr'` (stretches tiles to fill height, causing anamorphic distortion) to `gridAutoRows: 'auto'` with `alignContent: 'center'` — tiles maintain 16:9 and are centred vertically; unused background shows as black bars rather than stretching the video.
+- **Correct audio pair count**: `pairCount = Math.max(measuredPairs, audioEsCount)` — always shows as many meter pairs as there are audio Elementary Streams in the PMT, even when only the primary ES was probed. Unprobed pairs render as dark/inactive bars, showing the channel slot exists.
+- **Ghost null-PID audio ES fix**: PMT audio ES count now filters `s.pid != null` — ffprobe emits each ES twice (once in the program list with a PID, once in the global stream array without). The null-PID ghost was inflating the audio pair count by 1 for every stream.
+
+**Operator impact:** Thumbnails are true 16:9 at all tile counts. All 4 audio tracks on the current multicast streams now show meter slots. The phantom 5th audio track disappears.
+
+
 
 ## web v3.1.77 — 2026-03-18
 
