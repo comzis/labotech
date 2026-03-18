@@ -349,8 +349,8 @@ function StatBox({ label, value, color = C.text }) {
     >
       <div
         style={{
-          fontSize: 8,
-          color: C.muted,
+          fontSize: 10,
+          color: C.head,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
         }}
@@ -360,7 +360,7 @@ function StatBox({ label, value, color = C.text }) {
       <div
         style={{
           fontFamily: "'Courier New',monospace",
-          fontSize: 11,
+          fontSize: 13,
           color,
           fontWeight: 700,
         }}

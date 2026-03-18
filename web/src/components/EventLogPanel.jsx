@@ -258,7 +258,7 @@ export default function EventLogPanel({ events = [], onClear = () => {}, onClear
 
         <div style={{ display: 'grid', gridTemplateColumns: selected ? '1fr 320px' : '1fr', minHeight: 360 }}>
           <div style={{ maxHeight: '70vh', overflow: 'auto', background: C.panel }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 10 }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
             <thead style={{ position: 'sticky', top: 0, background: C.panelAlt, zIndex: 2 }}>
               <tr style={{ borderBottom: `1px solid ${C.borderHi}` }}>
                 <th style={{ textAlign: 'left', padding: '6px 8px', color: C.head, fontSize: 9 }}>Time (UTC)</th>
@@ -294,7 +294,7 @@ export default function EventLogPanel({ events = [], onClear = () => {}, onClear
                         style={{
                           padding: '6px 8px',
                           fontFamily: "'Courier New',monospace",
-                          color: C.muted,
+                          color: C.head,
                           whiteSpace: 'nowrap',
                         }}
                       >
