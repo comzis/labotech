@@ -2127,7 +2127,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
                 {/* ── AES3 / S302M Audio Detail ────────────────────────── */}
                 {(() => {
-                  const s302mPids = pidRows.filter(p => p.s302m);
+                  const s302mPids = pids.filter(p => p.s302m);
                   if (!s302mPids.length) return null;
                   const totalCh = s302mPids.reduce((acc, p) => acc + (p.s302m.channels || 0), 0);
                   const totalPairs = s302mPids.reduce((acc, p) => acc + (p.s302m.pairCount || 0), 0);
