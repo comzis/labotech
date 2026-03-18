@@ -584,8 +584,10 @@ class TSAnalyser extends EventEmitter {
       // stream so astats reports every pair.  Without this, FFmpeg's default
       // stream selection picks only the first audio ES and all other pairs
       // show dark placeholders in the multiview meters.
+      // Exclude S302M ESes — they carry SMPTE 337M data bursts (Dolby E etc.) and
+      // appear as constant near-full-scale PCM to amerge, producing spurious VU bars.
       const audioEsCount = (this.lastResult?.programs || []).reduce((acc, p) =>
-        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null && !s.s302m).length, 0);
       const mergeInputs = Math.min(Math.max(audioEsCount, 1), 8);
 
       // Build args: if >1 audio ES, amerge all streams into one multi-channel
