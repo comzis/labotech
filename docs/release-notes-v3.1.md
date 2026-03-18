@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.72 / web 3.1.80)
+Date: 2026-03-18 (latest: v3.1.72 / web 3.1.81)
+
+## web v3.1.81 — 2026-03-18
+
+### UMD overlay: remove status tally strip + refine colours
+
+Removed the 1px coloured left-edge tally from the UMD label. Service name: `#7ecfdc` (mid cyan); bitrate: `#2d6272` (dim steel teal).
+
+
 
 ## v3.1.72 / web v3.1.80 — 2026-03-18
 
