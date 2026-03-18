@@ -311,14 +311,20 @@ function LandingAuth({ onLogin, punchline }) {
           <div className="my-6 rounded-sm border p-5" style={{ borderColor: '#2c3b52', background: 'linear-gradient(180deg, #162233, #101a29)' }}>
             {!showForm ? (
               <div className="flex flex-col items-start gap-4">
-                <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: '#8ba3c7' }}>
-                  Secure operator access
+                <div
+                  style={{
+                    fontFamily: '"Bebas Neue", "Arial Narrow", Arial, sans-serif',
+                    fontSize: 72,
+                    lineHeight: 1,
+                    letterSpacing: '0.06em',
+                    color: '#e8f0ff',
+                    textShadow: '0 2px 24px rgba(100,160,255,0.18), 0 1px 0 rgba(0,0,0,0.7)',
+                  }}
+                >
+                  LABOTECH
                 </div>
-                <div className="text-[20px] font-black uppercase tracking-[0.12em] leading-none" style={{ color: '#c8dcff' }}>
-                  Control Room Access
-                </div>
-                <div className="text-[11px] text-gray-300 max-w-[720px]">
-                  Use your operator credentials to enter the shared engineering and operations workspace.
+                <div className="text-[11px] uppercase tracking-[0.28em]" style={{ color: '#5a7ba8', marginTop: 4 }}>
+                  Operator Access
                 </div>
                 <button
                   onClick={() => setShowForm(true)}
