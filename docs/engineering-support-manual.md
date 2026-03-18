@@ -1476,3 +1476,207 @@ Stream Management Platform  ← 11px Courier New, dim
 
 If Bebas Neue fails to load (no internet on isolated deployment), the browser falls back to `"Arial Narrow", Arial, sans-serif` which degrades gracefully. For air-gapped deployments, self-host the font file and update the `<link>` in `web/index.html`.
 
+---
+
+## 18) SRT Single-Listener Architecture — Constraints, Fixes, and Operator Guide (2026-03-18)
+
+### Background — what "single-listener" means
+
+Eurovision/contribution SRT encoders (Intinor, Haivision, Videon, and similar) operate in **listener mode**: they accept **exactly one simultaneous caller connection**. The moment a second caller attempts to connect it is either:
+
+- Rejected immediately with `"Connection rejected by peer"`, or
+- Accepted — which **kicks the existing caller** and resets its state machine.
+
+This is a fundamental SRT protocol characteristic, not a vendor quirk. The SRT specification allows a listener to accept multiple callers only if the application layer implements connection multiplexing (as Intinor's software does internally). Standard FFmpeg and srt-live-transmit do not multiplex — each spawn is a separate TCP-like connection.
+
+**Consequence for Labotech:** every process that opens the SRT URL competes for this single slot:
+
+| Process | When it connects |
+|---|---|
+| `PersistentThumbnailCapture` (ffmpeg) | Persistent — holds slot continuously |
+| `tsanalyze` heavy probe | Every N probe cycles (9 s burst) |
+| ffprobe transport probe | Every probe cycle (~2.5 s burst) |
+| ffprobe audio probe | Every heavy probe cycle |
+| srt-live-transmit transport test | Every probe cycle |
+| `ETR290Analyser` (ffmpeg) | Persistent — competes directly with thumbnail |
+
+If more than one of these is active simultaneously, one is kicked and the SRT link drops until it reconnects.
+
+---
+
+### Architecture before the fix (v3.1.84 and earlier)
+
+```
+185.x.x.x:40065 (SRT listener)
+   ▲
+   │── PersistentThumbnailCapture (ffmpeg, persistent)  ← holds slot
+   │── ETR290Analyser (ffmpeg, persistent)              ← kicks thumbnail
+   │── tsanalyze (9 s burst, every heavy cycle)         ← kicks whoever has the slot
+   │── ffprobe transport (2.5 s burst, every cycle)     ← same
+   └── ffprobe audio (9 s burst, every heavy cycle)     ← same
+```
+
+Observed failure modes:
+
+- **Thumbnail AWAITING FRAME:** tsanalyze probe fires, kicks thumbnail ffmpeg; thumbnail reconnects but next probe fires before it stabilises; thumbnail never gets a steady hold on the slot.
+- **ETR/thumbnail fight loop:** ETR and thumbnail both try to hold persistent connections; they kick each other every 5–60 s, visible as send-rate dips to 0 on the Intinor graph every ~1 minute.
+- **Ghost decoders competing post-restart:** `config/state.json` persisted all active decoder IDs. If a user started a new decoder without stopping the old one (e.g. after a URL change), both IDs were restored on container restart — two independent thumbnail processes competing for the same slot.
+- **HEVC 4:2:2 AWAITING FRAME (independent issue):** Even when the slot was held cleanly, `select=eq(pict_type,I)` did not match HEVC Main 4:2:2 Range Extension frames because the HEVC decoder does not set `pict_type`. Frames produced `PPS id out of range: 0` errors and the mjpeg encoder received 10-bit `yuv422p10le` which it cannot encode.
+
+---
+
+### Fixes applied (v3.1.85 → v3.1.88)
+
+#### v3.1.85 — ETR startup slot race (startup delay)
+
+**File:** `src/etr290-analyser.js`, `routes/etr290.js`
+
+When a decoder starts on a single-listener SRT source, ETR was spawning immediately via `start()` → `_spawnProc()`, racing the thumbnail process for the slot within milliseconds of decoder start.
+
+Fix: `ETR290Analyser.start(delayMs)` accepts a startup delay. `TSAnalyser.getEtrStartDelay()` returns `srtLatency + 15000` ms when a persistent thumbnail is active on an SRT URL (e.g. 4000 ms latency → 19 s delay). `routes/etr290.js` links ETR to the analyser before calling `mon.start()` and passes the computed delay.
+
+#### v3.1.86 — ETR/thumbnail fight loop + HEVC thumbnail fix + inter-probe settle
+
+**Files:** `src/etr290-analyser.js`, `src/monitoring.js`, `src/ts-analyser.js`
+
+**Fight loop:** `ETR290Analyser._spawnProc()` exit handler was treating all unexpected exits as permanent stops (`isRunning = false`). Once kicked, ETR would not restart automatically. But on each heavy-probe-window resume (`_attachEtrMonitor`), a fresh ETR spawn was attempted, causing periodic kick cycles every 1–2 minutes.
+
+Fix: unexpected exits (not triggered by `stop()` or `suspend()`) now schedule auto-restart. SRT URLs use a **60 s retry delay** to ensure thumbnail holds a stable slot between ETR attempts. Non-SRT uses 5 s.
+
+**HEVC thumbnail:** `select=eq(pict_type,I)` was replaced with `select=key` (uses the `key_frame` AVFrame flag, which the HEVC decoder sets reliably). `format=yuv420p` added as the final vf filter to downconvert 10-bit 4:2:2 to 8-bit 4:2:0 before the mjpeg encoder.
+
+```js
+// src/monitoring.js — PersistentThumbnailCapture._spawn()
+const vf = [
+  'select=key',                         // was: select=eq(pict_type\\,I) — broken for HEVC Rext
+  `fps=1/${this._intervalSec}`,
+  `scale=${w}:trunc(${w}/dar/2)*2:flags=${scaler}`,
+  capture.denoise || null,
+  'format=yuv420p',                     // required: mjpeg encoder has no 10-bit support
+].filter(Boolean).join(',');
+```
+
+**Inter-probe SRT settle:** a 1 s `_srtSettle()` await was added between each of the 7 sequential SRT probes in `ts-analyser.js` heavy probe cycle. Rapid connect/disconnect cycles can stall the SRT source's accept state machine. The settle adds ≤6 s to the probe cycle — negligible against the per-probe latency-window fill time.
+
+#### v3.1.87 — Ghost decoder clean slate
+
+**Files:** `src/api.js`, `routes/analyse.js`
+
+**URL dedup on restore:** On `restoreState()`, if multiple saved analysers share the same source URL, only the most recently started one (highest index in `state.analysers`) is restored. Superseded entries are logged and skipped. Prevents two thumbnail processes competing for the same SRT slot after a container restart.
+
+**JPEG cleanup on stop:** `DELETE /analyse/:id` now immediately deletes `logs/thumbnails/<id>.jpg` if it exists. Prevents stale thumbnails persisting across restarts and ghost files conflicting with a fresh decoder using the same stream ID slot.
+
+#### v3.1.88 — Block ETR on SRT (permanent clean fix)
+
+**File:** `routes/etr290.js`
+
+The fight loop between `ETR290Analyser` and `PersistentThumbnailCapture` cannot be solved by timing alone — both need persistent connections and the slot admits only one. The architectural fix is to block ETR entirely on SRT sources.
+
+`POST /etr290/start` returns **HTTP 422 Unprocessable Entity** if `url.startsWith('srt://')`:
+
+```
+ETR290 monitoring is not available on single-listener SRT sources.
+The thumbnail capture already holds the sole SRT caller slot.
+Use a UDP/RTP multicast feed for ETR290 monitoring.
+```
+
+The ETR 290 panel surfaces this message. The "Enable ETR" button is available but will immediately show the 422 reason — no silent failure, no fight loop.
+
+---
+
+### Current architecture (v3.1.88+)
+
+```
+185.x.x.x:40065 (SRT listener — single caller slot)
+   ▲
+   └── PersistentThumbnailCapture (ffmpeg)   ← sole persistent holder
+         ↓ thumbnail JPEG written atomically every N seconds
+
+Sequential heavy probe (tsanalyze → transport → audio → ts-disc → CC → Dolby E):
+   Each probe opens SRT, runs, closes, waits 1 s (_srtSettle), then next probe.
+   Total probe window: ~20–30 s every heavy cycle.
+   During this window the thumbnail process briefly loses and re-acquires the slot.
+   Normal SRT stats graph shows brief dips — this is expected.
+
+ETR290: ✗ BLOCKED on SRT (HTTP 422) — use UDP/RTP multicast for ETR monitoring.
+```
+
+---
+
+### Operator guidance — SRT decoder checklist
+
+#### Starting a new SRT decoder
+
+1. Ensure no other decoder is already running against the **same SRT source URL**. Check Active Decoders — stop any existing decoder first.
+2. If the source was previously monitored and the container was restarted without stopping the decoder cleanly, check `config/state.json` is not holding a stale entry (or simply stop-all and restart cleanly from the UI).
+3. After start, allow **30–60 s** for the first probe cycle to complete. SRT grace period holds health at `ok` for 8 probes (~40 s).
+
+#### ETR290 on SRT sources
+
+ETR290 is **not supported on SRT sources**. This is by design — the thumbnail process holds the single caller slot. To perform ETR 290 monitoring on a contribution stream, the encoder must also output a **UDP/RTP multicast copy** of the same service. Start a second decoder against the multicast URL and enable ETR on that.
+
+#### Thumbnail still shows AWAITING FRAME after 60 s
+
+Causes in order of likelihood:
+
+| Check | Command |
+|---|---|
+| Is the SRT source active and accepting connections? | `ffprobe "srt://<host>:<port>?mode=caller&adapter=10.67.18.29&latency=4000" -v error -show_entries format=duration -t 5` |
+| Is passphrase / pbkeylen correct? | Verify against gateway config. Try `pbkeylen=32` if using AES-256. |
+| Is another process holding the slot? | `docker compose logs --tail=50 labotech \| grep "Peer rejected\|AWAITING\|thumb"` |
+| HEVC 4:2:2 codec issue? | Ensure v3.1.86+ deployed; check `select=key` is in vf args via logs |
+| Ghost decoder competing? | Check Active Decoders list — stop all, then start a fresh decoder |
+
+#### SRT stability — normal vs abnormal dips
+
+**Normal:** 2–5 s send-rate dips every ~90–120 s during heavy probe windows (tsanalyze + probes take the slot momentarily). Thumbnail reconnects within the SRT handshake + latency window (~4–8 s).
+
+**Abnormal (investigate):**
+- Dips > 15 s → ETR process competing despite 422 block (check logs for `ETR` re-spawn attempts)
+- Dips every 60 s exactly → ETR retry timer firing (should be blocked — check `routes/etr290.js` version)
+- Continuous `Peer rejected connection` → ghost decoder ID in state; stop-all and restart cleanly
+
+#### Checking for ghost decoders in logs
+
+```bash
+docker compose logs --tail=200 labotech | grep -E "Peer rejected|thumb:|decoder-"
+```
+
+Multiple decoder IDs connecting to the same host:port confirms a ghost. Fix:
+
+1. Stop all decoders from the UI (**Stop All** button in Active Decoders)
+2. Start a fresh decoder
+3. Verify only one decoder ID appears in logs: `docker compose logs -f labotech | grep thumb:`
+
+---
+
+### INC-004 — SRT single-listener fight loop (2026-03-18)
+
+**Server:** `gva-boro-probe` · **Versions affected:** v3.1.1 – v3.1.87
+
+**Symptom**
+
+Intinor stats graph showed periodic send-rate drops to 0 Mbps every ~60 s. Thumbnail showed AWAITING FRAME intermittently. `docker compose logs` showed:
+
+```
+Peer rejected connection — id decoder-1773829593885
+Peer rejected connection — id SRT
+Peer rejected connection — id decoder-1773832144703
+```
+
+Multiple decoder IDs (from different sessions, persisted in `config/state.json`) were all attempting to connect to `185.148.228.45:40065` simultaneously on every container restart.
+
+**Root causes**
+
+1. No dedup on state restore → all decoder IDs restored on restart → N thumbnail ffmpeg processes per SRT source
+2. ETR290Analyser auto-restart on unexpected exit (5 s retry on SRT) → periodic kick of thumbnail
+3. `select=eq(pict_type,I)` broken for HEVC 4:2:2 Rext → thumbnail produced no frames even when slot was held cleanly
+
+**Resolution**
+
+Applied v3.1.85–v3.1.88 fix chain (see above). After deployment and `docker compose restart labotech`:
+- SRT stats graph stable (no periodic dips)
+- Thumbnail populating within 30 s
+- ETR 422 block prevents future fight loops
+- URL dedup prevents ghost decoder recurrence after restarts
+
