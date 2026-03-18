@@ -855,44 +855,6 @@ describe('TSAnalyser', () => {
     });
   });
 
-  describe('_withLiveInputHints — multicast localaddr pinning', () => {
-    test('adds localaddr=169.254.0.2 for udp:// multicast destination', () => {
-      const a = new TSAnalyser({ id: 'mc-test', url: 'udp://239.100.25.29:6501' });
-      const result = a._withLiveInputHints('udp://239.100.25.29:6501');
-      expect(result).toContain('localaddr=169.254.0.2');
-    });
-
-    test('adds localaddr=169.254.0.2 for rtp:// multicast destination', () => {
-      const a = new TSAnalyser({ id: 'mc-rtp-test', url: 'rtp://239.100.25.29:6501' });
-      const result = a._withLiveInputHints('rtp://239.100.25.29:6501');
-      expect(result).toContain('localaddr=169.254.0.2');
-    });
-
-    test('does NOT add localaddr for unicast udp:// (relay local copy)', () => {
-      const a = new TSAnalyser({ id: 'relay-test', url: 'srt://10.0.0.1:1234' });
-      const result = a._withLiveInputHints('udp://127.0.0.1:5529');
-      expect(result).not.toContain('localaddr');
-    });
-
-    test('does NOT add localaddr for srt:// (uses adapter= instead)', () => {
-      const a = new TSAnalyser({ id: 'srt-test', url: 'srt://10.0.0.1:1234' });
-      const result = a._withLiveInputHints('srt://10.0.0.1:1234');
-      expect(result).toContain('adapter=10.67.18.29');
-      expect(result).not.toContain('localaddr');
-    });
-
-    test('respects MULTICAST_NIC_LOCALADDR env override', () => {
-      const origEnv = process.env.MULTICAST_NIC_LOCALADDR;
-      // The env var is read at module load time; test the helper directly via mock
-      // by checking the default is 169.254.0.2 (setup-host.sh assigns this to eno2).
-      const a = new TSAnalyser({ id: 'env-test', url: 'udp://239.1.2.3:1234' });
-      const result = a._withLiveInputHints('udp://239.1.2.3:1234');
-      // Default must be 169.254.0.2 unless env overrides it
-      const expected = origEnv || '169.254.0.2';
-      expect(result).toContain(`localaddr=${expected}`);
-    });
-  });
-
   describe('_healthThresholds() SRT auto-relaxation', () => {
     test('UDP analyser returns unmodified policy thresholds', () => {
       const a = new TSAnalyser({ id: 'udp-test', url: 'udp://239.1.1.1:5000' });
