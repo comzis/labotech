@@ -165,6 +165,34 @@ function codecTypeScore(t) {
   return 0; // "unknown" or anything else
 }
 
+// Solid block shown in place of VU bars when an audio pair carries a
+// SMPTE 337M non-PCM data burst (e.g. Dolby E).  Broadcast standard:
+// amber/orange indicates non-PCM data channel — not a level meter.
+function DolbyEPairBlock({ programConfig }) {
+  return (
+    <div style={{
+      width: 7, height: "100%",
+      background: "linear-gradient(180deg, #7a3200 0%, #3d1800 100%)",
+      borderRadius: 1, position: "relative",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "space-between",
+      overflow: "hidden",
+    }}>
+      {/* amber top-rail — broadcast DE colour (EBU/SMPTE) */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+      {/* "DE" rotated label */}
+      <span style={{
+        fontSize: 5, fontWeight: 800, color: "#ff8c00",
+        letterSpacing: "0.05em", textTransform: "uppercase",
+        writingMode: "vertical-rl", transform: "rotate(180deg)",
+        lineHeight: 1, opacity: 0.9, userSelect: "none",
+      }}>DE</span>
+      {/* amber bottom-rail */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+    </div>
+  );
+}
+
 // Vertical audio VU bar for Confidence Monitor (3 px wide, bottom-up fill, −60→0 dBFS)
 function DecoderVuBar({ rmsDb, peakDb }) {
   const active = rmsDb != null && Number.isFinite(rmsDb);
@@ -1367,38 +1395,89 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 const hasMeter = pairCount > 0;
                 // audio panel: 4px per bar + 1px gap, 2 bars per pair + 1px gap between pairs
                 const panelW = hasMeter ? pairCount * (3 + 3 + 2) + (pairCount - 1) * 2 + 4 : 0;
+
+                // Dolby E / SMPTE 337M non-PCM pair detection.
+                // When dvb.dolbyE.detected is true, identify the carrier pair by the
+                // characteristic signature of a data burst in AES3: both channels carry
+                // near-identical constant-amplitude signal (data, not natural audio),
+                // typically measuring −28 to −8 dBFS with L/R symmetry < 3 dB.
+                const dolbyEOnStream = selectedResult?.dvb?.dolbyE?.detected === true;
+                const dolbyEProgramConfig = selectedResult?.dvb?.dolbyE?.programConfig || null;
+                const dolbyEPairFlags = Array.from({ length: pairCount }, (_, i) => {
+                  if (!dolbyEOnStream) return false;
+                  const lCh = channels[i * 2];
+                  const rCh = channels[i * 2 + 1];
+                  const lRms = Number(lCh?.rmsDb);
+                  const rRms = Number(rCh?.rmsDb);
+                  if (!Number.isFinite(lRms) || !Number.isFinite(rRms)) return false;
+                  const avg = (lRms + rRms) / 2;
+                  const diff = Math.abs(lRms - rRms);
+                  // Dolby E burst: constant near-equal amplitude, −35…−8 dBFS typical range
+                  return diff < 3.0 && avg > -35 && avg < -8;
+                });
+                // If Dolby E is detected but heuristic finds no pair (e.g. decoder not probed
+                // yet), show a stream-level badge instead.
+                const dolbyEFound = dolbyEPairFlags.some(Boolean);
+
                 return (
-                  <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
-                    {/* Thumbnail — flex: 1 so it takes remaining width */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {selectedResult?.thumbnailUrl ? (
-                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
-                          <img
-                            src={selectedResult.thumbnailUrl}
-                            alt="Confidence monitor"
-                            style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                            onError={(e) => { e.target.style.display = "none"; }}
-                          />
-                        </div>
-                      ) : (
-                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
-                          <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                      {/* Thumbnail — flex: 1 so it takes remaining width */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {selectedResult?.thumbnailUrl ? (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
+                            <img
+                              src={selectedResult.thumbnailUrl}
+                              alt="Confidence monitor"
+                              style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                              onError={(e) => { e.target.style.display = "none"; }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
+                            <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Vertical audio meters */}
+                      {hasMeter && (
+                        <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
+                          {Array.from({ length: pairCount }, (_, i) => {
+                            const lCh = channels[i * 2];
+                            const rCh = channels[i * 2 + 1];
+                            if (dolbyEPairFlags[i]) {
+                              return (
+                                <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                  <DolbyEPairBlock programConfig={dolbyEProgramConfig} />
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
+                                <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
-                    {/* Vertical audio meters */}
-                    {hasMeter && (
-                      <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
-                        {Array.from({ length: pairCount }, (_, i) => {
-                          const lCh = channels[i * 2];
-                          const rCh = channels[i * 2 + 1];
-                          return (
-                            <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
-                              <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
-                              <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
-                            </div>
-                          );
-                        })}
+                    {/* Dolby E stream indicator — shown when DE detected but pair heuristic
+                        has not yet identified the specific pair (e.g. first probe cycle). */}
+                    {dolbyEOnStream && !dolbyEFound && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E{dolbyEProgramConfig ? ` · ${dolbyEProgramConfig}` : ""} · SMPTE 337M carrier detected
+                        </span>
+                      </div>
+                    )}
+                    {dolbyEOnStream && dolbyEFound && dolbyEProgramConfig && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E · {dolbyEProgramConfig}
+                        </span>
                       </div>
                     )}
                   </div>
