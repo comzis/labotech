@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.87 / web 3.1.105)
+Date: 2026-03-18 (latest: v3.1.88 / web 3.1.106)
+
+## v3.1.88 — 2026-03-18
+
+### Fix: Block ETR290 on single-listener SRT — eliminate thumbnail/ETR slot fight
+
+- **Problem:** Starting ETR290 monitoring on an SRT contribution source caused a persistent fight loop: the thumbnail ffmpeg process held the single SRT caller slot; ETR's ffmpeg was rejected and restarted every 60 s (v3.1.86 retry delay). Each retry briefly displaced the thumbnail, causing periodic SRT instability visible in the Intinor stats graph as repeated send-rate dips.
+- **Fix:** `POST /etr290/start` now returns HTTP 422 if the URL begins with `srt://`. The ETR panel in the frontend surfaces this as a clear operator message: *"ETR290 monitoring is not available on single-listener SRT sources. Use a UDP/RTP multicast feed for ETR290 monitoring."*
+- **Rationale:** SRT contribution encoders (Eurovision, Intinor, Haivision) accept exactly one simultaneous caller. Thumbnail capture must hold that slot continuously. ETR monitoring requires its own persistent ffmpeg connection and cannot share the slot. The correct architecture is a UDP/RTP multicast feed (unlimited receivers) for ETR290 monitoring.
+- **Operator impact:** "Enable ETR" button on SRT decoders now immediately shows the reason it is unavailable instead of silently fighting the thumbnail and destabilising the link.
 
 ## v3.1.87 — 2026-03-18
 
