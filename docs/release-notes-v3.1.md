@@ -1,6 +1,12 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.77 / web 3.1.89)
+Date: 2026-03-18 (latest: v3.1.77 / web 3.1.90)
+
+## web v3.1.90 — 2026-03-18
+
+### Landing page: match hero font to header logo
+
+Landing page LABOTECH hero now uses the same font, weight, colour (`#7b879a`), and letter-spacing (`0.18em`) as the header badge — consistent brand identity across entry and main UI. Size 56 px (system font-black). Replaces Bebas Neue.
 
 ## web v3.1.89 — 2026-03-18
 
