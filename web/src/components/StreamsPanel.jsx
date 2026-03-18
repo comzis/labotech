@@ -406,6 +406,10 @@ export default function StreamsPanel({ lastMessage }) {
                     <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${MODE_STYLE[mode] || MODE_STYLE.srt}`}>
                       {mode}
                     </span>
+                    {/* Engine badge — SLT = preferred low-overhead path */}
+                    <span className={`text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border ${s.engine === 'srt-live-transmit' ? 'bg-emerald-900/50 text-emerald-300 border-emerald-700/40' : 'bg-slate-800/60 text-slate-400 border-slate-600/40'}`}>
+                      {s.engine === 'srt-live-transmit' ? 'SLT' : 'FFmpeg'}
+                    </span>
                     <span className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded border ${linkTone(s)}`}>
                       Link {s?.srtLink?.status || 'unknown'}
                     </span>

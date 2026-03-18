@@ -1,6 +1,27 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.74 / web 3.1.84)
+Date: 2026-03-18 (latest: v3.1.75 / web 3.1.85)
+
+## v3.1.75 / web v3.1.85 — 2026-03-18
+
+### SRT encapsulator: srt-live-transmit preferred engine with FFmpeg fallback
+
+`srt-live-transmit` (SLT) is now the primary encapsulation engine for copy+SRT streams with UDP or SRT inputs. FFmpeg copy mode remains the fallback when SLT is not installed, or when the input is RTP (SLT cannot strip RTP headers — FFmpeg demuxes cleanly).
+
+Engine selection is automatic at stream start based on the preflight snapshot:
+
+| Condition | Engine |
+|---|---|
+| SLT installed + input UDP or SRT + output SRT + copy mode | `srt-live-transmit` |
+| Any other configuration | `ffmpeg` |
+
+**Why SLT is preferred:** pure byte relay with no demux/remux, no SI table rewrite, ~10–20× lower CPU per stream, <100 ms startup vs 1–2 s for FFmpeg. Stats (RTT, loss, retransmit, send rate) parsed from SLT JSON stdout (`-pf json -s 1000`) and surfaced via existing `srtStats` WebSocket events. `classifyHaivisionLink()` reused for link health classification.
+
+Preflight now checks `srt-live-transmit --help` and reports availability as `tooling.tools.srtLiveTransmit` in `/health`. Stream `toJSON()` includes `engine: 'srt-live-transmit' | 'ffmpeg'`. UI stream cards show a green `SLT` badge or grey `FFmpeg` badge.
+
+**Install on server:** `sudo apt install srt-tools`
+
+**Operator impact:** no form changes needed — engine is selected automatically. Streams tab shows which engine is running. Existing FFmpeg streams unaffected.
 
 ## v3.1.74 — 2026-03-18
 
