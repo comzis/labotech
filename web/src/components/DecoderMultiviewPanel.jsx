@@ -457,92 +457,146 @@ function fsColumns(count) {
   return 5;
 }
 
-// Evertz-style fullscreen tile: thumbnail fills the cell, thin label bar below
+// Single vertical VU bar (fills bottom-up)
+function FsVuBar({ rmsDb, peakDb, label }) {
+  const active = rmsDb != null && Number.isFinite(rmsDb);
+  const rmsH  = active ? Math.max(0, ((Math.max(-60, Math.min(0, rmsDb)) + 60) / 60) * 100) : 0;
+  const peakH = (peakDb != null && Number.isFinite(peakDb))
+    ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
+    : null;
+  const rmsColor  = !active ? '#111' : rmsDb > -9 ? '#ff2233' : rmsDb > -18 ? '#ffaa00' : '#00cc44';
+  const peakColor = peakDb > -9 ? '#ff2233' : peakDb > -18 ? '#ffaa00' : '#00cc44';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, width: '100%', position: 'relative', background: '#080808', border: '1px solid #111', borderRadius: '1px', overflow: 'hidden' }}>
+        {/* Zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
+        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
+        {/* RMS fill from bottom */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.12s linear' }} />
+        {/* Peak hold tick */}
+        {peakH != null && (
+          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '2px', background: peakColor, boxShadow: `0 0 3px ${peakColor}` }} />
+        )}
+      </div>
+      <div style={{ color: '#383838', fontFamily: 'monospace', fontSize: '6px', marginTop: '1px', lineHeight: 1, textAlign: 'center' }}>{label}</div>
+    </div>
+  );
+}
+
+// Evertz-style fullscreen tile: thumbnail + vertical audio meters, thin label bar below
 function FullscreenThumbTile({ id, result, nowMs }) {
   const svc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || '—';
   const hasTelemetry = Boolean(result?.probeTime);
   const severity = result?.health?.severity;
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
   const isStale = staleMs > 20000;
-  // Status colour: green=ok / amber=warning / red=critical / grey=no data
   const statusColor = !hasTelemetry
     ? '#444'
-    : isStale
-      ? '#ffaa00'
-      : severity === 'critical' ? '#ff2233'
-      : severity === 'warning'  ? '#ffaa00'
-      : '#00dd55';
+    : isStale       ? '#ffaa00'
+    : severity === 'critical' ? '#ff2233'
+    : severity === 'warning'  ? '#ffaa00'
+    : '#00dd55';
 
   const rate = resolveTransportBitrate(result);
   const thumbUrl = result?.thumbnailUrl || null;
+  const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Keep last good frame
+  // Pair channels into L/R; fallback to aggregate mean as a single bar
+  const pairs = [];
+  for (let i = 0; i < channels.length; i += 2) {
+    pairs.push({ left: channels[i], right: channels[i + 1] || null, num: Math.floor(i / 2) + 1 });
+  }
+  const meanDb = result?.audioLevels?.meanDb;
+  const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
+
   const [displaySrc, setDisplaySrc] = useState(null);
   useEffect(() => { setDisplaySrc(null); }, [thumbUrl]);
 
   return (
     <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      background: '#000',
-      borderRight: '1px solid #141414',
-      borderBottom: '1px solid #141414',
-      borderLeft: `2px solid ${statusColor}`,
-      overflow: 'hidden',
-      minWidth: 0,
+      display: 'flex', flexDirection: 'column',
+      background: '#040507',
+      border: '1px solid #111',
+      borderTop: `3px solid ${statusColor}`,
+      overflow: 'hidden', minWidth: 0,
     }}>
-      {/* 16:9 thumbnail area */}
-      <div style={{ position: 'relative', aspectRatio: '16/9', background: '#080808', overflow: 'hidden', flexShrink: 0 }}>
-        {(displaySrc || thumbUrl) ? (
-          <img
-            src={displaySrc || thumbUrl}
-            alt={svc}
-            onLoad={(e) => setDisplaySrc(e.currentTarget.src)}
-            onError={() => {}}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#222', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-              AWAITING FRAME
-            </span>
+      {/* Content row: thumbnail | audio meters */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* Thumbnail */}
+        <div style={{ flex: 1, position: 'relative', background: '#080808', minWidth: 0, overflow: 'hidden' }}>
+          {(displaySrc || thumbUrl) ? (
+            <img
+              src={displaySrc || thumbUrl}
+              alt={svc}
+              onLoad={(e) => setDisplaySrc(e.currentTarget.src)}
+              onError={() => {}}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#1e1e1e', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                AWAITING FRAME
+              </span>
+            </div>
+          )}
+          {/* Status LED */}
+          <div style={{ position: 'absolute', top: 6, left: 6, width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 5px ${statusColor}aa` }} />
+          {/* Decoder ID */}
+          <div style={{ position: 'absolute', top: 4, right: 5, fontFamily: 'monospace', fontSize: '8px', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.06em', textTransform: 'uppercase', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {id}
+          </div>
+        </div>
+
+        {/* Vertical audio meters panel */}
+        {hasAudio && (
+          <div style={{
+            width: 'clamp(44px, 20%, 110px)',
+            background: 'rgba(4,6,10,0.92)',
+            borderLeft: '1px solid #0e0e0e',
+            display: 'flex', flexDirection: 'column',
+            padding: '4px 4px 2px',
+            gap: 2,
+            flexShrink: 0,
+          }}>
+            {/* Scale label */}
+            <div style={{ color: '#252525', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', letterSpacing: '0.12em', flexShrink: 0 }}>dBFS</div>
+            {/* Bars */}
+            <div style={{ flex: 1, display: 'flex', gap: '4px', minHeight: 0, alignItems: 'stretch' }}>
+              {pairs.length > 0 ? pairs.map(({ left, right, num }) => (
+                <div key={num} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, display: 'flex', gap: '1px', minHeight: 0 }}>
+                    <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} label="L" />
+                    {right && <FsVuBar rmsDb={right?.rmsDb} peakDb={right?.peakDb ?? right?.rmsDb} label="R" />}
+                  </div>
+                  {/* Pair number */}
+                  <div style={{ color: '#2a2a2a', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', marginTop: '1px', flexShrink: 0 }}>{num}</div>
+                </div>
+              )) : (
+                // Fallback: aggregate mean bar
+                <FsVuBar rmsDb={meanDb} peakDb={meanDb} label="Σ" />
+              )}
+            </div>
           </div>
         )}
-        {/* Status LED — top-left corner */}
-        <div style={{
-          position: 'absolute', top: 6, left: 6,
-          width: 7, height: 7, borderRadius: '50%',
-          background: statusColor,
-          boxShadow: `0 0 5px ${statusColor}aa`,
-        }} />
-        {/* Decoder ID badge — top-right */}
-        <div style={{
-          position: 'absolute', top: 4, right: 5,
-          fontFamily: 'monospace', fontSize: '8px',
-          color: 'rgba(255,255,255,0.35)', letterSpacing: '0.06em',
-          textTransform: 'uppercase', maxWidth: '55%',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {id}
-        </div>
       </div>
+
       {/* Bottom label bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '3px 7px',
-        background: '#060606',
-        borderTop: '1px solid #0e0e0e',
-        flexShrink: 0,
-        gap: 4,
+        padding: '2px 6px',
+        background: '#060608',
+        borderTop: `1px solid ${statusColor}22`,
+        flexShrink: 0, gap: 4,
       }}>
-        <span style={{
-          color: '#e8e8e8', fontFamily: 'monospace', fontSize: '10px',
-          fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-        }}>
-          {svc}
-        </span>
-        <span style={{ color: '#3a6a9a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, overflow: 'hidden' }}>
+          <div style={{ width: 4, height: 4, borderRadius: '50%', background: statusColor, flexShrink: 0, boxShadow: `0 0 4px ${statusColor}88` }} />
+          <span style={{ color: '#c8c8c8', fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {svc}
+          </span>
+        </div>
+        <span style={{ color: '#2a4a6a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
           {rate.mbps != null ? `${rate.mbps.toFixed(1)} Mb` : '—'}
         </span>
       </div>
@@ -747,6 +801,15 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+
+  // 1 Hz UTC clock for fullscreen header — only active when fullscreen is open
+  const [fsNowMs, setFsNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (!isFullscreen) return;
+    setFsNowMs(Date.now());
+    const t = setInterval(() => setFsNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [isFullscreen]);
 
   // Request browser fullscreen when overlay is mounted and visible
   useEffect(() => {
@@ -1063,7 +1126,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               title="Add a new decoder tile"
             >
               <Plus className="w-3.5 h-3.5" />
-              + Decoder
+              Decoder
             </button>
             <input
               ref={importFileRef}
@@ -1368,120 +1431,160 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       </BentoCard>
     </div>
 
-    {/* ── Evertz-style fullscreen multiview overlay ── */}
-    {isFullscreen && (
-      <div
-        ref={fullscreenRef}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          background: '#000',
-          display: 'flex', flexDirection: 'column',
-          fontFamily: 'monospace',
-        }}
-      >
-        {/* Top header bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 18px',
-          height: 44,
-          background: 'linear-gradient(180deg, #0e0e0e 0%, #080808 100%)',
-          borderBottom: '1px solid #1a1a1a',
-          flexShrink: 0,
-          gap: 16,
-        }}>
-          {/* Left: panel name + system tag */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <img
-              src="/labotech-mark.png"
-              alt="LaboTech"
-              style={{ height: 22, width: 'auto', opacity: 0.82, filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.12))' }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <div>
-              <div style={{ color: '#888', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', lineHeight: 1 }}>
-                PANEL
+    {/* ── Professional MCR-style fullscreen multiview overlay ── */}
+    {isFullscreen && (() => {
+      const d = new Date(fsNowMs);
+      const utcTime = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((v) => String(v).padStart(2, '0')).join(':');
+      const utcDate = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      const liveCount = visibleIds.filter((id) => {
+        const r = resultsById[id];
+        return r?.probeTime && (Date.now() - r.probeTime) < 20000;
+      }).length;
+      return (
+        <div
+          ref={fullscreenRef}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            backgroundColor: '#040608',
+            backgroundImage: 'url("/broadcast-rack-bays.svg")',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            display: 'flex', flexDirection: 'column',
+            fontFamily: 'monospace',
+          }}
+        >
+          {/* Top header bar — 40px MCR chrome */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 40,
+            background: '#070707',
+            borderBottom: '2px solid #0f0f0f',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.7)',
+            flexShrink: 0,
+            gap: 12,
+          }}>
+            {/* Left: LaboTech mark + panel callsign */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+              <img
+                src="/labotech-mark.png"
+                alt="LaboTech"
+                style={{ height: 20, width: 'auto', opacity: 0.75, filter: 'brightness(0.85)' }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <div style={{ lineHeight: 1 }}>
+                <div style={{ color: '#3a3a3a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>PANEL</div>
+                <div style={{ color: '#d8d8d8', fontSize: '12px', fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                  {activePanel?.name || '—'}
+                </div>
               </div>
-              <div style={{ color: '#e0e0e0', fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', lineHeight: 1.2 }}>
-                {activePanel?.name || '—'}
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              {/* Live stream indicator */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: liveCount > 0 ? '#00dd55' : '#333', boxShadow: liveCount > 0 ? '0 0 5px #00dd5566' : 'none' }} />
+                <span style={{ color: liveCount > 0 ? '#00bb44' : '#333', fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                  {liveCount}/{visibleIds.length}
+                </span>
               </div>
             </div>
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <div style={{ color: '#333', fontSize: '9px', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-              {visibleIds.length} TILE{visibleIds.length !== 1 ? 'S' : ''}
-            </div>
-          </div>
 
-          {/* Centre: LABOTECH wordmark */}
-          <div style={{ textAlign: 'center', flexShrink: 0 }}>
-            <div style={{
-              color: '#c8d8f0',
-              fontSize: '13px',
-              fontWeight: 700,
-              letterSpacing: '0.28em',
-              textTransform: 'uppercase',
-              textShadow: '0 0 14px rgba(150,190,255,0.3)',
-            }}>
-              LABOTECH
-            </div>
-            <div style={{ color: '#2a4a6a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: 1 }}>
-              MULTIVIEW MONITOR
-            </div>
-          </div>
-
-          {/* Right: Eurovision Services logo + exit */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, justifyContent: 'flex-end' }}>
-            <img
-              src="/eurovision-services.png"
-              alt="Eurovision Services"
-              style={{ height: 26, width: 'auto', opacity: 0.88, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.12))' }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <button
-              onClick={() => { document.exitFullscreen?.(); setIsFullscreen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid #222',
-                borderRadius: '2px',
-                color: '#666',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontSize: '9px',
-                letterSpacing: '0.1em',
+            {/* Centre: system title */}
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{
+                color: '#8a9ab8',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.36em',
                 textTransform: 'uppercase',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.borderColor = '#333'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#222'; }}
-              title="Exit fullscreen (ESC)"
-            >
-              <Minimize2 style={{ width: 11, height: 11 }} />
-              EXIT
-            </button>
+              }}>
+                LABOTECH
+              </div>
+              <div style={{ color: '#1e2e40', fontSize: '7px', letterSpacing: '0.22em', textTransform: 'uppercase', marginTop: 1 }}>
+                MULTIVIEW MONITOR
+              </div>
+            </div>
+
+            {/* Right: UTC timecode + exit */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+              {/* UTC clock */}
+              <div style={{ textAlign: 'right', lineHeight: 1 }}>
+                <div style={{ color: '#2a4a5a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>UTC</div>
+                <div style={{ color: '#4a8ab0', fontSize: '14px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
+                  {utcTime}
+                </div>
+              </div>
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <button
+                onClick={() => { document.exitFullscreen?.(); setIsFullscreen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'transparent',
+                  border: '1px solid #1e1e1e',
+                  borderRadius: '2px',
+                  color: '#3a3a3a',
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  transition: 'color 0.1s, border-color 0.1s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#3a3a3a'; e.currentTarget.style.borderColor = '#1e1e1e'; }}
+                title="Exit fullscreen (ESC)"
+              >
+                <Minimize2 style={{ width: 10, height: 10 }} />
+                EXIT
+              </button>
+            </div>
+          </div>
+
+          {/* Tile grid — fills remaining height */}
+          <div style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
+            gridAutoRows: '1fr',
+            overflow: 'hidden',
+            gap: '2px',
+            padding: '2px',
+            background: '#020304',
+          }}>
+            {visibleIds.map((id) => (
+              <FullscreenThumbTile
+                key={id}
+                id={id}
+                result={resultsById[id]}
+                nowMs={nowMs}
+              />
+            ))}
+          </div>
+
+          {/* Bottom status bus — 26px */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 26,
+            background: '#050505',
+            borderTop: '1px solid #0d0d0d',
+            flexShrink: 0,
+            gap: 12,
+          }}>
+            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+              LABOTECH MVW · {activePanel?.name || '—'}
+            </span>
+            <span style={{ color: '#1a2a36', fontSize: '8px', letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>
+              {utcDate} {utcTime} UTC
+            </span>
+            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+              {liveCount > 0 ? `${liveCount} LIVE` : 'NO SIGNAL'} / {visibleIds.length} STREAM{visibleIds.length !== 1 ? 'S' : ''}
+            </span>
           </div>
         </div>
-
-        {/* Tile grid — fills remaining height */}
-        <div style={{
-          flex: 1,
-          display: 'grid',
-          gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
-          gridAutoRows: '1fr',
-          overflow: 'hidden',
-          borderTop: '1px solid #0a0a0a',
-        }}>
-          {visibleIds.map((id) => (
-            <FullscreenThumbTile
-              key={id}
-              id={id}
-              result={resultsById[id]}
-              nowMs={nowMs}
-            />
-          ))}
-        </div>
-      </div>
-    )}
+      );
+    })()}
     </>
   );
 }
