@@ -1,6 +1,19 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.73 / web 3.1.84)
+Date: 2026-03-18 (latest: v3.1.74 / web 3.1.84)
+
+## v3.1.74 — 2026-03-18
+
+### Preflight: SRT protocol availability check
+
+`tooling-preflight.js` now runs `ffmpeg -protocols` on startup (and every 5 min) and reports whether `libsrt` is compiled into the system FFmpeg. Result is exposed as `tooling.srtProtocol` in the `/health` endpoint:
+
+```json
+"srtProtocol": { "available": true,  "reason": "libsrt compiled in" }
+"srtProtocol": { "available": false, "reason": "srt protocol not listed — ffmpeg may need --enable-libsrt rebuild or ffmpeg-srt PPA" }
+```
+
+**Operator impact:** operators can confirm whether SRT encapsulation will actually work before starting a stream, without having to attempt a connection and read FFmpeg error output. 3 new tests added (194 total across 9 suites).
 
 ## web v3.1.84 — 2026-03-18
 
