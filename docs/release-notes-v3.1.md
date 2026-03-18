@@ -1,6 +1,19 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.66)
+Date: 2026-03-18 (latest: v3.1.67)
+
+## v3.1.67 — 2026-03-18
+
+### Fix: captureThumbnail fallback chain short-circuit and fallback analyzeduration
+
+**`src/monitoring.js`:**
+
+- `runAttempt` now checks `fs.existsSync(tmpPath)` after `code === 0`. If ffmpeg exits cleanly but wrote no frame (e.g. `select=eq(pict_type\,I)` found no I-frame in the capture window), the attempt is **rejected** so the fallback chain continues to the next attempt. Previously `code === 0` unconditionally resolved, which then threw ENOENT in `fs.rename`, bypassing all remaining attempts and failing the entire capture in one shot.
+- Fallback attempt (`iFrameOnly=false`, `thumbnail=pick`) now uses the same `analyzeduration`/`probesize` as the I-frame path (`2000000 µs` / `3 MB` for RTP, SRT-latency-derived for SRT). The previous `7000000 µs` fallback value left only ~1 s for `thumbnail=pick` buffering within the 8 s RTP timeout, causing reliable timeouts on every fallback attempt.
+
+**Why:** For live RTP streams that are mid-GOP at connect time, `select=eq(pict_type\,I)` exits code=0 with no file. This silently short-circuited the 4-attempt ladder on the very first attempt, causing the capture to fail immediately and reschedule for 5 s later — repeated until ffmpeg happened to join near a keyframe. Combined with the fallback analyzeduration being too long to fit in the timeout budget, thumbnails were appearing after 35–50 s instead of 5–10 s.
+
+**Operator impact:** First thumbnail frame should now appear within 5–10 s of decoder start under normal live-stream conditions.
 
 ## v3.1.66 — 2026-03-18
 
