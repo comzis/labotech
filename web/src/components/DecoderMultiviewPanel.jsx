@@ -212,8 +212,16 @@ function extractThumbTimestamp(thumbnailUrl) {
 }
 
 function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode, isStopping = false }) {
-  const primaryService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || 'Unknown';
-  const serviceProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  const rawService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || null;
+  const rawProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  // Latch the last known-good service name/provider — same pattern as audioSnapshot —
+  // so the tile never flickers back to "Unknown" between probe cycles.
+  const [svcSnapshot, setSvcSnapshot] = useState(null);
+  useEffect(() => {
+    if (rawService) setSvcSnapshot({ name: rawService, provider: rawProvider });
+  }, [rawService, rawProvider]);
+  const primaryService = rawService || svcSnapshot?.name || 'Unknown';
+  const serviceProvider = rawProvider || svcSnapshot?.provider || null;
   const transportRate = resolveTransportBitrate(result);
   // Per-channel audio levels from astats probe
   const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
@@ -424,7 +432,11 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
         {/* Stats */}
         <div className="grid grid-cols-4 gap-1">
           <Stat label="Programs" value={String(result?.programs?.length || 0)} />
-          <Stat label="PIDs"     value={String(countPids(result))} />
+          <Stat label="PIDs" value={
+            result?.dvb?.streamBreakdown
+              ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
+              : String(countPids(result))
+          } />
           <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
           <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
         </div>
