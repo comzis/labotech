@@ -54,18 +54,28 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (etr290monitors.has(id)) return res.status(409).json({ error: `ETR290 monitor ${id} already exists` });
 
-    // ETR290 monitoring is not supported on single-listener SRT sources.
-    // SRT sources in contribution mode accept exactly one simultaneous caller.
-    // The persistent thumbnail process already holds that slot; a second ETR
-    // ffmpeg process would be rejected immediately or kick the thumbnail,
-    // causing a fight loop that destabilises the SRT link.
-    // Use UDP/RTP multicast (unlimited receivers) for ETR290 monitoring.
+    // SRT single-listener guard: ETR cannot connect directly to an SRT source
+    // that already has a relay or thumbnail holding the caller slot.
+    // When a TSAnalyser relay is active for this stream, ETR uses the relay's
+    // local UDP copy instead — unlimited readers, no slot contention.
+    let effectiveUrl = url;
     if (url.startsWith('srt://')) {
-      return res.status(422).json({
-        error: 'ETR290 monitoring is not available on single-listener SRT sources. ' +
-          'The thumbnail capture already holds the sole SRT caller slot. ' +
-          'Use a UDP/RTP multicast feed for ETR290 monitoring.',
-      });
+      const linkedId = /^etr-/i.test(id) ? id.slice(4) : null;
+      const linkedAnalyser = linkedId && analysers ? analysers.get(linkedId) : null;
+      const relayUrl = linkedAnalyser && typeof linkedAnalyser.getRelayUrl === 'function'
+        ? linkedAnalyser.getRelayUrl()
+        : null;
+      if (relayUrl) {
+        // Relay is active — redirect ETR to the local UDP copy.
+        effectiveUrl = relayUrl;
+      } else {
+        // No relay present — direct SRT ETR is not supported.
+        return res.status(422).json({
+          error: 'ETR290 monitoring is not available on single-listener SRT sources. ' +
+            'Start the decoder first (the SRT relay will be created automatically), ' +
+            'then enable ETR. The relay provides a shared UDP copy for unlimited consumers.',
+        });
+      }
     }
 
     let profileConfig = {};
@@ -82,7 +92,7 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
 
     const mon = new ETR290Analyser({
       id,
-      url,
+      url: effectiveUrl,
       nicName: nicName || undefined,
       config: mergedConfig,
       profileName: profileName || mergedConfig.profileName || null,
