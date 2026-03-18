@@ -205,19 +205,22 @@ class PersistentThumbnailCapture extends EventEmitter {
     const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
-    // select=eq(pict_type,I) passes only IDR/CRA frames (HEVC) or IDR (H.264).
-    // I-frames are fully self-contained: they carry their own VPS/SPS/PPS and have
-    // no reference frame dependencies.  This prevents "PPS id out of range" and
-    // "Could not find ref with POC" errors when the decoder joins an HEVC stream
-    // mid-GOP and receives B/P frames before the parameter sets have been seen.
+    // select=key passes only key frames (IDR for H.264/H.265, I-frame for MPEG-2).
+    // Preferred over select=eq(pict_type,I) because the HEVC decoder does not always
+    // set the pict_type AVFrame field — particularly for Main 4:2:2 Range Extensions
+    // (yuv422p10le) where pict_type may remain AV_PICTURE_TYPE_NONE throughout.
+    // The key_frame flag is set reliably by all decoders.
+    // format=yuv420p: mjpeg encoder has no 10-bit pixel format support; yuv422p10le
+    // input (HEVC 4:2:2 Rext) must be explicitly downconverted before the encoder.
     // NOTE: do NOT add setpts here — resetting timestamps would compress all I-frame
     // PTS values to near-zero, causing fps=1/N to treat stream-seconds as
     // microseconds and produce essentially no output after the first frame.
     const vf = [
-      `select=eq(pict_type\\,I)`,
+      'select=key',
       `fps=1/${this._intervalSec}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
+      'format=yuv420p',
     ].filter(Boolean).join(',');
 
     const args = [
