@@ -1,6 +1,12 @@
 # LABOTECH
 
-Professional broadcast stream processing and management for HPE DL360 on Ubuntu. Handles SRT/UDP/RTP workflows, 1080p↔1080i transcoding, multicast routing, TS analysis, ETR290 monitoring, and decoder multiview operations.
+**v3.1.73 / web 3.1.83**
+
+Professional DVB-IP stream processor for broadcast MCR operations on HPE DL360 / Ubuntu Server.
+Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 compliance, decoder multiview monitoring, and 1080p↔1080i interlace conversion.
+
+> **Not an encoder.** Labotech is an encapsulator, analyser, and multiview platform.
+> Transcoding is present but secondary. `SRTEncoder` is a legacy class name — it performs SRT encapsulation.
 
 ---
 
@@ -22,85 +28,73 @@ Professional broadcast stream processing and management for HPE DL360 on Ubuntu.
 |---|---|
 | Backend | Node.js 20, Express.js, WebSocket (`ws`) |
 | Video processing | FFmpeg + ffprobe (system install via apt) |
+| TS analysis | TSDuck (`tsanalyze`) |
 | Frontend | React 18, Vite 7, Tailwind CSS |
 | Charts | Recharts |
 | Notifications | Sonner |
 | State | TanStack React Query |
-| Containerisation | Docker + docker-compose |
+| Containerisation | Docker + Compose v2 plugin |
 
 ---
 
 ## Quick Start
 
-### 1. Host setup (run once on Ubuntu server as root)
+### 1. Host setup (run once as root)
 
 ```bash
 sudo bash scripts/setup-host.sh
-sudo bash scripts/check-routes.sh   # verify networking
+sudo bash scripts/check-routes.sh       # verify networking
 ```
 
-Optional (high-load RTP/SRT/transcode tuning profile):
+Optional high-load tuning (RTP/SRT/transcode):
 
 ```bash
 sudo bash scripts/optimize-host-v2.sh
-sudo bash scripts/check-routes.sh
-```
-
-Rollback v2 tuning:
-
-```bash
-sudo bash scripts/rollback-host-optimization-v2.sh
+sudo bash scripts/rollback-host-optimization-v2.sh   # rollback
 ```
 
 ### 2. Configure environment
 
 ```bash
 cp .env.example .env
-# edit .env — set API_HOST, SRT_HOST, multicast addresses, SNMP targets
+# Edit .env — set API_HOST, multicast addresses, SNMP targets
 ```
 
 ### 3. Production deployment
 
 ```bash
-docker-compose up -d
+docker compose up -d                    # Compose v2 — docker-compose v1 NOT supported
 ```
 
-### 3b. Standardized production update
+### 3b. Standard update (recommended)
 
 ```bash
 bash scripts/update-and-deploy-safe.sh
 ```
 
-Deterministic recovery to a known ref:
+Post-deploy smoke test:
 
 ```bash
-bash scripts/recover-prod-fast.sh <ref>
+bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
 ```
 
-Fast recover (if UI tabs/features are missing after deployment):
+Recovery to a known ref:
 
 ```bash
 bash scripts/recover-prod-fast.sh origin/main
 ```
 
-Disk pressure quick recovery (aggressive Docker cleanup for emergency deploys):
+Disk pressure emergency cleanup:
 
 ```bash
 bash scripts/reclaim-disk-fast.sh --yes
 ```
 
-Docker log rotation install/check (prevents `*-json.log` growth from filling root disk):
-
-```bash
-sudo bash scripts/install-docker-log-rotation.sh
-bash scripts/check-docker-log-rotation.sh
-```
-
 ### 4. Development (live reload)
 
 ```bash
-docker-compose -f docker-compose.dev.yml up
-# or run locally:
+docker compose -f docker-compose.dev.yml up
+# or locally:
 npm install && npm start
 cd web && npm install && npm run dev
 ```
@@ -114,18 +108,18 @@ Web UI: `http://10.67.18.29:4000`
 ```bash
 # Backend
 npm install
-npm test                          # 149 tests across 6 suites
-npm test -- test/encoder.test.js  # single suite
-npm start                         # API server
+npm test -- --runInBand               # 191 tests across 8 suites
+npm test -- test/encoder.test.js      # single suite
+npm start                             # API server
 
 # Frontend
 cd web && npm install
-npm run build                     # production build → web/dist/
-npm run dev                       # Vite dev server (proxies to API)
+npm run build                         # production build → web/dist/
+npm run dev                           # Vite dev server (proxies to API)
 
-# Docker
-docker-compose up -d
-docker-compose -f docker-compose.dev.yml up
+# Docker (Compose v2 only)
+docker compose up -d
+docker compose -f docker-compose.dev.yml up
 ```
 
 ---
@@ -134,20 +128,26 @@ docker-compose -f docker-compose.dev.yml up
 
 ### Backend (`src/`)
 
-All state is **in-memory `Map()` objects** — no database.
+All state is **in-memory `Map()` objects** — no database, no ORM.
 
 | File | Class | Purpose |
 |---|---|---|
-| `encoder.js` | `SRTEncoder` | Core FFmpeg wrapper. Supports SRT, UDP, RTP output with full DVB/MPEG-TS muxer compliance (service ID, PIDs, transport stream ID). Per-audio-pair codec, bitrate, PID and ISO 639-2 language. |
-| `transcoder.js` | `Transcoder` | Extends `SRTEncoder`. Four broadcast interlace presets: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT). |
-| `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `eno2`. Validates all addresses against `239.100.25.0/26`. Manages routes via `ensureMulticastRoute()`. |
-| `ts-analyser.js` | `TSAnalyser` | ffprobe wrapper. Parses PAT/PMT/PID tree via `parseStructure()`. One-shot and continuous probing modes. |
-| `iat-sniffer.js` | `IATSniffer` | Optional NIC-level packet timestamp sniffer for continuous analyser workflows. Uses `tshark` or `tcpdump` to derive IAT/jitter/loss metrics and capture provenance. |
-| `failover.js` | `FailoverEncoder` | Primary/backup input watchdog. 3-second switchover threshold. Emits `switched` event. |
-| `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder for ad marker injection. |
-| `monitoring.js` | — | Confidence thumbnail capture (ffmpeg), SNMP traps, syslog events. |
-| `filters.js` | — | FFmpeg filter chain builders: logo overlay, noise reduction, scale. |
-| `api.js` | — | Express server bound to `10.67.18.29:4000`. WebSocket broadcasts all encoder events. Serves React SPA from `web/dist/`. |
+| `encoder.js` | `SRTEncoder` | Core FFmpeg wrapper. SRT/UDP/RTP output, full DVB/MPEG-TS muxer compliance. Per-audio-pair codec, bitrate, PID and ISO 639-2 language. |
+| `transcoder.js` | `Transcoder` | Extends `SRTEncoder`. Four broadcast interlace presets: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (OTT). |
+| `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `eno2`. Validates all addresses against `239.100.25.0/26`. |
+| `ts-analyser.js` | `TSAnalyser` | Continuous/one-shot MPEG-TS probe. PAT/PMT/PID tree, health scoring, TSDuckMonitor integration, thumbnail lifecycle, severity-aware probe cadence. |
+| `tsduck-monitor.js` | `TSDuckMonitor` | Persistent `tsanalyze` runner per stream. Real-time PCR / SI / bitrate events. Suspend/resume for SRT single-connection constraint. |
+| `thumbnail-worker.js` | — | Isolated worker process (Node `fork`). Owns all `ffmpeg` thumbnail captures. Crash-isolated from API. IPC: `start/stop/suspend/resume/shutdown`. |
+| `thumbnail-worker-client.js` | `ThumbnailWorkerClient` | IPC client for the thumbnail worker. Routes `frame` events back to the correct `TSAnalyser` instance. |
+| `monitoring.js` | — | `PersistentThumbnailCapture` (SRT streams), one-shot `captureThumbnail` (RTP/UDP), SNMP traps, syslog. Atomic JPEG write (`.tmp` → rename). |
+| `monitoring-policy.js` | — | Named monitoring profiles (`broadcast-strict`, `broadcast-balanced-v1`, `srt-contribution`, `contribution-relaxed`, `ott-streaming`). Env + `config/monitoring-policy.json` overrides. |
+| `tooling-preflight.js` | — | Startup tool check (ffmpeg, ffprobe, tsanalyze, tshark, tcpdump) and NIC capture permission probe. Results exposed via `/health`. |
+| `iat-sniffer.js` | `IATSniffer` | NIC-level packet timestamp sniffer. `tshark`/`tcpdump` backend. IAT, jitter, loss metrics, SMPTE ST 2022-7 path assessment. |
+| `etr290-analyser.js` | `ETR290Analyser` | Real-time ETR 290 P1/P2/P3 alarm parser. 5 s startup grace to suppress multicast-join artefacts. |
+| `failover.js` | `FailoverEncoder` | Primary/backup input watchdog. 3 s switchover threshold. Emits `switched`. |
+| `event-log.js` | — | 1000-event in-memory ring + `logs/events.jsonl` append. Seeded from disk on startup. |
+| `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder. |
+| `api.js` | — | Express bound to `10.67.18.29:4000`. WebSocket broadcasts all stream events. Serves React SPA. |
 
 ### Routes (`routes/`)
 
@@ -159,7 +159,7 @@ All state is **in-memory `Map()` objects** — no database.
 | `analyse.js` | `GET /analyse`, `POST /analyse/start`, `GET/DELETE /analyse/:id` |
 | `etr290.js` | `GET/POST/DELETE /etr290`, `GET/POST /etr290/profiles` |
 | `events.js` | `GET /api/events`, `DELETE /api/events` |
-| `encap.js` | `GET/POST/DELETE /encap/channels`, `GET /encap/health`, `GET/POST /encap/port-offender` |
+| `encap.js` | `GET/POST/DELETE /encap/channels`, `GET /encap/health` |
 | `pipelines.js` | `POST /pipeline` — chained ingest → transcode → forward |
 | `scte35.js` | `POST /scte35/splice` |
 
@@ -167,31 +167,74 @@ All state is **in-memory `Map()` objects** — no database.
 
 | Component | Purpose |
 |---|---|
-| `App.jsx` | Root shell, tab routing, WebSocket lifecycle toasts |
-| `StreamsPanel` | Active streams grid — output mode badge, DVB service identity, audio pair PIDs, real-time metrics |
-| `EncoderForm` | Full encoder configuration: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
+| `App.jsx` | Root shell, tab routing, WebSocket lifecycle, preflight/policy header badges |
+| `StreamsPanel` | Active streams grid — output mode, DVB identity, audio PIDs, real-time metrics |
+| `EncoderForm` | Full encoder config: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
 | `TranscodePanel` | 1080p→1080i presets + broadcast preset slot selector |
 | `MulticastPanel` | `eno2` forwarder controls and subnet status |
-| `TSAnalyser` | One-shot TS probe, DVB service summary/table, embedded ETR290 view, and continuous decoder/monitor workflows |
-| `ConfidenceMonitor` | Thumbnail mosaic grid with live Mbps, DVB service name |
-| `StreamViewPanel` | Live UTC timeline across analyser/ETR lanes. Canvas lane bars, rAF crosshair cursor, right-edge OK/WARN/CRIT/LOS status labels, pointer popup with error context and IAT/jitter forensics |
-| `EventLogPanel` | Central alarm/event log with UTC timestamps, instance correlation, severity/status filters, and CSV/JSONL export |
+| `DecoderPanelRevamp` | Decoder provisioning, Confidence Monitor (16:9 thumbnail), ETR 290 alarm config, PID/audio/video breakdown |
+| `DecoderMultiviewPanel` | Fullscreen MCR multiview — true 16:9 tiles, UMD overlays, vertical VU meters (all audio ES pairs), UTC clock, professional dark chrome header |
+| `TSAnalyser` | One-shot TS probe, DVB service summary, ETR 290 view, continuous monitor workflows |
+| `StreamViewPanel` | Live UTC timeline — canvas lane bars, rAF crosshair, right-edge OK/WARN/CRIT/LOS labels, IAT/jitter forensics popup |
+| `EventLogPanel` | Alarm log (1000-event ring, severity filter, CSV/JSONL export) |
 | `MetricsTile` | Recharts bitrate sparkline, SRT link health (RTT, loss %) |
 
 ---
 
-## DVB / MPEG-TS Compliance
+## Decoder Multiview
 
-The encoder supports full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13818-1):
+The fullscreen multiview (`DecoderMultiviewPanel`) is designed for MCR distance viewing:
 
-- **Service ID** (`-mpegts_service_id`)
-- **Transport Stream ID** (`-mpegts_transport_stream_id`)
-- **Original Network ID** (`-mpegts_original_network_id`)
-- **PMT PID** (`-mpegts_pmt_start_pid`)
-- **Video PID** — declared via `-streamid 0:<pid>`, PCR carried on video PID
-- **Per-audio-pair PID** — `-streamid N:<pid>` for each track
-- **Service name / provider** — written to SI metadata
-- **Language tags** — ISO 639-2 per audio track (`-metadata:s:a:N language=xxx`)
+- **True 16:9 tiles** — `aspectRatio: 16/9`, `objectFit: contain` — no anamorphic stretch, no picture cropping
+- **UMD overlay** — bottom-left of each thumbnail; service name (latched across probe cycles), bitrate. Broadcast Courier New monospace, Labotech cyan palette
+- **Vertical VU meters** — all audio Elementary Stream pairs probed via `amerge` filter; 2 px bars, −60→0 dBFS, zone ticks at −18 dBFS and −9 dBFS
+- **Status tally** — top-border colour per tile: green (ok), amber (warning/stale), red (critical), grey (stopped)
+- **UTC timecode** — 1 Hz header clock, active only when fullscreen is open
+- **Auto-seed** — on page load, active analysers seed the tile grid from last probe results
+
+---
+
+## TS Analyser and ETR 290
+
+- **PID/program structure matrix** — PAT/PMT/PCR, per-stream details, null-PID ghost suppression
+- **DVB summary** — service count, PID count, aggregate bitrate, monitoring policy, heavy probe cadence
+- **Health model** (`dvb.health`) — composite score, severity, per-reason breakdown
+- **Per-protocol thresholds** — SRT uses `srt-contribution` profile; RTP/UDP uses `broadcast-balanced-v1` floor (CC warn ≥3, critical ≥8) to absorb multicast-join artefacts
+- **ETR 290 P1/P2/P3 alarms** — 5 s startup grace, hysteresis-gated severity transitions, alarm-log integration
+- **Bitrate provenance** — `TRUSTED` (TSDuck PCR-derived) vs `MEASURED` (ffprobe) vs `HELD` (carry-forward)
+- **SMPTE ST 2022-7** — dual-path loss/gap/duplicate/reorder assessment (NIC capture required)
+- **IAT/jitter forensics** — `tshark`/`tcpdump` capture provenance surfaced per-stream
+
+---
+
+## Monitoring Policy
+
+Five named profiles selectable via `config/monitoring-policy.json` or env:
+
+| Profile | Standard | Use case |
+|---|---|---|
+| `broadcast-strict` | EBU R95 / ITU-R BT.656 | TX master control — zero tolerance |
+| `broadcast-balanced-v1` | EBU R95 / ETSI TR 101 290 | MCR contribution (default) |
+| `srt-contribution` | SRT Alliance / Haivision | SRT ARQ near-lossless delivery |
+| `contribution-relaxed` | ETSI TR 101 290 / DVB-S2 | Satellite / long-haul with noise |
+| `ott-streaming` | MPEG-DASH / HLS (ETSI TS 103 285) | IP end-user delivery |
+
+All thresholds are env-overridable. Active profile visible in the header and in each analyser result.
+
+---
+
+## Tooling Preflight
+
+On startup, Labotech checks tool availability and NIC capture permissions:
+
+```
+GET /health → .tooling.status        "ready" | "degraded"
+             .tooling.tools          ffmpeg / ffprobe / tsanalyze / tshark / tcpdump
+             .tooling.nicCapture     state, tool, reason
+             .tooling.checkedAt      timestamp
+```
+
+Header badge shows `READY` / `DEGRADED` / `PENDING`. Refreshes every 5 minutes.
 
 ---
 
@@ -199,145 +242,34 @@ The encoder supports full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13
 
 | Mode | Format | Use case |
 |---|---|---|
-| `srt` | MPEG-TS over SRT (Haivision) | Contribution, low-latency delivery with ARQ |
-| `udp` | MPEG-TS over UDP (`pkt_size=1316`) | Multicast distribution, internal routing |
+| `srt` | MPEG-TS over SRT (Haivision) | Contribution, ARQ low-latency |
+| `udp` | MPEG-TS over UDP (`pkt_size=1316`) | Multicast distribution |
 | `rtp` | MPEG-TS over RTP (`rtp_mpegts`) | Standards-compliant RTP delivery |
 
 ---
 
-## TS Analyser and ETR290
+## DVB / MPEG-TS Compliance
 
-The TS Analyser now includes transport, DVB, and ETR290 operator views:
+Full DVB-compliant MPEG-TS output (ETSI EN 300 468 / ISO 13818-1):
 
-- **PID/program structure matrix** (PAT/PMT/PCR and per-stream details)
-- **DVB summary panel** with service count, PID count, stream breakdown, aggregate bitrate
-- **Service table** showing SID, service name/provider, PMT PID, PCR PID
-- **ETR290 monitor panel** (P1/P2/P3, alarms) embedded in analyser workflow
-- **TS PID inventory** table for video/audio/data/other streams, including codec and bitrate
-- **PID bitrate provenance label** for unresolved video remainder allocations (`(est.)`) so computed values are not mistaken for measured per-PID bitrate
-- **ETR input bind IP** for RTP/UDP monitor URLs, so operators can pin monitoring to the intended interface path
-- **ETR parser diagnostics** (matched lines and last match time) to verify monitor activity against live faults
-- **IAT sniffer diagnostics** (attempted, capture method, sample count, error) for NIC-capture visibility
-- **Transport integrity checks** for timestamp discontinuities and continuity counter (CC) errors
-- **Composite health model** (`dvb.health`) including score, severity, and reasons for operator triage
-- **Health assessment accuracy** (v3.1.3): SMPTE ST 2022-7 `insufficient_data` no longer penalises score (only `non_compliant` deducts); bitrate drift scoring applies only when `bitrateSource === 'tsduck'` to avoid false alarms from short ffprobe measurement windows
-- **Per-protocol CC thresholds** (v3.1.4): RTP and UDP multicast sources automatically use `broadcast-balanced-v1` floor values (ccWarnCount ≥ 3, ccCriticalCount ≥ 8) in `_healthThresholds()`. Eliminates false CC/discontinuity alarms from ffprobe joining mid-stream. SRT streams retain configured policy thresholds unchanged.
-
-### Recent broadcast-grade monitoring improvements
-
-- **Server-side event window filtering:** `GET /api/events?since=<ts>` is used by the UI to avoid reloading stale event-ring history outside timeline scope.
-- **Timeline retention policy:** 26-hour horizon (24h operator window + 2h safety margin) for both browser restore and API backlog hydration.
-- **Lane continuity hardening:** active lanes can be reconstructed after refresh/idle using full-history gradient seeding and running-state lane inclusion logic.
-- **P1 severity semantics in timeline:** P1 ETR alarms are represented distinctly in timeline rendering while alarm/log workflows keep dedicated severity mapping.
-- **Probe-cycle stability improvements:** decoder PID rows are deduplicated by physical PID to prevent heavy/light probe-cycle row rotation.
-- **Per-stream metadata carry-forward:** analyser preserves structural fields (`profile`, `level`, color metadata, audio layout) across sparse probe cycles to avoid false blanks.
-- **Per-PID bitrate enrichment:** tsduck PCR-derived PID bitrates backfill ffprobe `N/A` values where possible.
+- Service ID, Transport Stream ID, Original Network ID
+- PMT PID, Video PID (PCR on video PID)
+- Per-audio-pair PID — ISO 639-2 language tag per track
+- Service name / provider in SI metadata
 
 ---
 
-## Optional Dolby E Adapter (Linux)
+## Optional Dolby E Adapter
 
-LABOTECH supports Dolby E via an optional external decoder adapter in the TS analyser path.
-
-- Adapter is non-fatal: if disabled/unavailable, standard TS analysis continues.
-- Use a Linux executable/script for decoder integration.
-
-Environment variables (`.env`):
+Non-fatal external decoder adapter in the TS analyser path.
 
 ```bash
 DOLBYE_ENABLED=true
 DOLBYE_DECODER_PATH=/usr/local/bin/dolbye-decoder
 DOLBYE_DECODER_ARGS_JSON=["--input","{url}","--json"]
-# Fallback template if *_JSON is empty:
-# DOLBYE_DECODER_ARGS=--input {url} --json
 DOLBYE_DECODER_TIMEOUT_MS=4000
 DOLBYE_REQUIRED_WHEN_DETECTED=false
 ```
-
-Expected decoder output (JSON):
-
-```json
-{
-  "detected": true,
-  "decoded": true,
-  "frameCount": 128,
-  "programConfig": "5.1+2",
-  "ok": true
-}
-```
-
-Operator visibility fields:
-
-- `dvb.dolbyE.detected`
-- `dvb.dolbyE.decoded`
-- `dvb.dolbyE.frameCount`
-- `dvb.probeDiagnostics.dolbyE`
-
-For deployment checks and troubleshooting runbook, see `docs/engineering-support-manual.md`.
-For the latest UI hardening + SMPTE 2022-7 implementation details and validation evidence, see `docs/ui-hardening-and-20227-worklog.md`.
-
----
-
-## Live View Timeline
-
-`Live View` provides a UTC timeline that correlates analyser and ETR events in one place:
-
-- **Duration block timeline**: compact color-coded line blocks represent event persistence by category/severity
-- **Lane line severity at pointer**: lane baseline color reflects current severity near pointer (critical/warning/ok)
-- **Dynamic pointer popup**: follows cursor quadrants to reduce lane occlusion while inspecting nearby evidence
-- **De-noised status plotting**: repeated identical status samples are suppressed to avoid a misleading dotted-line effect
-- **IAT/jitter telemetry source clarity**: lane cards expose arrival provenance (`tshark`, `tcpdump`, analyser-derived) so operators can distinguish NIC-capture from analyser-derived telemetry
-- **Canvas lane renderer** (v3.1.2): lane bars use `HTMLCanvasElement` `fillRect()` drawing via `LaneCanvas` component, replacing CSS `linear-gradient` strings. Eliminates sub-pixel gap artefacts and slow browser recalculation on dense event lanes. `buildLaneGradient()` logic is unchanged.
-- **rAF-throttled crosshair cursor** (v3.1.4): crosshair line position updated via direct DOM ref — zero React re-renders at high mousemove frequency. React state for the pointer popup is throttled to `requestAnimationFrame` (≤ 60 fps).
-- **Right-edge status labels** (v3.1.12): each lane shows a chip — **OK** / **WARN** / **CRIT** / **LOS** — derived from the latest probe result. Consistent with Elecard Boro / Telestream PRISM conventions.
-- **Lane colour stability** (v3.1.6–v3.1.11): four layered fixes ensure lanes stay green while decoders are active — heartbeat seed uses `Date.now()`, stale check uses `max(sevEventTs, heartbeatTs)`, `isLive` uses heartbeat-in-window as primary condition, tombstone detection anchored to last explicit start.
-- **Lane start position** (v3.1.14): bar begins at actual decoder start time, not the left edge of the current window.
-- **Stop All button** (v3.1.5): Active Decoders section header includes a STOP ALL control visible when one or more decoders are running.
-
----
-
-## Alarm and Event Log
-
-`Alarm Log` is a persistent operator-focused incident view:
-
-- **Sources:** stream/transcode/multicast/analyser/ETR events and errors routed through centralized API broadcast
-- **Scope:** `critical`, `warning`, and `info` severities, with explicit status (`alarm`, `error`, `no-signal`, `failover`, `started`, `stopped`, `info`)
-- **UX controls:** unread critical badge on tab, severity filter, text search, clear log action
-- **Export:** one-click **CSV** and **JSONL** export for NOC handover and post-incident review
-- **Persistence:** in-memory ring + append-only `logs/events.jsonl`; seeded on page load from `GET /api/events`
-
----
-
-## Input Bitrate Provenance
-
-`SRTEncoder` input bitrate reporting is intentionally source-aware for live feeds where startup metadata may be missing:
-
-- **`srt-stats`** — live SRT rate from periodic transport stats
-- **`bitrate-watcher`** — periodic ffmpeg remux watcher for UDP/RTP inputs
-- **`proxy-output`** — passthrough (`videoCodec=copy`) output-rate proxy when direct input-rate telemetry is absent
-- **`stream-descriptor` / startup metadata** — one-shot source metadata when available
-
-The API surface includes `inputBitrate` and provenance (`inputBitrateSource`) to support deterministic operator visibility.
-
----
-
-## Encoder Presets
-
-64 slots in `config/presets.json`, organised by category:
-
-| Slots | Category |
-|---|---|
-| 1–16 | HD/SD H.264 and H.265 — standard bitrate range |
-| 17–29 | HD/SD H.264 extended bitrates + 4:2:2 profiles |
-| 30–36 | UHD/HDR — HEVC PQ10, HLG10, archival |
-| 37–40 | HD H.264 — low-latency speed presets (ultrafast → faster) |
-| 41–45 | HD H.265 10-bit SDR and HQ |
-| 46–50 | 720p H.264 and H.265 |
-| 51–57 | Broadcast audio codecs — MP2 (DVB), AC3, E-AC3 |
-| 58–59 | 4K HEVC PQ10 / HLG10 |
-| 60–61 | HD contribution / archival 4:2:2 |
-| 62–63 | H.264 baseline and main profiles (legacy devices) |
-| 64 | Pass-through / remux (`copy` video + audio) |
 
 ---
 
@@ -346,86 +278,94 @@ The API surface includes `inputBitrate` and provenance (`inputBitrateSource`) to
 ### `config/multicast.json`
 
 ```json
-{
-  "nic": "eno2",
-  "subnet": "239.100.25.0/26",
-  "address": "239.100.25.29",
-  "ttl": 10
-}
+{ "nic": "eno2", "subnet": "239.100.25.0/26", "address": "239.100.25.29", "ttl": 10 }
 ```
 
-### `.env.example`
+### `config/monitoring-policy.json` (optional override)
 
-Key variables:
+```json
+{ "profile": "broadcast-balanced-v1" }
+```
+
+### Key `.env` variables
 
 ```env
 API_HOST=10.67.18.29
 API_PORT=4000
-MANAGEMENT_NIC=eno1
 MULTICAST_NIC=eno2
 FORWARD_MULTICAST_SUBNET=239.100.25.0/26
-FORWARD_MULTICAST_IP=239.100.25.29
-RESTORE_STREAMS_ON_BOOT=false
-RESTORE_TRANSCODERS_ON_BOOT=false
-RESTORE_FORWARDERS_ON_BOOT=false
-MAX_ACTIVE_FORWARDERS=1
-SRT_HOST=your.destination.server.com
-SRT_PORT=9999
-SRT_LATENCY=2000
-SNMP_MANAGER_HOST=10.67.18.1
-SYSLOG_HOST=10.67.18.1
 THUMBNAIL_INTERVAL_SEC=5
-THUMBNAIL_QUALITY_PROFILE=high
-EVENT_LOG_RING_SIZE=500
+THUMBNAIL_QUALITY_PROFILE=high        # or: low
+EVENT_LOG_RING_SIZE=1000
+TS_HEAVY_PROBE_MAX_CONCURRENT=3
+MONITORING_POLICY_PROFILE=broadcast-balanced-v1
 ```
-
-Thumbnail quality profile options:
-
-- `THUMBNAIL_QUALITY_PROFILE=high` (default): 640px capture, cleaner multiview image, higher CPU.
-- `THUMBNAIL_QUALITY_PROFILE=low`: 320px capture, lower CPU, lower visual quality.
-
----
-
-## Coding Rules
-
-- Plain ES6 Node.js with `require()` — no TypeScript
-- FFmpeg always via `child_process.spawn` — never `exec`
-- Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
-- All multicast addresses validated against `239.100.25.0/26` before use
-- API server always binds to `10.67.18.29` — never `0.0.0.0`
-- All state in-memory `Map()` — no database, no ORM
 
 ---
 
 ## Tests
 
 ```bash
-npm test
-# 149 tests across 6 suites
+npm test -- --runInBand    # 191 tests across 8 suites
 ```
 
 | Suite | Tests | Coverage |
 |---|---|---|
-| `encoder.test.js` | 57 | Input detection, FFmpeg args, DVB muxer, output modes (SRT/UDP/RTP), PID assignment, stats parsing |
+| `encoder.test.js` | 57 | Input detection, FFmpeg args, DVB muxer, SRT/UDP/RTP, PID assignment, stats parsing |
 | `transcoder.test.js` | 16 | Interlace presets, yadif filter, broadcast conversions |
 | `multicast.test.js` | 13 | Subnet validator, CIDR edge cases, URL building |
-| `ts-analyser.test.js` | 54 | PAT/PMT/PID parsing, orphan streams, continuous probing, health scoring, per-protocol thresholds |
-| `etr290-analyser.test.js` | 6 | ETR290 P1/P2/P3 alarm parsing and profile matching |
+| `ts-analyser.test.js` | 54 | PAT/PMT/PID parsing, health scoring, per-protocol thresholds, probe scheduling |
+| `etr290-analyser.test.js` | 6 | P1/P2/P3 alarm parsing, profile matching |
 | `monitoring.test.js` | 3 | Thumbnail capture, atomic write, concurrency guard |
+| `thumbnail-worker.test.js` | 28 | Worker IPC, start/stop/suspend/resume, frame events, crash isolation |
+| `tsduck-monitor.test.js` | 14 | PCR/SI/bitrate event parsing, restart backoff, suspend/resume |
 
 ---
 
-## Release Safety
+## Coding Rules
 
-- v3.1 release notes: `docs/release-notes-v3.1.md`
-- Production-safe git and rollback runbook: `docs/git-workflow-and-rollback.md`
-- Engineering operations runbook: `docs/engineering-support-manual.md`
-- Disk recovery and log-rotation runbook: `docs/ops-disk-recovery.md`
-- Full operations scripts usage reference: `docs/ops-scripts-reference.md`
-- UI hardening and SMPTE 2022-7 worklog: `docs/ui-hardening-and-20227-worklog.md`
-- Day-1 post-change operations checklist: `docs/day1-monitoring-checklist.md`
-- Ubuntu host tuning scripts: `scripts/optimize-host-v2.sh` and `scripts/rollback-host-optimization-v2.sh`
-- Docker log rotation install/check scripts: `scripts/install-docker-log-rotation.sh` and `scripts/check-docker-log-rotation.sh`
-- Fast disk reclaim helper (aggressive): `scripts/reclaim-disk-fast.sh --yes`
-- Standardized production update: `bash scripts/update-and-deploy-safe.sh`
-- Deterministic rollback/recovery: `bash scripts/recover-prod-fast.sh <ref>`
+- Plain ES6 `require()` — no TypeScript
+- FFmpeg and TSDuck always via `child_process.spawn` — never `exec`
+- Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
+- All multicast addresses validated against `239.100.25.0/26` before use
+- API always binds to `10.67.18.29` — never `0.0.0.0`
+- All state in-memory `Map()` — no database, no ORM
+- `pid != null && Number.isFinite(Number(pid))` — never coerce nullable PIDs
+- `matchAll` requires `g` flag — derive: `new RegExp(rx.source, rx.flags + 'g')`
+- `-af` must not follow a `-filter_complex` mapped output — embed in the chain
+
+---
+
+## Engineering Docs
+
+| Document | Purpose |
+|---|---|
+| `docs/release-notes-v3.1.md` | Full changelog from v3.1.1 |
+| `docs/engineering-snag-list.md` | Defect log — 18 closed snags, root causes, lessons, invariants |
+| `docs/engineering-support-manual.md` | Operator and engineer runbook |
+| `docs/architecture-roadmap-continuous-monitoring.md` | Continuous monitoring + thumbnail worker architecture |
+| `docs/broadcast-grade-compliance-roadmap.md` | Broadcast compliance phases (tooling preflight, monitoring policy, probe scheduler, UI clarity, ops hardening) |
+| `docs/git-workflow-and-rollback.md` | Production-safe git and rollback procedure |
+| `docs/ops-disk-recovery.md` | Disk recovery and log-rotation runbook |
+| `docs/ops-scripts-reference.md` | All ops scripts reference |
+| `docs/day1-monitoring-checklist.md` | Post-change operations checklist |
+| `docs/tsduck-spike-findings.md` | TSDuck production capability findings |
+| `CLAUDE.md` | AI agent coding rules, pitfalls, and invariants |
+| `docs/agent-status.md` | Multi-agent collaboration logbook (Claude Code + Cursor) |
+
+---
+
+## AI-Assisted Development
+
+Labotech uses a structured multi-agent development model:
+
+| Tool | Branch prefix | Role |
+|---|---|---|
+| Claude Code | `feat/`, `fix/`, `chore/` | Multi-file features, backend logic, deploy scripts, architecture |
+| Cursor | `cursor/` | Inline editing, small fixes, debugging sessions |
+
+Rules: never push directly to `main` · always branch + PR · human reviews and merges · `npm test -- --runInBand` must pass before PR · `npm run build --prefix web` must be 0 warnings.
+
+Pre-commit hook blocks Cursor AI telemetry patterns (`127.0.0.1:7265`, `#region agent log`).
+
+See `CLAUDE.md` and `docs/agent-status.md` for the full collaboration protocol.
