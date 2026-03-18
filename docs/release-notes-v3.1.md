@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.78 / web 3.1.95)
+Date: 2026-03-18 (latest: v3.1.79 / web 3.1.96)
+
+## v3.1.79 / web v3.1.96 — 2026-03-18
+
+### Fix SRT thumbnail (HEVC) and SRT Transport stats always null
+
+**HEVC thumbnail** — removed `-skip_frame nokey` from `PersistentThumbnailCapture._spawn()`. This flag breaks HEVC decoder initialisation: HEVC slices reference VPS/SPS/PPS context that is established by frames marked as non-keyframes in ffmpeg's view, causing `PPS id out of range: 0` errors on every frame and zero JPEG output. The `fps=1/N` vf filter alone is sufficient to throttle output rate without corrupting decoder state. Fix is codec-agnostic: H.264 thumbnails are unaffected.
+
+**SRT Transport stats** — `srt-live-transmit --help` exits non-zero on all known builds, causing `_checkTool()` (which gates on exit code 0) to mark the tool unavailable even when it is installed. Added `_checkSltTool()` which marks available when any stdout/stderr output is produced — a spawn failure (binary not found) produces none. This unblocks `_probeSrtLinkStats()` so RTT, loss, NAK, retransmit and drop counters appear in the SRT Transport tab.
+
+**Operator impact:** SRT RX Confidence Monitor now shows a live thumbnail for HEVC and H.264 streams. SRT Transport tab shows real-time link metrics.
 
 ## web v3.1.95 — 2026-03-18
 

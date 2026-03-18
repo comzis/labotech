@@ -92,6 +92,18 @@ async function _checkTool(name, args) {
   };
 }
 
+// srt-live-transmit --help exits non-zero on most builds but writes help text
+// to stderr — the same exit-code trap as tsanalyze.  Mark available when any
+// output is produced (spawn failure produces none).
+async function _checkSltTool() {
+  const res = await _runCommand('srt-live-transmit', ['--help']);
+  const output = (res.stdout + res.stderr).trim();
+  if (!output) {
+    return { available: false, version: null, error: res.error || `exit ${res.code}` };
+  }
+  return { available: true, version: _extractVersion(output), error: null };
+}
+
 async function _checkNicCapture(toolName, nicName) {
   if (!toolName) {
     return {
@@ -160,7 +172,7 @@ async function refreshToolingPreflight() {
     _checkTool('tsanalyze', ['--version']),
     _checkTool('tshark', ['-v']),
     _checkTool('tcpdump', ['--version']),
-    _checkTool('srt-live-transmit', ['--help']),
+    _checkSltTool(),
     _checkSrtProtocol(),
   ]);
 
