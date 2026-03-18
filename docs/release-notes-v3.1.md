@@ -1,8 +1,12 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.77 / web 3.1.87)
+Date: 2026-03-18 (latest: v3.1.77 / web 3.1.88)
 
-## v3.1.77 / web v3.1.87 — 2026-03-18
+## v3.1.77 / web v3.1.88 — 2026-03-18
+
+### SRT Transport tab: remove nonexistent policy reference; SRT thumbnail bind to eno1
+
+Removed the "Use the SRT Contribution monitoring policy for additional tuning" sentence from the SRT Transport note — no such policy exists in the UI. The remaining note (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms) is accurate and matches `_healthThresholds()`.
 
 ### SRT thumbnail capture: bind ffmpeg to eno1
 
