@@ -315,13 +315,13 @@ function LandingAuth({ onLogin, punchline }) {
                   Operator Access
                 </div>
                 <div
+                  className="font-black uppercase"
                   style={{
-                    fontFamily: '"Bebas Neue", "Arial Narrow", Arial, sans-serif',
-                    fontSize: 72,
+                    fontSize: 56,
                     lineHeight: 1,
-                    letterSpacing: '0.06em',
-                    color: '#b8c8dc',
-                    textShadow: '0 1px 0 rgba(0,0,0,0.8), 0 0 40px rgba(180,200,220,0.08)',
+                    letterSpacing: '0.18em',
+                    color: '#7b879a',
+                    textShadow: '0 1px 0 rgba(0,0,0,0.5)',
                   }}
                 >
                   LABOTECH
