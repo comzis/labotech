@@ -457,29 +457,28 @@ function fsColumns(count) {
   return 5;
 }
 
-// Single vertical VU bar (fills bottom-up)
-function FsVuBar({ rmsDb, peakDb, label }) {
+// 2px-wide vertical VU bar (fills bottom-up) — MCR meter style
+function FsVuBar({ rmsDb, peakDb }) {
   const active = rmsDb != null && Number.isFinite(rmsDb);
   const rmsH  = active ? Math.max(0, ((Math.max(-60, Math.min(0, rmsDb)) + 60) / 60) * 100) : 0;
   const peakH = (peakDb != null && Number.isFinite(peakDb))
     ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
     : null;
-  const rmsColor  = !active ? '#111' : rmsDb > -9 ? '#ff2233' : rmsDb > -18 ? '#ffaa00' : '#00cc44';
-  const peakColor = peakDb > -9 ? '#ff2233' : peakDb > -18 ? '#ffaa00' : '#00cc44';
+  const rmsColor  = !active ? '#0c0c0c' : rmsDb > -9 ? '#cc1020' : rmsDb > -18 ? '#b87800' : '#007a28';
+  const peakColor = (peakDb ?? -60) > -9 ? '#cc1020' : (peakDb ?? -60) > -18 ? '#b87800' : '#007a28';
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
-      <div style={{ flex: 1, width: '100%', position: 'relative', background: '#080808', border: '1px solid #111', borderRadius: '1px', overflow: 'hidden' }}>
+    <div style={{ width: 2, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, position: 'relative', background: '#060606', overflow: 'hidden' }}>
         {/* Zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
-        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
-        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
-        {/* RMS fill from bottom */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.12s linear' }} />
-        {/* Peak hold tick */}
-        {peakH != null && (
-          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '2px', background: peakColor, boxShadow: `0 0 3px ${peakColor}` }} />
+        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.05)' }} />
+        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.05)' }} />
+        {/* RMS fill */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.1s linear' }} />
+        {/* Peak hold 1px */}
+        {peakH != null && active && (
+          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '1px', background: peakColor }} />
         )}
       </div>
-      <div style={{ color: '#383838', fontFamily: 'monospace', fontSize: '6px', marginTop: '1px', lineHeight: 1, textAlign: 'center' }}>{label}</div>
     </div>
   );
 }
@@ -502,10 +501,23 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const thumbUrl = result?.thumbnailUrl || null;
   const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Pair channels into L/R; fallback to aggregate mean as a single bar
+  // Count actual audio ES streams from the PMT to know how many pairs to display.
+  // audioLevels.channels contains measured level data for as many channels as the
+  // backend probed (typically the primary audio ES, all its channels).
+  // Pair measured channels into L/R; index into channels[] for real levels.
+  const audioEsCount = (result?.programs || []).reduce((acc, p) =>
+    acc + (p.streams || []).filter((s) => s.codecType === 'audio').length, 0);
+  const pairCount = channels.length > 0
+    ? Math.ceil(channels.length / 2)            // real measured pairs
+    : audioEsCount > 0 ? audioEsCount : 0;      // ES count as placeholder pairs
+
   const pairs = [];
-  for (let i = 0; i < channels.length; i += 2) {
-    pairs.push({ left: channels[i], right: channels[i + 1] || null, num: Math.floor(i / 2) + 1 });
+  for (let i = 0; i < pairCount; i++) {
+    pairs.push({
+      left:  channels[i * 2]     || null,
+      right: channels[i * 2 + 1] || null,
+      num:   i + 1,
+    });
   }
   const meanDb = result?.audioLevels?.meanDb;
   const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
@@ -516,16 +528,16 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
-      background: '#040507',
-      border: '1px solid #111',
-      borderTop: `3px solid ${statusColor}`,
+      background: '#030405',
+      border: '1px solid #0e0e0e',
+      borderTop: `2px solid ${statusColor}`,
       overflow: 'hidden', minWidth: 0,
     }}>
       {/* Content row: thumbnail | audio meters */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
         {/* Thumbnail */}
-        <div style={{ flex: 1, position: 'relative', background: '#080808', minWidth: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, position: 'relative', background: '#060606', minWidth: 0, overflow: 'hidden' }}>
           {(displaySrc || thumbUrl) ? (
             <img
               src={displaySrc || thumbUrl}
@@ -536,69 +548,72 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             />
           ) : (
             <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <span style={{ color: '#1e1e1e', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+              <span style={{ color: '#161616', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
                 AWAITING FRAME
               </span>
             </div>
           )}
-          {/* Status LED */}
-          <div style={{ position: 'absolute', top: 6, left: 6, width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 5px ${statusColor}aa` }} />
-          {/* Decoder ID */}
-          <div style={{ position: 'absolute', top: 4, right: 5, fontFamily: 'monospace', fontSize: '8px', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.06em', textTransform: 'uppercase', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+
+          {/* UMD — broadcast-style source label at top of thumbnail */}
+          <div style={{
+            position: 'absolute', top: 0, left: 0, right: 0,
+            height: 18,
+            background: 'rgba(0,0,0,0.82)',
+            display: 'flex', alignItems: 'center',
+            overflow: 'hidden',
+          }}>
+            {/* Tally strip — status color */}
+            <div style={{ width: 3, alignSelf: 'stretch', background: statusColor, flexShrink: 0 }} />
+            {/* Service name */}
+            <span style={{
+              flex: 1, minWidth: 0,
+              color: '#f0f0f0', fontFamily: 'monospace', fontSize: '11px', fontWeight: 700,
+              letterSpacing: '0.07em', textTransform: 'uppercase',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              padding: '0 5px',
+            }}>
+              {svc}
+            </span>
+            {/* Bitrate */}
+            <span style={{
+              color: '#2a4060', fontFamily: 'monospace', fontSize: '9px',
+              flexShrink: 0, paddingRight: 4, fontVariantNumeric: 'tabular-nums',
+            }}>
+              {rate.mbps != null ? `${rate.mbps.toFixed(1)}` : ''}
+            </span>
+          </div>
+
+          {/* Decoder ID — very dim, bottom-right corner */}
+          <div style={{ position: 'absolute', bottom: 3, right: 4, fontFamily: 'monospace', fontSize: '7px', color: 'rgba(255,255,255,0.18)', letterSpacing: '0.04em', textTransform: 'uppercase', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {id}
           </div>
         </div>
 
-        {/* Vertical audio meters panel */}
+        {/* Vertical audio meters panel — fixed 30px for 4 pairs @ 2px bars */}
         {hasAudio && (
           <div style={{
-            width: 'clamp(44px, 20%, 110px)',
-            background: 'rgba(4,6,10,0.92)',
-            borderLeft: '1px solid #0e0e0e',
+            width: 30,
+            background: '#020305',
+            borderLeft: '1px solid #080808',
             display: 'flex', flexDirection: 'column',
-            padding: '4px 4px 2px',
-            gap: 2,
+            padding: '2px 2px 2px 2px',
             flexShrink: 0,
           }}>
-            {/* Scale label */}
-            <div style={{ color: '#252525', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', letterSpacing: '0.12em', flexShrink: 0 }}>dBFS</div>
-            {/* Bars */}
-            <div style={{ flex: 1, display: 'flex', gap: '4px', minHeight: 0, alignItems: 'stretch' }}>
+            <div style={{ flex: 1, display: 'flex', gap: '2px', minHeight: 0, alignItems: 'stretch' }}>
               {pairs.length > 0 ? pairs.map(({ left, right, num }) => (
-                <div key={num} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                <div key={num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
                   <div style={{ flex: 1, display: 'flex', gap: '1px', minHeight: 0 }}>
-                    <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} label="L" />
-                    {right && <FsVuBar rmsDb={right?.rmsDb} peakDb={right?.peakDb ?? right?.rmsDb} label="R" />}
+                    <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} />
+                    <FsVuBar rmsDb={right?.rmsDb ?? null} peakDb={right?.peakDb ?? right?.rmsDb ?? null} />
                   </div>
-                  {/* Pair number */}
-                  <div style={{ color: '#2a2a2a', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', marginTop: '1px', flexShrink: 0 }}>{num}</div>
+                  <div style={{ color: '#141414', fontSize: '4px', fontFamily: 'monospace', lineHeight: 1, flexShrink: 0 }}>{num}</div>
                 </div>
               )) : (
-                // Fallback: aggregate mean bar
-                <FsVuBar rmsDb={meanDb} peakDb={meanDb} label="Σ" />
+                <FsVuBar rmsDb={meanDb} peakDb={meanDb} />
               )}
             </div>
           </div>
         )}
-      </div>
-
-      {/* Bottom label bar */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '2px 6px',
-        background: '#060608',
-        borderTop: `1px solid ${statusColor}22`,
-        flexShrink: 0, gap: 4,
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, overflow: 'hidden' }}>
-          <div style={{ width: 4, height: 4, borderRadius: '50%', background: statusColor, flexShrink: 0, boxShadow: `0 0 4px ${statusColor}88` }} />
-          <span style={{ color: '#c8c8c8', fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {svc}
-          </span>
-        </div>
-        <span style={{ color: '#2a4a6a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
-          {rate.mbps != null ? `${rate.mbps.toFixed(1)} Mb` : '—'}
-        </span>
       </div>
     </div>
   );
@@ -1548,9 +1563,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
             gridAutoRows: '1fr',
             overflow: 'hidden',
-            gap: '2px',
-            padding: '2px',
-            background: '#020304',
+            gap: '1px',
+            padding: '1px',
+            background: '#010203',
           }}>
             {visibleIds.map((id) => (
               <FullscreenThumbTile
