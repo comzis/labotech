@@ -457,29 +457,29 @@ function fsColumns(count) {
   return 5;
 }
 
-// Single vertical VU bar (fills bottom-up)
+// Single vertical VU bar (fills bottom-up) — refined MCR style
 function FsVuBar({ rmsDb, peakDb, label }) {
   const active = rmsDb != null && Number.isFinite(rmsDb);
   const rmsH  = active ? Math.max(0, ((Math.max(-60, Math.min(0, rmsDb)) + 60) / 60) * 100) : 0;
   const peakH = (peakDb != null && Number.isFinite(peakDb))
     ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
     : null;
-  const rmsColor  = !active ? '#111' : rmsDb > -9 ? '#ff2233' : rmsDb > -18 ? '#ffaa00' : '#00cc44';
-  const peakColor = peakDb > -9 ? '#ff2233' : peakDb > -18 ? '#ffaa00' : '#00cc44';
+  const rmsColor  = !active ? '#0a0a0a' : rmsDb > -9 ? '#dd1122' : rmsDb > -18 ? '#cc8800' : '#009933';
+  const peakColor = (peakDb ?? 0) > -9 ? '#dd1122' : (peakDb ?? 0) > -18 ? '#cc8800' : '#009933';
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
-      <div style={{ flex: 1, width: '100%', position: 'relative', background: '#080808', border: '1px solid #111', borderRadius: '1px', overflow: 'hidden' }}>
-        {/* Zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
-        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
-        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
+      <div style={{ flex: 1, width: '100%', position: 'relative', background: '#050505', overflow: 'hidden' }}>
+        {/* Near-invisible zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.04)' }} />
+        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.04)' }} />
         {/* RMS fill from bottom */}
-        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.12s linear' }} />
-        {/* Peak hold tick */}
-        {peakH != null && (
-          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '2px', background: peakColor, boxShadow: `0 0 3px ${peakColor}` }} />
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, opacity: active ? 0.88 : 0.2, transition: 'height 0.12s linear' }} />
+        {/* Peak hold — 1px, no glow */}
+        {peakH != null && active && (
+          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '1px', background: peakColor, opacity: 0.7 }} />
         )}
       </div>
-      <div style={{ color: '#383838', fontFamily: 'monospace', fontSize: '6px', marginTop: '1px', lineHeight: 1, textAlign: 'center' }}>{label}</div>
+      <div style={{ color: '#1e1e1e', fontFamily: 'monospace', fontSize: '5px', marginTop: '1px', lineHeight: 1, textAlign: 'center' }}>{label}</div>
     </div>
   );
 }
@@ -502,10 +502,23 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const thumbUrl = result?.thumbnailUrl || null;
   const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Pair channels into L/R; fallback to aggregate mean as a single bar
+  // Count actual audio ES streams from the PMT to know how many pairs to display.
+  // audioLevels.channels contains measured level data for as many channels as the
+  // backend probed (typically the primary audio ES, all its channels).
+  // Pair measured channels into L/R; index into channels[] for real levels.
+  const audioEsCount = (result?.programs || []).reduce((acc, p) =>
+    acc + (p.streams || []).filter((s) => s.codecType === 'audio').length, 0);
+  const pairCount = channels.length > 0
+    ? Math.ceil(channels.length / 2)            // real measured pairs
+    : audioEsCount > 0 ? audioEsCount : 0;      // ES count as placeholder pairs
+
   const pairs = [];
-  for (let i = 0; i < channels.length; i += 2) {
-    pairs.push({ left: channels[i], right: channels[i + 1] || null, num: Math.floor(i / 2) + 1 });
+  for (let i = 0; i < pairCount; i++) {
+    pairs.push({
+      left:  channels[i * 2]     || null,
+      right: channels[i * 2 + 1] || null,
+      num:   i + 1,
+    });
   }
   const meanDb = result?.audioLevels?.meanDb;
   const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
@@ -552,29 +565,25 @@ function FullscreenThumbTile({ id, result, nowMs }) {
         {/* Vertical audio meters panel */}
         {hasAudio && (
           <div style={{
-            width: 'clamp(44px, 20%, 110px)',
-            background: 'rgba(4,6,10,0.92)',
-            borderLeft: '1px solid #0e0e0e',
+            width: 'clamp(20px, 7%, 42px)',
+            background: 'rgba(2,3,5,0.88)',
+            borderLeft: '1px solid #0a0a0a',
             display: 'flex', flexDirection: 'column',
-            padding: '4px 4px 2px',
-            gap: 2,
+            padding: '3px 2px 1px',
+            gap: 1,
             flexShrink: 0,
           }}>
-            {/* Scale label */}
-            <div style={{ color: '#252525', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', letterSpacing: '0.12em', flexShrink: 0 }}>dBFS</div>
             {/* Bars */}
-            <div style={{ flex: 1, display: 'flex', gap: '4px', minHeight: 0, alignItems: 'stretch' }}>
+            <div style={{ flex: 1, display: 'flex', gap: '2px', minHeight: 0, alignItems: 'stretch' }}>
               {pairs.length > 0 ? pairs.map(({ left, right, num }) => (
                 <div key={num} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
                   <div style={{ flex: 1, display: 'flex', gap: '1px', minHeight: 0 }}>
                     <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} label="L" />
-                    {right && <FsVuBar rmsDb={right?.rmsDb} peakDb={right?.peakDb ?? right?.rmsDb} label="R" />}
+                    <FsVuBar rmsDb={right?.rmsDb ?? null} peakDb={right?.peakDb ?? right?.rmsDb ?? null} label="R" />
                   </div>
-                  {/* Pair number */}
-                  <div style={{ color: '#2a2a2a', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', marginTop: '1px', flexShrink: 0 }}>{num}</div>
+                  <div style={{ color: '#161616', fontSize: '5px', fontFamily: 'monospace', textAlign: 'center', lineHeight: 1, flexShrink: 0 }}>{num}</div>
                 </div>
               )) : (
-                // Fallback: aggregate mean bar
                 <FsVuBar rmsDb={meanDb} peakDb={meanDb} label="Σ" />
               )}
             </div>
@@ -1548,9 +1557,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
             gridAutoRows: '1fr',
             overflow: 'hidden',
-            gap: '2px',
-            padding: '2px',
-            background: '#020304',
+            gap: '1px',
+            padding: '1px',
+            background: '#010203',
           }}>
             {visibleIds.map((id) => (
               <FullscreenThumbTile
