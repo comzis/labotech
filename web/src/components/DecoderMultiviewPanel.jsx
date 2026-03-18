@@ -504,15 +504,16 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const thumbUrl = result?.thumbnailUrl || null;
   const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Count actual audio ES streams from the PMT to know how many pairs to display.
-  // audioLevels.channels contains measured level data for as many channels as the
-  // backend probed (typically the primary audio ES, all its channels).
-  // Pair measured channels into L/R; index into channels[] for real levels.
+  // Count audio ESes from PMT, filtering null-PID entries — ffprobe emits each ES
+  // twice: once inside the program list (with PID) and once in the global stream
+  // array (without PID). The null-PID ghost must not inflate the pair count.
   const audioEsCount = (result?.programs || []).reduce((acc, p) =>
-    acc + (p.streams || []).filter((s) => s.codecType === 'audio').length, 0);
-  const pairCount = channels.length > 0
-    ? Math.ceil(channels.length / 2)            // real measured pairs
-    : audioEsCount > 0 ? audioEsCount : 0;      // ES count as placeholder pairs
+    acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+  // Show whichever is larger: measured channel pairs OR PMT ES count.
+  // This ensures all 4 audio PIDs show meter slots even when only the primary
+  // stream is probed (2 measured channels → 1 real pair, 3 dark placeholders).
+  const measuredPairs = channels.length > 0 ? Math.ceil(channels.length / 2) : 0;
+  const pairCount = Math.max(measuredPairs, audioEsCount);
 
   const pairs = [];
   for (let i = 0; i < pairCount; i++) {
@@ -535,6 +536,7 @@ function FullscreenThumbTile({ id, result, nowMs }) {
       border: '1px solid #0e0e0e',
       borderTop: `2px solid ${statusColor}`,
       overflow: 'hidden', minWidth: 0,
+      aspectRatio: '16 / 9',
     }}>
       {/* Content row: thumbnail | audio meters */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -1566,7 +1568,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             flex: 1,
             display: 'grid',
             gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
-            gridAutoRows: '1fr',
+            gridAutoRows: 'auto',
+            alignContent: 'center',
             overflow: 'hidden',
             gap: '1px',
             padding: '1px',
