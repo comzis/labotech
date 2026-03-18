@@ -1190,6 +1190,31 @@ class TSAnalyser extends EventEmitter {
       profile: s.profile || null,                 // e.g. 'High', 'Main 10'
       level: s.level != null ? Number(s.level) : null, // integer: 40=4.0, 41=4.1, 50=5.0
       channelLayout: s.channel_layout || null,    // audio: 'stereo','5.1','7.1' etc.
+      bitsPerSample: Number(s.bits_per_raw_sample) || Number(s.bits_per_sample) || null,
+      s302m: (() => {
+        // SMPTE 302M (AES3 PCM audio in MPEG-TS) detection.
+        // ffprobe reports codec_name 's302m' for correctly identified streams.
+        // Fallback: PCM codec on stream_type 0x06/0x82/0x83 (private/AES3 types).
+        const stNum = streamType != null ? Number(streamType) : null;
+        const isS302m = s.codec_name === 's302m' ||
+          (s.codec_type === 'audio' &&
+           s.codec_name && /^pcm_s(16|20|24|32)(be|le)$/.test(s.codec_name) &&
+           (stNum === 0x06 || stNum === 0x82 || stNum === 0x83));
+        if (!isS302m) return null;
+        const ch = Number(s.channels) || null;
+        const bitDepth = Number(s.bits_per_raw_sample) || Number(s.bits_per_sample) || null;
+        const sr = Number(s.sample_rate) || 48000;
+        const pairCount = ch ? Math.round(ch / 2) : null;
+        // Theoretical raw PCM bitrate (bps): sr × bitDepth × channels
+        // Actual MPEG-TS bitrate is slightly higher due to PES/TS overhead.
+        const theoreticalBps = (ch && bitDepth) ? (sr * bitDepth * ch) : null;
+        // Channel map: S302M assigns stereo pairs sequentially from Ch 1.
+        const pairs = pairCount ? Array.from({ length: pairCount }, (_, i) => ({
+          pair: i + 1,
+          ch: [i * 2 + 1, i * 2 + 2],
+        })) : null;
+        return { bitDepth, pairCount, channels: ch, sampleRate: sr, theoreticalBps, pairs };
+      })(),
     };
   }
 
@@ -1417,6 +1442,8 @@ class TSAnalyser extends EventEmitter {
           colorSpace: null,
           colorTrc: null,
           colorPrimaries: null,
+          bitsPerSample: null,
+          s302m: null,
         });
       }
     }
@@ -1556,6 +1583,7 @@ class TSAnalyser extends EventEmitter {
           codecName: obj.codec_name || obj.codecName || null,
           language: obj.language || obj.lang || null,
           bitrate,
+          s302m: null, // populated from ffprobe _mapStream() via _applyTSDuckData merge
         };
         const prev = candidates.get(maybePid);
         // Prefer entries that have more information — bitrate > stream type > anything.

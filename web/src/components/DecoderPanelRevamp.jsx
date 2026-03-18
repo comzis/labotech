@@ -165,6 +165,34 @@ function codecTypeScore(t) {
   return 0; // "unknown" or anything else
 }
 
+// Solid block shown in place of VU bars when an audio pair carries a
+// SMPTE 337M non-PCM data burst (e.g. Dolby E).  Broadcast standard:
+// amber/orange indicates non-PCM data channel — not a level meter.
+function DolbyEPairBlock({ programConfig }) {
+  return (
+    <div style={{
+      width: 7, height: "100%",
+      background: "linear-gradient(180deg, #7a3200 0%, #3d1800 100%)",
+      borderRadius: 1, position: "relative",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "space-between",
+      overflow: "hidden",
+    }}>
+      {/* amber top-rail — broadcast DE colour (EBU/SMPTE) */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+      {/* "DE" rotated label */}
+      <span style={{
+        fontSize: 5, fontWeight: 800, color: "#ff8c00",
+        letterSpacing: "0.05em", textTransform: "uppercase",
+        writingMode: "vertical-rl", transform: "rotate(180deg)",
+        lineHeight: 1, opacity: 0.9, userSelect: "none",
+      }}>DE</span>
+      {/* amber bottom-rail */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+    </div>
+  );
+}
+
 // Vertical audio VU bar for Confidence Monitor (3 px wide, bottom-up fill, −60→0 dBFS)
 function DecoderVuBar({ rmsDb, peakDb }) {
   const active = rmsDb != null && Number.isFinite(rmsDb);
@@ -232,6 +260,10 @@ function extractPidRows(selectedResult) {
     codecType: s.codecType || s.type || "unknown",
     codec: s.codecName || s.codec || s.description || "-",
     bitrate: Number(s.bitrate || 0),
+    sampleRate: s.sampleRate || null,
+    channels: s.channels || null,
+    bitsPerSample: s.bitsPerSample || null,
+    s302m: s.s302m || null,
     _idx: i, // used only as tiebreaker for PID-less entries
   }));
 
@@ -1363,38 +1395,89 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 const hasMeter = pairCount > 0;
                 // audio panel: 4px per bar + 1px gap, 2 bars per pair + 1px gap between pairs
                 const panelW = hasMeter ? pairCount * (3 + 3 + 2) + (pairCount - 1) * 2 + 4 : 0;
+
+                // Dolby E / SMPTE 337M non-PCM pair detection.
+                // When dvb.dolbyE.detected is true, identify the carrier pair by the
+                // characteristic signature of a data burst in AES3: both channels carry
+                // near-identical constant-amplitude signal (data, not natural audio),
+                // typically measuring −28 to −8 dBFS with L/R symmetry < 3 dB.
+                const dolbyEOnStream = selectedResult?.dvb?.dolbyE?.detected === true;
+                const dolbyEProgramConfig = selectedResult?.dvb?.dolbyE?.programConfig || null;
+                const dolbyEPairFlags = Array.from({ length: pairCount }, (_, i) => {
+                  if (!dolbyEOnStream) return false;
+                  const lCh = channels[i * 2];
+                  const rCh = channels[i * 2 + 1];
+                  const lRms = Number(lCh?.rmsDb);
+                  const rRms = Number(rCh?.rmsDb);
+                  if (!Number.isFinite(lRms) || !Number.isFinite(rRms)) return false;
+                  const avg = (lRms + rRms) / 2;
+                  const diff = Math.abs(lRms - rRms);
+                  // Dolby E burst: constant near-equal amplitude, −35…−8 dBFS typical range
+                  return diff < 3.0 && avg > -35 && avg < -8;
+                });
+                // If Dolby E is detected but heuristic finds no pair (e.g. decoder not probed
+                // yet), show a stream-level badge instead.
+                const dolbyEFound = dolbyEPairFlags.some(Boolean);
+
                 return (
-                  <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
-                    {/* Thumbnail — flex: 1 so it takes remaining width */}
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      {selectedResult?.thumbnailUrl ? (
-                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
-                          <img
-                            src={selectedResult.thumbnailUrl}
-                            alt="Confidence monitor"
-                            style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                            onError={(e) => { e.target.style.display = "none"; }}
-                          />
-                        </div>
-                      ) : (
-                        <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
-                          <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                      {/* Thumbnail — flex: 1 so it takes remaining width */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {selectedResult?.thumbnailUrl ? (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
+                            <img
+                              src={selectedResult.thumbnailUrl}
+                              alt="Confidence monitor"
+                              style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                              onError={(e) => { e.target.style.display = "none"; }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
+                            <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Vertical audio meters */}
+                      {hasMeter && (
+                        <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
+                          {Array.from({ length: pairCount }, (_, i) => {
+                            const lCh = channels[i * 2];
+                            const rCh = channels[i * 2 + 1];
+                            if (dolbyEPairFlags[i]) {
+                              return (
+                                <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                  <DolbyEPairBlock programConfig={dolbyEProgramConfig} />
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
+                                <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
+                              </div>
+                            );
+                          })}
                         </div>
                       )}
                     </div>
-                    {/* Vertical audio meters */}
-                    {hasMeter && (
-                      <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
-                        {Array.from({ length: pairCount }, (_, i) => {
-                          const lCh = channels[i * 2];
-                          const rCh = channels[i * 2 + 1];
-                          return (
-                            <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
-                              <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
-                              <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
-                            </div>
-                          );
-                        })}
+                    {/* Dolby E stream indicator — shown when DE detected but pair heuristic
+                        has not yet identified the specific pair (e.g. first probe cycle). */}
+                    {dolbyEOnStream && !dolbyEFound && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E{dolbyEProgramConfig ? ` · ${dolbyEProgramConfig}` : ""} · SMPTE 337M carrier detected
+                        </span>
+                      </div>
+                    )}
+                    {dolbyEOnStream && dolbyEFound && dolbyEProgramConfig && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E · {dolbyEProgramConfig}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -2003,11 +2086,34 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Type</div>
-                            <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                            {p.s302m
+                              ? <Badge label="S302M" color={C.gold} small />
+                              : <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                            }
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Description</div>
-                            <span style={{ color: C.text, fontSize: 10, display: "block", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.25 }}>{p.codec}</span>
+                            {p.s302m ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                                  <span style={{ color: C.gold, fontSize: 9, fontWeight: 700, fontFamily: "'Courier New',monospace" }}>AES3</span>
+                                  {p.s302m.bitDepth && <span style={{ color: C.text, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.bitDepth}-bit</span>}
+                                  {p.s302m.pairCount != null && <span style={{ color: C.text, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.pairCount} pair{p.s302m.pairCount !== 1 ? "s" : ""}{p.s302m.channels ? ` (${p.s302m.channels}ch)` : ""}</span>}
+                                  {p.s302m.sampleRate && <span style={{ color: C.muted, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.sampleRate / 1000}kHz</span>}
+                                </div>
+                                {p.s302m.pairs && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                                    {p.s302m.pairs.map(pr => (
+                                      <span key={pr.pair} style={{ fontSize: 8, fontFamily: "'Courier New',monospace", color: C.muted, background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "1px 4px" }}>
+                                        P{pr.pair}: {pr.ch[0]}/{pr.ch[1]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: C.text, fontSize: 10, display: "block", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.25 }}>{p.codec}</span>
+                            )}
                           </div>
                           <div style={{ minWidth: 0, textAlign: "right" }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Bitrate</div>
@@ -2018,6 +2124,73 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     )}
                   </div>
                 </PanelBox>
+
+                {/* ── AES3 / S302M Audio Detail ────────────────────────── */}
+                {(() => {
+                  const s302mPids = pidRows.filter(p => p.s302m);
+                  if (!s302mPids.length) return null;
+                  const totalCh = s302mPids.reduce((acc, p) => acc + (p.s302m.channels || 0), 0);
+                  const totalPairs = s302mPids.reduce((acc, p) => acc + (p.s302m.pairCount || 0), 0);
+                  // Reference sample rate / bit depth from first S302M PID
+                  const ref = s302mPids[0].s302m;
+                  return (
+                    <PanelBox>
+                      <SectionHead icon="🎚" title="AES3 / SMPTE 302M Audio"
+                        badge={<Badge label={`${totalPairs} pair${totalPairs !== 1 ? "s" : ""} · ${totalCh}ch`} color={C.gold} small />}
+                      />
+                      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* Summary row */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                          {[
+                            { label: "Bit Depth", value: ref.bitDepth ? `${ref.bitDepth}-bit PCM` : "—" },
+                            { label: "Sample Rate", value: ref.sampleRate ? `${ref.sampleRate / 1000} kHz` : "—" },
+                            { label: "Total Pairs", value: totalPairs ? `${totalPairs} AES3 stereo pairs` : "—" },
+                            { label: "Total Channels", value: totalCh ? `${totalCh} channels` : "—" },
+                          ].map(({ label, value }) => (
+                            <div key={label} style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "6px 8px" }}>
+                              <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 3 }}>{label}</div>
+                              <div style={{ fontSize: 10, fontFamily: "'Courier New',monospace", color: C.text }}>{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Per-PID channel map */}
+                        {s302mPids.map(p => (
+                          <div key={p.pid ?? p._idx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.muted }}>PID {p.pid ?? "—"}</span>
+                              <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.dim }}>({p.pidHex})</span>
+                              {p.s302m.bitDepth && <Badge label={`${p.s302m.bitDepth}-bit`} color={C.gold} small />}
+                              {p.s302m.sampleRate && <Badge label={`${p.s302m.sampleRate / 1000}kHz`} color={C.muted} small />}
+                              {p.bitrate > 0 && <span style={{ fontSize: 9, color: C.muted, fontFamily: "'Courier New',monospace" }}>{(p.bitrate / 1e6).toFixed(2)} Mbps</span>}
+                              {p.s302m.theoreticalBps > 0 && <span style={{ fontSize: 8, color: C.dim, fontFamily: "'Courier New',monospace" }}>({(p.s302m.theoreticalBps / 1e6).toFixed(2)} Mbps raw)</span>}
+                            </div>
+                            {/* Pair / channel strip */}
+                            {p.s302m.pairs && (
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                {p.s302m.pairs.map(pr => (
+                                  <div key={pr.pair} style={{
+                                    display: "flex", alignItems: "center", gap: 4,
+                                    background: C.panel, border: `1px solid ${C.borderHi}`,
+                                    borderRadius: 2, padding: "4px 8px",
+                                  }}>
+                                    <span style={{ fontSize: 8, fontWeight: 800, color: C.head, textTransform: "uppercase", letterSpacing: "0.1em" }}>Pair {pr.pair}</span>
+                                    <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.gold }}>Ch {pr.ch[0]}</span>
+                                    <span style={{ fontSize: 8, color: C.muted }}>+</span>
+                                    <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.gold }}>Ch {pr.ch[1]}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 8, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+                          SMPTE 302M — AES3 PCM audio encapsulation in MPEG-TS · Channel pairs assigned sequentially from Ch 1
+                          {" · "}SMPTE 337M non-PCM carrier detection requires Dolby E adapter
+                        </div>
+                      </div>
+                    </PanelBox>
+                  );
+                })()}
 
                 {/* ── Active Decoders ──────────────────────────────────── */}
                 <PanelBox>
