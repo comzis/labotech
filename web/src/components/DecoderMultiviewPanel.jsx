@@ -557,33 +557,35 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             </div>
           )}
 
-          {/* UMD — broadcast-style source label at top of thumbnail */}
+          {/* UMD — content-width label, top-left of thumbnail */}
           <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0,
+            position: 'absolute', top: 0, left: 0,
+            maxWidth: '88%',
             height: 18,
             background: 'rgba(0,0,0,0.82)',
-            display: 'flex', alignItems: 'center',
+            display: 'inline-flex', alignItems: 'center',
             overflow: 'hidden',
           }}>
-            {/* Tally strip — status color */}
+            {/* Tally strip */}
             <div style={{ width: 3, alignSelf: 'stretch', background: statusColor, flexShrink: 0 }} />
-            {/* Service name */}
+            {/* Service name — no flex:1, takes only what it needs */}
             <span style={{
-              flex: 1, minWidth: 0,
               color: '#f0f0f0', fontFamily: 'monospace', fontSize: '11px', fontWeight: 700,
               letterSpacing: '0.07em', textTransform: 'uppercase',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              padding: '0 5px',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              padding: '0 4px 0 5px',
             }}>
               {svc}
             </span>
-            {/* Bitrate */}
-            <span style={{
-              color: '#2a4060', fontFamily: 'monospace', fontSize: '9px',
-              flexShrink: 0, paddingRight: 4, fontVariantNumeric: 'tabular-nums',
-            }}>
-              {rate.mbps != null ? `${rate.mbps.toFixed(1)}` : ''}
-            </span>
+            {/* Bitrate immediately after name */}
+            {rate.mbps != null && (
+              <span style={{
+                color: '#3a5878', fontFamily: 'monospace', fontSize: '9px',
+                whiteSpace: 'nowrap', paddingRight: 5, fontVariantNumeric: 'tabular-nums',
+              }}>
+                {rate.mbps.toFixed(1)}
+              </span>
+            )}
           </div>
 
           {/* Decoder ID — very dim, bottom-right corner */}

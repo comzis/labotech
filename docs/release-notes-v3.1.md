@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.74)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.75)
+
+## web v3.1.75 — 2026-03-18
+
+### Fix: UMD label shrink-wraps content, maximises thumbnail area
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- UMD overlay changed from `display:flex; left:0; right:0` (full tile width) to `display:inline-flex; left:0` with no `right` — background covers only the service name + bitrate text. `maxWidth:88%` prevents overflow. Service name span no longer uses `flex:1`; bitrate rendered only when available and sits immediately after the name. Thumbnail video is unobscured everywhere outside the label.
+
+**Operator impact:** UMD background is now exactly as wide as the label text, leaving the thumbnail image visible behind it rather than blacked out across the full top strip.
+
+
 
 ## web v3.1.74 — 2026-03-18
 
