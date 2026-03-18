@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
@@ -80,6 +80,24 @@ function newDecoderRow(seed = Date.now()) {
     decoderId: "",
   };
 }
+
+function deriveCatalogCategory(name) {
+  const n = String(name || '').toUpperCase();
+  if (n.startsWith('GV_IPDEC'))  return 'GV IP Decoders';
+  if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
+  if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
+  if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_BMCAST')) return 'GV Blue Multicast';
+  if (n.startsWith('GV_RMCAST')) return 'GV Red Multicast';
+  if (n.startsWith('LK_BMCAST')) return 'LK Blue Multicast';
+  if (n.startsWith('LK_RMCAST')) return 'LK Red Multicast';
+  if (n.startsWith('GV_RX'))     return 'GV Receivers';
+  if (n.startsWith('LK_RX'))     return 'LK Receivers';
+  if (n.endsWith('_OLD'))        return 'Legacy';
+  return 'Other';
+}
+
+const CAT_ORDER = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
 
 function normalizeLaneId(rawId) {
   const id = String(rawId || "").trim();
@@ -479,7 +497,7 @@ function pickPreferredVideoStream(streams) {
 export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [mode, setMode] = useState("rtp");
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
-  const [latency, setLatency] = useState("2000");
+  const [latency, setLatency] = useState("4000");
   const [passphrase, setPassphrase] = useState("");
   const [pbkeylen, setPbkeylen] = useState(16);
   const [intervalMs, setIntervalMs] = useState(5000);
@@ -513,6 +531,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [policyPickerOpen, setPolicyPickerOpen] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [selectedPickerOpen, setSelectedPickerOpen] = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
 
   const {
     result,
@@ -537,6 +559,17 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   useEffect(() => {
     getMonitoringPolicy().then(setPolicyData).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch('/api/multiview/catalog').then(r => r.json()).then(d => setCatalog(d.streams || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showCatalog) return;
+    const handler = (e) => { if (catalogRef.current && !catalogRef.current.contains(e.target)) setShowCatalog(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCatalog]);
 
   const handleSelectProfile = (profileId) => {
     setPolicyBusy(true);
@@ -1028,6 +1061,94 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 ))}
               </div>
 
+              {catalog.length > 0 && (
+                <div ref={catalogRef} style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <span style={{ position: 'absolute', left: 8, fontSize: 10, color: C.muted, pointerEvents: 'none' }}>⊞</span>
+                    <input
+                      type="text"
+                      value={catalogSearch}
+                      onChange={(e) => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
+                      onFocus={() => setShowCatalog(true)}
+                      placeholder="Select from stream catalog…"
+                      style={{
+                        width: '100%', boxSizing: 'border-box', padding: '5px 8px 5px 26px',
+                        background: C.input, border: `1px solid ${C.border}`, borderRadius: 2,
+                        color: C.text, fontSize: 11, fontFamily: "'Courier New', monospace",
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                  {showCatalog && (() => {
+                    const q = catalogSearch.toLowerCase();
+                    const filtered = q.length >= 1
+                      ? catalog.filter(s => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                      : catalog;
+                    const grouped = {};
+                    filtered.forEach(s => {
+                      const c = deriveCatalogCategory(s.name);
+                      if (!grouped[c]) grouped[c] = [];
+                      grouped[c].push(s);
+                    });
+                    const cats = CAT_ORDER.filter(c => grouped[c]);
+                    if (!cats.length && !filtered.length) return null;
+                    return (
+                      <div style={{
+                        position: 'absolute', left: 0, right: 0, zIndex: 50, marginTop: 2,
+                        background: '#0d1117', border: `1px solid ${C.borderHi}`,
+                        borderRadius: 2, boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
+                        maxHeight: 280, overflowY: 'auto',
+                      }}>
+                        {cats.length === 0 && (
+                          <div style={{ padding: '6px 10px', fontSize: 10, color: C.muted }}>No streams match</div>
+                        )}
+                        {cats.map(cat => (
+                          <div key={cat}>
+                            <div style={{
+                              padding: '4px 10px', fontSize: 9, fontWeight: 800, textTransform: 'uppercase',
+                              letterSpacing: '0.1em', color: '#3a6a9a', background: '#0d1117',
+                              borderBottom: `1px solid rgba(40,90,160,0.2)`, position: 'sticky', top: 0,
+                            }}>
+                              {cat} ({grouped[cat].length})
+                            </div>
+                            {grouped[cat].map(s => (
+                              <button
+                                key={s.ip + ':' + s.port}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  // Fill first empty row, or the last row if all filled
+                                  const emptyRow = decoderRows.find(r => !r.host);
+                                  const targetRow = emptyRow || decoderRows[decoderRows.length - 1];
+                                  setDecoderRows(prev => prev.map(r =>
+                                    r.key === targetRow.key
+                                      ? { ...r, host: s.ip, port: String(s.port), decoderId: String(s.name || s.ip).trim().slice(0, 64) }
+                                      : r
+                                  ));
+                                  if (s.mode && ['rtp','srt','udp'].includes(s.mode)) setMode(s.mode);
+                                  setShowCatalog(false);
+                                  setCatalogSearch('');
+                                }}
+                                style={{
+                                  width: '100%', textAlign: 'left', padding: '5px 10px',
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  background: 'transparent', border: 'none', cursor: 'pointer',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <span style={{ fontSize: 10, fontFamily: "'Courier New',monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                                <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: '#3a6a9a', flexShrink: 0 }}>{s.ip}:{s.port}</span>
+                                {s.mode && <span style={{ fontSize: 8, color: C.muted, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.mode}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
                   <Field label="Host / IP — paste srt:// URI to auto-fill">
@@ -1061,7 +1182,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       border: `1px solid ${row.host && row.port && !busy ? C.ok : C.border}`,
                       color: row.host && row.port && !busy ? C.bg : C.muted,
                       background: row.host && row.port && !busy ? C.ok : "transparent",
-                      boxShadow: row.host && row.port && !busy ? `0 0 8px ${C.ok}44` : "none",
+                      boxShadow: "none",
                       fontSize: 10,
                       fontWeight: 700,
                       cursor: row.host && row.port && !busy ? "pointer" : "not-allowed",
@@ -1117,7 +1238,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     fontSize: 10,
                     fontWeight: 700,
                     cursor: validRowPlans.length && !busy ? "pointer" : "not-allowed",
-                    boxShadow: validRowPlans.length && !busy ? `0 0 10px ${C.ok}55` : "none",
+                    boxShadow: "none",
                     opacity: busy ? 0.5 : 1,
                   }}
                 >
@@ -1164,7 +1285,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {mode === "srt" && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 10 }}>
                   <Field label="Latency (ms)">
-                    <Input value={latency} onChange={(e) => setLatency(e.target.value)} mono />
+                    <Input value={latency} onChange={(e) => setLatency(e.target.value)} placeholder="4000" mono />
                   </Field>
                   <Field label="Passphrase (AES key)">
                     <Input value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
@@ -1423,7 +1544,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       border: `1px solid ${selectedId && selectedEtrExists && !busy ? C.cyan : C.border}`,
                       color: selectedId && selectedEtrExists && !busy ? C.bg : C.muted,
                       background: selectedId && selectedEtrExists && !busy ? C.cyan : "transparent",
-                      boxShadow: selectedId && selectedEtrExists && !busy ? `0 0 10px ${C.cyan}44` : "none",
+                      boxShadow: "none",
                       opacity: busy ? 0.5 : 1,
                     }}
                   >
