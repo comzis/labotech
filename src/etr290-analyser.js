@@ -377,6 +377,11 @@ class ETR290Analyser extends EventEmitter {
       const liveUrl = `${this.url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
       // Force mpegts demux on live RTP/UDP to expose PAT/PMT/CC/PCR faults.
       args.push('-f', 'mpegts', '-i', liveUrl);
+    } else if (type === 'srt') {
+      // Bind SRT caller socket to eno1 (10.67.18.29) — same invariant as ffprobe
+      // and thumbnail (SNAG-019/020). Without adapter= ffmpeg routes via eno2 (no IP).
+      const sep = this.url.includes('?') ? '&' : '?';
+      args.push('-i', `${this.url}${sep}adapter=10.67.18.29`);
     } else {
       args.push('-i', this.url);
     }

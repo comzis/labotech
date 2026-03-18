@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.80 / web 3.1.99)
+Date: 2026-03-18 (latest: v3.1.81 / web 3.1.100)
+
+## v3.1.81 — 2026-03-18
+
+### Fix: HEVC SRT thumbnail — `select=I-frames` prevents PPS/ref errors (SNAG-025)
+
+- **Problem:** After removing `-skip_frame nokey` (SNAG-022), the HEVC thumbnail ffmpeg connected but produced no frames. Server log: `PPS id out of range: 0` (×23) + `Could not find ref with POC 50/52/56/64`. Root cause: when ffmpeg joins an SRT stream mid-GOP, B and P frames arrive before the decoder has seen the IDR that carries the parameter sets. The decoder cannot resolve reference frames and outputs nothing.
+- **Fix:** Added `select=eq(pict_type\,I),setpts=N*AVTB` before the `fps=1/N` filter. I-frames (IDR/CRA in HEVC, IDR in H.264) are fully self-contained — they carry their own VPS/SPS/PPS and have no reference dependencies. Thumbnail output is now driven exclusively by I-frames; `fps=1/N` limits to one per interval.
+- **Operator impact:** Confidence Monitor thumbnail now displays correctly for HEVC SRT streams.
+
+### Fix: ETR290 analyser SRT ffmpeg missing `adapter=` — exits code 1 (SNAG-024)
+
+- **Problem:** `ETR290Analyser._buildFFmpegArgs()` passed the raw SRT URL to ffmpeg without `adapter=10.67.18.29`. ffmpeg routed the SRT caller socket via eno2 (multicast NIC, no IP assigned) → connection refused → `FFmpeg exited with code 1`. ETR monitoring was non-functional on all SRT streams.
+- **Fix:** Added `adapter=10.67.18.29` to the SRT URL in `_buildFFmpegArgs()` for the `srt` input type, matching the invariant already applied in ffprobe (`_withLiveInputHints`) and thumbnail capture (`_buildSrtSrc`).
+- **Operator impact:** ETR 290 alarm monitoring now connects and runs on SRT RX streams.
 
 ## web v3.1.100 — 2026-03-18
 
