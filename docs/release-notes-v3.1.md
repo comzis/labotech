@@ -1,6 +1,6 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.72 / web 3.1.82)
+Date: 2026-03-18 (latest: v3.1.73 / web 3.1.83)
 
 ## web v3.1.82 — 2026-03-18
 
@@ -15,6 +15,22 @@ Date: 2026-03-18 (latest: v3.1.72 / web 3.1.82)
 ### UMD overlay: remove status tally strip + refine colours
 
 Removed the 1px coloured left-edge tally from the UMD label. Service name: `#7ecfdc` (mid cyan); bitrate: `#2d6272` (dim steel teal).
+
+
+
+## v3.1.73 / web v3.1.83 — 2026-03-18
+
+### Fix: all 4 audio pairs now live in multiview VU meters + ghost track removed from analyser
+
+**`src/ts-analyser.js` — `_probeAudioLevels()` (backend):**
+
+Root cause of the remaining single-pair issue: `astats` was passed via `-af` after a `-filter_complex` output. FFmpeg rejects mixing `-filter_complex` mapped outputs with a subsequent `-af` — the filter graph is silently dropped and no channel stats are produced. Fixed by embedding `astats=reset=1` directly inside the filter_complex chain: `amerge=inputs=N,astats=reset=1[aout]`. The `-af` flag is removed from the multi-ES path.
+
+**`web/src/components/DecoderPanelRevamp.jsx` — `audioStreams` ghost suppression (frontend):**
+
+`audioStreams` filtered on `codecType === 'audio'` but did not exclude null-PID ghost entries — ffprobe emits each ES twice (once in the PMT program list with a PID, once in the global stream array without). This caused "AUDIO (5 TRACKS)" when the stream has only 4. Added the same ghost-suppression guard already present in `extractPidRows()`: if any audio stream has a real PID, all null-PID audio rows are suppressed.
+
+**Operator impact:** Multiview VU meters show all 4 stereo pairs live. TS Analyser panel shows "AUDIO (4 TRACKS)" instead of 5.
 
 
 
