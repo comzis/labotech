@@ -263,6 +263,37 @@ _No open snags at time of writing (2026-03-18). SNAG-022 and SNAG-023 fixed and 
 
 ---
 
+### SNAG-025 — HEVC SRT thumbnail frozen at first frame — `select=I` + `setpts=N*AVTB` timestamp collapse
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.83 · **PR:** #51 (select added), #52 (setpts removed)
+- **Symptom:** Confidence Monitor thumbnail for HEVC SRT streams displayed the first frame correctly but never refreshed. No errors in server log.
+- **Root cause (part 1):** After removing `-skip_frame nokey` (SNAG-022), HEVC decoder joined the SRT stream mid-GOP and received B/P frames before seeing the IDR that carries VPS/SPS/PPS. Decoder logged `PPS id out of range: 0` × N + `Could not find ref with POC` and produced no output until an IDR arrived — which under load could be the next 2 s GOP boundary.
+- **Root cause (part 2):** PR #51 added `setpts=N*AVTB` alongside `select=eq(pict_type,I)` to "reset" I-frame timestamps. This compressed all I-frame PTS values to frame-rate-interval spacing (~40 ms at 25fps). `fps=1/5` interprets those compressed timestamps as stream-seconds: it saw "5 stream-seconds" as ~200 ms of real time and produced a single output frame after which the limiter held for a very long interval. No further frames were output.
+- **Fix:** `select=eq(pict_type,I)` is necessary and correct — I-frames are self-contained (carry their own VPS/SPS/PPS) and eliminate the mid-GOP join problem. `setpts=N*AVTB` must NOT be used alongside it — the `fps=1/N` limiter works correctly on the original stream timestamps.
+- **Lesson:** Never combine `select=eq(pict_type,I)` with `setpts` in a thumbnail vf chain. The select filter passes through original PTS values; `fps=1/N` uses those PTS values for its interval logic. Any PTS rewrite before `fps` breaks the rate limiter.
+
+---
+
+### SNAG-026 — S302M SMPTE 337M data bursts drove audio level meters to full scale
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.83 · **PR:** #52
+- **Symptom:** Audio VU meters in the Decoder panel showed all channel pairs pegged at maximum level on streams carrying embedded Dolby E / SMPTE 337M. Programme audio levels were not visible.
+- **Root cause:** `_probeAudioLevels()` in `ts-analyser.js` built its `amerge` filter from ALL audio ESes including S302M (SMPTE 302M / AES3). S302M ESes carry SMPTE 337M data bursts — Dolby E or AC-3 metadata encoded as burst PCM. To `astats`, these bursts appear as near-full-scale PCM audio. With S302M merged into the channel map, every astats channel reported near-maximum level.
+- **Fix:** Added `&& !s.s302m` filter to `audioEsCount` in `_probeAudioLevels()`. Also excluded S302M from `audioEsCount` in the frontend `pairCount` calculation in `DecoderPanelRevamp.jsx` to prevent phantom channel-pair placeholders.
+- **Lesson:** When building an amerge channel map, always filter out non-programme audio ESes. S302M ESes are data carriers, not programme audio — they must never be included in astats probes. The S302M structural data is displayed separately in the AES3 section of the decoder panel.
+
+---
+
+### SNAG-027 — ETR290 analyser held SRT slot permanently, starving thumbnail and all probes
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.84 · **PR:** #52
+- **Symptom:** On single-listener SRT sources (one caller permitted), Confidence Monitor showed "AWAITING FRAME" indefinitely, SRT Transport stats stayed at "-", bitrate and TSDuck probes returned nothing. All symptoms resolved on RTP/UDP streams.
+- **Root cause:** `ETR290Analyser` runs ffmpeg as a persistent process, holding the SRT caller slot continuously. `TSAnalyser` already suspends `PersistentThumbnailCapture` and `TSDuckMonitor` before heavy SRT probes — but not the ETR analyser, which is a separate object not referenced by `TSAnalyser`. With ETR holding the only caller slot, all other probes (tsanalyze, transport bitrate ffmpeg, srt-live-transmit, thumbnail ffmpeg) were rejected by the SRT source with connection refused.
+- **Fix:** Added `suspend(durationMs)` / `resume()` to `ETR290Analyser` (epoch-guarded, same pattern as `PersistentThumbnailCapture`). Added `setEtrMonitor(mon)` / `clearEtrMonitor()` to `TSAnalyser`. During SRT heavy probe cycles, ETR is now suspended for `srtLatMs + 75000` ms alongside the thumbnail and TSDuck monitor. `routes/etr290.js` and `api.js` wire `setEtrMonitor` on ETR start and `clearEtrMonitor` on stop/delete/orphan-watchdog.
+- **Lesson:** Any process that opens a persistent SRT caller connection must implement `suspend()`/`resume()` and be registered with the coordinating `TSAnalyser` via `setEtrMonitor()`. Before adding a new persistent SRT consumer, check whether it would compete for the single caller slot.
+
+---
+
 ## Invariants Produced
 
 These rules were extracted from the snags above and are now enforced in `CLAUDE.md`:
@@ -287,6 +318,9 @@ These rules were extracted from the snags above and are now enforced in `CLAUDE.
 | I-16 | CLI tool availability must gate on observable output, not exit code — `--help` often exits non-zero | SNAG-023 |
 | I-17 | Every new SRT-opening code path (ffmpeg, ffprobe, tsp, srt-live-transmit) must add `adapter=10.67.18.29` | SNAG-024 |
 | I-18 | Thumbnail capture from any live stream must use `select=eq(pict_type,I)` — never rely on SRT buffer containing an IDR | SNAG-025 |
+| I-19 | Never combine `select=eq(pict_type,I)` with `setpts` in a thumbnail vf chain — setpts breaks the `fps=1/N` rate limiter | SNAG-025 |
+| I-20 | S302M ESes must never be included in an `amerge` audio level probe — they carry SMPTE 337M data bursts, not programme audio | SNAG-026 |
+| I-21 | Any persistent SRT caller process must implement `suspend()`/`resume()` and register with `TSAnalyser.setEtrMonitor()` | SNAG-027 |
 
 ---
 
