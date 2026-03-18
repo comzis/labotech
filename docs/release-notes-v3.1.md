@@ -1,6 +1,22 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.80)
+Date: 2026-03-18 (latest: v3.1.72 / web 3.1.80)
+
+## v3.1.72 / web v3.1.80 — 2026-03-18
+
+### Fix: all audio ES pairs now measured in multiview VU meters
+
+**`src/ts-analyser.js` — `_probeAudioLevels()`:**
+
+**Root cause:** `_probeAudioLevels()` had no `-map` argument, so FFmpeg defaulted to selecting only the first audio Elementary Stream. On a stream with 4 audio ESes (8 channels) only the first stereo pair (Ch1+Ch2) was measured; pairs 2–4 always showed as dark/inactive placeholders.
+
+**Fix:** On probe cycles where `this.lastResult` shows more than one audio ES in the PMT (null-PID ghost entries excluded), the probe now builds a `filter_complex` that merges all ESes into one multi-channel stream via `amerge=inputs=N` before passing to `astats`. This gives FFmpeg a single 8-channel (for 4×stereo) stream to analyse, producing `Channel: 1` through `Channel: 8` in the astats output — mapping to pairs P1L/P1R through P4L/P4R.
+
+First-probe cycle (no `lastResult` yet) falls back to single-stream behaviour; the merged probe runs from the second cycle onward. Cap of 8 inputs guards against malformed PMT data.
+
+**Operator impact:** All 4 audio pairs on current multicast streams now show live VU bar levels in fullscreen multiview, not just the first stereo pair.
+
+
 
 ## web v3.1.80 — 2026-03-18
 
