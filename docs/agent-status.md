@@ -42,33 +42,34 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Phase 3 PR #16 open, awaiting operator review/merge.
+**Current task:** SRT stability fixes deployed — awaiting server confirmation.
 
 **Owns:**
-- `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
-- `src/tsduck-monitor.js` (new file, Phase 3 only)
-- `test/tsduck-monitor.test.js` (new file, Phase 3)
+- `src/ts-analyser.js`
+- `src/tsduck-monitor.js`
+- `src/etr290-analyser.js`
+- `src/monitoring.js`
+- `test/tsduck-monitor.test.js`
 
 **Last session:** 2026-03-18
 
 **Completed this session:**
-- PR #35 — `feat/srt-live-transmit-engine`: srt-live-transmit as preferred encapsulation engine, FFmpeg copy fallback. (v3.1.75 / web 3.1.85)
-- PR #38 — `fix/srt-binary-volume-mount`: Compile srt-live-transmit v1.5.3 from source in Dockerfile to fix GLIBCXX ABI mismatch.
-- PR #39 — `fix/srt-analyser-eno1-binding`: `_withLiveInputHints()` adds `adapter=10.67.18.29`. (v3.1.76 / web 3.1.86)
-- PR #40 — `fix/srt-thumbnail-eno1-binding`: `_buildSrtSrc()` adds `adapter=10.67.18.29`. (v3.1.77 / web 3.1.88)
-- PR #41–#46 — Landing page, SRT URI paste, evc workspace, SRT Transport tab note. (web 3.1.89–3.1.93)
-- PR #47 — `feat/srt-link-stats-probe`: `_probeSrtLinkStats()` via srt-live-transmit JSON; `isSrtUrl` fix; decoder catalog; latency default 4000ms; button glow removed. (v3.1.78 / web 3.1.95)
-- PR #48 — `fix/srt-hevc-thumb-and-slt-check`: Remove `-skip_frame nokey` (HEVC PPS error); fix `_checkSltTool()` exit-code gate for srt-live-transmit. (v3.1.79 / web 3.1.96)
-- PR #49 — `feat/s302m-aes3-recognition`: SMPTE 302M detection + channel-map panel; Dolby E amber pair block in Confidence Monitor. (v3.1.80 / web 3.1.98)
+- PR #50 — `fix/decoder-pidrows-crash`: Fix `ReferenceError: pidRows` → blank page; add `PanelErrorBoundary` React error boundary. (v3.1.82 / web 3.1.99–3.1.100)
+- PR #51 — `fix/srt-hevc-thumbnail-and-etr-adapter`: `select=eq(pict_type,I)` for HEVC mid-GOP join; `adapter=10.67.18.29` in ETR290Analyser. (v3.1.82)
+- PR #52 — `fix/s302m-audio-thumbnail-fps`: Remove `setpts=N*AVTB` (thumbnail fps freeze); exclude S302M from amerge audio probe; ETR290 `suspend()`/`resume()` for SRT slot coordination. (v3.1.83–3.1.84 / web 3.1.102)
+- PR #53 — `chore/deploy-version-banner`: Print deployed backend/web versions at end of deploy-one-shot.sh.
+- PR #54 — `fix/deploy-web-version`: Read web version from host filesystem (not container — web/package.json not in final image).
+- SNAG-025, SNAG-026, SNAG-027 documented; invariants I-19, I-20, I-21 added to snag list.
 
 **Active branch:** `main` (all branches merged)
 
-**Waiting for:** Server confirmation after deploy — thumbnail (HEVC fix), SRT Transport stats (slt availability fix), S302M panel on live stream.
+**Current versions:** backend `3.1.84` / web `3.1.102` — 194 tests passing.
 
-**Outstanding issues (unconfirmed on server — see SNAG-022, SNAG-023):**
-- SNAG-022: SRT RX thumbnail blank — HEVC `-skip_frame nokey` removed (PR #48), awaiting server confirmation
-- SNAG-023: SRT Transport stats empty — `_checkSltTool()` fix (PR #48), awaiting server confirmation
+**Waiting for:** Server deploy confirmation — thumbnail refresh, SRT Transport stats, correct audio VU levels on S302M stream.
+
+**Outstanding:**
 - SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter returning PID/pair number
+- SCTE-35 frontend panel (deferred by operator)
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
