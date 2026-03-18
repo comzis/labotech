@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.76 / web 3.1.86)
+Date: 2026-03-18 (latest: v3.1.77 / web 3.1.88)
+
+## v3.1.77 / web v3.1.88 — 2026-03-18
+
+### SRT Transport tab: remove nonexistent policy reference; SRT thumbnail bind to eno1
+
+Removed the "Use the SRT Contribution monitoring policy for additional tuning" sentence from the SRT Transport note — no such policy exists in the UI. The remaining note (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms) is accurate and matches `_healthThresholds()`.
+
+### SRT thumbnail capture: bind ffmpeg to eno1
+
+`_buildSrtSrc()` in `monitoring.js` now appends `adapter=10.67.18.29` to all SRT thumbnail capture URLs (both `captureThumbnail()` and `PersistentThumbnailCapture`). Without this, the thumbnail ffmpeg process routed SRT connections via eno2 (no IP address), causing silent capture failures and a permanently blank Confidence Monitor in SRT decoder mode.
+
+**Operator impact:** Confidence Monitor now shows a live thumbnail when decoding SRT streams.
 
 ## v3.1.76 / web v3.1.86 — 2026-03-18
 
