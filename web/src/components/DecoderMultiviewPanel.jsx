@@ -457,89 +457,141 @@ function fsColumns(count) {
   return 5;
 }
 
-// Evertz-style fullscreen tile: thumbnail fills the cell, thin label bar below
+// Single vertical VU bar (fills bottom-up)
+function FsVuBar({ rmsDb, peakDb, label }) {
+  const active = rmsDb != null && Number.isFinite(rmsDb);
+  const rmsH  = active ? Math.max(0, ((Math.max(-60, Math.min(0, rmsDb)) + 60) / 60) * 100) : 0;
+  const peakH = (peakDb != null && Number.isFinite(peakDb))
+    ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
+    : null;
+  const rmsColor  = !active ? '#111' : rmsDb > -9 ? '#ff2233' : rmsDb > -18 ? '#ffaa00' : '#00cc44';
+  const peakColor = peakDb > -9 ? '#ff2233' : peakDb > -18 ? '#ffaa00' : '#00cc44';
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1, minWidth: 0 }}>
+      <div style={{ flex: 1, width: '100%', position: 'relative', background: '#080808', border: '1px solid #111', borderRadius: '1px', overflow: 'hidden' }}>
+        {/* Zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
+        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: '#1c1c1c' }} />
+        {/* RMS fill from bottom */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.12s linear' }} />
+        {/* Peak hold tick */}
+        {peakH != null && (
+          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '2px', background: peakColor, boxShadow: `0 0 3px ${peakColor}` }} />
+        )}
+      </div>
+      <div style={{ color: '#383838', fontFamily: 'monospace', fontSize: '6px', marginTop: '1px', lineHeight: 1, textAlign: 'center' }}>{label}</div>
+    </div>
+  );
+}
+
+// Evertz-style fullscreen tile: thumbnail + vertical audio meters, thin label bar below
 function FullscreenThumbTile({ id, result, nowMs }) {
   const svc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || '—';
   const hasTelemetry = Boolean(result?.probeTime);
   const severity = result?.health?.severity;
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
   const isStale = staleMs > 20000;
-  // Status colour: green=ok / amber=warning / red=critical / grey=no data
   const statusColor = !hasTelemetry
     ? '#444'
-    : isStale
-      ? '#ffaa00'
-      : severity === 'critical' ? '#ff2233'
-      : severity === 'warning'  ? '#ffaa00'
-      : '#00dd55';
+    : isStale       ? '#ffaa00'
+    : severity === 'critical' ? '#ff2233'
+    : severity === 'warning'  ? '#ffaa00'
+    : '#00dd55';
 
   const rate = resolveTransportBitrate(result);
   const thumbUrl = result?.thumbnailUrl || null;
+  const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
 
-  // Keep last good frame
+  // Pair channels into L/R; fallback to aggregate mean as a single bar
+  const pairs = [];
+  for (let i = 0; i < channels.length; i += 2) {
+    pairs.push({ left: channels[i], right: channels[i + 1] || null, num: Math.floor(i / 2) + 1 });
+  }
+  const meanDb = result?.audioLevels?.meanDb;
+  const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
+
   const [displaySrc, setDisplaySrc] = useState(null);
   useEffect(() => { setDisplaySrc(null); }, [thumbUrl]);
 
   return (
     <div style={{
-      display: 'flex',
-      flexDirection: 'column',
-      background: '#000',
+      display: 'flex', flexDirection: 'column',
+      background: 'transparent',
       borderRight: '1px solid #141414',
       borderBottom: '1px solid #141414',
       borderLeft: `2px solid ${statusColor}`,
-      overflow: 'hidden',
-      minWidth: 0,
+      overflow: 'hidden', minWidth: 0,
     }}>
-      {/* 16:9 thumbnail area */}
-      <div style={{ position: 'relative', aspectRatio: '16/9', background: '#080808', overflow: 'hidden', flexShrink: 0 }}>
-        {(displaySrc || thumbUrl) ? (
-          <img
-            src={displaySrc || thumbUrl}
-            alt={svc}
-            onLoad={(e) => setDisplaySrc(e.currentTarget.src)}
-            onError={() => {}}
-            style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
-          />
-        ) : (
-          <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <span style={{ color: '#222', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
-              AWAITING FRAME
-            </span>
+      {/* Content row: thumbnail | audio meters */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* Thumbnail */}
+        <div style={{ flex: 1, position: 'relative', background: '#080808', minWidth: 0, overflow: 'hidden' }}>
+          {(displaySrc || thumbUrl) ? (
+            <img
+              src={displaySrc || thumbUrl}
+              alt={svc}
+              onLoad={(e) => setDisplaySrc(e.currentTarget.src)}
+              onError={() => {}}
+              style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#1e1e1e', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                AWAITING FRAME
+              </span>
+            </div>
+          )}
+          {/* Status LED */}
+          <div style={{ position: 'absolute', top: 6, left: 6, width: 7, height: 7, borderRadius: '50%', background: statusColor, boxShadow: `0 0 5px ${statusColor}aa` }} />
+          {/* Decoder ID */}
+          <div style={{ position: 'absolute', top: 4, right: 5, fontFamily: 'monospace', fontSize: '8px', color: 'rgba(255,255,255,0.28)', letterSpacing: '0.06em', textTransform: 'uppercase', maxWidth: '55%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {id}
+          </div>
+        </div>
+
+        {/* Vertical audio meters panel */}
+        {hasAudio && (
+          <div style={{
+            width: 'clamp(44px, 20%, 110px)',
+            background: 'rgba(4,6,10,0.92)',
+            borderLeft: '1px solid #0e0e0e',
+            display: 'flex', flexDirection: 'column',
+            padding: '4px 4px 2px',
+            gap: 2,
+            flexShrink: 0,
+          }}>
+            {/* Scale label */}
+            <div style={{ color: '#252525', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', letterSpacing: '0.12em', flexShrink: 0 }}>dBFS</div>
+            {/* Bars */}
+            <div style={{ flex: 1, display: 'flex', gap: '4px', minHeight: 0, alignItems: 'stretch' }}>
+              {pairs.length > 0 ? pairs.map(({ left, right, num }) => (
+                <div key={num} style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0 }}>
+                  <div style={{ flex: 1, display: 'flex', gap: '1px', minHeight: 0 }}>
+                    <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} label="L" />
+                    {right && <FsVuBar rmsDb={right?.rmsDb} peakDb={right?.peakDb ?? right?.rmsDb} label="R" />}
+                  </div>
+                  {/* Pair number */}
+                  <div style={{ color: '#2a2a2a', fontSize: '6px', fontFamily: 'monospace', textAlign: 'center', marginTop: '1px', flexShrink: 0 }}>{num}</div>
+                </div>
+              )) : (
+                // Fallback: aggregate mean bar
+                <FsVuBar rmsDb={meanDb} peakDb={meanDb} label="Σ" />
+              )}
+            </div>
           </div>
         )}
-        {/* Status LED — top-left corner */}
-        <div style={{
-          position: 'absolute', top: 6, left: 6,
-          width: 7, height: 7, borderRadius: '50%',
-          background: statusColor,
-          boxShadow: `0 0 5px ${statusColor}aa`,
-        }} />
-        {/* Decoder ID badge — top-right */}
-        <div style={{
-          position: 'absolute', top: 4, right: 5,
-          fontFamily: 'monospace', fontSize: '8px',
-          color: 'rgba(255,255,255,0.35)', letterSpacing: '0.06em',
-          textTransform: 'uppercase', maxWidth: '55%',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {id}
-        </div>
       </div>
+
       {/* Bottom label bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '3px 7px',
-        background: '#060606',
+        background: 'rgba(6,6,6,0.95)',
         borderTop: '1px solid #0e0e0e',
-        flexShrink: 0,
-        gap: 4,
+        flexShrink: 0, gap: 4,
       }}>
-        <span style={{
-          color: '#e8e8e8', fontFamily: 'monospace', fontSize: '10px',
-          fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-        }}>
+        <span style={{ color: '#e8e8e8', fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
           {svc}
         </span>
         <span style={{ color: '#3a6a9a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0 }}>
@@ -1374,7 +1426,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
         ref={fullscreenRef}
         style={{
           position: 'fixed', inset: 0, zIndex: 9999,
-          background: '#000',
+          backgroundColor: '#070b14',
+          backgroundImage: 'radial-gradient(140% 110% at 50% 0%, rgba(70,102,148,0.18), transparent 52%), url("/broadcast-rack-bays.svg")',
+          backgroundSize: '100% 100%, cover',
+          backgroundPosition: 'center, center',
+          backgroundRepeat: 'no-repeat, no-repeat',
           display: 'flex', flexDirection: 'column',
           fontFamily: 'monospace',
         }}
