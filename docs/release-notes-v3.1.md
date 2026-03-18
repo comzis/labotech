@@ -1,6 +1,22 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.71 / web 3.1.70)
+Date: 2026-03-18 (latest: v3.1.71 / web 3.1.71)
+
+## web v3.1.71 — 2026-03-18
+
+### Fullscreen multiview: professional MCR redesign
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **Tile status indicator moved to top border** (3px, status color) — Evertz VMX style replaces the left-edge accent strip. Uniform 1px dark dividers between tiles; tile background changed from transparent to `#040507` for cleaner contrast against rack SVG.
+- **Tile label bar**: coloured status dot (4px, matching tile border) + service name in slightly brighter text; bitrate readout right-aligned; label bar background tied to status color at 14% alpha for subtle context.
+- **Header redesigned** (40px): LaboTech mark · PANEL callsign · live-stream count indicator (green LED + `N/M` ratio) · centered LABOTECH wordmark · UTC timecode (14px monospace, tabular nums, 1 Hz update) · EXIT button. Eurovision Services logo removed.
+- **Bottom status bus** (26px): `LABOTECH MVW · PANEL-NAME` left, `YYYY-MM-DD HH:MM:SS UTC` centre, `N LIVE / M STREAMS` right — all in very dark blue text, visible only at close range (not distracting at MCR distance).
+- **Tile grid**: 2px gap + 2px padding on a `#020304` background so rack SVG frames the grid as a bezel.
+- **UTC clock**: `fsNowMs` state with 1 Hz interval only active when fullscreen is open — no timer overhead in normal view.
+- **`+ Decoder` button**: text label corrected to `Decoder` (was `+ Decoder`, which combined with the `<Plus>` icon rendered as `+ + DECODER`).
+
+**Operator impact:** Fullscreen multiview now has the tight dark chrome and UTC timecode expected on a professional MCR monitor wall. Double `+` on the Add Decoder button is fixed.
 
 ## web v3.1.70 — 2026-03-18
 

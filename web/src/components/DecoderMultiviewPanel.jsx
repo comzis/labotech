@@ -516,10 +516,9 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
-      background: 'transparent',
-      borderRight: '1px solid #141414',
-      borderBottom: '1px solid #141414',
-      borderLeft: `2px solid ${statusColor}`,
+      background: '#040507',
+      border: '1px solid #111',
+      borderTop: `3px solid ${statusColor}`,
       overflow: 'hidden', minWidth: 0,
     }}>
       {/* Content row: thumbnail | audio meters */}
@@ -586,15 +585,18 @@ function FullscreenThumbTile({ id, result, nowMs }) {
       {/* Bottom label bar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '3px 7px',
-        background: 'rgba(6,6,6,0.95)',
-        borderTop: '1px solid #0e0e0e',
+        padding: '2px 6px',
+        background: '#060608',
+        borderTop: `1px solid ${statusColor}22`,
         flexShrink: 0, gap: 4,
       }}>
-        <span style={{ color: '#e8e8e8', fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-          {svc}
-        </span>
-        <span style={{ color: '#3a6a9a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flex: 1, overflow: 'hidden' }}>
+          <div style={{ width: 4, height: 4, borderRadius: '50%', background: statusColor, flexShrink: 0, boxShadow: `0 0 4px ${statusColor}88` }} />
+          <span style={{ color: '#c8c8c8', fontFamily: 'monospace', fontSize: '10px', fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {svc}
+          </span>
+        </div>
+        <span style={{ color: '#2a4a6a', fontFamily: 'monospace', fontSize: '9px', flexShrink: 0, fontVariantNumeric: 'tabular-nums' }}>
           {rate.mbps != null ? `${rate.mbps.toFixed(1)} Mb` : '—'}
         </span>
       </div>
@@ -799,6 +801,15 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     document.addEventListener('fullscreenchange', handler);
     return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
+
+  // 1 Hz UTC clock for fullscreen header — only active when fullscreen is open
+  const [fsNowMs, setFsNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (!isFullscreen) return;
+    setFsNowMs(Date.now());
+    const t = setInterval(() => setFsNowMs(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [isFullscreen]);
 
   // Request browser fullscreen when overlay is mounted and visible
   useEffect(() => {
@@ -1115,7 +1126,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               title="Add a new decoder tile"
             >
               <Plus className="w-3.5 h-3.5" />
-              + Decoder
+              Decoder
             </button>
             <input
               ref={importFileRef}
@@ -1420,124 +1431,160 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       </BentoCard>
     </div>
 
-    {/* ── Evertz-style fullscreen multiview overlay ── */}
-    {isFullscreen && (
-      <div
-        ref={fullscreenRef}
-        style={{
-          position: 'fixed', inset: 0, zIndex: 9999,
-          backgroundColor: '#070b14',
-          backgroundImage: 'radial-gradient(140% 110% at 50% 0%, rgba(70,102,148,0.18), transparent 52%), url("/broadcast-rack-bays.svg")',
-          backgroundSize: '100% 100%, cover',
-          backgroundPosition: 'center, center',
-          backgroundRepeat: 'no-repeat, no-repeat',
-          display: 'flex', flexDirection: 'column',
-          fontFamily: 'monospace',
-        }}
-      >
-        {/* Top header bar */}
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: '0 18px',
-          height: 44,
-          background: 'linear-gradient(180deg, #0e0e0e 0%, #080808 100%)',
-          borderBottom: '1px solid #1a1a1a',
-          flexShrink: 0,
-          gap: 16,
-        }}>
-          {/* Left: panel name + system tag */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, minWidth: 0 }}>
-            <img
-              src="/labotech-mark.png"
-              alt="LaboTech"
-              style={{ height: 22, width: 'auto', opacity: 0.82, filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.12))' }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <div>
-              <div style={{ color: '#888', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase', lineHeight: 1 }}>
-                PANEL
+    {/* ── Professional MCR-style fullscreen multiview overlay ── */}
+    {isFullscreen && (() => {
+      const d = new Date(fsNowMs);
+      const utcTime = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((v) => String(v).padStart(2, '0')).join(':');
+      const utcDate = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      const liveCount = visibleIds.filter((id) => {
+        const r = resultsById[id];
+        return r?.probeTime && (Date.now() - r.probeTime) < 20000;
+      }).length;
+      return (
+        <div
+          ref={fullscreenRef}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            backgroundColor: '#040608',
+            backgroundImage: 'url("/broadcast-rack-bays.svg")',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            display: 'flex', flexDirection: 'column',
+            fontFamily: 'monospace',
+          }}
+        >
+          {/* Top header bar — 40px MCR chrome */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 40,
+            background: '#070707',
+            borderBottom: '2px solid #0f0f0f',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.7)',
+            flexShrink: 0,
+            gap: 12,
+          }}>
+            {/* Left: LaboTech mark + panel callsign */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+              <img
+                src="/labotech-mark.png"
+                alt="LaboTech"
+                style={{ height: 20, width: 'auto', opacity: 0.75, filter: 'brightness(0.85)' }}
+                onError={(e) => { e.currentTarget.style.display = 'none'; }}
+              />
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <div style={{ lineHeight: 1 }}>
+                <div style={{ color: '#3a3a3a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>PANEL</div>
+                <div style={{ color: '#d8d8d8', fontSize: '12px', fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                  {activePanel?.name || '—'}
+                </div>
               </div>
-              <div style={{ color: '#e0e0e0', fontSize: '11px', fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', lineHeight: 1.2 }}>
-                {activePanel?.name || '—'}
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              {/* Live stream indicator */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: liveCount > 0 ? '#00dd55' : '#333', boxShadow: liveCount > 0 ? '0 0 5px #00dd5566' : 'none' }} />
+                <span style={{ color: liveCount > 0 ? '#00bb44' : '#333', fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                  {liveCount}/{visibleIds.length}
+                </span>
               </div>
             </div>
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <div style={{ color: '#333', fontSize: '9px', letterSpacing: '0.12em', textTransform: 'uppercase' }}>
-              {visibleIds.length} TILE{visibleIds.length !== 1 ? 'S' : ''}
-            </div>
-          </div>
 
-          {/* Centre: LABOTECH wordmark */}
-          <div style={{ textAlign: 'center', flexShrink: 0 }}>
-            <div style={{
-              color: '#c8d8f0',
-              fontSize: '13px',
-              fontWeight: 700,
-              letterSpacing: '0.28em',
-              textTransform: 'uppercase',
-              textShadow: '0 0 14px rgba(150,190,255,0.3)',
-            }}>
-              LABOTECH
-            </div>
-            <div style={{ color: '#2a4a6a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase', marginTop: 1 }}>
-              MULTIVIEW MONITOR
-            </div>
-          </div>
-
-          {/* Right: Eurovision Services logo + exit */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 14, minWidth: 0, justifyContent: 'flex-end' }}>
-            <img
-              src="/eurovision-services.png"
-              alt="Eurovision Services"
-              style={{ height: 26, width: 'auto', opacity: 0.88, filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.12))' }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
-            <div style={{ width: 1, height: 20, background: '#1e1e1e' }} />
-            <button
-              onClick={() => { document.exitFullscreen?.(); setIsFullscreen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 5,
-                background: 'rgba(255,255,255,0.04)',
-                border: '1px solid #222',
-                borderRadius: '2px',
-                color: '#666',
-                padding: '4px 8px',
-                cursor: 'pointer',
-                fontSize: '9px',
-                letterSpacing: '0.1em',
+            {/* Centre: system title */}
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{
+                color: '#8a9ab8',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.36em',
                 textTransform: 'uppercase',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = '#aaa'; e.currentTarget.style.borderColor = '#333'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = '#666'; e.currentTarget.style.borderColor = '#222'; }}
-              title="Exit fullscreen (ESC)"
-            >
-              <Minimize2 style={{ width: 11, height: 11 }} />
-              EXIT
-            </button>
+              }}>
+                LABOTECH
+              </div>
+              <div style={{ color: '#1e2e40', fontSize: '7px', letterSpacing: '0.22em', textTransform: 'uppercase', marginTop: 1 }}>
+                MULTIVIEW MONITOR
+              </div>
+            </div>
+
+            {/* Right: UTC timecode + exit */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+              {/* UTC clock */}
+              <div style={{ textAlign: 'right', lineHeight: 1 }}>
+                <div style={{ color: '#2a4a5a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>UTC</div>
+                <div style={{ color: '#4a8ab0', fontSize: '14px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
+                  {utcTime}
+                </div>
+              </div>
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <button
+                onClick={() => { document.exitFullscreen?.(); setIsFullscreen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'transparent',
+                  border: '1px solid #1e1e1e',
+                  borderRadius: '2px',
+                  color: '#3a3a3a',
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  transition: 'color 0.1s, border-color 0.1s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#3a3a3a'; e.currentTarget.style.borderColor = '#1e1e1e'; }}
+                title="Exit fullscreen (ESC)"
+              >
+                <Minimize2 style={{ width: 10, height: 10 }} />
+                EXIT
+              </button>
+            </div>
+          </div>
+
+          {/* Tile grid — fills remaining height */}
+          <div style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
+            gridAutoRows: '1fr',
+            overflow: 'hidden',
+            gap: '2px',
+            padding: '2px',
+            background: '#020304',
+          }}>
+            {visibleIds.map((id) => (
+              <FullscreenThumbTile
+                key={id}
+                id={id}
+                result={resultsById[id]}
+                nowMs={nowMs}
+              />
+            ))}
+          </div>
+
+          {/* Bottom status bus — 26px */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 26,
+            background: '#050505',
+            borderTop: '1px solid #0d0d0d',
+            flexShrink: 0,
+            gap: 12,
+          }}>
+            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+              LABOTECH MVW · {activePanel?.name || '—'}
+            </span>
+            <span style={{ color: '#1a2a36', fontSize: '8px', letterSpacing: '0.12em', fontVariantNumeric: 'tabular-nums' }}>
+              {utcDate} {utcTime} UTC
+            </span>
+            <span style={{ color: '#1e2e3a', fontSize: '8px', letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+              {liveCount > 0 ? `${liveCount} LIVE` : 'NO SIGNAL'} / {visibleIds.length} STREAM{visibleIds.length !== 1 ? 'S' : ''}
+            </span>
           </div>
         </div>
-
-        {/* Tile grid — fills remaining height */}
-        <div style={{
-          flex: 1,
-          display: 'grid',
-          gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
-          gridAutoRows: '1fr',
-          overflow: 'hidden',
-          borderTop: '1px solid #0a0a0a',
-        }}>
-          {visibleIds.map((id) => (
-            <FullscreenThumbTile
-              key={id}
-              id={id}
-              result={resultsById[id]}
-              nowMs={nowMs}
-            />
-          ))}
-        </div>
-      </div>
-    )}
+      );
+    })()}
     </>
   );
 }
