@@ -235,15 +235,26 @@ class TSAnalyser extends EventEmitter {
           }
 
           let heavyProbeResults;
+          // Small settle between sequential SRT probes: gives the SRT source time
+          // to reset its accept state after a caller disconnects before the next
+          // caller connects.  Rapid connect/disconnect sequences can cause some
+          // sources to stall or drop packets on the subsequent connection.
+          const _srtSettle = () => new Promise(r => setTimeout(r, 1000));
           try {
             if (isSrt) {
               // Sequential: one SRT connection at a time.
               const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
+              await _srtSettle();
               const transport = await (runHeavyProbe ? this._probeTransportBitrateBps()     : Promise.resolve(null));
+              await _srtSettle();
               const srtLink   = await (runHeavyProbe ? this._probeSrtLinkStats()            : Promise.resolve(null));
+              await _srtSettle();
               const audio     = await this._probeAudioLevels();
+              await _srtSettle();
               const tsDisc    = await (runHeavyProbe ? this._probeTimestampDiscontinuities(): Promise.resolve(null));
+              await _srtSettle();
               const cc        = await (runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null));
+              await _srtSettle();
               const dolby     = await (runHeavyProbe ? this._probeDolbyE()                  : Promise.resolve(null));
               heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
             } else {
