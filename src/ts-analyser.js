@@ -2611,19 +2611,26 @@ class TSAnalyser extends EventEmitter {
       // RTP / UDP multicast: one-shot timer loop.  Multicast join is near-instant
       // so per-frame reconnect is fine, and the proven captureThumbnail() path
       // avoids the silent-failure modes of a persistent process on multicast.
+      //
+      // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
+      // Subsequent captures use the full thumbIntervalMs cadence.
+      // This cuts first-frame latency from (jitter + interval) ~6.5 s down to
+      // jitter-only ~1.5 s max without removing the thundering-herd jitter.
+      const doCapture = async () => {
+        this._thumbnailTimer = null;
+        if (!this.isRunning) return;
+        try {
+          await captureThumbnail(this.id, this.url);
+          this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+        } catch (_) { /* captureThumbnail logs internally */ }
+        scheduleThumb();
+      };
       const scheduleThumb = () => {
         if (!this.isRunning) return;
-        this._thumbnailTimer = setTimeout(async () => {
-          this._thumbnailTimer = null;
-          if (!this.isRunning) return;
-          try {
-            await captureThumbnail(this.id, this.url);
-            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-          } catch (_) { /* captureThumbnail logs internally */ }
-          scheduleThumb();
-        }, thumbIntervalMs);
+        this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
       };
-      this._thumbnailTimer = setTimeout(scheduleThumb, thumbStartJitterMs);
+      // First capture: jitter only — no extra thumbIntervalMs wait
+      this._thumbnailTimer = setTimeout(doCapture, thumbStartJitterMs);
     }
 
     const run = async () => {
