@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.73 / web 3.1.83)
+Date: 2026-03-18 (latest: v3.1.73 / web 3.1.84)
+
+## web v3.1.84 — 2026-03-18
+
+### Decoder Confidence Monitor: vertical audio VU meters
+
+Added per-pair vertical audio level bars to the Confidence Monitor in the Decoder panel, matching the broadcast-standard meters in fullscreen multiview. Bars appear to the right of the thumbnail; width auto-scales to the number of audio ES pairs detected. Each pair renders an L+R bar (3 px each, 1 px gap) with bottom-up RMS fill, peak-hold dot, and three-zone colour coding (green < −18 dBFS · amber < −9 dBFS · red ≥ −9 dBFS). Bars are driven by `selectedResult.audioLevels.channels` — they update at the probe cycle rate. Null-PID ghost ES are excluded from the pair count. If no audio levels are present yet, the meter panel is not rendered and the thumbnail occupies the full width.
+
+**Operator impact:** audio levels are now visible on the Decoder tab without switching to fullscreen multiview.
 
 ## web v3.1.82 — 2026-03-18
 
