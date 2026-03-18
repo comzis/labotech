@@ -1,6 +1,6 @@
 {
   "name": "labotech",
-  "version": "3.1.64",
+  "version": "3.1.65",
   "description": "Professional DVB-IP stream processor — SRT encapsulation, multiview monitoring, and MPEG-TS analysis",
   "main": "src/index.js",
   "scripts": {

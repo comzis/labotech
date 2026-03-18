@@ -31,7 +31,6 @@ let _lastCpuSample = null;
 let _etrOrphanWatchdog = null;
 let _thumbnailClient = null;
 
-const THUMBNAIL_INTERVAL_SEC = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
 
 function _sampleCpuPercent() {
   const cpus = os.cpus();
@@ -267,7 +266,7 @@ async function restoreState(broadcast, thumbnailClient) {
       a.on('error',        err    => broadcast({ type: 'error',          id: cfg.id, message: err.message }));
       a.startContinuous();
       analysers.set(cfg.id, a);
-      if (thumbnailClient) thumbnailClient.start(cfg.id, cfg.url, THUMBNAIL_INTERVAL_SEC);
+      // thumbnailClient.start() intentionally omitted — TSAnalyser manages thumbnails internally.
       console.log(`[state] Restored analyser: ${cfg.id}`);
     } catch (err) {
       console.error(`[state] Failed to restore analyser ${cfg.id}:`, err.message);
