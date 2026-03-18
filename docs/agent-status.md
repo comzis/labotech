@@ -52,15 +52,23 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 **Last session:** 2026-03-18
 
 **Completed this session:**
-- PR #35 — `feat/srt-live-transmit-engine`: srt-live-transmit as preferred encapsulation engine, FFmpeg copy fallback. Preflight checks for `srtProtocol` and `srtLiveTransmit` in `/health`. Engine badge on stream cards. (v3.1.75 / web 3.1.85)
-- PR #38 — `fix/srt-binary-volume-mount`: Compile srt-live-transmit v1.5.3 from source in `debian:bookworm-slim` multi-stage Dockerfile to fix GLIBCXX ABI mismatch.
-- PR #39 — `fix/srt-analyser-eno1-binding`: `_withLiveInputHints()` adds `adapter=10.67.18.29` for srt:// probe URLs; Capture NIC placeholder is mode-aware. (v3.1.76 / web 3.1.86)
-- PR #40 — `fix/srt-thumbnail-eno1-binding`: `_buildSrtSrc()` in monitoring.js adds `adapter=10.67.18.29` to all SRT thumbnail ffmpeg calls. (v3.1.77 / web 3.1.88)
-- PR #41 — `feat/landing-bebas-srt-paste`: Bebas Neue 72px silver landing hero, SRT URI smart-paste auto-fills host/port/passphrase/latency/pbkeylen. (web 3.1.89)
+- PR #35 — `feat/srt-live-transmit-engine`: srt-live-transmit as preferred encapsulation engine, FFmpeg copy fallback. (v3.1.75 / web 3.1.85)
+- PR #38 — `fix/srt-binary-volume-mount`: Compile srt-live-transmit v1.5.3 from source in Dockerfile to fix GLIBCXX ABI mismatch.
+- PR #39 — `fix/srt-analyser-eno1-binding`: `_withLiveInputHints()` adds `adapter=10.67.18.29`. (v3.1.76 / web 3.1.86)
+- PR #40 — `fix/srt-thumbnail-eno1-binding`: `_buildSrtSrc()` adds `adapter=10.67.18.29`. (v3.1.77 / web 3.1.88)
+- PR #41–#46 — Landing page, SRT URI paste, evc workspace, SRT Transport tab note. (web 3.1.89–3.1.93)
+- PR #47 — `feat/srt-link-stats-probe`: `_probeSrtLinkStats()` via srt-live-transmit JSON; `isSrtUrl` fix; decoder catalog; latency default 4000ms; button glow removed. (v3.1.78 / web 3.1.95)
+- PR #48 — `fix/srt-hevc-thumb-and-slt-check`: Remove `-skip_frame nokey` (HEVC PPS error); fix `_checkSltTool()` exit-code gate for srt-live-transmit. (v3.1.79 / web 3.1.96)
+- PR #49 — `feat/s302m-aes3-recognition`: SMPTE 302M detection + channel-map panel; Dolby E amber pair block in Confidence Monitor. (v3.1.80 / web 3.1.98)
 
 **Active branch:** `main` (all branches merged)
 
-**Waiting for:** Operator to run `bash scripts/update-and-deploy-safe.sh` on gva-boro-probe
+**Waiting for:** Server confirmation after deploy — thumbnail (HEVC fix), SRT Transport stats (slt availability fix), S302M panel on live stream.
+
+**Outstanding issues (unconfirmed on server — see SNAG-022, SNAG-023):**
+- SNAG-022: SRT RX thumbnail blank — HEVC `-skip_frame nokey` removed (PR #48), awaiting server confirmation
+- SNAG-023: SRT Transport stats empty — `_checkSltTool()` fix (PR #48), awaiting server confirmation
+- SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter returning PID/pair number
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`

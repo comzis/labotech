@@ -14,7 +14,7 @@ the invariant it produced so the same class of bug is not reintroduced.
 
 ## Open
 
-_No open snags at time of writing (2026-03-18)._
+_No open snags at time of writing (2026-03-18). SNAG-022 and SNAG-023 fixed and moved to Closed below._
 
 ---
 
@@ -223,6 +223,26 @@ _No open snags at time of writing (2026-03-18)._
 
 ---
 
+### SNAG-022 — SRT RX HEVC thumbnail blank — `PPS id out of range: 0`
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.79 · **PR:** #48
+- **Symptom:** Confidence Monitor showed "AWAITING FRAME" for all SRT streams carrying HEVC video. Server log contained repeated `[hevc @ 0x...] PPS id out of range: 0` ffmpeg errors. H.264 streams were unaffected.
+- **Root cause:** `PersistentThumbnailCapture._spawn()` passed `-skip_frame nokey` to ffmpeg. This flag instructs the decoder to skip all frames not classified as keyframes. In HEVC, VPS/SPS/PPS parameter sets are embedded in frames that ffmpeg does not classify as IDR keyframes — they are IRAP/CRA slices. By skipping those frames, the decoder never received the parameter sets needed to decode any subsequent frame, causing `PPS id out of range: 0` on every GOP and producing zero JPEG output.
+- **Fix:** Removed `-skip_frame nokey` from `PersistentThumbnailCapture._spawn()`. Output rate is already controlled by the `fps=1/N` video filter; `-skip_frame nokey` is redundant and codec-breaking for HEVC.
+- **Lesson:** `-skip_frame nokey` is only safe for H.264 streams where parameter sets are carried exclusively in IDR frames. Do not apply it globally — any codec that uses non-IDR reference frames (HEVC, AV1) will fail decoder initialisation. Use the `fps` vf filter alone to limit capture rate.
+
+---
+
+### SNAG-023 — SRT Transport stats always empty — `srt-live-transmit` availability gate used exit code
+
+- **Reported:** 2026-03-18 · **Fixed:** v3.1.79 · **PR:** #48
+- **Symptom:** SRT Transport tab showed no RTT, loss, or NAK data despite `srt-live-transmit` binary being present at `/usr/local/bin/srt-live-transmit`. `isSltAvailable()` consistently returned `false`.
+- **Root cause:** `_checkTool()` in `src/tooling-preflight.js` gates availability on exit code `=== 0`. The `srt-live-transmit --help` command exits non-zero (code 1) on all known builds because it considers the invocation an error (no URI provided). The binary was present and functional but was never flagged as available, so `_probeSrtLinkStats()` was skipped on every probe cycle.
+- **Fix:** Replaced `_checkTool('srt-live-transmit', ...)` with a dedicated `_checkSltTool()` that marks the binary available when any stdout or stderr output is produced — a failed spawn produces no output. Exit code is ignored.
+- **Lesson:** Do not use `exit code === 0` as the sole availability criterion for CLI tools that print help and exit non-zero. Gate on observable output instead. For each new external binary, verify the actual exit code produced by the `--help` / `--version` invocation before wiring into `_checkTool()`.
+
+---
+
 ## Invariants Produced
 
 These rules were extracted from the snags above and are now enforced in `CLAUDE.md`:
@@ -243,6 +263,8 @@ These rules were extracted from the snags above and are now enforced in `CLAUDE.
 | I-12 | Every `srt://` caller must include `adapter=10.67.18.29` — applies to ffprobe, ffmpeg, srt-live-transmit | SNAG-019, SNAG-020 |
 | I-13 | `_withLiveInputHints()` and `_buildSrtSrc()` are independent code paths — fix each separately | SNAG-020 |
 | I-14 | Container native binaries must be compiled inside the target distro (multi-stage build) — never volume-mount from host | SNAG-021 |
+| I-15 | `-skip_frame nokey` is H.264-only — never apply globally; HEVC parameter sets ride non-IDR frames | SNAG-022 |
+| I-16 | CLI tool availability must gate on observable output, not exit code — `--help` often exits non-zero | SNAG-023 |
 
 ---
 
