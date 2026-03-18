@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.88 / web 3.1.107)
+Date: 2026-03-18 (latest: v3.1.89 / web 3.1.108)
+
+## v3.1.89 — 2026-03-18
+
+### Fix: tcpdump `cap_net_raw` persistence — deploy warning + rc.local re-apply
+
+- **Problem:** `apt upgrade tcpdump` silently wipes the `cap_net_raw` capability set by `setup-host.sh`, causing Probe Method to show **UNAVAILABLE** after routine package updates. No warning was surfaced during the next deploy.
+- **Fix 1 (`scripts/setup-host.sh`):** Added `setcap` to the `rc.local` block so the capability is automatically re-applied on every boot (and after upgrades that trigger a reboot).
+- **Fix 2 (`scripts/deploy-one-shot.sh`):** Added `check_tcpdump_capability` as a non-fatal warning stage. On every deploy, the script now checks `getcap /usr/bin/tcpdump` and prints the exact fix command if `cap_net_raw` is missing.
+- **Operator impact:** Future `apt upgrade` cycles will no longer silently break NIC capture. The deploy output will call out the missing capability with the exact remediation command.
 
 ## web 3.1.107 — 2026-03-18
 
