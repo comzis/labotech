@@ -309,7 +309,12 @@ function start() {
 
   // Thumbnail worker — start early so routes can reference it
   _thumbnailClient = new ThumbnailWorkerClient();
-  _thumbnailClient.on('frame',        (id, url, filePath) => broadcast({ type: 'thumbnail_frame', id, url, path: filePath }));
+  _thumbnailClient.on('frame',        (id, url, filePath) => {
+    // Keep analyser._lastThumbnailUrl in sync so analyse_result events carry thumbnailUrl.
+    const a = analysers.get(id);
+    if (a) a._lastThumbnailUrl = `/logs/thumbnails/${path.basename(filePath)}?t=${Date.now()}`;
+    broadcast({ type: 'thumbnail_frame', id, url, path: filePath });
+  });
   _thumbnailClient.on('worker_exit',  (e) => console.warn(`[thumbnail-worker] exited (code=${e.code} signal=${e.signal}), respawn in ${e.restartInMs}ms`));
   _thumbnailClient.on('worker_error', (e) => console.error(`[thumbnail-worker] error id=${e.id}: ${e.message}`));
 
