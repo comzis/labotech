@@ -15,6 +15,7 @@ let _snapshot = {
     tsanalyze: { available: false, version: null, error: 'pending' },
     tshark: { available: false, version: null, error: 'pending' },
     tcpdump: { available: false, version: null, error: 'pending' },
+    srtLiveTransmit: { available: false, version: null, error: 'pending' },
   },
   srtProtocol: { available: null, reason: 'preflight pending' },
   nicCapture: {
@@ -153,12 +154,13 @@ async function _checkSrtProtocol() {
 
 async function refreshToolingPreflight() {
   const nicName = _readNicName();
-  const [ffmpeg, ffprobe, tsanalyze, tshark, tcpdump, srtProtocol] = await Promise.all([
+  const [ffmpeg, ffprobe, tsanalyze, tshark, tcpdump, srtLiveTransmit, srtProtocol] = await Promise.all([
     _checkTool('ffmpeg', ['-version']),
     _checkTool('ffprobe', ['-version']),
     _checkTool('tsanalyze', ['--version']),
     _checkTool('tshark', ['-v']),
     _checkTool('tcpdump', ['--version']),
+    _checkTool('srt-live-transmit', ['--help']),
     _checkSrtProtocol(),
   ]);
 
@@ -174,11 +176,15 @@ async function refreshToolingPreflight() {
     status,
     checkedAt: Date.now(),
     nicName,
-    tools: { ffmpeg, ffprobe, tsanalyze, tshark, tcpdump },
+    tools: { ffmpeg, ffprobe, tsanalyze, tshark, tcpdump, srtLiveTransmit },
     srtProtocol,
     nicCapture,
   };
   return _snapshot;
+}
+
+function isSltAvailable() {
+  return _snapshot.tools.srtLiveTransmit.available === true;
 }
 
 function getToolingPreflightSnapshot() {
@@ -198,4 +204,5 @@ module.exports = {
   refreshToolingPreflight,
   getToolingPreflightSnapshot,
   startToolingPreflightAutoRefresh,
+  isSltAvailable,
 };
