@@ -2834,6 +2834,19 @@ class TSAnalyser extends EventEmitter {
     this._etrMonitor = null;
   }
 
+  /**
+   * Return the ms ETR should delay its first ffmpeg spawn when starting alongside
+   * this analyser on an SRT stream.  Gives the persistent thumbnail capture time
+   * to win the single SRT caller slot before ETR tries to connect.
+   * Returns 0 for non-SRT streams (no slot contention).
+   */
+  getEtrStartDelay() {
+    if (this._persistentThumb && this.url && this.url.startsWith('srt://')) {
+      return parseSrtLatency(this.url) + 15000;
+    }
+    return 0;
+  }
+
   stop() {
     this.isRunning = false;
     this._nextProbeAt = 0;
