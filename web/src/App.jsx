@@ -317,7 +317,7 @@ function LandingAuth({ onLogin, punchline }) {
                 <div
                   className="font-black uppercase"
                   style={{
-                    fontSize: 56,
+                    fontSize: 42,
                     lineHeight: 1,
                     letterSpacing: '0.18em',
                     color: '#7b879a',
@@ -326,7 +326,10 @@ function LandingAuth({ onLogin, punchline }) {
                 >
                   LABOTECH
                 </div>
-                <div style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: '#3d5470', letterSpacing: '0.04em' }}>
+                <div style={{ fontFamily: '"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif', fontStyle: 'italic', fontSize: 9, color: '#738199', letterSpacing: '0.05em', marginTop: 2 }}>
+                  Powered by Docker
+                </div>
+                <div style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: '#3d5470', letterSpacing: '0.04em', marginTop: 6 }}>
                   Stream Management Platform
                 </div>
                 <button
