@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.89 / web 3.1.108)
+Date: 2026-03-18 (latest: v3.1.89 / web 3.1.109)
+
+## web 3.1.109 — 2026-03-18
+
+### Fix: Enable ETR 422 error surfaced as toast — silent failure on SRT sources
+
+- **Problem:** Clicking "Enable ETR" on an SRT decoder returned HTTP 422 (SRT sources are blocked by design). The error was caught and set in a small `fontSize: 10` note below the button — invisible without scrolling. The button appeared to do nothing.
+- **Fix:** Added `toast.error(msg, { duration: 8000 })` in the ETR start catch block. The 422 reason now appears as a prominent 8-second toast notification.
+- **Operator impact:** Clicking Enable ETR on an SRT decoder now immediately shows why it was rejected.
 
 ## v3.1.89 — 2026-03-18
 

@@ -982,6 +982,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         }
       }
       setEtrActionNote({ type: "err", text: msg });
+      toast.error(msg, { duration: 8000 });
     } finally { setBusy(false); }
   };
 
