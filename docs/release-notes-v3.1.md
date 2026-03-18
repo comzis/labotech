@@ -1,6 +1,18 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.69)
+Date: 2026-03-18 (latest: v3.1.70)
+
+## v3.1.70 — 2026-03-18
+
+### Fix: Log thumbnail capture failures to docker logs
+
+**`src/ts-analyser.js`:**
+
+- The `doCapture` catch block in `startContinuous()` was silently swallowing errors. Added `console.error` so failures appear in `docker compose logs labotech` as `[thumb:<id>] capture failed: <message>`.
+
+**Why:** With thumbnails still not appearing at expected latency after v3.1.69, the silent catch made it impossible to diagnose whether the issue was ffmpeg errors, network/multicast access, filesystem permissions, or something else.
+
+**Operator impact:** Thumbnail capture failures are now visible in server logs for diagnosis.
 
 ## v3.1.69 — 2026-03-18
 
