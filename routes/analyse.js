@@ -1,8 +1,11 @@
 'use strict';
 
+const fs         = require('fs');
+const path       = require('path');
 const express    = require('express');
 const WebSocket  = require('ws');
 const TSAnalyser = require('../src/ts-analyser');
+const { THUMBNAIL_DIR, sanitizeStreamId } = require('../src/monitoring');
 
 
 module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null) {
@@ -66,13 +69,20 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
 
   // DELETE /analyse/:id
   router.delete('/:id', (req, res) => {
-    const a = analysers.get(req.params.id);
+    const id = req.params.id;
+    const a = analysers.get(id);
     if (!a) return res.status(404).json({ error: 'Analyser not found' });
     a.stop();
-    analysers.delete(req.params.id);
+    analysers.delete(id);
+    // Remove stale thumbnail so a ghost JPEG cannot persist across restarts
+    // and confuse operators or conflict with a new decoder using the same slot.
+    try {
+      const thumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(id)}.jpg`);
+      if (fs.existsSync(thumbPath)) fs.unlinkSync(thumbPath);
+    } catch (_) {}
     if (saveState) saveState();
-    broadcast({ type: 'analyse_stopped', id: req.params.id, message: `${req.params.id} analyser stopped` });
-    res.json({ stopped: req.params.id });
+    broadcast({ type: 'analyse_stopped', id, message: `${id} analyser stopped` });
+    res.json({ stopped: id });
   });
 
   return router;
