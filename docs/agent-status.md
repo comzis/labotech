@@ -81,9 +81,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Repo hygiene — fix broken `git status` on Linux (Claude worktree gitlinks).
+**Current task:** Idle — git worktree gitlink fix merged (PR #70).
 
-**Branch:** `cursor/fix-claude-worktree-gitlinks` (commit `a15c1d2`)
+**Branch:** `main` (PR #70 merged 2026-03-21)
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -91,11 +91,11 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
 - `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-21 — Removed `.claude/worktrees/*` gitlinks from index; added `.claude/worktrees/` to `.gitignore`; deleted stale nested `gitdir` stubs locally.
+**Last session:** 2026-03-21 — PR **#70** merged: removed `.claude/worktrees/*` gitlinks; `.gitignore` ignores `.claude/worktrees/`; `git status` / `git diff` work on Linux.
 
-**Active branch:** `cursor/fix-claude-worktree-gitlinks`
+**Active branch:** `main`
 
-**Files modified this session:** `.gitignore`, `docs/agent-status.md` (this block)
+**Merged:** `cursor/fix-claude-worktree-gitlinks` → **PR #70** (`f9c7b33` on main).
 
 **Waiting for:** Operator review of Phase 3 PR #16.
 
@@ -192,6 +192,7 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | 2026-03-18 | A | fix/srt-analyser-eno1-binding | #39 | fix(analyser): bind SRT ffprobe to eno1 (v3.1.76) |
 | 2026-03-18 | A | fix/srt-thumbnail-eno1-binding | #40 | fix(monitoring): bind SRT thumbnail ffmpeg to eno1 (v3.1.77) |
 | 2026-03-18 | A | feat/landing-bebas-srt-paste | #41 | feat(ui): Bebas Neue landing + SRT URI smart-paste (web 3.1.89) |
+| 2026-03-21 | B | cursor/fix-claude-worktree-gitlinks | #70 | chore(git): drop Claude worktree gitlinks; ignore `.claude/worktrees/` — fixes `git status` on Linux |
 
 ---
 
