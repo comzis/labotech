@@ -181,14 +181,8 @@ describe('Phase 2 migration — TSAnalyser thumbnail delegation', () => {
       a.stop();
     });
 
-    test('calls thumbnailClient.start() for direct SRT (no relay)', () => {
+    test('calls thumbnailClient.start() for RTP multicast', () => {
       const client = makeFakeClient();
-      // Use a URL that won't match relay path — we'll verify relay is NOT set
-      // by inspecting _relay after startContinuous runs the relay block first.
-      // SRTRelay mock creates _relay, so direct SRT actually gets a relay in test.
-      // For "direct SRT no relay" test we must check the RTP/UDP path is sufficient.
-      // (Direct SRT always gets a relay in current architecture — see SRTRelay block.)
-      // Test RTP variant which unambiguously goes to worker.
       const a = makeAnalyser('rtp://239.1.1.2:1234', { thumbnailClient: client });
       a.startContinuous();
       jest.runAllTimers();

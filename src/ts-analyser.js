@@ -225,9 +225,10 @@ class TSAnalyser extends EventEmitter {
           // contention. Only suspend/sequential-mode when running direct SRT (no relay).
           const isSrtDirect = runHeavyProbe && this.url && this.url.startsWith('srt://') && !this._relay;
           // Suspend thumbnail for the duration of sequential SRT heavy probes so only
-          // one caller occupies the SRT slot at a time.  The thumbnail may be managed
-          // by the out-of-process worker (_thumbnailClient) or the in-process fallback
-          // (_persistentThumb) — both honour the same suspend/resume API shape.
+          // one caller occupies the SRT slot at a time.
+          // Note: isSrtDirect requires !this._relay. In practice the SRT relay is
+          // always active (created above), so isSrtHeavy is never true in the current
+          // architecture.  Kept as a safety net for the hypothetical no-relay path.
           const isSrtHeavy  = isSrtDirect && (this._thumbnailClient || this._persistentThumb);
           if (isSrtHeavy) {
             const srtLatMs = parseSrtLatency(this.url);
@@ -2786,7 +2787,9 @@ class TSAnalyser extends EventEmitter {
     if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
 
     if (this._thumbnailClient && !this._relay) {
-      // Out-of-process worker: covers direct SRT and RTP/UDP multicast.
+      // Out-of-process worker: RTP/UDP multicast only in practice.
+      // SRT sources always have this._relay set (relay block above), so they never
+      // reach this branch — relay-backed SRT falls through to the one-shot path below.
       // PersistentThumbnailCapture runs in the worker process, keeping ffmpeg CPU
       // load isolated from the API process and benefiting from worker-level crash
       // isolation and automatic restart.
@@ -2797,25 +2800,12 @@ class TSAnalyser extends EventEmitter {
           this._thumbnailClient.start(this.id, this._effectiveUrl, thumbIntervalSec);
         }
       }, thumbStartJitterMs);
-    } else if (!this._relay && this.url && this.url.startsWith('srt://')) {
-      // Direct SRT, no worker injected — fallback to in-process PersistentThumbnailCapture.
-      this._persistentThumb = new PersistentThumbnailCapture({
-        streamId: this.id,
-        inputUrl: this._effectiveUrl,
-        intervalSec: thumbIntervalSec,
-      });
-      this._persistentThumb.on('frame', () => {
-        this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-      });
-      this._thumbnailTimer = setTimeout(() => {
-        this._thumbnailTimer = null;
-        if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
-      }, thumbStartJitterMs);
     } else {
-      // Relay-backed SRT: loopback unicast UDP (the relay output) cannot be held open
-      // by a persistent reader — ffprobe probes need to bind the same port and unicast
-      // UDP does not support simultaneous multiple receivers.  One-shot timer loop
-      // releases the socket between captures so probes can always bind.
+      // SRT (always relay-backed) and RTP/UDP without worker: one-shot timer loop.
+      // For relay-backed SRT, this._effectiveUrl is the relay's loopback unicast UDP
+      // address.  A persistent reader would hold that port and block ffprobe probes
+      // from binding the same socket — one-shot releases it between captures.
+      // For RTP/UDP multicast without a worker client this is the in-process fallback.
       //
       // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
       // Subsequent captures use the full thumbIntervalMs cadence.
