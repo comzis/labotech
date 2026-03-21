@@ -122,6 +122,10 @@ class TSAnalyser extends EventEmitter {
     this._ccHeavyCount = 0; // heavy CC probe cycles completed
     this._relay        = null;        // SRTRelay instance (srt:// sources only)
     this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
+    // Optional out-of-process thumbnail worker client (Phase 2).
+    // When provided, thumbnail management is delegated to the worker process
+    // instead of running PersistentThumbnailCapture in the API process.
+    this._thumbnailClient = options.thumbnailClient || null;
   }
 
   probe(options = {}) {
@@ -220,12 +224,17 @@ class TSAnalyser extends EventEmitter {
           // When a relay is active, all probes read from local UDP — no SRT slot
           // contention. Only suspend/sequential-mode when running direct SRT (no relay).
           const isSrtDirect = runHeavyProbe && this.url && this.url.startsWith('srt://') && !this._relay;
-          const isSrtHeavy  = isSrtDirect && this._persistentThumb;
+          // Suspend thumbnail for the duration of sequential SRT heavy probes so only
+          // one caller occupies the SRT slot at a time.  The thumbnail may be managed
+          // by the out-of-process worker (_thumbnailClient) or the in-process fallback
+          // (_persistentThumb) — both honour the same suspend/resume API shape.
+          const isSrtHeavy  = isSrtDirect && (this._thumbnailClient || this._persistentThumb);
           if (isSrtHeavy) {
             const srtLatMs = parseSrtLatency(this.url);
             // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
             const suspendMs = srtLatMs + 70000;
-            this._persistentThumb.suspend(suspendMs);
+            if (this._thumbnailClient) this._thumbnailClient.suspend(this.id, suspendMs);
+            else if (this._persistentThumb) this._persistentThumb.suspend(suspendMs);
             if (this._tsduckMonitor) this._tsduckMonitor.suspend();
             if (this._etrMonitor) this._etrMonitor.suspend(suspendMs + 5000);
             await new Promise(r => setTimeout(r, 600));
@@ -268,11 +277,12 @@ class TSAnalyser extends EventEmitter {
             }
           } finally {
             if (runHeavyProbe) _releaseHeavyProbeSlot();
-            if (isSrtHeavy && this._persistentThumb) {
+            if (isSrtHeavy) {
               // Brief settle delay: SRT sources may have a 1–2s reconnect cooldown after
               // the last probe connection closed.  Avoid immediate rejection of the thumbnail.
               setTimeout(() => {
-                if (this._persistentThumb) this._persistentThumb.resume();
+                if (this._thumbnailClient) this._thumbnailClient.resume(this.id);
+                else if (this._persistentThumb) this._persistentThumb.resume();
                 if (this._tsduckMonitor) this._tsduckMonitor.resume();
                 if (this._etrMonitor) this._etrMonitor.resume();
               }, 1500);
@@ -2775,13 +2785,20 @@ class TSAnalyser extends EventEmitter {
     if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
     if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
 
-    if (!this._relay && this.url && this.url.startsWith('srt://')) {
-      // Direct SRT (no relay): persistent long-lived ffmpeg avoids paying the full
-      // SRT latency window on every reconnect. Safe because only one consumer
-      // (PersistentThumbnailCapture) ever reads this SRT URL.
-      // When relay IS active we fall through to the one-shot timer path below —
-      // loopback unicast UDP (the relay output) cannot be bound by two simultaneous
-      // readers, so we must release the socket between captures.
+    if (this._thumbnailClient && !this._relay) {
+      // Out-of-process worker: covers direct SRT and RTP/UDP multicast.
+      // PersistentThumbnailCapture runs in the worker process, keeping ffmpeg CPU
+      // load isolated from the API process and benefiting from worker-level crash
+      // isolation and automatic restart.
+      // Hash-based jitter preserves thundering-herd spreading across decoders.
+      this._thumbnailTimer = setTimeout(() => {
+        this._thumbnailTimer = null;
+        if (this.isRunning && this._thumbnailClient) {
+          this._thumbnailClient.start(this.id, this._effectiveUrl, thumbIntervalSec);
+        }
+      }, thumbStartJitterMs);
+    } else if (!this._relay && this.url && this.url.startsWith('srt://')) {
+      // Direct SRT, no worker injected — fallback to in-process PersistentThumbnailCapture.
       this._persistentThumb = new PersistentThumbnailCapture({
         streamId: this.id,
         inputUrl: this._effectiveUrl,
@@ -2795,11 +2812,10 @@ class TSAnalyser extends EventEmitter {
         if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
       }, thumbStartJitterMs);
     } else {
-      // RTP / UDP multicast, OR relay-backed SRT: one-shot timer loop.
-      // Multicast join is near-instant so per-frame reconnect is fine.
-      // For relay-backed SRT, releasing the loopback UDP socket between captures
-      // is mandatory — ffprobe probes need to bind the same port and unicast UDP
-      // does not support simultaneous multiple receivers.
+      // Relay-backed SRT: loopback unicast UDP (the relay output) cannot be held open
+      // by a persistent reader — ffprobe probes need to bind the same port and unicast
+      // UDP does not support simultaneous multiple receivers.  One-shot timer loop
+      // releases the socket between captures so probes can always bind.
       //
       // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
       // Subsequent captures use the full thumbIntervalMs cadence.
@@ -2873,7 +2889,7 @@ class TSAnalyser extends EventEmitter {
   getEtrStartDelay() {
     // When relay is active, ETR reads from local UDP — no SRT slot delay needed.
     if (this._relay) return 0;
-    if (this._persistentThumb && this.url && this.url.startsWith('srt://')) {
+    if (!this._relay && this.url && this.url.startsWith('srt://') && (this._thumbnailClient || this._persistentThumb)) {
       return parseSrtLatency(this.url) + 15000;
     }
     return 0;
@@ -2902,6 +2918,9 @@ class TSAnalyser extends EventEmitter {
     if (this._persistentThumb) {
       this._persistentThumb.stop();
       this._persistentThumb = null;
+    }
+    if (this._thumbnailClient) {
+      this._thumbnailClient.stop(this.id);
     }
     if (this._iatSniffer) {
       this._iatSniffer.stop();

@@ -9,8 +9,9 @@ class ThumbnailWorkerClient extends EventEmitter {
     super();
     this._workerPath = options.workerPath || path.join(__dirname, 'thumbnail-worker.js');
     this._forkFn = options.forkFn || fork;
-    this._restartDelayMs = Math.max(1000, Number(options.restartDelayMs) || 2000);
-    this._maxRestartDelayMs = Math.max(this._restartDelayMs, Number(options.maxRestartDelayMs) || 30000);
+    this._initialRestartDelayMs = Math.max(1000, Number(options.restartDelayMs) || 2000);
+    this._restartDelayMs = this._initialRestartDelayMs;
+    this._maxRestartDelayMs = Math.max(this._initialRestartDelayMs, Number(options.maxRestartDelayMs) || 30000);
     this._active = new Map(); // id -> { url, intervalSec }
     this._worker = null;
     this._respawnTimer = null;
@@ -47,6 +48,8 @@ class ThumbnailWorkerClient extends EventEmitter {
   _onWorkerMessage(msg) {
     if (!msg || typeof msg !== 'object') return;
     if (msg.event === 'ready') {
+      // Reset backoff so a subsequent crash doesn't inherit a grown delay.
+      this._restartDelayMs = this._initialRestartDelayMs;
       if (this._awaitingReplay) {
         this._replayActiveCaptures();
         this._awaitingReplay = false;
