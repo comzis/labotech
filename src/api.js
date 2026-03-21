@@ -279,13 +279,12 @@ async function restoreState(broadcast, thumbnailClient) {
       continue;
     }
     try {
-      const a = new TSAnalyser({ id: cfg.id, url: cfg.url, interval: cfg.interval, nicName: cfg.nicName });
+      const a = new TSAnalyser({ id: cfg.id, url: cfg.url, interval: cfg.interval, nicName: cfg.nicName, thumbnailClient: thumbnailClient || undefined });
       a.on('result',       result => broadcast({ type: 'analyse_result', id: cfg.id, ...result }));
       a.on('health_alarm', data   => broadcast({ type: 'health_alarm',   id: cfg.id, ...data }));
       a.on('error',        err    => broadcast({ type: 'error',          id: cfg.id, message: err.message }));
       a.startContinuous();
       analysers.set(cfg.id, a);
-      // thumbnailClient.start() intentionally omitted — TSAnalyser manages thumbnails internally.
       console.log(`[state] Restored analyser: ${cfg.id}`);
     } catch (err) {
       console.error(`[state] Failed to restore analyser ${cfg.id}:`, err.message);
@@ -374,7 +373,10 @@ function start() {
     setTimeout(() => restoreState(broadcast, _thumbnailClient), 2000);
 
     process.on('SIGTERM', async () => {
-      console.log('[api] SIGTERM received — shutting down thumbnail worker');
+      console.log('[api] SIGTERM received — shutting down');
+      // Stop all analysers first: clears relay-backed SRT one-shot timers and
+      // any in-process PersistentThumbnailCapture instances (fallback path).
+      for (const a of analysers.values()) { try { a.stop(); } catch (_) {} }
       if (_thumbnailClient) await _thumbnailClient.shutdown();
       process.exit(0);
     });

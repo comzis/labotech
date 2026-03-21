@@ -81,21 +81,35 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Phase 2 merged. Idle / supporting Phase 3 review.
+**Current task:** Phase 2 migration complete — PR pending operator review.
 
-**Branch:** none (Phase 2 branch merged)
+**Branch:** `cursor/phase2-complete-thumb-migration`
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
-- `src/thumbnail-worker-client.js` (new file, Phase 2) ✅
-- `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
-- `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
+- `src/thumbnail-worker-client.js` (Phase 2 + backoff reset fix) ✅
+- `test/thumbnail-worker.test.js` (Phase 2 + backoff reset test) ✅
+- `docs/release-notes-v3.2.md` (entries to add before PR) ✅
 
-**Last session:** 2026-03-17 — Phase 2 merged (PR #15), release notes updated, server validation passed.
+**Last session:** 2026-03-21 — Phase 2 migration completed. TSAnalyser now delegates thumbnails to ThumbnailWorkerClient. All 221 tests passing. PR opened for operator review.
 
-**Active branch:** `main`
+**Active branch:** `cursor/phase2-complete-thumb-migration`
 
-**Waiting for:** Operator review of Phase 3 PR #16.
+**Files touched this session:**
+- `src/ts-analyser.js` — constructor injection, startContinuous() 3-branch thumb logic, probe() suspend/resume, getEtrStartDelay(), stop()
+- `src/thumbnail-worker-client.js` — backoff reset on ready event
+- `routes/analyse.js` — pass thumbnailClient to TSAnalyser constructor
+- `src/api.js` — restoreState() passes thumbnailClient; SIGTERM stops analysers before shutdown
+- `test/thumbnail-worker.test.js` — backoff reset test added
+
+**Design decisions:**
+- Relay-backed SRT (loopback unicast) keeps in-process one-shot timer — persistent worker connection would hold the UDP port and block ffprobe probes
+- Direct SRT and RTP/UDP multicast → worker (PersistentThumbnailCapture out-of-process)
+- In-process PersistentThumbnailCapture kept as fallback (no thumbnailClient injected)
+
+**Do NOT touch (Agent A owns):**
+- `src/tsduck-monitor.js`
+- Any file in `web/src/` (UI Change Policy — operator approval required)
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`

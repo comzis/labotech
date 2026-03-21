@@ -130,6 +130,31 @@ describe('ThumbnailWorkerClient', () => {
     await expect(p).resolves.toBeUndefined();
   });
 
+  test('resets restart backoff delay after successful ready', () => {
+    const children = [];
+    const client = new ThumbnailWorkerClient({
+      forkFn: () => {
+        const child = new FakeChild();
+        children.push(child);
+        return child;
+      },
+      restartDelayMs: 1000,
+      maxRestartDelayMs: 8000,
+    });
+
+    // Simulate two crashes to grow the backoff.
+    children[0].emit('exit', 1, null);
+    jest.advanceTimersByTime(1000); // 1st respawn delay
+    children[1].emit('exit', 1, null);
+    jest.advanceTimersByTime(2000); // 2nd respawn delay (doubled)
+    // Backoff should now be at 4000 ms (next doubling).
+    expect(client._restartDelayMs).toBe(4000);
+
+    // Worker comes up healthy — ready event should reset backoff.
+    children[2].emit('message', { event: 'ready' });
+    expect(client._restartDelayMs).toBe(1000);
+  });
+
   test('routes worker error to worker_error when no error listener exists', () => {
     const events = [];
     const client = new ThumbnailWorkerClient({
