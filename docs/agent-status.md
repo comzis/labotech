@@ -109,11 +109,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
-- Any file in `web/src/` (UI Change Policy — operator approval required)
-
-**Do NOT touch (Agent A owns):**
-- `src/tsduck-monitor.js`
-- `src/ts-analyser.js` (beyond the ~3-line constructor addition)
+- `src/ts-analyser.js` (scoped edits this session now done — treat as A's again)
 - Any file in `web/src/` (UI Change Policy — operator approval required)
 
 ---
@@ -211,6 +207,7 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 
 | File | Risk | Resolution |
 |---|---|---|
-| `src/ts-analyser.js` | Both agents edit constructor | Agent B branches off main AFTER Phase 1 merges. Agent B's change is additive only (new optional param). |
-| `src/api.js` | Both agents add wiring | Coordinate via this file. Agent B adds thumbnail client; Agent A adds TSDuckMonitor. Do not both edit in the same session without checking this file first. |
-| `docs/release-notes-v3.1.md` | Both agents may need to add entries | Only Agent A adds to this file (Phase 1). Agent B creates a new `docs/release-notes-v3.2.md`. |
+| `src/ts-analyser.js` | B added `_thumbnailClient` field and removed dead `PersistentThumbnailCapture` branch (PR pending). Agent A: pull main after B's PR merges before touching this file. | Low — A has no active branch. |
+| `src/api.js` | B added SIGTERM analyser stop + thumbnailClient to restoreState. A adds TSDuckMonitor. Do not both edit in the same session without checking this file first. | Low currently. |
+| `package.json` | B bumped to `3.2.0`. A must not bump version on a separate branch simultaneously. | Pull main after B's PR merges. |
+| `docs/release-notes-v3.1.md` | Only Agent A adds to this file. Agent B uses `docs/release-notes-v3.2.md`. | No conflict. |
