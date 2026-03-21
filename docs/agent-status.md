@@ -81,9 +81,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Phase 2 merged. Idle / supporting Phase 3 review.
+**Current task:** Repo hygiene — fix broken `git status` on Linux (Claude worktree gitlinks).
 
-**Branch:** none (Phase 2 branch merged)
+**Branch:** `cursor/fix-claude-worktree-gitlinks` (commit `a15c1d2`)
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -91,9 +91,11 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
 - `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-17 — Phase 2 merged (PR #15), release notes updated, server validation passed.
+**Last session:** 2026-03-21 — Removed `.claude/worktrees/*` gitlinks from index; added `.claude/worktrees/` to `.gitignore`; deleted stale nested `gitdir` stubs locally.
 
-**Active branch:** `main`
+**Active branch:** `cursor/fix-claude-worktree-gitlinks`
+
+**Files modified this session:** `.gitignore`, `docs/agent-status.md` (this block)
 
 **Waiting for:** Operator review of Phase 3 PR #16.
 
