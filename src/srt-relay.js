@@ -175,7 +175,14 @@ class SRTRelay extends EventEmitter {
       if (!this._ready) {
         this._ready = true;
         this.emit('ready', { id: this.id, localUrl: this.localUrl });
-        if (this.thumbPath) this._spawnThumb(epoch);
+        // Thumbnail ffmpeg is spawned AFTER the SRT latency buffer fills.
+        // srt-live-transmit with latency=N ms outputs nothing to UDP until the
+        // receiver buffer has N ms of data — spawning ffmpeg too early causes it
+        // to hit the UDP read timeout and exit before a single frame arrives.
+        if (this.thumbPath) {
+          const latencyMs = this._parseSrtLatencyMs();
+          setTimeout(() => this._spawnThumb(epoch), latencyMs + 500);
+        }
       }
     }, 800);
 
@@ -214,14 +221,17 @@ class SRTRelay extends EventEmitter {
 
   /**
    * Spawn a separate ffmpeg process to write JPEG thumbnails from the UDP loopback.
-   * Called after the relay is ready so the UDP stream is already flowing.
-   * Restarts automatically if it crashes while the relay epoch is still active.
+   * Must be called only after the SRT latency buffer has filled (slt won't output
+   * UDP data until latencyMs after connecting). Restarts automatically if it crashes.
    */
   _spawnThumb(epoch) {
     if (!this.thumbPath || !this._running || this._epoch !== epoch) return;
 
-    // UDP input hints match monitoring.js LIVE_INPUT_HINTS for multicast/loopback consumers.
-    const udpInput = `udp://127.0.0.1:${this.port}?overrun_nonfatal=1&fifo_size=5000000&timeout=3000000`;
+    // UDP read timeout must exceed the SRT latency so ffmpeg doesn't exit before
+    // the first packet arrives. Set to max(5s, latency + 3s) in microseconds.
+    const latencyMs = this._parseSrtLatencyMs();
+    const timeoutUs = Math.max(5000000, (latencyMs + 3000) * 1000);
+    const udpInput  = `udp://127.0.0.1:${this.port}?overrun_nonfatal=1&fifo_size=5000000&timeout=${timeoutUs}`;
 
     // thumbnail=100: buffer 100 frames and pick the sharpest — at 25 fps that is ~4 s per JPEG.
     // Joining the UDP stream mid-GOP is fine: the first IDR frame arrives within one GOP period
@@ -257,6 +267,13 @@ class SRTRelay extends EventEmitter {
       try { this._thumbProc.kill('SIGTERM'); } catch (_) {}
       this._thumbProc = null;
     }
+  }
+
+  // Parse the SRT receive latency from the source URL (latency=, rcvlatency=, or tsbpddelay=).
+  // Returns milliseconds; defaults to 500 ms if no latency param is present.
+  _parseSrtLatencyMs() {
+    const m = this.srtUrl.match(/(?:latency|rcvlatency|tsbpddelay)=(\d+)/i);
+    return m ? Number(m[1]) : 500;
   }
 
   _scheduleRestart() {

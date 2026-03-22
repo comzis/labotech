@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.16)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.17)
+
+## v3.2.17 — 2026-03-22
+
+### Fix: SRT relay thumbnail not arriving after v3.2.16 srt-live-transmit relay change
+
+- **Root cause:** `srt-live-transmit` with `latency=4000` buffers 4 seconds of data before outputting anything to the UDP loopback. The thumbnail ffmpeg was spawned at 800 ms (relay ready timer) with a 3 s UDP read timeout — it timed out and exited before the first UDP packet arrived, then restarted and repeated the cycle indefinitely.
+- **Fix:** Thumbnail ffmpeg is now spawned after a delay of `latencyMs + 500 ms` (parsed from the SRT URL). UDP read timeout is set to `max(5s, latencyMs + 3s)` so ffmpeg waits long enough for the latency buffer to fill before giving up.
+- **Operator impact:** Thumbnails and full SRT stats (RTT, Bandwidth, NAK, ACK, Loss) now both work simultaneously for SRT streams with any latency setting.
 
 ## v3.2.16 — 2026-03-22
 
