@@ -232,7 +232,14 @@ class ETR290Analyser extends EventEmitter {
       const lines = buf.split('\n');
       buf = lines.pop();
       for (const line of lines) {
-        if (line.trim()) this._parseLine(line);
+        // FFmpeg -stats output uses \r to overwrite progress lines on the same
+        // terminal row. Split on \r so each segment is parsed independently —
+        // otherwise a stats update and an error in the same data chunk become
+        // one combined "line" that triggers a false pattern match, and the stored
+        // alarm message shows stats cruft instead of the actual error text.
+        for (const seg of line.split('\r')) {
+          if (seg.trim()) this._parseLine(seg);
+        }
       }
     });
 
