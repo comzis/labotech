@@ -38,10 +38,24 @@ cd web && npm run dev                    # Vite dev server (proxies to API)
 docker compose up -d                     # production
 docker compose -f docker-compose.dev.yml up   # development with live reload
 
+# Deploying changes to the server
+git pull
+docker compose -f docker-compose.dev.yml build labotech   # always required after any change
+docker compose -f docker-compose.dev.yml up -d
+
 # Host setup (run once on Ubuntu server as root)
 sudo bash scripts/setup-host.sh
 sudo bash scripts/check-routes.sh       # verify networking
 ```
+
+### Docker build required for ALL changes — including frontend-only
+
+`web/dist` is **baked into the image** at build time (`COPY --from=builder /app/web/dist ./web/dist` in the Dockerfile). It is **not** volume-mounted by `docker-compose.dev.yml`.
+
+- Backend source (`src/`, `routes/`) is volume-mounted → nodemon picks up changes live, no rebuild needed.
+- Frontend (`web/src/`) is NOT volume-mounted → any React/CSS/Tailwind change requires `docker compose build` to re-run `npm run build` inside the image.
+- Never tell the user to run `npm run build` manually on the server — the Docker build stage handles it.
+- The correct server-side deploy sequence is always: `git pull` → `docker compose -f docker-compose.dev.yml build labotech` → `docker compose -f docker-compose.dev.yml up -d`.
 
 ## Architecture
 
