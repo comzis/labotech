@@ -2,6 +2,16 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.6 — 2026-03-22
+
+### Fix: SRT relay — thumbnail EADDRINUSE flood and H.264 log noise
+
+- **Root cause 1 (thumbnail EADDRINUSE flood):** The thumbnail one-shot timer fires every 2 s. The sequential `isRelayBacked` probe path holds the loopback UDP port for ~15–20 s (tsanalyze 5 s + ffprobe transport 2 s + audio + tsDisc + CC + Dolby). Every thumbnail attempt during a probe cycle failed with `bind failed: Address already in use`, producing a flood of errors in the log and never capturing a frame.
+- **Fix:** Added `_relayProbeRunning` flag. Set to `true` at the start of the `isRelayBacked` sequential probe block, cleared in the `finally`. `doCapture` checks the flag and if set, backs off 3 s without attempting the bind — no error logged. Thumbnail runs in the gaps between probe cycles.
+- **Root cause 2 (H.264 decode_slice_header noise):** The relay runs ffmpeg at `-loglevel verbose` (needed for libsrt periodic stats). Verbose level exposes H.264 parser warnings (`decode_slice_header error`, `non-existing PPS`, `mmco:`) that occur when ffmpeg joins the stream mid-GOP before the first keyframe. These are harmless but polluted the log with hundreds of lines per minute.
+- **Fix:** Added a suppression rule in the relay's stderr filter — lines matching H.264 parser patterns are skipped before reaching `console.error`.
+- **Operator impact:** Log is clean under normal operation. Thumbnails now capture successfully between probe cycles.
+
 ## v3.2.5 — 2026-03-22
 
 ### Fix: SRT transport stats — colon-space separator not parsed; sequential probe port hold time reduced
