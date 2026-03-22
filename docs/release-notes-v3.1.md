@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.21)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.22)
+
+## v3.2.22 — 2026-03-22
+
+### Fix: suppress spurious "Input signal missing" alarms during SRT relay restart window
+
+- **Root cause:** When the relay's ffmpeg exits (network blip → `Input/output error`), `SRTRelay._ready` becomes `false` and the relay schedules a restart with 5 s+ backoff. During this window the UDP loopback has no sender, so any in-flight `ffprobe` reads an empty socket and throws "ffprobe returned empty probe payload (no input packets observed during probe window)". `TSAnalyser.run()` caught this and emitted `error`, which `App.jsx`'s `isExpectedNoSignalError()` correctly classified as "Input signal missing" — but the stream was not actually lost; only the relay was momentarily restarting.
+- **Fix:** Added a guard in `TSAnalyser.run()` catch block: if `this._relay` exists and `!this._relay.isReady()`, the probe error is silently swallowed (no `emit('error')`). The relay's own restart logging still fires; only the false-positive alarm is suppressed.
+- **Operator impact:** SRT streams will no longer generate "Input signal missing" alarm log entries during the relay's brief restart window after a transient network interruption.
 
 ## v3.2.21 — 2026-03-22
 
