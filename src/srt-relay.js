@@ -10,13 +10,25 @@ const { spawn } = require('child_process');
  * as local UDP so all internal consumers (thumbnail, ffprobe, tsanalyze, ETR)
  * share the UDP copy rather than competing for the single SRT listener slot.
  *
- * Architecture: one long-lived ffmpeg process per SRT source.
- *   ffmpeg -i srt://source:port?... -c copy -f mpegts udp://127.0.0.1:PORT?pkt_size=1316
+ * Architecture: srt-live-transmit as the SRT connection holder + optional ffmpeg for thumbnails.
+ *
+ *   srt-live-transmit srt://source:port?... udp://127.0.0.1:PORT
+ *   (stdout: JSON stats every ~1000 packets — RTT, BW, loss, NAK, ACK)
+ *
+ *   ffmpeg -i udp://127.0.0.1:PORT ...thumbnail... (spawned after relay is ready)
+ *
+ * Using srt-live-transmit (not ffmpeg) as the SRT connection holder is necessary because:
+ *   - ffmpeg 5.x/Debian Bookworm does not call srt_bistats() periodically, so
+ *     no libsrt stats lines appear in ffmpeg stderr even with statsintvl=N.
+ *   - srt-live-transmit 1.5.3 emits full JSON stats (RTT, bandwidth, loss, NAK, ACK)
+ *     on stdout every N packets via -s N -pf json.
+ *   - The thumbnail ffmpeg connects to the UDP loopback (not the SRT source directly),
+ *     so a second SRT caller slot is not required.
  *
  * Port allocation: deterministic djb2 hash of srtUrl, range 5500–5599.
  * Same URL always gets same port — stable across restarts.
  *
- * Emits: 'started', 'stopped', 'error', 'ready'
+ * Emits: 'started', 'stopped', 'error', 'ready', 'srt_stats'
  */
 
 const RELAY_PORT_MIN   = 5500;
@@ -42,9 +54,9 @@ class SRTRelay extends EventEmitter {
    * @param {string}  opts.srtUrl   - Source SRT URL (srt://host:port?latency=N...)
    * @param {string}  [opts.id]     - Human-readable identifier for logging
    * @param {number}  [opts.port]   - Override UDP output port (default: hash of srtUrl)
-   * @param {string}  [opts.thumbPath] - Absolute path for relay-written JPEG thumbnail
-   *                                     When set, ffmpeg writes a thumbnail on every I-frame
-   *                                     (no separate capture process needed).
+   * @param {string}  [opts.thumbPath] - Absolute path for relay-written JPEG thumbnail.
+   *                                     When set, a separate ffmpeg process reads from the
+   *                                     UDP loopback and writes thumbnails on each I-frame.
    */
   constructor({ srtUrl, id, port, thumbPath } = {}) {
     super();
@@ -59,12 +71,14 @@ class SRTRelay extends EventEmitter {
     this.localUrl  = `udp://127.0.0.1:${this.port}`;
     this.thumbPath = (typeof thumbPath === 'string' && thumbPath) ? thumbPath : null;
 
-    this._proc         = null;
+    this._proc         = null;   // srt-live-transmit process
+    this._thumbProc    = null;   // ffmpeg thumbnail process
     this._running      = false;
     this._restartTimer = null;
-    this._restartDelay = 5000; // ms; doubles on each crash, capped at 30 s
-    this._epoch        = 0;    // stale-close guard
+    this._restartDelay = 5000;   // ms; doubles on each crash, capped at 30 s
+    this._epoch        = 0;      // stale-close guard
     this._ready        = false;
+    this.lastStats     = null;   // latest parsed srt-live-transmit JSON stats object
   }
 
   /** Start the relay. Idempotent — safe to call multiple times. */
@@ -82,6 +96,7 @@ class SRTRelay extends EventEmitter {
     this._ready   = false;
     this._epoch++;
     if (this._restartTimer) { clearTimeout(this._restartTimer); this._restartTimer = null; }
+    this._killThumb();
     if (this._proc) {
       try { this._proc.kill('SIGTERM'); } catch (_) {}
       this._proc = null;
@@ -103,20 +118,11 @@ class SRTRelay extends EventEmitter {
     // Ensure caller mode and eno1 binding (same convention as monitoring.js _buildSrtSrc)
     if (!src.includes('mode='))    src += `${sep}mode=caller`;
     if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
-    if (!src.includes('timeout=')) src += '&timeout=8000000';
     // Give the SRT receive buffer 500 ms headroom unless the URL already sets a
     // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,
     // tsbpddelay= — the last is the legacy libsrt option name accepted by some encoders).
-    if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
-    // Enable periodic libsrt statistics output (every 1 s) so the relay can emit
-    // 'srt_stats_line' events with RTT, bandwidth and loss data for the UI.
-    // Override any existing statsintvl < 500 ms — statsintvl=1 (1 ms) would
-    // emit ~1000 stats lines/second and flood stderr unnecessarily.
-    const statsintvlMatch = src.match(/statsintvl=(\d+)/i);
-    if (!statsintvlMatch) {
-      src += '&statsintvl=1000';
-    } else if (Number(statsintvlMatch[1]) < 500) {
-      src = src.replace(/statsintvl=\d+/i, 'statsintvl=1000');
+    if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) {
+      src += '&rcvlatency=500';
     }
     return src;
   }
@@ -126,89 +132,59 @@ class SRTRelay extends EventEmitter {
     const epoch = ++this._epoch;
 
     const inputUrl  = this._buildInputUrl();
-    const outputUrl = `${this.localUrl}?pkt_size=1316`;
+    const outputUrl = `udp://127.0.0.1:${this.port}`;
 
-    const args = [
-      // verbose: enables libsrt statistics lines (msRTT=, mbpsRecvRate=, etc.)
-      // that are emitted to stderr and collected via the 'srt_stats_line' event.
-      '-loglevel', 'verbose',
-      '-fflags', '+discardcorrupt',
-      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening a bare
-      // H.264 parser context. The relay decodes video only when thumbPath is set;
-      // the demuxer has the full elementary stream so SPS/PPS are in-context from
-      // connection start (unlike a mid-stream joiner that never sees them).
-      '-f', 'mpegts',
-      '-i', inputUrl,
-      // Output 1 — MPEG-TS UDP relay (stream copy, no decode)
-      '-c', 'copy',
-      '-f', 'mpegts',
+    // srt-live-transmit: holds the SRT caller connection, re-outputs as UDP loopback,
+    // and emits full JSON stats (RTT, bandwidth, packet loss, NAK, ACK) on stdout.
+    // -a no:     disable auto-reconnect — we manage restarts with exponential backoff.
+    // -s 1000:   emit stats every 1000 packets (~0.75 s at 16 Mbps).
+    // -pf json:  machine-readable JSON stats format (recv.mbitRate, link.rtt, etc.).
+    const proc = spawn('srt-live-transmit', [
+      '-a', 'no',
+      '-s', '1000',
+      '-pf', 'json',
+      inputUrl,
       outputUrl,
-    ];
-
-    // Output 2 — JPEG thumbnail (only when thumbPath is configured).
-    // thumbnail=100 buffers 100 frames and picks the sharpest one — at 25 fps
-    // that is ~1 JPEG every 4 s. No select=I-frame filter: feeding thumbnail
-    // only I-frames would require 100 × GOP interval (≈ 1000 s) before the
-    // first output. thumbnail tolerates a mix of corrupt/valid frames from the
-    // initial mid-GOP probe window and writes once a good frame arrives.
-    // -vsync vfr (deprecated alias for -fps_mode vfr) is required so image2
-    // -update 1 can receive frames at irregular intervals without duplicating.
-    if (this.thumbPath) {
-      args.push(
-        '-map', '0:v:0',
-        '-vf', 'thumbnail=100,scale=480:-2',
-        '-vsync', 'vfr',
-        '-update', '1',
-        '-f', 'image2',
-        '-q:v', '3',
-        this.thumbPath,
-      );
-    }
-
-    const proc = spawn('ffmpeg', args);
+    ]);
     this._proc  = proc;
     this._ready = false;
 
-    // Emit 'ready' after 600 ms — by then the SRT handshake has completed
+    // Parse JSON stats from stdout — one object per line after each stats interval.
+    let _stdoutBuf = '';
+    proc.stdout.on('data', (d) => {
+      _stdoutBuf += d.toString();
+      const lines = _stdoutBuf.split('\n');
+      _stdoutBuf = lines.pop(); // hold the last (potentially incomplete) line
+      for (const line of lines) {
+        const t = line.trim();
+        if (!t) continue;
+        try {
+          const obj = JSON.parse(t);
+          if (obj && (obj.recv || obj.link)) {
+            this.lastStats = obj;
+            this.emit('srt_stats', obj);
+          }
+        } catch (_) {}
+      }
+    });
+
+    // Emit 'ready' after 800 ms — by then the SRT handshake has completed
     // and the first packets are flowing into the UDP output buffer.
     const readyTimer = setTimeout(() => {
       if (this._epoch !== epoch || !this._running) return;
       if (!this._ready) {
         this._ready = true;
         this.emit('ready', { id: this.id, localUrl: this.localUrl });
+        if (this.thumbPath) this._spawnThumb(epoch);
       }
-    }, 600);
-
-    // Debug: log first N stderr lines so we can inspect the exact ffmpeg
-    // verbose format for this build and confirm stats line shape.
-    // Disable by setting SRT_RELAY_STDERR_DEBUG=0 in the environment.
-    const debugLines = process.env.SRT_RELAY_STDERR_DEBUG !== '0' ? 30 : 0;
-    let _debugCount = 0;
+    }, 800);
 
     proc.stderr.on('data', (d) => {
       for (const line of d.toString().split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        // Emit libsrt statistics lines as events so TSAnalyser can surface SRT
-        // transport stats (RTT, bandwidth, packet loss) in the decoder panel.
-        // libsrt periodic stats (statsintvl=N) use key=value format: msRTT=X
-        // ffmpeg verbose log uses key:value format: msRTT:X
-        // Match both so the pipeline works regardless of which layer emits first.
-        if (/msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(t)) {
-          this.emit('srt_stats_line', t);
-        } else if (/error|warning|failed|reject|refused/i.test(t)) {
-          // Suppress known-harmless H.264 parser noise from mid-GOP SRT join.
-          // These appear at -loglevel verbose when ffmpeg parses stream headers
-          // before the relay has received a full keyframe — they are not errors.
-          if (/decode_slice_header|non.existing PPS|mmco:|non existing PPS/i.test(t)) continue;
-          // Only surface genuine errors — suppress verbose info noise.
+        if (/error|failed|reject|refused/i.test(t)) {
           console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
-        }
-        // Debug: print first N lines verbatim so we can see the actual ffmpeg
-        // output format for SRT stats on this build.
-        if (_debugCount < debugLines) {
-          _debugCount++;
-          console.log(`[srt-relay:${this.id}:stderr:${_debugCount}] ${t.slice(0, 300)}`);
         }
       }
     });
@@ -216,6 +192,7 @@ class SRTRelay extends EventEmitter {
     proc.on('error', (err) => {
       clearTimeout(readyTimer);
       if (this._epoch !== epoch) return;
+      this._killThumb();
       this.emit('error', err);
       this._scheduleRestart();
     });
@@ -225,13 +202,61 @@ class SRTRelay extends EventEmitter {
       if (this._epoch !== epoch) return;
       this._proc  = null;
       this._ready = false;
+      this._killThumb();
       if (this._running) {
-        console.warn(`[srt-relay:${this.id}] ffmpeg exited (${code}); restart in ${this._restartDelay}ms`);
+        console.warn(`[srt-relay:${this.id}] srt-live-transmit exited (${code}); restart in ${this._restartDelay}ms`);
         this._scheduleRestart();
       }
     });
 
     this.emit('started', { id: this.id, localUrl: this.localUrl });
+  }
+
+  /**
+   * Spawn a separate ffmpeg process to write JPEG thumbnails from the UDP loopback.
+   * Called after the relay is ready so the UDP stream is already flowing.
+   * Restarts automatically if it crashes while the relay epoch is still active.
+   */
+  _spawnThumb(epoch) {
+    if (!this.thumbPath || !this._running || this._epoch !== epoch) return;
+
+    // UDP input hints match monitoring.js LIVE_INPUT_HINTS for multicast/loopback consumers.
+    const udpInput = `udp://127.0.0.1:${this.port}?overrun_nonfatal=1&fifo_size=5000000&timeout=3000000`;
+
+    // thumbnail=100: buffer 100 frames and pick the sharpest — at 25 fps that is ~4 s per JPEG.
+    // Joining the UDP stream mid-GOP is fine: the first IDR frame arrives within one GOP period
+    // and thumbnail=100 tolerates the initial corrupt/partial frames before then.
+    const thumbProc = spawn('ffmpeg', [
+      '-fflags', '+discardcorrupt',
+      '-f', 'mpegts',
+      '-i', udpInput,
+      '-map', '0:v:0',
+      '-vf', 'thumbnail=100,scale=480:-2',
+      '-vsync', 'vfr',
+      '-update', '1',
+      '-f', 'image2',
+      '-q:v', '3',
+      this.thumbPath,
+    ]);
+    this._thumbProc = thumbProc;
+
+    thumbProc.stderr.on('data', () => {});
+    thumbProc.on('error', () => { this._thumbProc = null; });
+    thumbProc.on('close', () => {
+      if (this._thumbProc !== thumbProc) return;
+      this._thumbProc = null;
+      // Restart after 3 s if the relay is still in the same epoch
+      if (this._running && this._epoch === epoch) {
+        setTimeout(() => this._spawnThumb(epoch), 3000);
+      }
+    });
+  }
+
+  _killThumb() {
+    if (this._thumbProc) {
+      try { this._thumbProc.kill('SIGTERM'); } catch (_) {}
+      this._thumbProc = null;
+    }
   }
 
   _scheduleRestart() {

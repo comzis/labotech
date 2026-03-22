@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.15)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.16)
+
+## v3.2.16 — 2026-03-22
+
+### Fix: SRT Transport stats — RTT, Bandwidth, NAK, ACK, Loss all missing for relay-backed SRT streams
+
+- **Root cause:** The relay used `ffmpeg` to hold the SRT caller connection. ffmpeg 5.1.8 (Debian Bookworm) does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines to stderr, even with `-loglevel verbose` and `statsintvl=1000` in the URL. No stats lines → `_lastRelayStatsLine` was always null → only `RATE` was synthesised from bitrate. The v3.2.14 fix (second `srt-live-transmit` caller) was also ineffective because the SRT sender at the operator's site only accepts one simultaneous caller and immediately rejected the second connection.
+- **Fix:** Replaced `ffmpeg` with `srt-live-transmit` as the SRT connection holder in `SRTRelay`. `srt-live-transmit 1.5.3` emits full JSON stats (RTT, bandwidth, packet loss, NAK, ACK, retransmissions) on stdout every ~0.75 s (`-s 1000 -pf json`). A separate `ffmpeg` process now reads from the UDP loopback for thumbnail capture (mid-GOP join is tolerated because SPS/PPS are embedded per-IDR in the MPEG-TS bitstream). `_probeSrtLinkStats()` for relay streams now returns the cached relay stats directly — no second SRT connection is ever opened.
+- **Operator impact:** SRT Transport panel now shows full stats (RTT, RATE, BANDWIDTH, LOSS, NAK SENT, ACK SENT, RETRANSMITTED, DROPPED, LOST, TOTAL RECEIVED) for all SRT streams, including those from senders that only accept a single caller.
 
 ## v3.2.15 — 2026-03-22
 
