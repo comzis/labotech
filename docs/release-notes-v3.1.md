@@ -2,6 +2,16 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.9 — 2026-03-22
+
+### Fix: SRT relay thumbnail — integrate JPEG capture into relay ffmpeg to fix permanent H.264 mid-GOP failure
+
+- **Root cause:** Any separate ffmpeg process joining the relay's loopback UDP stream mid-stream cannot decode H.264. The encoder sends SPS/PPS only at initial SRT connection — not before subsequent IDR slices. Any joiner that misses the opening connection (which is always the case for the one-shot `doCapture` timer) never receives the SPS/PPS → `non-existing PPS 0 referenced` → exit code 69. Neither `thumbnail=pick` nor `select=eq(pict_type\,I)` can work from a mid-stream joiner because both require H.264 decoding, which requires SPS/PPS.
+- **Fix:** Integrated thumbnail capture into the relay's own ffmpeg process as a second output branch. Since the relay connects to SRT from scratch at startup, it sees the SPS/PPS from the encoder's initial sequence. A second ffmpeg output (`-map 0:v:0 -vf "select=eq(pict_type\,I),thumbnail=1,scale=480:-2" -vsync vfr -update 1 -f image2 -q:v 3`) writes a JPEG on each I-frame directly to `THUMBNAIL_DIR`. The `thumbPath` parameter is added to `SRTRelay`'s constructor and wired from `TSAnalyser`.
+- **Fix:** Replaced the `doCapture` one-shot timer loop for relay streams with a lightweight mtime poller (`pollRelayThumb`, 2 s interval). The poller checks the JPEG file's mtime and updates `_lastThumbnailUrl` when the relay writes a new frame. No separate ffmpeg process, no UDP port competition, no EADDRINUSE.
+- **Removed:** The `_relayProbeRunning` backoff logic in `doCapture` and the EADDRINUSE silent-retry in `doCapture` are no longer needed for SRT relay streams (the `doCapture` path is no longer used for relay).
+- **Operator impact:** SRT relay thumbnails now appear and rotate reliably on every I-frame boundary (≈ every 2–10 s depending on encoder GOP). No capture failures logged. Log is clean for SRT relay streams.
+
 ## v3.2.8 — 2026-03-22
 
 ### Fix: SRT relay — thumbnail always fails mid-GOP; SRT stats "AWAITING" on ffmpeg 5.x

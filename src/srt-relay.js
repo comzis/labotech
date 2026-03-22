@@ -39,21 +39,25 @@ function hashPort(url) {
 class SRTRelay extends EventEmitter {
   /**
    * @param {object} opts
-   * @param {string}  opts.srtUrl  - Source SRT URL (srt://host:port?latency=N...)
-   * @param {string}  [opts.id]    - Human-readable identifier for logging
-   * @param {number}  [opts.port]  - Override UDP output port (default: hash of srtUrl)
+   * @param {string}  opts.srtUrl   - Source SRT URL (srt://host:port?latency=N...)
+   * @param {string}  [opts.id]     - Human-readable identifier for logging
+   * @param {number}  [opts.port]   - Override UDP output port (default: hash of srtUrl)
+   * @param {string}  [opts.thumbPath] - Absolute path for relay-written JPEG thumbnail
+   *                                     When set, ffmpeg writes a thumbnail on every I-frame
+   *                                     (no separate capture process needed).
    */
-  constructor({ srtUrl, id, port } = {}) {
+  constructor({ srtUrl, id, port, thumbPath } = {}) {
     super();
     if (!srtUrl || !String(srtUrl).startsWith('srt://')) {
       throw new Error(`SRTRelay: srtUrl must be a srt:// URL, got: ${srtUrl}`);
     }
-    this.srtUrl   = srtUrl;
-    this.id       = id || `relay-${Date.now()}`;
-    this.port     = Number.isFinite(Number(port)) && Number(port) > 0
+    this.srtUrl    = srtUrl;
+    this.id        = id || `relay-${Date.now()}`;
+    this.port      = Number.isFinite(Number(port)) && Number(port) > 0
       ? Number(port)
       : hashPort(srtUrl);
-    this.localUrl = `udp://127.0.0.1:${this.port}`;
+    this.localUrl  = `udp://127.0.0.1:${this.port}`;
+    this.thumbPath = (typeof thumbPath === 'string' && thumbPath) ? thumbPath : null;
 
     this._proc         = null;
     this._running      = false;
@@ -129,16 +133,33 @@ class SRTRelay extends EventEmitter {
       // that are emitted to stderr and collected via the 'srt_stats_line' event.
       '-loglevel', 'verbose',
       '-fflags', '+discardcorrupt',
-      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening an H.264
-      // parser context, which eliminates the wall of 'non-existing PPS / decode_slice_header'
-      // warnings that appear when joining a live stream mid-GOP. The relay only
-      // copies TS packets; it never needs to understand the elementary streams.
+      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening a bare
+      // H.264 parser context. The relay decodes video only when thumbPath is set;
+      // the demuxer has the full elementary stream so SPS/PPS are in-context from
+      // connection start (unlike a mid-stream joiner that never sees them).
       '-f', 'mpegts',
       '-i', inputUrl,
+      // Output 1 — MPEG-TS UDP relay (stream copy, no decode)
       '-c', 'copy',
       '-f', 'mpegts',
       outputUrl,
     ];
+
+    // Output 2 — JPEG thumbnail (only when thumbPath is configured).
+    // The relay's ffmpeg is the only process that has seen SPS/PPS from connection
+    // start, so it is the only one that can successfully decode H.264 mid-stream.
+    // Selecting I-frames keeps decode overhead low (one JPEG per GOP ≈ every 2–10 s).
+    if (this.thumbPath) {
+      args.push(
+        '-map', '0:v:0',
+        '-vf', 'select=eq(pict_type\\,I),thumbnail=1,scale=480:-2',
+        '-vsync', 'vfr',
+        '-update', '1',
+        '-f', 'image2',
+        '-q:v', '3',
+        this.thumbPath,
+      );
+    }
 
     const proc = spawn('ffmpeg', args);
     this._proc  = proc;
