@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.17)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.18)
+
+## v3.2.18 — 2026-03-22
+
+### Fix: SRT relay — stream gaps on transient network blips (srt-live-transmit `-a no`)
+
+- **Root cause:** `srt-live-transmit` was started with `-a no` (auto-reconnect disabled). Any brief network interruption caused slt to exit immediately, triggering the Node.js 5 s restart delay (doubling on repeated drops). This produced visible gaps in the stream every time the SRT sender had a minor network blip, whereas the previous ffmpeg relay handled transient disconnects internally.
+- **Fix:** Removed `-a no` — auto-reconnect is now enabled (slt default). Transient drops are recovered internally by slt without restarting the Node.js relay process or the backoff timer. The `close` handler now only fires on fatal exits (bad URL, explicit `stop()`).
+- **Operator impact:** SRT stream gaps caused by brief network interruptions are eliminated. The transmission stability matches the pre-v3.2.16 ffmpeg relay behaviour.
 
 ## v3.2.17 — 2026-03-22
 
