@@ -2,6 +2,15 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.12 — 2026-03-22
+
+### Fix: SRT relay thumbnail — disappears on tab switch; lost after nodemon restart
+
+- **Root cause 1 (null lastResult seed):** In v3.2.11, `pollRelayThumb` guarded `lastResult` update with `if (this.lastResult)`. If no probe had run yet (`lastResult === null`), the thumbnail URL was emitted as a live WS event but `lastResult` stayed null. On tab switch, `refreshActives()` → `toJSON()` → `lastResult: null` — the URL was not in the REST snapshot and was lost.
+- **Fix 1:** `pollRelayThumb` now always seeds `lastResult`: `this.lastResult = this.lastResult ? { ...this.lastResult, thumbnailUrl } : { id, thumbnailUrl }`. The minimal seed is overwritten by the next full probe result.
+- **Root cause 2 (toJSON never checks disk):** After a nodemon restart, all in-memory TSAnalyser state is gone — `lastResult` is null, `_lastThumbnailUrl` is null. Even though the JPEG file from the previous session still exists on disk, `toJSON()` returned `lastResult: null` and `refreshActives()` could not restore the thumbnail.
+- **Fix 2:** `toJSON()` now falls back to `_resolveCachedThumbnailUrl()` (disk file check) when `lastResult` has no `thumbnailUrl`. If the file exists it seeds a minimal `lastResult` with the URL, so the Multiview and Confidence Monitor restore the thumbnail immediately after restart.
+
 ## v3.2.11 — 2026-03-22
 
 ### Fix: SRT relay thumbnail — URL not persisted across tab switches; multiview tile delayed
