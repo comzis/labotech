@@ -2,6 +2,20 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.5 — 2026-03-22
+
+### Fix: SRT transport stats — colon-space separator not parsed; sequential probe port hold time reduced
+
+- **Root cause 1 (stats still "AWAITING"):** FFmpeg's verbose log emits libsrt stats with a space after the colon: `msRTT: 18.500`. The `SEP = '[:=]'` pattern in `_extractSrtStatsFromLog` expected the digit to immediately follow the separator. With a space present, `Number('') === NaN` — every field returned `null` and stats stayed at "AWAITING STATS" even though the line filter passed.
+- **Fix:** Changed `SEP` to `'[:=]\\s*'` (with optional whitespace) so both `msRTT=18.500` (libsrt format) and `msRTT: 18.500` (ffmpeg verbose format) are captured correctly.
+- **Root cause 2 (slow thumbnail rotation):** The sequential `isRelayBacked` probe path ran `_probeTSDuck()` with a 9 s kill timer and `_probeTransportBitrateBps()` with a 3 s capture window. For loopback UDP the relay stream is already buffered — there is no SRT latency fill needed. The combined probe cycle took 40+ seconds, leaving the thumbnail one-shot path waiting for the port.
+- **Fix:** For relay-backed streams, `_probeTSDuck()` kill timer is reduced from 9 s to 5 s, and `_probeTransportBitrateBps()` capture is reduced from 3.0 s to 2.0 s. Total sequential probe cycle now ~15–20 s vs. 40+ s previously.
+- **Operator impact:** RTT, bandwidth, and packet-loss stats now populate on first relay stats event. Thumbnail rotation resumes between probe cycles rather than being starved.
+
+## v3.2.4 — 2026-03-22
+
+### Fix: SRT relay — no-signal spurious alarms from dual UDP output
+
 ## v3.2.3 — 2026-03-22
 
 ### Fix: SRT relay — TS bitrate shows 0.38 Mb/s "STREAMS" instead of measured rate
