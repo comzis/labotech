@@ -2,6 +2,13 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.7 — 2026-03-22
+
+### Fix: SRT relay — statsintvl too low floods stderr; add relay connection log lines
+
+- **Fix:** `_buildInputUrl()` now normalises any `statsintvl` value below 500 ms to 1000 ms. Decoder URLs provisioned with `statsintvl=1` (1 ms — effectively ~1000 stats lines/second) are silently corrected to 1 s. Values ≥ 500 ms are left as-is.
+- **Logging:** Added `console.log` on relay `ready` event and on first `srt_stats_line` received. Operators can confirm relay connection and stats pipeline from `docker logs` without needing to inspect the UI.
+
 ## v3.2.6 — 2026-03-22
 
 ### Fix: SRT relay — thumbnail EADDRINUSE flood and H.264 log noise
