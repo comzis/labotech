@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.14)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.15)
+
+## v3.2.15 — 2026-03-22
+
+### Fix: thumbnail disappears on tab switch for worker-managed streams (direct SRT, RTP/UDP)
+
+- **Root cause:** The `thumbnail_frame` event handler in `api.js` only updated `a._lastThumbnailUrl` but never merged the URL into `a.lastResult`. On tab switch, `refreshActives()` → `toJSON()` reads `lastResult` to build the REST snapshot — `_lastThumbnailUrl` is in-memory only and not visible to `toJSON()`. The thumbnail appeared live via WS but was lost on any navigation that caused a REST re-fetch.
+- **Affected streams:** All streams using `ThumbnailWorkerClient` — direct SRT caller and RTP/UDP multicast. Relay-backed SRT was already fixed via `pollRelayThumb`.
+- **Fix:** Frame handler now merges `thumbnailUrl` into `a.lastResult` on every new frame, matching the pattern established in `pollRelayThumb`.
+- **Operator impact:** Thumbnails for direct SRT and multicast decoders now persist correctly across Multiview ↔ Decoder tab switches and after nodemon restarts.
 
 ## v3.2.14 — 2026-03-22
 
