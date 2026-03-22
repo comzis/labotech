@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.14)
+
+## v3.2.14 — 2026-03-22
+
+### Fix: SRT Transport stats — only RATE shown; RTT, Bandwidth, NAK, ACK, retransmissions, loss all missing
+
+- **Root cause 1 (relay streams):** `_probeSrtLinkStats()` had an early-return guard `|| this._relay` that caused it to always return null for relay-backed SRT streams. The fallback path synthesised a minimal `srtStats = { rateMbps }` from the measured bitrate, so only RATE ever populated the SRT Transport panel.
+- **Root cause 2 (all SRT streams):** The `srt-live-transmit -pf json` output includes `recv.naksSent` and `recv.acksSent` but these fields were never parsed and mapped to `srt.pktNak` / `srt.pktAck`. NAK and ACK always showed "—" even when stats were available.
+- **Fix 1:** Removed the `|| this._relay` guard. `srt-live-transmit` now connects to the SRT source as a second caller alongside the relay's ffmpeg process. Professional broadcast SRT senders (GV/LK receivers, encoders) accept multiple simultaneous callers. If the sender rejects the second connection, `srt-live-transmit` exits immediately and the system falls back to rate-only — the relay is unaffected.
+- **Fix 2:** Added parsing of `recv.naksSent` → `srt.pktNak` and `recv.acksSent` → `srt.pktAck`. Added `retransRatio` calculation for the health penalty scorer.
+- **Operator impact:** SRT Transport panel now shows RTT, Bandwidth, Total Received, Dropped, Lost, Retransmissions, NAK Sent, and ACK Sent for both relay and non-relay SRT streams.
 
 ## v3.1.121 / web — 2026-03-22
 

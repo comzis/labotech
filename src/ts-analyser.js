@@ -1106,7 +1106,12 @@ class TSAnalyser extends EventEmitter {
   // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format.
   _probeSrtLinkStats() {
     return new Promise((resolve) => {
-      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://') || this._relay) return resolve(null);
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      // For relay-backed streams, srt-live-transmit opens a second caller connection
+      // to the same SRT source alongside the relay's ffmpeg. Professional broadcast
+      // SRT senders (GV/LK receivers, encoders) accept multiple simultaneous callers.
+      // If the sender rejects the second connection, srt-live-transmit exits immediately
+      // and this resolves(null) — the relay stays connected and rate-only stats remain.
       const latencyMs = parseSrtLatency(this.url);
       const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
       const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
@@ -1137,6 +1142,8 @@ class TSAnalyser extends EventEmitter {
         const pktLost    = Number(recv.packetsLost);
         const pktDropped = Number(recv.packetsDropped);
         const pktRetrans = Number(recv.packetsRetransmitted);
+        const pktNak     = Number(recv.naksSent);
+        const pktAck     = Number(recv.acksSent);
         if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
         if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
         if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
@@ -1144,8 +1151,13 @@ class TSAnalyser extends EventEmitter {
         if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
         if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
         if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+        if (Number.isFinite(pktNak))     srt.pktNak     = pktNak;
+        if (Number.isFinite(pktAck))     srt.pktAck     = pktAck;
         if (pktTotal > 0 && Number.isFinite(pktLost)) {
           srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+        }
+        if (pktTotal > 0 && Number.isFinite(pktRetrans)) {
+          srt.retransRatio = parseFloat(((pktRetrans / pktTotal) * 100).toFixed(3));
         }
         resolve(Object.keys(srt).length > 0 ? srt : null);
       });
