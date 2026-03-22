@@ -288,9 +288,10 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
   const isRunning = Boolean(meta?.isRunning);
   const telemetryFresh = hasTelemetry && staleMs <= 15000;
-  // Operator preference: active running decoders remain green while lock/telemetry warms up.
-  // If telemetry exists and goes stale, downgrade to warning.
-  const signalOk = isRunning && (!hasTelemetry || telemetryFresh);
+  // In engineer mode, downgrade to warning when telemetry goes stale.
+  // In MCR (operator) mode, running = green — no telemetry-freshness penalty so the
+  // badge never flips to amber just because a probe cycle is delayed or MCR was toggled.
+  const signalOk = isRunning && (engineerMode ? (!hasTelemetry || telemetryFresh) : true);
 
   return (
     <div
@@ -362,26 +363,32 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
 
       {/* Info panel */}
       <div className="p-2 space-y-1.5" style={{ background: '#141414' }}>
-        <div
-          className="text-[10px] font-mono engraved"
-          style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
-        >
-          {meta?.url || result?.url || '-'}
-        </div>
-        <div
-          className="text-[10px] font-mono uppercase tracking-wider"
-          style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
-        >
-          {hasProbeError
-            ? `probe error: ${String(result.probeError).slice(0, 60)}`
-            : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
-        </div>
-        <div
-          className="text-[10px] font-mono uppercase tracking-wider"
-          style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
-        >
-          thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
-        </div>
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono engraved"
+            style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
+          >
+            {meta?.url || result?.url || '-'}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
+          >
+            {hasProbeError
+              ? `probe error: ${String(result.probeError).slice(0, 60)}`
+              : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
+          >
+            thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
+          </div>
+        )}
         <div className="text-[11px] text-gray-300 font-mono" style={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
           <span className="engraved">SVC </span>{primaryService}
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
@@ -429,20 +436,24 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
           )}
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-1">
-          <Stat label="Programs" value={String(result?.programs?.length || 0)} />
-          <Stat label="PIDs" value={
-            result?.dvb?.streamBreakdown
-              ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
-              : String(countPids(result))
-          } />
-          <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
-          <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
-        </div>
-        <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
-          TS source: {transportRate.source.toUpperCase()}
-        </div>
+        {/* Stats — engineer mode only */}
+        {engineerMode && (
+          <>
+            <div className="grid grid-cols-4 gap-1">
+              <Stat label="Programs" value={String(result?.programs?.length || 0)} />
+              <Stat label="PIDs" value={
+                result?.dvb?.streamBreakdown
+                  ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
+                  : String(countPids(result))
+              } />
+              <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
+              <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+            </div>
+            <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
+              TS source: {transportRate.source.toUpperCase()}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -641,7 +652,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [nowMs, setNowMs] = useState(Date.now());
-  const [engineerMode, setEngineerMode] = useState(true);
+  const [engineerMode, setEngineerMode] = useState(false);
   const [engineerModeLabel, setEngineerModeLabel] = useState(DEFAULT_ENGINEER_MODE_LABEL);
   const [isEditingEngineerModeLabel, setIsEditingEngineerModeLabel] = useState(false);
   const [engineerModeLabelDraft, setEngineerModeLabelDraft] = useState(DEFAULT_ENGINEER_MODE_LABEL);

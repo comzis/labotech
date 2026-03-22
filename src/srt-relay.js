@@ -54,6 +54,11 @@ class SRTRelay extends EventEmitter {
       ? Number(port)
       : hashPort(srtUrl);
     this.localUrl = `udp://127.0.0.1:${this.port}`;
+    // Dedicated thumbnail output port (probe port + 100, range 5600–5699).
+    // PersistentThumbnailCapture binds here exclusively while probes use localUrl,
+    // eliminating the UDP unicast port-exclusivity conflict that forced one-shot captures.
+    this.thumbPort = this.port + 100;
+    this.thumbUrl  = `udp://127.0.0.1:${this.thumbPort}`;
 
     this._proc         = null;
     this._running      = false;
@@ -88,6 +93,9 @@ class SRTRelay extends EventEmitter {
   /** Returns the local UDP URL consumers should connect to. */
   getLocalUrl() { return this.localUrl; }
 
+  /** Returns the dedicated thumbnail UDP URL (probe port + 100). */
+  getThumbUrl() { return this.thumbUrl; }
+
   /** True once the relay has fired its first 'ready' event. */
   isReady() { return this._ready; }
 
@@ -104,6 +112,9 @@ class SRTRelay extends EventEmitter {
     // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,
     // tsbpddelay= — the last is the legacy libsrt option name accepted by some encoders).
     if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
+    // Enable periodic libsrt statistics output (every 1 s) so the relay can emit
+    // 'srt_stats_line' events with RTT, bandwidth and loss data for the UI.
+    if (!src.includes('statsintvl=')) src += '&statsintvl=1000';
     return src;
   }
 
@@ -111,8 +122,9 @@ class SRTRelay extends EventEmitter {
     if (!this._running) return;
     const epoch = ++this._epoch;
 
-    const inputUrl  = this._buildInputUrl();
-    const outputUrl = `${this.localUrl}?pkt_size=1316`;
+    const inputUrl      = this._buildInputUrl();
+    const outputUrl     = `${this.localUrl}?pkt_size=1316`;
+    const thumbOutputUrl = `${this.thumbUrl}?pkt_size=1316`;
 
     const args = [
       // verbose: enables libsrt statistics lines (msRTT=, mbpsRecvRate=, etc.)
@@ -125,9 +137,11 @@ class SRTRelay extends EventEmitter {
       // copies TS packets; it never needs to understand the elementary streams.
       '-f', 'mpegts',
       '-i', inputUrl,
-      '-c', 'copy',
-      '-f', 'mpegts',
-      outputUrl,
+      // Primary output: probe port — used by tsanalyze, ffprobe, ETR.
+      '-c', 'copy', '-f', 'mpegts', outputUrl,
+      // Thumbnail output: dedicated port (probe+100) — held exclusively by
+      // PersistentThumbnailCapture so it never conflicts with probe processes.
+      '-c', 'copy', '-f', 'mpegts', thumbOutputUrl,
     ];
 
     const proc = spawn('ffmpeg', args);
@@ -150,7 +164,10 @@ class SRTRelay extends EventEmitter {
         if (!t) continue;
         // Emit libsrt statistics lines as events so TSAnalyser can surface SRT
         // transport stats (RTT, bandwidth, packet loss) in the decoder panel.
-        if (/msRTT=|mbpsRecvRate=|mbpsSendRate=|mbpsBandwidth=/i.test(t)) {
+        // libsrt periodic stats (statsintvl=N) use key=value format: msRTT=X
+        // ffmpeg verbose log uses key:value format: msRTT:X
+        // Match both so the pipeline works regardless of which layer emits first.
+        if (/msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(t)) {
           this.emit('srt_stats_line', t);
         } else if (/error|warning|failed|reject|refused/i.test(t)) {
           // Only surface genuine errors — suppress verbose info noise.
