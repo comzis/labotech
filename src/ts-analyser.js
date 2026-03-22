@@ -825,14 +825,14 @@ class TSAnalyser extends EventEmitter {
         // Fallback: bitrate= field reported directly by FFmpeg
         if (progressKbps > 0) bitrateBps = Math.round(progressKbps * 1000);
 
-        // For relay-backed SRT, get stats from the relay's srt-live-transmit process
-        // (it holds the SRT connection and emits full JSON stats every ~1000 packets).
-        // For direct SRT (no relay), extract from ffprobe verbose log.
+        // For relay-backed SRT the transport probe runs on UDP (no libsrt output).
+        // ffmpeg 5.x / Debian 12 does not emit periodic libsrt stats lines so
+        // _lastRelaySrtStats is effectively always null — synthesise a minimal
+        // srtStats object from the measured bitrate so the SRT Transport panel
+        // shows RATE. RTT/bandwidth/loss remain "—" (genuinely unavailable).
         let srtStats = this._relay
-          ? (this._lastRelaySrtStats ? this._parseSltStats(this._lastRelaySrtStats) : null)
+          ? (this._lastRelaySrtStats ? this._extractSrtStatsFromLog(this._lastRelaySrtStats) : null)
           : this._extractSrtStatsFromLog(stderr);
-        // If relay stats not yet available, synthesise RATE from measured bitrate so
-        // the SRT Transport panel shows something while waiting for the first stats interval.
         if (this._relay && !srtStats && bitrateBps) {
           srtStats = { rateMbps: parseFloat((bitrateBps / 1e6).toFixed(3)) };
         }
@@ -1133,22 +1133,16 @@ class TSAnalyser extends EventEmitter {
       }));
   }
 
-  // Return SRT link stats (RTT, bandwidth, loss, NAK, ACK) for the active stream.
-  // For relay-backed streams the relay's srt-live-transmit process holds the SRT
-  // connection and emits continuous JSON stats — return the cached object directly.
-  // For direct SRT (no relay) spawn srt-live-transmit as a dedicated connection.
+  // Run srt-live-transmit for (latency + 2s) and parse its JSON stats output.
+  // This is the only reliable way to get RTT, loss, NAK, retransmit for SRT RX —
+  // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format
+  // on ffmpeg 5.x / Debian Bookworm.
+  // Note: relay-backed streams (this._relay set) skip this probe — the relay's
+  // ffmpeg holds the only caller slot and senders typically reject a second connection.
   _probeSrtLinkStats() {
     return new Promise((resolve) => {
-      if (!this.url || !this.url.startsWith('srt://')) return resolve(null);
-
-      // Relay path: srt-live-transmit already holds the SRT connection — use cached stats.
-      // No second caller is opened (broadcast senders typically only accept one caller).
-      if (this._relay) {
-        return resolve(this._relay.lastStats ? this._parseSltStats(this._relay.lastStats) : null);
-      }
-
-      // Direct SRT path: spawn srt-live-transmit as a dedicated connection for stats.
-      if (!isSltAvailable()) return resolve(null);
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      if (this._relay) return resolve(null);
       const latencyMs = parseSrtLatency(this.url);
       const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
       const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
@@ -2872,15 +2866,8 @@ class TSAnalyser extends EventEmitter {
         console.log(`[relay:${this.id}] ready — stream flowing on ${localUrl}`);
         this.emit('info', { message: `SRT relay ready → ${localUrl}` });
       });
-      let _statsLogged = false;
-      this._relay.on('srt_stats', (stats) => {
-        this._lastRelaySrtStats = stats;
-        if (!_statsLogged) {
-          _statsLogged = true;
-          const r = stats.recv || {};
-          const l = stats.link || {};
-          console.log(`[relay:${this.id}] first SRT stats: RTT=${l.rtt}ms rate=${r.mbitRate}Mbps`);
-        }
+      this._relay.on('srt_stats_line', (line) => {
+        this._lastRelaySrtStats = line;
       });
       this._relay.start();
     }
