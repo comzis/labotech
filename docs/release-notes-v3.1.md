@@ -10,6 +10,14 @@ Date: 2026-03-22 (latest: web 3.1.118)
 - **UX:** Port field is hidden when a full `srt://` / `rtp://` / `udp://` URL is typed. Decoder ID is optional (auto-generated from timestamp if blank). Modal closes on Escape or backdrop click. Enter key submits. Consistent with existing provisioning flow (`handleCreate`).
 - **Operator impact:** Operators can build a multiview stack from the Multiview tab in a single session without switching tabs.
 
+## v3.2.13 — 2026-03-22
+
+### Fix: system status flashes "OFFLINE" briefly when stopping a decoder
+
+- **Root cause:** `saveState()` writes `config/state.json` via `fs.writeFileSync` on every decoder start/stop. `docker-compose.dev.yml` mounts `./config:/app/config` into the container, and nodemon (running without an ignore list) watches `*.json` files in the working directory — which includes `config/state.json`. Every stop triggered a nodemon restart → WebSocket dropped → status indicator briefly showed "OFFLINE" (red LED) → WebSocket reconnected → "RUNNING" restored.
+- **Fix:** Added `nodemon.json` to the project root with `ignore: ["config/state.json", "logs/"]`. Nodemon now ignores runtime state writes and the thumbnail directory. Code changes in `src/` and `routes/` still trigger restarts as expected.
+- **Operator impact:** Stopping decoders no longer causes a server restart or WS disconnect. Status indicator stays green throughout.
+
 ## v3.2.12 — 2026-03-22
 
 ### Fix: SRT relay thumbnail — disappears on tab switch; lost after nodemon restart
