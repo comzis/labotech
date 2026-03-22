@@ -660,6 +660,12 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
+  const [addTileOpen, setAddTileOpen] = useState(false);
+  const [addTileHost, setAddTileHost] = useState('');
+  const [addTilePort, setAddTilePort] = useState('');
+  const [addTileDecoderId, setAddTileDecoderId] = useState('');
+  const [addTileError, setAddTileError] = useState(null);
+  const [addTileSubmitting, setAddTileSubmitting] = useState(false);
   const [catalog, setCatalog] = useState([]);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [showCatalog, setShowCatalog] = useState(false);
@@ -1044,6 +1050,47 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     };
     reader.readAsText(file);
   }, [refreshActives]);
+
+  // Close add-tile modal on Escape
+  useEffect(() => {
+    if (!addTileOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setAddTileOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addTileOpen]);
+
+  const handleAddTile = async () => {
+    const h = addTileHost.trim();
+    if (!h) { setAddTileError('Host / IP or SRT URL is required'); return; }
+    let url;
+    if (/^(srt|rtp|udp):\/\//i.test(h)) {
+      url = h;
+    } else {
+      const p = addTilePort.trim();
+      if (!p) { setAddTileError('Port is required'); return; }
+      url = `srt://${h}:${p}`;
+    }
+    const id = addTileDecoderId.trim() || `decoder-${Date.now()}`;
+    setAddTileSubmitting(true);
+    setAddTileError(null);
+    try {
+      await startContinuous(id, url, 5000);
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), id] };
+      }));
+      setAddTileOpen(false);
+      setAddTileHost('');
+      setAddTilePort('');
+      setAddTileDecoderId('');
+      refreshActives();
+    } catch (err) {
+      setAddTileError(err?.message || 'Failed to start decoder');
+    } finally {
+      setAddTileSubmitting(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!probeUrl) return;
@@ -1433,39 +1480,149 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        {/* Active decoder tiles only */}
-        {activeIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No active decoders. Use + Decoder to start monitoring a stream.</p>
-        )}
-        {activeIds.length > 0 && visibleIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.</p>
-        )}
-        {visibleIds.length > 0 && (
-          <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-            {visibleIds.map((id) => (
-              <DecoderCard
-                key={id}
-                id={id}
-                displayName={getMultiviewDisplayName(id)}
-                meta={decoderMeta[id]}
-                result={resultsById[id]}
-                onStop={async () => {
-                  if (stoppingIds.has(id)) return;
-                  setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
-                  try { await stop(id); } finally {
-                    refreshActives();
-                    setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-                  }
-                }}
-                nowMs={nowMs}
-                engineerMode={engineerMode}
-                isStopping={stoppingIds.has(id)}
-              />
-            ))}
-          </div>
-        )}
+        {/* Decoder tile grid — always rendered; "+" tile is always the last slot */}
+        <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {visibleIds.map((id) => (
+            <DecoderCard
+              key={id}
+              id={id}
+              displayName={getMultiviewDisplayName(id)}
+              meta={decoderMeta[id]}
+              result={resultsById[id]}
+              onStop={async () => {
+                if (stoppingIds.has(id)) return;
+                setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
+                try { await stop(id); } finally {
+                  refreshActives();
+                  setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+                }
+              }}
+              nowMs={nowMs}
+              engineerMode={engineerMode}
+              isStopping={stoppingIds.has(id)}
+            />
+          ))}
+          {/* Quick-add slot */}
+          <button
+            onClick={() => setAddTileOpen(true)}
+            style={{
+              minHeight: '200px',
+              border: '1px dashed #1c3040',
+              borderRadius: '4px',
+              background: 'transparent',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+            className="hover:border-teal-600 hover:bg-teal-950/20 transition-colors group"
+            title="Add decoder to multiview"
+          >
+            <Plus size={32} className="text-gray-700 group-hover:text-teal-500 transition-colors" />
+          </button>
+        </div>
       </BentoCard>
     </div>
+
+    {/* ── Add decoder modal (triggered by "+" tile) ── */}
+    {addTileOpen && (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={(e) => { if (e.target === e.currentTarget) setAddTileOpen(false); }}
+      >
+        <div style={{ background: '#0d1117', border: '1px solid #1a2d3a', borderRadius: '6px', padding: '28px 28px 24px', width: '420px', maxWidth: '92vw' }}>
+          <p style={{ fontFamily: 'monospace', fontSize: '11px', color: '#00ff9f', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
+            Add Decoder
+          </p>
+
+          {/* Host / SRT URL */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Host / IP or SRT:// URL
+          </label>
+          <input
+            type="text"
+            value={addTileHost}
+            onChange={(e) => { setAddTileHost(e.target.value); setAddTileError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="192.168.1.10  or  srt://host:port?latency=2000"
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {/* Port — hidden when a full URL is typed */}
+          {!/^(srt|rtp|udp):\/\//i.test(addTileHost) && (
+            <>
+              <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                Port
+              </label>
+              <input
+                type="text"
+                value={addTilePort}
+                onChange={(e) => { setAddTilePort(e.target.value); setAddTileError(null); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+                placeholder="e.g. 9000"
+                style={{
+                  width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+                  background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+                  color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+                  outline: 'none',
+                }}
+              />
+            </>
+          )}
+
+          {/* Optional decoder ID */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Decoder ID <span style={{ color: '#374151' }}>(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={addTileDecoderId}
+            onChange={(e) => setAddTileDecoderId(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="auto-generated if blank"
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '20px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {addTileError && (
+            <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#f87171', marginBottom: '12px' }}>{addTileError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => { setAddTileOpen(false); setAddTileHost(''); setAddTilePort(''); setAddTileDecoderId(''); setAddTileError(null); }}
+              style={{ fontFamily: 'monospace', fontSize: '11px', color: '#6b7280', background: 'transparent', border: '1px solid #1a2d3a', borderRadius: '3px', padding: '6px 16px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddTile}
+              disabled={addTileSubmitting}
+              style={{
+                fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.1em',
+                color: addTileSubmitting ? '#374151' : '#00ff9f',
+                background: 'transparent', border: `1px solid ${addTileSubmitting ? '#1a2d3a' : '#00ff9f'}`,
+                borderRadius: '3px', padding: '6px 20px', cursor: addTileSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {addTileSubmitting ? 'STARTING…' : 'START'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── Professional MCR-style fullscreen multiview overlay ── */}
     {isFullscreen && (() => {

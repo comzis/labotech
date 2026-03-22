@@ -2,6 +2,14 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.1.119 / web — 2026-03-22
+
+### Feature: Multiview — "+" tile to add decoder without leaving the Multiview tab
+
+- **What's new:** The Decoder Multiview grid now always shows a "+" tile as the last slot. Clicking it opens a compact modal (Host/IP or full SRT:// URL · Port · optional Decoder ID). On submit, the decoder is provisioned and immediately added to the active panel — no need to switch to the Decoder tab.
+- **UX:** Port field is hidden when a full `srt://` / `rtp://` / `udp://` URL is typed. Decoder ID is optional (auto-generated from timestamp if blank). Modal closes on Escape or backdrop click. Enter key submits. Consistent with existing provisioning flow (`handleCreate`).
+- **Operator impact:** Operators can build a multiview stack from the Multiview tab in a single session without switching tabs.
+
 ## v3.2.12 — 2026-03-22
 
 ### Fix: SRT relay thumbnail — disappears on tab switch; lost after nodemon restart
