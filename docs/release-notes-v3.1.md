@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.120)
+Date: 2026-03-22 (latest: web 3.1.121)
+
+## v3.1.121 / web — 2026-03-22
+
+### Fix: Decoder tab — Active Decoders list does not show decoders started from Multiview tab
+
+- **Root cause:** `DecoderPanel` called `refreshActives()` only once on mount. If a decoder was started from the Multiview tab, the `analyse_started` WS event fired while `DecoderPanel` was unmounted (conditional render). On switching back, the mount-time REST call was the only opportunity to pick up the new decoder — any timing race left the list stale until the next `analyse_result` WS event arrived (up to 5 s later).
+- **Fix:** Added a 5 s polling interval to `DecoderPanel` (matching the Multiview cadence). Active Decoders now stays in sync with the backend regardless of which tab provisioned the decoder.
+- **Operator impact:** Decoders started from the Multiview "+" tile (or any other source) appear in the Decoder tab's Active Decoders list within 5 seconds without any manual refresh.
 
 ## v3.1.120 / web — 2026-03-22
 
