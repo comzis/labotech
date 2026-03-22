@@ -122,6 +122,7 @@ class TSAnalyser extends EventEmitter {
     this._ccHeavyCount = 0; // heavy CC probe cycles completed
     this._relay        = null;        // SRTRelay instance (srt:// sources only)
     this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
+    this._lastRelayStatsLine = null;  // latest libsrt stats line from relay stderr
     // Optional out-of-process thumbnail worker client (Phase 2).
     // When provided, thumbnail management is delegated to the worker process
     // instead of running PersistentThumbnailCapture in the API process.
@@ -794,7 +795,11 @@ class TSAnalyser extends EventEmitter {
         // Fallback: bitrate= field reported directly by FFmpeg
         if (progressKbps > 0) bitrateBps = Math.round(progressKbps * 1000);
 
-        const srtStats = this._extractSrtStatsFromLog(stderr);
+        // For relay-backed SRT the transport probe runs on UDP (no libsrt output).
+        // Use the most recent stats line emitted by the relay's verbose ffmpeg process.
+        const srtStats = (this._relay && this._lastRelayStatsLine)
+          ? this._extractSrtStatsFromLog(this._lastRelayStatsLine)
+          : this._extractSrtStatsFromLog(stderr);
         if (bitrateBps || srtStats) {
           return resolve({
             bitrateBps: bitrateBps || null,
@@ -2768,6 +2773,9 @@ class TSAnalyser extends EventEmitter {
       this._relay.on('ready', ({ localUrl }) => {
         this.emit('info', { message: `SRT relay ready → ${localUrl}` });
       });
+      this._relay.on('srt_stats_line', (line) => {
+        this._lastRelayStatsLine = line;
+      });
       this._relay.start();
     }
 
@@ -2924,6 +2932,7 @@ class TSAnalyser extends EventEmitter {
       this._relay.stop();
       this._relay = null;
       this._effectiveUrl = this.url;
+      this._lastRelayStatsLine = null;
     }
     this.emit('stopped', { id: this.id });
   }

@@ -100,10 +100,10 @@ class SRTRelay extends EventEmitter {
     if (!src.includes('mode='))    src += `${sep}mode=caller`;
     if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
     if (!src.includes('timeout=')) src += '&timeout=8000000';
-    // Give the SRT receive buffer 500 ms headroom unless the URL already sets it.
-    // Without this, transient network jitter (>latency ms) causes RCV-DROPPED which
-    // corrupts the TS and makes consumers see glitches.
-    if (!src.includes('latency=') && !src.includes('rcvlatency=')) src += '&rcvlatency=500';
+    // Give the SRT receive buffer 500 ms headroom unless the URL already sets a
+    // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,
+    // tsbpddelay= — the last is the legacy libsrt option name accepted by some encoders).
+    if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
     return src;
   }
 
@@ -115,7 +115,9 @@ class SRTRelay extends EventEmitter {
     const outputUrl = `${this.localUrl}?pkt_size=1316`;
 
     const args = [
-      '-loglevel', 'error',
+      // verbose: enables libsrt statistics lines (msRTT=, mbpsRecvRate=, etc.)
+      // that are emitted to stderr and collected via the 'srt_stats_line' event.
+      '-loglevel', 'verbose',
       '-fflags', '+discardcorrupt',
       // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening an H.264
       // parser context, which eliminates the wall of 'non-existing PPS / decode_slice_header'
@@ -143,8 +145,18 @@ class SRTRelay extends EventEmitter {
     }, 600);
 
     proc.stderr.on('data', (d) => {
-      const t = d.toString().trim();
-      if (t) console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
+      for (const line of d.toString().split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        // Emit libsrt statistics lines as events so TSAnalyser can surface SRT
+        // transport stats (RTT, bandwidth, packet loss) in the decoder panel.
+        if (/msRTT=|mbpsRecvRate=|mbpsSendRate=|mbpsBandwidth=/i.test(t)) {
+          this.emit('srt_stats_line', t);
+        } else if (/error|warning|failed|reject|refused/i.test(t)) {
+          // Only surface genuine errors — suppress verbose info noise.
+          console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
+        }
+      }
     });
 
     proc.on('error', (err) => {

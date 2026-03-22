@@ -52,7 +52,8 @@ if (!fs.existsSync(THUMBNAIL_DIR)) {
  */
 function parseSrtLatency(url) {
   try {
-    const m = String(url || '').match(/[?&]latency=(\d+)/i);
+    // Accept both ffmpeg's 'latency=' and the legacy SRT option name 'tsbpddelay='
+    const m = String(url || '').match(/[?&](?:latency|tsbpddelay)=(\d+)/i);
     return m ? Math.max(200, parseInt(m[1], 10)) : 2000;
   } catch (_) { return 2000; }
 }
