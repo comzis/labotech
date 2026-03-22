@@ -417,8 +417,60 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     });
 
     const attemptTimeoutMs = isSrtUrl ? 14000 : 8000;
-    runAttempt({ withDeblock: true, timeoutMs: attemptTimeoutMs })
-      .catch(() => runAttempt({ withDeblock: false, timeoutMs: attemptTimeoutMs }))
+
+    // Relay loopback (udp://127.0.0.1:…): stream is H.264 with long GOPs (10–25 s).
+    // thumbnail=pick needs decoded frames; joining mid-GOP means no decodable frames
+    // until the next IDR — the standard attempts reliably fail (exit 69).
+    // Instead: wait for the next I-frame using select=eq(pict_type\,I) with a 30 s
+    // timeout that covers the worst-case GOP.  Average wait ≈ half the GOP ≈ 5–12 s.
+    const relayKeyframeAttempt = isLoopback
+      ? ({ withDeblock }) => new Promise((res, rej) => {
+          const vf = [
+            'select=eq(pict_type\\,I)',
+            'thumbnail=1',
+            withDeblock && capture.deblock ? 'pp=de/de' : null,
+            `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
+            capture.denoise || null,
+          ].filter(Boolean).join(',');
+          const kfArgs = [
+            '-y', '-hide_banner', '-loglevel', 'error',
+            '-fflags', '+discardcorrupt+genpts',
+            '-err_detect', 'ignore_err',
+            '-analyzeduration', udpAnalyzeDurUs,
+            '-probesize', udpProbeSize,
+            '-rtbufsize', '128M',
+            '-i', src,
+            '-frames:v', '1',
+            '-vf', vf,
+            '-vsync', 'vfr',
+            '-f', 'image2',
+            '-q:v', String(capture.qv),
+            tmpPath,
+          ];
+          const kfProc = spawn('ffmpeg', kfArgs);
+          let kfStderr = '';
+          const kfTimer = setTimeout(() => { try { kfProc.kill('SIGTERM'); } catch (_) {} rej(new Error('Relay keyframe timeout')); }, 30000);
+          kfProc.stderr.on('data', (d) => { kfStderr += d.toString(); });
+          kfProc.on('exit', (code) => {
+            clearTimeout(kfTimer);
+            if (code === 0 && fs.existsSync(tmpPath)) return res();
+            try { fs.unlinkSync(tmpPath); } catch (_) {}
+            const detail = (kfStderr || '').trim().slice(0, 200);
+            rej(new Error(detail || `Relay keyframe capture failed (${code})`));
+          });
+          kfProc.on('error', (err) => { clearTimeout(kfTimer); try { fs.unlinkSync(tmpPath); } catch (_) {} rej(err); });
+        })
+      : null;
+
+    // For loopback relay skip the standard thumbnail=pick attempts (they always
+    // fail mid-GOP) and go straight to the I-frame wait path.
+    const captureChain = isLoopback && relayKeyframeAttempt
+      ? relayKeyframeAttempt({ withDeblock: true })
+          .catch(() => relayKeyframeAttempt({ withDeblock: false }))
+      : runAttempt({ withDeblock: true, timeoutMs: attemptTimeoutMs })
+          .catch(() => runAttempt({ withDeblock: false, timeoutMs: attemptTimeoutMs }));
+
+    captureChain
       .then(() => {
         fs.rename(tmpPath, outPath, (err) => {
           if (err) reject(err);
