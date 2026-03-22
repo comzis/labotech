@@ -2804,10 +2804,16 @@ class TSAnalyser extends EventEmitter {
         this.emit('info', { message: `SRT relay error: ${err.message}` });
       });
       this._relay.on('ready', ({ localUrl }) => {
+        console.log(`[relay:${this.id}] ready — stream flowing on ${localUrl}`);
         this.emit('info', { message: `SRT relay ready → ${localUrl}` });
       });
+      let _statsLogged = false;
       this._relay.on('srt_stats_line', (line) => {
         this._lastRelayStatsLine = line;
+        if (!_statsLogged) {
+          _statsLogged = true;
+          console.log(`[relay:${this.id}] first stats line received: ${line.slice(0, 120)}`);
+        }
       });
       this._relay.start();
     }

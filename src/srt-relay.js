@@ -106,7 +106,14 @@ class SRTRelay extends EventEmitter {
     if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
     // Enable periodic libsrt statistics output (every 1 s) so the relay can emit
     // 'srt_stats_line' events with RTT, bandwidth and loss data for the UI.
-    if (!src.includes('statsintvl=')) src += '&statsintvl=1000';
+    // Override any existing statsintvl < 500 ms — statsintvl=1 (1 ms) would
+    // emit ~1000 stats lines/second and flood stderr unnecessarily.
+    const statsintvlMatch = src.match(/statsintvl=(\d+)/i);
+    if (!statsintvlMatch) {
+      src += '&statsintvl=1000';
+    } else if (Number(statsintvlMatch[1]) < 500) {
+      src = src.replace(/statsintvl=\d+/i, 'statsintvl=1000');
+    }
     return src;
   }
 
