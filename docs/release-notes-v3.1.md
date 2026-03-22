@@ -1,6 +1,19 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.118)
+Date: 2026-03-22 (latest: web 3.1.120)
+
+## v3.1.120 / web — 2026-03-22
+
+### Fix: Multiview — existing tiles disappear when adding a new decoder; ghost processes shown in grid
+
+- **Root cause:** The auto-seeding `useEffect` used a "prune or full-reseed" approach that only checked whether *any* stored decoder ID was still in `activeIds`. If a panel held stale IDs from a previous session (stopped decoders, server restart with new IDs), `anyActive` evaluated to `false` → the effect replaced all `decoderIds` with the entire current `activeIds` set, wiping tile assignments built by the operator.
+- **Fix:** The effect now *prunes* stale IDs from every panel before checking `anyActive`. Ghost IDs (processes that are no longer active on the server) are silently removed. Only if every panel ends up empty after pruning does a first-time reseed occur (placing all active IDs onto panel 0). Existing tile assignments are preserved.
+- **Operator impact:** Adding a new decoder via the "+" tile or the "+ Decoder" form no longer causes existing tiles to disappear. Ghost decoder entries in the grid are automatically cleared on the next `activeIds` refresh.
+
+### Feature: Multiview "+" tile modal — catalog stream picker, protocol selector, SRT latency/passphrase
+
+- **What's new:** The "+" tile modal now includes: (1) a catalog search dropdown identical to the existing "+ Decoder" form — streams can be selected by name or IP/port with grouped category headers; selecting a stream auto-fills Host, Port, Mode, and Decoder ID. (2) Protocol mode buttons (RTP / SRT / UDP). (3) SRT-specific Latency and Passphrase fields that appear when SRT mode is selected. URL construction uses `buildProbeUrl` for consistency.
+- **Operator impact:** Operators can add any catalogued stream to the multiview directly from the "+" tile without having to type addresses manually.
 
 ## v3.1.119 / web — 2026-03-22
 
