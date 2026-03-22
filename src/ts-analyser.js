@@ -751,7 +751,8 @@ class TSAnalyser extends EventEmitter {
       // duration and analyze window from the URL's latency parameter.
       const srtLatencyMs   = isSrt ? parseSrtLatency(this.url) : 0;
       const analyzeDurUs   = isSrt ? String((srtLatencyMs + 2000) * 1000) : '1000000';
-      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : '3.0';
+      // Relay: loopback UDP unicast — no latency fill needed; use short capture.
+      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : (this._relay ? '2.0' : '3.0');
       const killTimerMs    = isSrt ? (srtLatencyMs + 20000) : 12000;
       const args = [
         '-hide_banner',
@@ -868,10 +869,11 @@ class TSAnalyser extends EventEmitter {
 
     // All patterns use exact libsrt field names as emitted by ffmpeg's libsrt.c.
     // No short fallback aliases — those caused false matches against ffmpeg progress output.
-    // libsrt periodic stats (statsintvl=N) use key=value: msRTT=18.500 mbpsRecvRate=21.234
-    // ffmpeg verbose log uses key:value:              msRTT:18.500 mbpsRecvRate:21.234
-    // Each pattern uses [:=] to match both separator styles.
-    const SEP = '[:=]';
+    // Two log sources, two separator styles:
+    //   libsrt periodic stats (statsintvl=N): key=value  — msRTT=18.500 mbpsRecvRate=21.234
+    //   ffmpeg verbose log:                   key: value — msRTT: 18.500 mbpsRecvRate: 21.234
+    // SEP uses [:=]\s* so both formats are captured (space after colon is optional).
+    const SEP = '[:=]\\s*';
     const f   = (name, fp = '([\\d.]+)') => new RegExp(`\\b${name}${SEP}${fp}`, 'i');
     const fi  = (name)                    => new RegExp(`\\b${name}${SEP}(\\d+)`, 'i');
     const rateMbps   = num(last(f('mbpsRecvRate'))) ?? num(last(f('mbpsSendRate')));
@@ -1137,9 +1139,11 @@ class TSAnalyser extends EventEmitter {
       const proc = spawn('tsanalyze', args);
       let stdout = '';
       let stderr = '';
+      // Relay streams use loopback UDP unicast — reduce kill timer to free the
+      // port sooner so the next sequential probe can bind without delay.
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 9000);
+      }, this._relay ? 5000 : 9000);
 
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
