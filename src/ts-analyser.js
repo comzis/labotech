@@ -2881,13 +2881,12 @@ class TSAnalyser extends EventEmitter {
             // Push the new thumbnail URL to live WS clients without waiting for the
             // next full probe cycle. Also persist it in lastResult so refreshActives()
             // restores it correctly after a tab switch.
-            if (this.lastResult) {
-              this.lastResult = { ...this.lastResult, thumbnailUrl: this._lastThumbnailUrl };
-            }
-            this.emit('result', Object.assign(
-              { id: this.id, thumbnailUrl: this._lastThumbnailUrl },
-              this.lastResult || {},
-            ));
+            // Seed lastResult with a minimal object if no probe has run yet — the
+            // full result will be overwritten on the next probe cycle.
+            this.lastResult = this.lastResult
+              ? { ...this.lastResult, thumbnailUrl: this._lastThumbnailUrl }
+              : { id: this.id, thumbnailUrl: this._lastThumbnailUrl };
+            this.emit('result', { ...this.lastResult });
           }
         } catch (_) {
           // File not yet written — relay may still be connecting. Retry silently.
@@ -3070,11 +3069,23 @@ class TSAnalyser extends EventEmitter {
   }
 
   toJSON() {
+    // Ensure the REST snapshot always carries a thumbnailUrl when one is available,
+    // even after a backend restart (nodemon) where lastResult is null but the JPEG
+    // file from a previous session still exists on disk.
+    let lastResult = this.lastResult;
+    if (!lastResult?.thumbnailUrl) {
+      const thumbUrl = this._lastThumbnailUrl || this._resolveCachedThumbnailUrl();
+      if (thumbUrl) {
+        lastResult = lastResult
+          ? { ...lastResult, thumbnailUrl: thumbUrl }
+          : { id: this.id, thumbnailUrl: thumbUrl };
+      }
+    }
     return {
       id: this.id,
       url: this.url,
       isRunning: this.isRunning,
-      lastResult: this.lastResult,
+      lastResult,
     };
   }
 }
