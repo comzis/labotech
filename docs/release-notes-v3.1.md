@@ -1,6 +1,41 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.92 / web 3.1.114)
+Date: 2026-03-22 (latest: web 3.1.118)
+
+## v3.2.3 — 2026-03-22
+
+### Fix: SRT relay — TS bitrate shows 0.38 Mb/s "STREAMS" instead of measured rate
+
+- **Root cause:** For relay-backed SRT, all heavy probes (`tsanalyze`, `ffprobe` transport, `ffprobe` tsDisc/CC/Dolby/audio) ran in parallel on the relay's loopback unicast UDP probe port. Unicast UDP does not duplicate packets to multiple readers the way multicast does — parallel processes split the packet stream, each getting only a fraction. `tsanalyze` (PCR bitrate) and the transport ffprobe both received partial streams, producing no usable bitrate. The fallback is codec-metadata `bitrateSource='streams'`, which was 0.38 Mb/s from the encoder's declared elementary stream bitrate — not the actual transport rate.
+- **Fix:** Added `isRelayBacked` path that serialises heavy probes on the relay probe port sequentially (same as `isSrtDirect`) but without inter-probe settle delays (no SRT reconnect cooldown needed for loopback UDP). Each probe now gets the full packet stream.
+- **Operator impact:** SRT decoder tiles now show the correct TS rate (TSDUCK PCR-based source) and complete program information (PIDs, bitrate, DVB service info) matching the quality of RTP/UDP multicast tiles.
+
+## v3.2.2 — 2026-03-22
+
+### Fix: SRT transport stats always "AWAITING" — wrong separator in regex
+
+- **Root cause:** Two different log sources produce SRT statistics in different formats. libsrt's own periodic stats output (enabled by `statsintvl=N` in the SRT URL) uses `key=value` (`msRTT=18.5`). FFmpeg's verbose log layer uses `key:value` (`msRTT:18.5`). All regex patterns in `_extractSrtStatsFromLog` used only `=`, so lines from ffmpeg's verbose layer never matched and `srtStats` was always `null`.
+- **Fix 1 — enable libsrt stats:** Added `statsintvl=1000` to the relay's SRT input URL (`_buildInputUrl`). This enables libsrt's built-in 1 s periodic stats output in `key=value` format.
+- **Fix 2 — both separators:** Updated the relay's line-filter regex and all field-extraction regexes to accept `[:=]` as separator, covering both libsrt (`=`) and ffmpeg verbose (`:`). Added short field-name aliases (`pktRecv`, `pktSndLoss`, `pktRetrans`, `pktRecvACK`, `pktRecvNAK`) used by ffmpeg's verbose log variant.
+- **Operator impact:** RTT, Receive Rate, Bandwidth, and ARQ counters now populate in the SRT Transport tab within one probe cycle (~5–10 s) of starting an SRT decoder.
+
+## v3.2.1 — 2026-03-22
+
+### Fix: SRT thumbnail refresh — persistent capture via dedicated relay output port
+
+- **Problem:** SRT relay thumbnails refreshed every ~7 s (5 s interval + ~2 s ffmpeg startup + analyze time). Each one-shot capture had to start ffmpeg from scratch, connect to the relay UDP port, wait for `analyzeduration` (2 s), grab a frame, and release the socket. The RTP/UDP path uses `PersistentThumbnailCapture` (continuous ffmpeg) and updates at the configured interval with no reconnect overhead.
+- **Root cause:** The relay outputs a single loopback UDP unicast stream. Only one process can bind to a unicast UDP port at a time. `PersistentThumbnailCapture` holding the port would block `tsanalyze`/`ffprobe` probes from binding — so thumbnails were forced into one-shot mode.
+- **Fix:** The relay now outputs **two UDP streams**: the existing probe port (`5500–5599`) for `tsanalyze`/`ffprobe`/ETR, and a new dedicated thumbnail port (probe port + 100, range `5600–5699`). `TSAnalyser.startContinuous()` launches `PersistentThumbnailCapture` on the thumb port — no port conflict, continuous like RTP/UDP. The one-shot path is retained only as the no-worker fallback for RTP/UDP without a thumbnail worker.
+- **Operator impact:** SRT decoder thumbnails now refresh at the configured interval (default 5 s) with no startup latency between frames — matching the RTP/UDP multicast experience.
+
+## web 3.1.118 — 2026-03-22
+
+### Fix: MCR mode — default off, stable status, simplified tile view
+
+- **Default MCR off:** `engineerMode` now defaults to `false` (MCR/operator view). Engineer details are opt-in via the MRC toggle. Previous sessions that saved `engineerMode: true` to localStorage continue to restore correctly.
+- **Status stabilised during toggle:** In MCR-off mode `signalOk` is now simply `isRunning` — the telemetry-freshness penalty (`staleMs > 15000`) is no longer applied. This eliminates the amber flash that appeared when toggling MCR while a probe cycle was delayed. Engineer mode retains the full staleness check.
+- **Simplified tile (MCR off):** When MCR is off, each tile shows only the service name and audio level meters. Source URL, update age, thumbnail age, and the stats grid (Programs / PIDs / TS Rate / Last Probe / TS source) are hidden. Thumbnail frame is preserved in both modes.
+- **Operator impact:** MCR operators see a clean, uncluttered multiview by default. Engineers can turn MRC on for full diagnostic details.
 
 ## v3.1.92 — 2026-03-18
 

@@ -349,6 +349,12 @@ function _doCaptureThumbnail(streamId, inputUrl) {
     // For SRT, derive analyze duration from the stream's own latency parameter.
     const srtLatencyMs = isSrtUrl ? parseSrtLatency(inputUrl) : 0;
     const srtAnalyzeDurUs = isSrtUrl ? String((srtLatencyMs + 3000) * 1000) : '6000000';
+    // Loopback UDP (relay thumb port) — data is already streaming from the relay process
+    // so format detection completes almost instantly.  Use 500 ms instead of 2 s to
+    // avoid holding the one-shot slot longer than necessary between probe cycles.
+    const isLoopback = !isSrtUrl && /127\.0\.0\.1|localhost/i.test(inputUrl);
+    const udpAnalyzeDurUs = isLoopback ? '500000' : '2000000';
+    const udpProbeSize    = isLoopback ? '1500000' : '3000000';
 
     // One-shot thumbnail capture.
     //
@@ -376,8 +382,8 @@ function _doCaptureThumbnail(streamId, inputUrl) {
         '-loglevel', 'error',
         '-fflags', '+discardcorrupt+genpts',
         '-err_detect', 'ignore_err',
-        '-analyzeduration', isSrtUrl ? srtAnalyzeDurUs : '2000000',
-        '-probesize', isSrtUrl ? '7000000' : '3000000',
+        '-analyzeduration', isSrtUrl ? srtAnalyzeDurUs : udpAnalyzeDurUs,
+        '-probesize', isSrtUrl ? '7000000' : udpProbeSize,
         '-rtbufsize', '128M',
         '-i', src,
         '-frames:v', '1',
