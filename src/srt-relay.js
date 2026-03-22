@@ -136,11 +136,12 @@ class SRTRelay extends EventEmitter {
 
     // srt-live-transmit: holds the SRT caller connection, re-outputs as UDP loopback,
     // and emits full JSON stats (RTT, bandwidth, packet loss, NAK, ACK) on stdout.
-    // -a no:     disable auto-reconnect — we manage restarts with exponential backoff.
+    // Auto-reconnect is left enabled (default -a yes) so transient network blips are
+    // handled internally without triggering our Node.js restart + backoff cycle.
+    // Our close handler only fires on fatal exits (bad URL, SIGTERM from stop()).
     // -s 1000:   emit stats every 1000 packets (~0.75 s at 16 Mbps).
     // -pf json:  machine-readable JSON stats format (recv.mbitRate, link.rtt, etc.).
     const proc = spawn('srt-live-transmit', [
-      '-a', 'no',
       '-s', '1000',
       '-pf', 'json',
       inputUrl,

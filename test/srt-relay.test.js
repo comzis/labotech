@@ -93,10 +93,12 @@ describe('SRTRelay — spawn args', () => {
     expect(args).toContain('1000');
   });
 
-  test('args include -a no (disable auto-reconnect)', () => {
+  test('args do not disable auto-reconnect (-a no absent)', () => {
     const args = spawn.mock.calls[0][1];
-    expect(args).toContain('-a');
-    expect(args).toContain('no');
+    // Auto-reconnect must remain enabled (default) so transient drops are handled
+    // internally without triggering the Node.js restart + backoff cycle.
+    const aIdx = args.indexOf('-a');
+    expect(aIdx === -1 || args[aIdx + 1] !== 'no').toBe(true);
   });
 
   test('input URL has mode=caller', () => {
