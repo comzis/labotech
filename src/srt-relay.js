@@ -146,13 +146,17 @@ class SRTRelay extends EventEmitter {
     ];
 
     // Output 2 — JPEG thumbnail (only when thumbPath is configured).
-    // The relay's ffmpeg is the only process that has seen SPS/PPS from connection
-    // start, so it is the only one that can successfully decode H.264 mid-stream.
-    // Selecting I-frames keeps decode overhead low (one JPEG per GOP ≈ every 2–10 s).
+    // thumbnail=100 buffers 100 frames and picks the sharpest one — at 25 fps
+    // that is ~1 JPEG every 4 s. No select=I-frame filter: feeding thumbnail
+    // only I-frames would require 100 × GOP interval (≈ 1000 s) before the
+    // first output. thumbnail tolerates a mix of corrupt/valid frames from the
+    // initial mid-GOP probe window and writes once a good frame arrives.
+    // -vsync vfr (deprecated alias for -fps_mode vfr) is required so image2
+    // -update 1 can receive frames at irregular intervals without duplicating.
     if (this.thumbPath) {
       args.push(
         '-map', '0:v:0',
-        '-vf', 'select=eq(pict_type\\,I),thumbnail=1,scale=480:-2',
+        '-vf', 'thumbnail=100,scale=480:-2',
         '-vsync', 'vfr',
         '-update', '1',
         '-f', 'image2',
