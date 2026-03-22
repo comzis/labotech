@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.19)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.20)
+
+## v3.2.20 — 2026-03-22
+
+### Feat: upgrade ffmpeg to 7.x (John Van Sickle static build) for full SRT stats
+
+- **Change:** Replaced Debian Bookworm's `ffmpeg` apt package (5.1.8) with the John Van Sickle static build of ffmpeg 7.x in the Dockerfile. The static build is placed at `/usr/local/bin/ffmpeg` and `/usr/local/bin/ffprobe`, taking precedence over any system-installed version.
+- **Why:** ffmpeg 5.1.8 does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines (`msRTT=`, `mbpsBandwidth=`, etc.) to stderr, even with `-loglevel verbose` and `statsintvl=1000`. ffmpeg 7.x corrects this.
+- **Also:** Re-enabled `statsintvl=1000` in SRT relay URL and `srt_stats_line` event emission in `srt-relay.js` so the existing `_extractSrtStatsFromLog()` parsing path produces RTT, Bandwidth, Loss, NAK, ACK for relay-backed SRT streams if ffmpeg 7.x confirms the stats output.
+- **Operator impact:** SRT Transport panel should now show full stats (RTT, RATE, BANDWIDTH, LOSS) after the first probe cycle (~30 s). RATE was already available; all other fields require the ffmpeg upgrade to take effect.
 
 ## v3.2.19 — 2026-03-22
 
