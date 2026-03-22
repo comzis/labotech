@@ -221,33 +221,36 @@ describe('Phase 2 migration — TSAnalyser thumbnail delegation', () => {
 
   // ── startContinuous() — relay-backed SRT ────────────────────────────────────
 
-  describe('startContinuous() — relay-backed SRT stays in-process', () => {
+  describe('startContinuous() — relay-backed SRT uses relay-integrated thumbnail', () => {
     test('does NOT call thumbnailClient.start() when relay is active', () => {
       const client = makeFakeClient();
       // SRT URL triggers FakeSRTRelay, which sets this._relay
       const a = makeAnalyser('srt://10.0.0.1:9000', { thumbnailClient: client });
       a.startContinuous();
-      jest.runAllTimers();
+      // Use advanceTimersByTime rather than runAllTimers — pollRelayThumb reschedules
+      // itself indefinitely (intentional), so runAllTimers would infinite-loop.
+      jest.advanceTimersByTime(10000);
 
       // Relay should be set by the FakeSRTRelay mock
       expect(a._relay).not.toBeNull();
-      // Worker must NOT be started — relay-backed path uses in-process one-shot
+      // Worker must NOT be started — relay writes thumbnails itself
       expect(client.started).toHaveLength(0);
 
       a.stop();
     });
 
-    test('uses in-process captureThumbnail loop for relay-backed SRT', () => {
+    test('does NOT call captureThumbnail for relay-backed SRT (relay writes JPEG directly)', () => {
       const { captureThumbnail } = require('../src/monitoring');
       captureThumbnail.mockClear();
 
       const client = makeFakeClient();
       const a = makeAnalyser('srt://10.0.0.1:9000', { thumbnailClient: client });
       a.startContinuous();
-      // Fire jitter timer + one interval
-      jest.runAllTimers();
+      // Advance past the initial 1 s delay and several 2 s poll intervals.
+      jest.advanceTimersByTime(10000);
 
-      expect(captureThumbnail).toHaveBeenCalled();
+      // captureThumbnail must never be called — relay's own ffmpeg writes the JPEG
+      expect(captureThumbnail).not.toHaveBeenCalled();
 
       a.stop();
     });

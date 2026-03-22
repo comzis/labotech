@@ -2813,7 +2813,8 @@ class TSAnalyser extends EventEmitter {
     // SRT caller slot and re-outputs as local UDP. All probes and the
     // thumbnail then read from the unlimited-reader UDP copy.
     if (this.url && this.url.startsWith('srt://') && !this._relay) {
-      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay` });
+      const _relayThumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay`, thumbPath: _relayThumbPath });
       this._effectiveUrl = this._relay.localUrl;
       this._relay.on('error', (err) => {
         this.emit('info', { message: `SRT relay error: ${err.message}` });
@@ -2862,49 +2863,44 @@ class TSAnalyser extends EventEmitter {
           this._thumbnailClient.start(this.id, this._effectiveUrl, thumbIntervalSec);
         }
       }, thumbStartJitterMs);
+    } else if (this._relay) {
+      // Relay-backed SRT: the relay's own ffmpeg writes thumbnails to disk via a
+      // second ffmpeg output branch (select=eq(pict_type\,I),thumbnail=1,scale=480:-2).
+      // No separate capture process is needed — and none should run, because the
+      // relay UDP port is unicast and only one reader can bind at a time.
+      // This poller just watches the file mtime and updates _lastThumbnailUrl when
+      // the relay writes a new frame (once per GOP ≈ every 2–10 s).
+      const _thumbFilePath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      const pollRelayThumb = () => {
+        if (!this.isRunning) return;
+        try {
+          const stat = fs.statSync(_thumbFilePath);
+          if (stat.mtimeMs > this._lastThumbnailAt) {
+            this._lastThumbnailAt = stat.mtimeMs;
+            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Math.round(stat.mtimeMs)}`;
+          }
+        } catch (_) {
+          // File not yet written — relay may still be connecting. Retry silently.
+        }
+        this._thumbnailTimer = setTimeout(pollRelayThumb, 2000);
+      };
+      this._thumbnailTimer = setTimeout(pollRelayThumb, 1000);
     } else {
-      // Relay-backed SRT and RTP/UDP without worker: one-shot timer loop.
-      //
-      // PersistentThumbnailCapture is NOT used for relay-backed SRT because it relies
-      // on select=key, which waits for a keyframe.  SRT contribution encoders commonly
-      // use 10–25 s GOPs; joining mid-stream means up to 25 s before the first frame.
-      // The one-shot path uses thumbnail=pick (no keyframe required) and completes in
-      // <1 s on the relay's loopback UDP port.
-      //
-      // For relay streams the effective interval is halved (relay loopback has no SRT
-      // latency overhead) to give a faster refresh than the default 5 s cadence.
-      const relayIntervalMs = this._relay ? Math.min(thumbIntervalMs, 2000) : thumbIntervalMs;
+      // RTP/UDP without worker: one-shot timer loop.
       const doCapture = async () => {
         this._thumbnailTimer = null;
         if (!this.isRunning) return;
-        // Sequential relay probes hold the unicast UDP port — back off and retry
-        // rather than spamming EADDRINUSE errors every 2 s.
-        if (this._relayProbeRunning) {
-          this._thumbnailTimer = setTimeout(doCapture, 3000);
-          return;
-        }
-        const captureUrl = this._effectiveUrl;
         try {
-          await captureThumbnail(this.id, captureUrl);
+          await captureThumbnail(this.id, this._effectiveUrl);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
         } catch (err) {
           const msg = (err && err.message) || '';
-          // EADDRINUSE: a probe or stale child process from a previous node
-          // restart is holding the relay UDP port.  Back off silently —
-          // this is expected during/after probe cycles and clears on its own.
-          if (/Address already in use|EADDRINUSE/i.test(msg)) {
-            this._thumbnailTimer = setTimeout(doCapture, 5000);
-            return;
-          }
           console.error(`[thumb:${this.id}] capture failed: ${msg}`);
         }
-        scheduleThumb();
+        if (this.isRunning) {
+          this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
+        }
       };
-      const scheduleThumb = () => {
-        if (!this.isRunning) return;
-        this._thumbnailTimer = setTimeout(doCapture, relayIntervalMs);
-      };
-      // First capture: jitter only — no extra interval wait
       this._thumbnailTimer = setTimeout(doCapture, thumbStartJitterMs);
     }
 
