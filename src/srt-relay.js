@@ -113,14 +113,6 @@ class SRTRelay extends EventEmitter {
     // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,
     // tsbpddelay= — the last is the legacy libsrt option name accepted by some encoders).
     if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
-    // Request periodic libsrt statistics every 1 s — ffmpeg 7.x honours this and
-    // emits msRTT=, mbpsRecvRate= etc. to stderr at -loglevel verbose.
-    const statsintvlMatch = src.match(/statsintvl=(\d+)/i);
-    if (!statsintvlMatch) {
-      src += '&statsintvl=1000';
-    } else if (Number(statsintvlMatch[1]) < 500) {
-      src = src.replace(/statsintvl=\d+/i, 'statsintvl=1000');
-    }
     return src;
   }
 
@@ -176,26 +168,14 @@ class SRTRelay extends EventEmitter {
       }
     }, 600);
 
-    // Log first 30 stderr lines to confirm whether ffmpeg 7.x emits libsrt stats.
-    const debugLines = process.env.SRT_RELAY_STDERR_DEBUG !== '0' ? 30 : 0;
-    let _debugCount = 0;
-
     proc.stderr.on('data', (d) => {
       for (const line of d.toString().split('\n')) {
         const t = line.trim();
         if (!t) continue;
-        // Emit libsrt periodic stats lines (statsintvl=N) for the SRT Transport panel.
-        // ffmpeg 7.x emits these as key=value pairs: msRTT=X mbpsRecvRate=Y ...
-        if (/msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(t)) {
-          this.emit('srt_stats_line', t);
-        } else if (/error|warning|failed|reject|refused/i.test(t)) {
+        if (/error|warning|failed|reject|refused/i.test(t)) {
           // Suppress known-harmless H.264 parser noise from mid-GOP SRT join.
           if (/decode_slice_header|non.existing PPS|mmco:|non existing PPS/i.test(t)) continue;
           console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
-        }
-        if (_debugCount < debugLines) {
-          _debugCount++;
-          console.log(`[srt-relay:${this.id}:stderr:${_debugCount}] ${t.slice(0, 300)}`);
         }
       }
     });
