@@ -10,6 +10,12 @@ Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.17)
 - **Fix:** Thumbnail ffmpeg is now spawned after a delay of `latencyMs + 500 ms` (parsed from the SRT URL). UDP read timeout is set to `max(5s, latencyMs + 3s)` so ffmpeg waits long enough for the latency buffer to fill before giving up.
 - **Operator impact:** Thumbnails and full SRT stats (RTT, Bandwidth, NAK, ACK, Loss) now both work simultaneously for SRT streams with any latency setting.
 
+### Fix: `stop()` leaked stale field reference `_lastRelayStatsLine` after rename to `_lastRelaySrtStats`
+
+- **Root cause:** Agent B peer review caught that `ts-analyser.js` `stop()` still cleared `this._lastRelayStatsLine = null` after the field was renamed to `this._lastRelaySrtStats` in v3.2.16. The stale field was silently assigned to `undefined` on every `stop()` call; the actual field retained its last value across restarts, causing stale stats from a previous session to appear briefly after a decoder stop/start cycle.
+- **Fix:** `stop()` now clears `this._lastRelaySrtStats = null`.
+- **Operator impact:** SRT Transport stats correctly show "AWAITING STATS" immediately after a decoder is stopped and restarted.
+
 ## v3.2.16 — 2026-03-22
 
 ### Fix: SRT Transport stats — RTT, Bandwidth, NAK, ACK, Loss all missing for relay-backed SRT streams
@@ -36,6 +42,7 @@ Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.17)
 - **Fix 1:** Removed the `|| this._relay` guard. `srt-live-transmit` now connects to the SRT source as a second caller alongside the relay's ffmpeg process. Professional broadcast SRT senders (GV/LK receivers, encoders) accept multiple simultaneous callers. If the sender rejects the second connection, `srt-live-transmit` exits immediately and the system falls back to rate-only — the relay is unaffected.
 - **Fix 2:** Added parsing of `recv.naksSent` → `srt.pktNak` and `recv.acksSent` → `srt.pktAck`. Added `retransRatio` calculation for the health penalty scorer.
 - **Operator impact:** SRT Transport panel now shows RTT, Bandwidth, Total Received, Dropped, Lost, Retransmissions, NAK Sent, and ACK Sent for both relay and non-relay SRT streams.
+- **Superseded (relay stats path):** Fix 1 above (second `srt-live-transmit` caller for relay streams) was superseded by v3.2.16, which replaced `ffmpeg` with `srt-live-transmit` as the primary SRT connection holder. The operator's sender rejects second callers; the v3.2.16 approach avoids the problem entirely. Fix 2 (NAK/ACK parsing) remains in effect.
 
 ## v3.1.121 / web — 2026-03-22
 

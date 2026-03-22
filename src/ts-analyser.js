@@ -3058,7 +3058,7 @@ class TSAnalyser extends EventEmitter {
       this._relay.stop();
       this._relay = null;
       this._effectiveUrl = this.url;
-      this._lastRelayStatsLine = null;
+      this._lastRelaySrtStats = null;
     }
     this.emit('stopped', { id: this.id });
   }
