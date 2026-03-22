@@ -1069,19 +1069,26 @@ export default function App() {
           borderLeft: '1px solid #1e2a3a',
         }} />
 
+        {/* Multiview is kept permanently mounted to preserve thumbnail and status state
+            across tab switches. key={tab} would unmount/remount it causing a brief
+            offline flash and thumbnail wipe every time the user navigates away. */}
+        <div style={{ display: tab === 'decoders' ? 'block' : 'none' }} className="py-4">
+          <PanelErrorBoundary label="Multiview"><DecoderMultiviewPanel lastMessage={lastMessage} /></PanelErrorBoundary>
+        </div>
+
         <motion.div
           key={tab}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.15 }}
           className="py-4"
+          style={{ display: tab === 'decoders' ? 'none' : undefined }}
         >
           {tab === 'streams'    && <PanelErrorBoundary label="SRT Encapsulator"><StreamsPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
           {tab === 'transcode'  && <PanelErrorBoundary label="Transcoder"><TranscodePanel lastMessage={lastMessage} /></PanelErrorBoundary>}
           {tab === 'multicast'  && <PanelErrorBoundary label="Forwarding"><MulticastPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
           {tab === 'decoder'    && <PanelErrorBoundary label="Decoder"><DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} /></PanelErrorBoundary>}
           {tab === 'analyse'    && <PanelErrorBoundary label="TS Analyser"><TSAnalyser lastMessage={lastMessage} /></PanelErrorBoundary>}
-          {tab === 'decoders'   && <PanelErrorBoundary label="Multiview"><DecoderMultiviewPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
           {tab === 'streamView' && <PanelErrorBoundary label="Live View"><StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} /></PanelErrorBoundary>}
           {tab === 'alarms'     && (
             <EventLogPanel
