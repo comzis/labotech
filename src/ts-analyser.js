@@ -286,6 +286,13 @@ class TSAnalyser extends EventEmitter {
               const cc        = await this._probeContinuityCounterErrors();
               const dolby     = await this._probeDolbyE();
               heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
+            } else if (Boolean(this._relay)) {
+              // Light-cycle relay path: audio probe still binds the loopback
+              // unicast UDP port — run it sequentially with the flag set so the
+              // thumbnail timer backs off rather than competing for the port.
+              this._relayProbeRunning = true;
+              const audio = await this._probeAudioLevels();
+              heavyProbeResults = [null, null, null, audio, null, null, null];
             } else {
               // RTP/UDP multicast: parallel is fine — multicast duplicates to all readers.
               heavyProbeResults = await Promise.all([

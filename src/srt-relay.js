@@ -154,6 +154,12 @@ class SRTRelay extends EventEmitter {
       }
     }, 600);
 
+    // Debug: log first N stderr lines so we can inspect the exact ffmpeg
+    // verbose format for this build and confirm stats line shape.
+    // Disable by setting SRT_RELAY_STDERR_DEBUG=0 in the environment.
+    const debugLines = process.env.SRT_RELAY_STDERR_DEBUG !== '0' ? 30 : 0;
+    let _debugCount = 0;
+
     proc.stderr.on('data', (d) => {
       for (const line of d.toString().split('\n')) {
         const t = line.trim();
@@ -172,6 +178,12 @@ class SRTRelay extends EventEmitter {
           if (/decode_slice_header|non.existing PPS|mmco:|non existing PPS/i.test(t)) continue;
           // Only surface genuine errors — suppress verbose info noise.
           console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
+        }
+        // Debug: print first N lines verbatim so we can see the actual ffmpeg
+        // output format for SRT stats on this build.
+        if (_debugCount < debugLines) {
+          _debugCount++;
+          console.log(`[srt-relay:${this.id}:stderr:${_debugCount}] ${t.slice(0, 300)}`);
         }
       }
     });
