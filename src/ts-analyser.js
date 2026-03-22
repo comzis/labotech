@@ -123,6 +123,7 @@ class TSAnalyser extends EventEmitter {
     this._relay        = null;        // SRTRelay instance (srt:// sources only)
     this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
     this._lastRelayStatsLine = null;  // latest libsrt stats line from relay stderr
+    this._relayProbeRunning = false;  // true while sequential relay probes hold the UDP port
     // Optional out-of-process thumbnail worker client (Phase 2).
     // When provided, thumbnail management is delegated to the worker process
     // instead of running PersistentThumbnailCapture in the API process.
@@ -275,6 +276,8 @@ class TSAnalyser extends EventEmitter {
             } else if (isRelayBacked) {
               // Sequential: relay probe port is loopback unicast — no packet duplication.
               // No inter-probe settle needed (UDP bind/release is instant).
+              // Flag tells the thumbnail timer to back off while the port is held.
+              this._relayProbeRunning = true;
               const tsduck    = await this._probeTSDuck();
               const transport = await this._probeTransportBitrateBps();
               const srtLink   = await this._probeSrtLinkStats(); // uses relay stats line, not UDP
@@ -296,6 +299,7 @@ class TSAnalyser extends EventEmitter {
               ]);
             }
           } finally {
+            this._relayProbeRunning = false;
             if (runHeavyProbe) _releaseHeavyProbeSlot();
             if (isSrtHeavy) {
               // Brief settle delay: SRT sources may have a 1–2s reconnect cooldown after
@@ -2852,6 +2856,12 @@ class TSAnalyser extends EventEmitter {
       const doCapture = async () => {
         this._thumbnailTimer = null;
         if (!this.isRunning) return;
+        // Sequential relay probes hold the unicast UDP port — back off and retry
+        // rather than spamming EADDRINUSE errors every 2 s.
+        if (this._relayProbeRunning) {
+          this._thumbnailTimer = setTimeout(doCapture, 3000);
+          return;
+        }
         const captureUrl = this._effectiveUrl;
         try {
           await captureThumbnail(this.id, captureUrl);

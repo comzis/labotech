@@ -159,6 +159,10 @@ class SRTRelay extends EventEmitter {
         if (/msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(t)) {
           this.emit('srt_stats_line', t);
         } else if (/error|warning|failed|reject|refused/i.test(t)) {
+          // Suppress known-harmless H.264 parser noise from mid-GOP SRT join.
+          // These appear at -loglevel verbose when ffmpeg parses stream headers
+          // before the relay has received a full keyframe — they are not errors.
+          if (/decode_slice_header|non.existing PPS|mmco:|non existing PPS/i.test(t)) continue;
           // Only surface genuine errors — suppress verbose info noise.
           console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
         }
