@@ -2867,7 +2867,15 @@ class TSAnalyser extends EventEmitter {
           await captureThumbnail(this.id, captureUrl);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
         } catch (err) {
-          console.error(`[thumb:${this.id}] capture failed: ${err && err.message}`);
+          const msg = (err && err.message) || '';
+          // EADDRINUSE: a probe or stale child process from a previous node
+          // restart is holding the relay UDP port.  Back off silently —
+          // this is expected during/after probe cycles and clears on its own.
+          if (/Address already in use|EADDRINUSE/i.test(msg)) {
+            this._thumbnailTimer = setTimeout(doCapture, 5000);
+            return;
+          }
+          console.error(`[thumb:${this.id}] capture failed: ${msg}`);
         }
         scheduleThumb();
       };
