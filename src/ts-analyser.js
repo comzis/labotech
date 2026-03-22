@@ -2848,7 +2848,7 @@ class TSAnalyser extends EventEmitter {
       const doCapture = async () => {
         this._thumbnailTimer = null;
         if (!this.isRunning) return;
-        const captureUrl = this._relay ? this._relay.getThumbUrl() : this._effectiveUrl;
+        const captureUrl = this._effectiveUrl;
         try {
           await captureThumbnail(this.id, captureUrl);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
