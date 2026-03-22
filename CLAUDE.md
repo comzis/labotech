@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Backend
 npm install
-npm test -- --runInBand            # all tests (138 tests across 6 suites)
+npm test -- --runInBand            # all tests (240 tests across 11 suites)
 npm test -- test/encoder.test.js  # single test file
 npm start                         # run API server
 
@@ -67,6 +67,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 - **`transcoder.js`** — Extends `SRTEncoder`. Implements `INTERLACE_PRESETS` map for four broadcast conversions: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT).
 - **`multicast-forward.js`** — `MulticastForwarder` extends `EventEmitter` directly (not `SRTEncoder`). Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
 - **`ts-analyser.js`** — `TSAnalyser` extends `EventEmitter` directly (not `SRTEncoder`). Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
+- **`srt-relay.js`** — `SRTRelay` — two-process design (v3.2.16+): (1) `srt-live-transmit` holds the SRT caller connection, re-outputs as UDP loopback, and emits full JSON stats (`srt_stats` event — RTT, BW, loss, NAK, ACK) on stdout via `-s 1000 -pf json`; (2) a separate `ffmpeg` process reads from the UDP loopback and writes JPEG thumbnails. Thumbnail spawn is delayed by `latencyMs + 500ms` so it starts after the SRT latency buffer fills. Port allocation is deterministic djb2 hash of the source URL (range 5500–5599).
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
 - **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active stream processors.
 
