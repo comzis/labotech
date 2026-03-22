@@ -2956,6 +2956,9 @@ class TSAnalyser extends EventEmitter {
       try {
         await this.probe({ continuous: true });
       } catch (err) {
+        // Suppress probe errors during SRT relay restart window — ffprobe reads an
+        // empty UDP loopback while the relay's ffmpeg is restarting. Not a real signal loss.
+        if (this._relay && !this._relay.isReady()) return;
         this.emit('error', err);
       }
       if (this.isRunning) {
