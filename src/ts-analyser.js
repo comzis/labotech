@@ -827,9 +827,17 @@ class TSAnalyser extends EventEmitter {
 
         // For relay-backed SRT the transport probe runs on UDP (no libsrt output).
         // Use the most recent stats line emitted by the relay's verbose ffmpeg process.
-        const srtStats = (this._relay && this._lastRelayStatsLine)
+        let srtStats = (this._relay && this._lastRelayStatsLine)
           ? this._extractSrtStatsFromLog(this._lastRelayStatsLine)
           : this._extractSrtStatsFromLog(stderr);
+        // ffmpeg 5.x / Debian 12 does not call srt_bistats() periodically so
+        // _lastRelayStatsLine is never populated.  Synthesise a minimal srtStats
+        // object from the measured bitrate so the SRT Transport panel shows RATE
+        // and removes the "AWAITING STATS" placeholder.  RTT/bandwidth/loss remain
+        // null and display as "—" — they are genuinely unavailable from this build.
+        if (this._relay && !srtStats && bitrateBps) {
+          srtStats = { rateMbps: parseFloat((bitrateBps / 1e6).toFixed(3)) };
+        }
         if (bitrateBps || srtStats) {
           return resolve({
             bitrateBps: bitrateBps || null,

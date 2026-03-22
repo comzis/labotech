@@ -2,6 +2,16 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.8 — 2026-03-22
+
+### Fix: SRT relay — thumbnail always fails mid-GOP; SRT stats "AWAITING" on ffmpeg 5.x
+
+- **Root cause (thumbnail):** `thumbnail=pick` requires at least one decoded H.264 frame. Joining a long-GOP stream (10–25 s GOPs) mid-GOP means no IDR frame is available in the short capture window → exit code 69 with `decode_slice_header error`. Only the very first capture (which happened to land on a keyframe boundary) ever succeeded.
+- **Fix:** For loopback UDP relay streams, skip `thumbnail=pick` entirely and use `select=eq(pict_type\,I),thumbnail=1` with a 30 s timeout. This waits for the next I-frame (average ~5–12 s on a 25 s GOP) and captures it cleanly. The JPEG is always a fully decoded reference frame.
+- **Root cause (SRT stats):** ffmpeg 5.1.8/Debian 12 does not call `srt_bistats()` periodically — the `statsintvl` SRT option is accepted by the socket but this build never logs the result via `av_log`. The relay's stderr contains only H.264 parser noise during the initial GOP join; no stats lines appear after stabilisation.
+- **Fix:** When the relay transport probe measures a valid `bitrateBps` but has no libsrt stats, synthesise `srtStats = { rateMbps }` from the measured value. The SRT Transport panel shows RATE (from PCR/ffmpeg progress) and `—` for RTT/bandwidth/loss (genuinely unavailable from this ffmpeg build). The "AWAITING STATS" placeholder is cleared.
+- **Operator impact:** Thumbnails now rotate for SRT relay streams. SRT Transport panel shows measured receive rate immediately after first probe cycle.
+
 ## v3.2.7 — 2026-03-22
 
 ### Fix: SRT relay — statsintvl too low floods stderr; add relay connection log lines
