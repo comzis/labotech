@@ -2,6 +2,14 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.11 — 2026-03-22
+
+### Fix: SRT relay thumbnail — URL not persisted across tab switches; multiview tile delayed
+
+- **Root cause (persistence):** `pollRelayThumb` set `_lastThumbnailUrl` in-memory but never updated `this.lastResult`. On tab switch the component remounts and calls `refreshActives()` → `GET /api/analysers` → `toJSON()` → `lastResult` — but `lastResult` had no `thumbnailUrl` (it was set before the thumbnail was ever written). Result: "AWAITING FRAME" on every tab switch.
+- **Root cause (multiview delay):** No `analyse_result` WS event fires until the first probe cycle completes (up to 30–60 s with startup jitter). The multiview tile renders from `resultsById[id]`, which only populates from `analyse_result`. The decoder appeared in Active Decoders immediately (from `analyse_started`) but the multiview tile had no data.
+- **Fix:** When `pollRelayThumb` detects a new file mtime (relay wrote a JPEG), immediately: (1) merge `thumbnailUrl` into `this.lastResult` so the REST snapshot is always current; (2) emit a `result` event with the merged lastResult so the WS broadcast pushes the new URL to all live clients without waiting for the next probe cycle. Thumbnails now appear in both panels within ~2 s of the relay writing the first frame.
+
 ## v3.2.10 — 2026-03-22
 
 ### Fix: SRT relay thumbnail — `thumbnail=1` crashes filter graph on ffmpeg 5.1.8

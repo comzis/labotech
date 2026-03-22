@@ -2878,6 +2878,16 @@ class TSAnalyser extends EventEmitter {
           if (stat.mtimeMs > this._lastThumbnailAt) {
             this._lastThumbnailAt = stat.mtimeMs;
             this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Math.round(stat.mtimeMs)}`;
+            // Push the new thumbnail URL to live WS clients without waiting for the
+            // next full probe cycle. Also persist it in lastResult so refreshActives()
+            // restores it correctly after a tab switch.
+            if (this.lastResult) {
+              this.lastResult = { ...this.lastResult, thumbnailUrl: this._lastThumbnailUrl };
+            }
+            this.emit('result', Object.assign(
+              { id: this.id, thumbnailUrl: this._lastThumbnailUrl },
+              this.lastResult || {},
+            ));
           }
         } catch (_) {
           // File not yet written — relay may still be connecting. Retry silently.
