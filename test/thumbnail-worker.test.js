@@ -165,4 +165,74 @@ describe('ThumbnailWorkerClient', () => {
     expect(events).toHaveLength(1);
     expect(events[0].id).toBe('lane-x');
   });
+
+  test('start() during respawn backoff registers stream in replay after ready', () => {
+    const children = [];
+    const client = new ThumbnailWorkerClient({
+      forkFn: () => { const child = new FakeChild(); children.push(child); return child; },
+      restartDelayMs: 1000,
+      stallWatchdogMs: 0,
+    });
+
+    // Crash the initial worker — client enters backoff
+    children[0].emit('exit', 1, null);
+
+    // Register a stream during the backoff window (no worker running)
+    client.start('lane-backoff', 'udp://239.1.1.2:5000', 5);
+
+    // Advance through backoff — new worker spawns
+    jest.advanceTimersByTime(1000);
+    expect(children).toHaveLength(2);
+
+    // Worker signals ready — should replay lane-backoff
+    children[1].emit('message', { event: 'ready' });
+    expect(children[1].sent.some((m) => m.cmd === 'start' && m.id === 'lane-backoff')).toBe(true);
+  });
+
+  test('stall watchdog fires SIGKILL when worker IPC is silent', () => {
+    let now = 0;
+    const children = [];
+    const client = new ThumbnailWorkerClient({
+      forkFn: () => { const child = new FakeChild(); children.push(child); return child; },
+      stallWatchdogMs: 5000,
+      now: () => now,
+      restartDelayMs: 1000,
+    });
+
+    // Add an active capture so the watchdog condition is met
+    client.start('lane-stall', 'udp://239.1.1.3:5000', 5);
+
+    // Worker ready — _lastIpcAt = now = 0
+    children[0].emit('message', { event: 'ready' });
+
+    const stallEvents = [];
+    client.on('worker_stall', (e) => stallEvents.push(e));
+
+    // Advance fake clock past threshold without any IPC
+    now = 5001;
+    jest.advanceTimersByTime(5000);
+
+    expect(stallEvents).toHaveLength(1);
+    expect(stallEvents[0].stallMs).toBeGreaterThanOrEqual(5000);
+    expect(children[0].killed).toBe('SIGKILL');
+  });
+
+  test('shutdown logs warning if worker does not acknowledge within 5s', async () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const children = [];
+    const client = new ThumbnailWorkerClient({
+      forkFn: () => { const child = new FakeChild(); children.push(child); return child; },
+      stallWatchdogMs: 0, // disable stall timer to avoid interference
+    });
+
+    const p = client.shutdown();
+    // Do NOT send shutdown_complete — let the 5s timeout fire
+    jest.advanceTimersByTime(5000);
+    await p;
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('did not acknowledge shutdown within 5s')
+    );
+    warnSpy.mockRestore();
+  });
 });
