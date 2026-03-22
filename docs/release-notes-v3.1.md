@@ -1,6 +1,13 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.20)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.21)
+
+## v3.2.21 — 2026-03-22
+
+### Revert: ffmpeg upgrade rolled back — static 7.x build caused SRT connection instability
+
+- **Reason:** John Van Sickle ffmpeg 7.x static build caused SRT connection instability in production. Likely cause: SRT socket option handling differences between 5.1.8 and 7.x (adapter binding, timeout semantics, or OpenSSL vs GnuTLS differences). Reverted to Debian Bookworm apt `ffmpeg` 5.1.8.
+- **Known limitation:** Full SRT stats remain unavailable for relay streams (RATE only). Revisit with a controlled ffmpeg upgrade when the root cause of the instability is understood.
 
 ## v3.2.20 — 2026-03-22
 
