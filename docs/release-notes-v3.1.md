@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.18)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.19)
+
+## v3.2.19 — 2026-03-22
+
+### Revert: SRT relay back to ffmpeg (v3.2.16–v3.2.18 srt-live-transmit approach reverted)
+
+- **Reason:** The srt-live-transmit relay (v3.2.16) introduced two regressions: (1) stream rate spikes and gaps visible in monitoring due to slt reconnect behaviour differing from ffmpeg's internal handling; (2) thumbnails stuck on "Awaiting Frame" because slt-to-UDP mid-stream joiners cannot decode H.264 without the SPS/PPS headers that are only available at SRT session start. The latency-delay workaround (v3.2.17) was insufficient in practice.
+- **Reverted to:** ffmpeg as SRT connection holder with integrated thumbnail output (v3.2.9–v3.2.13 architecture). ffmpeg holds SPS/PPS from initial connection, writes thumbnails directly, and handles reconnects stably.
+- **Known limitation:** Full SRT stats (RTT, Bandwidth, NAK, ACK) remain unavailable for relay-backed streams — ffmpeg 5.1.8 on Debian Bookworm does not emit periodic libsrt stats. RATE is synthesised from measured bitrate. Revisit when ffmpeg is upgraded to 6.x/7.x.
+- **Retained from the reverted work:** `_parseSltStats()` helper and NAK/ACK parsing (v3.2.14 fix 2) remain in ts-analyser.js for non-relay SRT paths.
 
 ## v3.2.18 — 2026-03-22
 

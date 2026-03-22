@@ -81,36 +81,34 @@ describe('SRTRelay — spawn args', () => {
 
   afterEach(() => relay.stop());
 
-  test('spawns srt-live-transmit', () => {
-    expect(spawn).toHaveBeenCalledWith('srt-live-transmit', expect.any(Array));
+  test('spawns ffmpeg', () => {
+    expect(spawn).toHaveBeenCalledWith('ffmpeg', expect.any(Array));
   });
 
-  test('args include -pf json and -s 1000', () => {
+  test('args include -c copy -f mpegts', () => {
     const args = spawn.mock.calls[0][1];
-    expect(args).toContain('-pf');
-    expect(args).toContain('json');
-    expect(args).toContain('-s');
-    expect(args).toContain('1000');
-  });
-
-  test('args do not disable auto-reconnect (-a no absent)', () => {
-    const args = spawn.mock.calls[0][1];
-    // Auto-reconnect must remain enabled (default) so transient drops are handled
-    // internally without triggering the Node.js restart + backoff cycle.
-    const aIdx = args.indexOf('-a');
-    expect(aIdx === -1 || args[aIdx + 1] !== 'no').toBe(true);
+    expect(args).toContain('-c');
+    expect(args).toContain('copy');
+    expect(args).toContain('-f');
+    expect(args).toContain('mpegts');
   });
 
   test('input URL has mode=caller', () => {
     const args = spawn.mock.calls[0][1];
-    const inputUrl = args[args.length - 2]; // second-to-last arg
-    expect(inputUrl).toContain('mode=caller');
+    const iIdx = args.indexOf('-i');
+    expect(args[iIdx + 1]).toContain('mode=caller');
   });
 
   test('input URL has adapter=10.67.18.29', () => {
     const args = spawn.mock.calls[0][1];
-    const inputUrl = args[args.length - 2]; // second-to-last arg
-    expect(inputUrl).toContain('adapter=10.67.18.29');
+    const iIdx = args.indexOf('-i');
+    expect(args[iIdx + 1]).toContain('adapter=10.67.18.29');
+  });
+
+  test('output URL has pkt_size=1316', () => {
+    const args = spawn.mock.calls[0][1];
+    const last = args[args.length - 1];
+    expect(last).toContain('pkt_size=1316');
   });
 
   test('output URL is udp://127.0.0.1:PORT', () => {
@@ -145,12 +143,12 @@ describe('SRTRelay — lifecycle', () => {
     expect(cb).toHaveBeenCalledWith(expect.objectContaining({ localUrl: relay.localUrl }));
   });
 
-  test('ready fires after 800ms', () => {
+  test('ready fires after 600ms', () => {
     const cb = jest.fn();
     relay.on('ready', cb);
     relay.start();
     expect(cb).not.toHaveBeenCalled();
-    jest.advanceTimersByTime(800);
+    jest.advanceTimersByTime(600);
     expect(cb).toHaveBeenCalledWith(expect.objectContaining({ localUrl: relay.localUrl }));
   });
 
@@ -175,7 +173,7 @@ describe('SRTRelay — lifecycle', () => {
 
   test('isReady() true after ready event', () => {
     relay.start();
-    jest.advanceTimersByTime(800);
+    jest.advanceTimersByTime(600);
     expect(relay.isReady()).toBe(true);
   });
 
@@ -237,7 +235,7 @@ describe('SRTRelay — error handling', () => {
     const errCb = jest.fn();
     relay.on('error', errCb);
     relay.start();
-    proc.emit('error', new Error('ENOENT: srt-live-transmit not found'));
+    proc.emit('error', new Error('ENOENT: ffmpeg not found'));
     expect(errCb).toHaveBeenCalledWith(expect.any(Error));
     relay.stop();
   });
