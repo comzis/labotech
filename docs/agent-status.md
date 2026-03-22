@@ -67,22 +67,25 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `fix(srt-stats)`: SRT Transport panel showed only RATE — removed `|| this._relay` guard from `_probeSrtLinkStats()`; added `pktNak`/`pktAck` parsing from `srt-live-transmit` JSON; added `retransRatio`. (v3.2.14)
 - `fix(api)`: Agent B review blocker — `thumbnail_frame` handler only wrote `_lastThumbnailUrl`, not `lastResult`; thumbnails lost on tab switch for worker-managed streams (direct SRT, RTP/UDP). Fixed to mirror `pollRelayThumb` pattern. (v3.2.15)
 - `docs(claude)`: CLAUDE.md updated with Docker rebuild requirement for all frontend changes.
+- Various SRT relay/ffmpeg/slt attempts and reversions. (v3.2.16–v3.2.21)
+- `fix(ts-analyser)`: Suppress spurious "Input signal missing" alarms during SRT relay restart window. (v3.2.22)
+- `fix(thumbnail-worker-client)`: Stall watchdog (SIGKILL on hung worker after 120 s) + shutdown visibility warning + 3 new tests — backlog items from Agent B peer review. (v3.2.23)
 
 **Active branch:** `cursor/phase2-complete-thumb-migration` (shared with Agent B — all A work committed)
 
-**Current versions:** backend `3.2.15` / web `3.1.121` — 240 tests passing.
+**Current versions:** backend `3.2.23` / web `3.1.121` — 243 tests passing.
 
 **Waiting for:** Operator to run `git pull && docker compose -f docker-compose.dev.yml build labotech && docker compose -f docker-compose.dev.yml up -d` on server to deploy all fixes.
 
-**For Agent B — items identified in peer review (not blockers, backlog):**
-- `ThumbnailWorkerClient`: no hung-process watchdog (crash → respawn works; hung process stays hung)
-- `ThumbnailWorkerClient.shutdown()`: 5 s force-kill timeout is silent — add `console.warn`
-- `test/thumbnail-worker.test.js`: missing test for `start()` called during backoff window → appears in replay after respawn
-- PR #71 (`cursor/docs-agent-status-pr70-sync`) not in MERGE LOG table — add for completeness
+**Agent B backlog items — all now done:**
+- ✅ `ThumbnailWorkerClient` stall watchdog (v3.2.23)
+- ✅ `ThumbnailWorkerClient.shutdown()` warning log (v3.2.23)
+- ✅ `start()` during backoff test (v3.2.23)
 
 **Outstanding (deferred):**
 - SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter
 - SCTE-35 frontend panel (deferred by operator)
+- Full SRT stats (RTT/BW/NAK/ACK) for relay streams — requires ffmpeg upgrade (7.x static build caused instability, deferred)
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`

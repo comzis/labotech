@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.22)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
+
+## v3.2.23 — 2026-03-22
+
+### Fix: ThumbnailWorkerClient — stall watchdog + shutdown visibility
+
+- **Stall watchdog:** Added a periodic `setInterval` (period = `stallWatchdogMs`, default 120 s) that fires while `_active.size > 0`. If no IPC has been received from the worker for at least `stallWatchdogMs`, the worker is presumed hung: a `console.warn` is emitted, the `worker_stall` event fires with `{ stallMs }`, and the process receives `SIGKILL` so the existing respawn/backoff path takes over. Pass `stallWatchdogMs: 0` to disable. Minimum enforced value is 1 s (allows fast test cycles with `options.now` clock injection).
+- **Shutdown visibility:** The existing 5 s force-kill timeout now logs `[ThumbnailWorkerClient] worker did not acknowledge shutdown within 5s; sending SIGTERM` before killing, making silent shutdown failures visible in operator logs.
+- **Tests (3 new):** `start()` during respawn backoff → stream replays after ready; stall watchdog fires SIGKILL deterministically; shutdown warning logged on timeout.
+- **Operator impact:** Hung thumbnail worker processes are now automatically recovered within 120 s rather than blocking stream thumbnail updates indefinitely.
 
 ## v3.2.22 — 2026-03-22
 
