@@ -54,11 +54,6 @@ class SRTRelay extends EventEmitter {
       ? Number(port)
       : hashPort(srtUrl);
     this.localUrl = `udp://127.0.0.1:${this.port}`;
-    // Dedicated thumbnail output port (probe port + 100, range 5600–5699).
-    // PersistentThumbnailCapture binds here exclusively while probes use localUrl,
-    // eliminating the UDP unicast port-exclusivity conflict that forced one-shot captures.
-    this.thumbPort = this.port + 100;
-    this.thumbUrl  = `udp://127.0.0.1:${this.thumbPort}`;
 
     this._proc         = null;
     this._running      = false;
@@ -93,9 +88,6 @@ class SRTRelay extends EventEmitter {
   /** Returns the local UDP URL consumers should connect to. */
   getLocalUrl() { return this.localUrl; }
 
-  /** Returns the dedicated thumbnail UDP URL (probe port + 100). */
-  getThumbUrl() { return this.thumbUrl; }
-
   /** True once the relay has fired its first 'ready' event. */
   isReady() { return this._ready; }
 
@@ -122,9 +114,8 @@ class SRTRelay extends EventEmitter {
     if (!this._running) return;
     const epoch = ++this._epoch;
 
-    const inputUrl      = this._buildInputUrl();
-    const outputUrl     = `${this.localUrl}?pkt_size=1316`;
-    const thumbOutputUrl = `${this.thumbUrl}?pkt_size=1316`;
+    const inputUrl  = this._buildInputUrl();
+    const outputUrl = `${this.localUrl}?pkt_size=1316`;
 
     const args = [
       // verbose: enables libsrt statistics lines (msRTT=, mbpsRecvRate=, etc.)
@@ -137,11 +128,9 @@ class SRTRelay extends EventEmitter {
       // copies TS packets; it never needs to understand the elementary streams.
       '-f', 'mpegts',
       '-i', inputUrl,
-      // Primary output: probe port — used by tsanalyze, ffprobe, ETR.
-      '-c', 'copy', '-f', 'mpegts', outputUrl,
-      // Thumbnail output: dedicated port (probe+100) — held exclusively by
-      // PersistentThumbnailCapture so it never conflicts with probe processes.
-      '-c', 'copy', '-f', 'mpegts', thumbOutputUrl,
+      '-c', 'copy',
+      '-f', 'mpegts',
+      outputUrl,
     ];
 
     const proc = spawn('ffmpeg', args);
