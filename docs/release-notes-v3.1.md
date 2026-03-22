@@ -2,6 +2,15 @@
 
 Date: 2026-03-22 (latest: web 3.1.118)
 
+## v3.2.10 — 2026-03-22
+
+### Fix: SRT relay thumbnail — `thumbnail=1` crashes filter graph on ffmpeg 5.1.8
+
+- **Root cause 1:** `thumbnail=1` is invalid — ffmpeg 5.1.8's `thumbnail` filter requires `n ≥ 2` (default 100). The filter graph failed to initialise on every relay spawn → `Error reinitializing filters!` → exit code 1 → 30 s restart loop. No thumbnail was ever written.
+- **Root cause 2:** `select=eq(pict_type\,I)` before `thumbnail=1` would have fed only I-frames to the thumbnail batch. With a 10 s GOP that is one I-frame every 250 frames; `thumbnail=100` on that input would need 100 I-frames (≈ 1000 s) before writing the first JPEG. Even without the crash this was self-defeating.
+- **Fix:** Replace `select=eq(pict_type\,I),thumbnail=1` with `thumbnail=100`. All decoded frames feed the 100-frame sliding window. At 25 fps one JPEG is written every ~4 s. The thumbnail filter tolerates a mix of corrupt/valid frames from the initial mid-GOP probe window and starts producing output once a decodeable frame arrives.
+- **Operator impact:** Relay no longer crashes on startup. First thumbnail appears within ~4 s of the relay connecting (one 100-frame window at 25 fps). Thumbnails rotate continuously while the stream is live.
+
 ## v3.2.9 — 2026-03-22
 
 ### Fix: SRT relay thumbnail — integrate JPEG capture into relay ffmpeg to fix permanent H.264 mid-GOP failure
