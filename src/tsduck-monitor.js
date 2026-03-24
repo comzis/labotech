@@ -159,7 +159,7 @@ class TSDuckMonitor extends EventEmitter {
       const stderr = Buffer.concat(stderrChunks).toString('utf8');
       const durationMs = Date.now() - startMs;
 
-      this._parseOutput(stdout, stderr);
+      this._parseOutput(stdout, stderr, startMs);
       this.emit('sample', { durationMs, exitCode: code });
 
       if (this.isRunning) {
@@ -193,7 +193,10 @@ class TSDuckMonitor extends EventEmitter {
     return [
       ...inputArgs,
       '-P', 'pcrverify', '--log-level', 'error',
-      '-P', 'tables', '--json-line', '--all-sections',
+      // --all-sections is incompatible with --json-line on TSDuck 3.44-4581.
+      // Without it, tables are emitted once per version change — sufficient for
+      // detecting complete table absence within the sample window.
+      '-P', 'tables', '--json-line',
       '-P', 'bitrate_monitor', '--interval', String(Math.floor(this.sampleWindowMs / 2)),
       '-O', 'drop',
     ];
@@ -201,11 +204,14 @@ class TSDuckMonitor extends EventEmitter {
 
   _inputPluginArgs(url) {
     if (url.startsWith('srt://')) {
-      // tsp SRT input: -I srt <host> <port> [options]
+      // tsp SRT input — caller mode: tsp connects TO the SRT source.
+      // --listener would make tsp wait for an inbound connection which is
+      // wrong for our pull-based monitoring of a remote encoder or mux.
       try {
         const u = new URL(url);
-        const args = ['-I', 'srt', '--listener',
-          '--local-port', u.port || '9001'];
+        const args = ['-I', 'srt', '--caller',
+          '--remote-host', u.hostname,
+          '--remote-port', u.port || '9001'];
         const latency = u.searchParams.get('latency');
         if (latency) args.push('--latency', latency);
         return args;
@@ -223,10 +229,10 @@ class TSDuckMonitor extends EventEmitter {
 
   // ── output parser ────────────────────────────────────────────────────────────
 
-  _parseOutput(stdout, stderr) {
+  _parseOutput(stdout, stderr, windowStartMs) {
     const ts = Date.now();
     this._parsePcrVerifyStderr(stderr, ts);
-    this._parseTableJsonLines(stdout, ts);
+    this._parseTableJsonLines(stdout, ts, windowStartMs);
     this._parseBitrateMonitor(stdout, ts);
   }
 
@@ -307,7 +313,7 @@ class TSDuckMonitor extends EventEmitter {
    *   { "type": "table", "table_type": "PMT", ... }
    * We track last-seen timestamps to detect missing/delayed tables.
    */
-  _parseTableJsonLines(stdout, ts) {
+  _parseTableJsonLines(stdout, ts, windowStartMs) {
     if (!stdout) return;
 
     const tablesSeen = new Map();
@@ -328,7 +334,7 @@ class TSDuckMonitor extends EventEmitter {
 
     if (tablesSeen.size > 0) {
       // Check SI intervals against ETR 290 P3 limits
-      this._checkSiIntervals(ts);
+      this._checkSiIntervals(ts, windowStartMs);
 
       this.emit('si', {
         tables: Object.fromEntries(tablesSeen),
@@ -337,7 +343,7 @@ class TSDuckMonitor extends EventEmitter {
     }
   }
 
-  _checkSiIntervals(ts) {
+  _checkSiIntervals(ts, windowStartMs) {
     const limits = {
       PAT: ETR_SI_PAT_MAX_MS,
       PMT: ETR_SI_PMT_MAX_MS,
@@ -346,15 +352,18 @@ class TSDuckMonitor extends EventEmitter {
     };
     for (const [table, limitMs] of Object.entries(limits)) {
       const lastSeen = this._siTableTimes.get(table);
-      if (lastSeen == null) {
-        // Table never seen during this sample window
-        if (this.sampleWindowMs >= limitMs) {
-          this.emit('alarm', {
-            priority: 'p3', checkId: `si_absent_${table.toLowerCase()}`,
-            message: `${table} table absent in ${this.sampleWindowMs} ms window (ETR 290 P3)`,
-            ts,
-          });
-        }
+      // A table is absent from this window if:
+      //   (a) it has never been seen (null), OR
+      //   (b) it was last seen BEFORE this window started (windowStartMs supplied)
+      // Without windowStartMs (called from tests directly), fall back to (a) only.
+      const absentThisWindow = lastSeen == null ||
+        (windowStartMs != null && lastSeen < windowStartMs);
+      if (absentThisWindow && this.sampleWindowMs >= limitMs) {
+        this.emit('alarm', {
+          priority: 'p3', checkId: `si_absent_${table.toLowerCase()}`,
+          message: `${table} table absent in ${this.sampleWindowMs} ms window (ETR 290 P3)`,
+          ts,
+        });
       }
     }
   }

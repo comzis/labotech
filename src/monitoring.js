@@ -66,6 +66,9 @@ function _buildSrtSrc(inputUrl) {
   const sep = src.includes('?') ? '&' : '?';
   if (!src.includes('mode=')) src += `${sep}mode=caller`;
   if (!src.includes('timeout=')) src += '&timeout=8000000';
+  // Bind caller socket to eno1 (management NIC) so ffmpeg routes SRT via
+  // 10.67.18.29 and not eno2 which has no IP address.
+  if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
   return src;
 }
 
@@ -202,21 +205,32 @@ class PersistentThumbnailCapture extends EventEmitter {
     const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
-    // -skip_frame nokey already ensures the decoder only ever sees keyframes (I-frames).
-    // select=eq(pict_type\,I) is therefore redundant AND harmful: it only passes frames
-    // that fall exactly on the fps=1/N time grid, potentially skipping the very first
-    // keyframe.  Remove it — fps=1/N alone throttles the output rate.
+    // select=key passes only key frames (IDR for H.264/H.265, I-frame for MPEG-2).
+    // Preferred over select=eq(pict_type,I) because the HEVC decoder does not always
+    // set the pict_type AVFrame field — particularly for Main 4:2:2 Range Extensions
+    // (yuv422p10le) where pict_type may remain AV_PICTURE_TYPE_NONE throughout.
+    // The key_frame flag is set reliably by all decoders.
+    // format=yuv420p: mjpeg encoder has no 10-bit pixel format support; yuv422p10le
+    // input (HEVC 4:2:2 Rext) must be explicitly downconverted before the encoder.
+    // NOTE: do NOT add setpts here — resetting timestamps would compress all I-frame
+    // PTS values to near-zero, causing fps=1/N to treat stream-seconds as
+    // microseconds and produce essentially no output after the first frame.
     const vf = [
+      'select=key',
       `fps=1/${this._intervalSec}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
+      'format=yuv420p',
     ].filter(Boolean).join(',');
 
     const args = [
       '-hide_banner', '-loglevel', 'error',
       '-fflags', '+discardcorrupt+genpts',
       '-err_detect', 'ignore_err',
-      '-skip_frame', 'nokey',
+      // -skip_frame nokey is omitted: it breaks HEVC decoder initialisation by
+      // skipping frames that carry VPS/SPS/PPS context, causing "PPS id out of
+      // range" errors and zero output.  The fps=1/N vf filter alone is sufficient
+      // to limit the output rate without corrupting the decoder state.
       '-analyzeduration', analyzeDurUs,
       '-probesize', '7000000',
       '-rtbufsize', '128M',

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { Badge, C, Dot, Field, Input, PanelBox, SectionHead, Select } from "./BroadcastUI";
@@ -81,6 +81,24 @@ function newDecoderRow(seed = Date.now()) {
   };
 }
 
+function deriveCatalogCategory(name) {
+  const n = String(name || '').toUpperCase();
+  if (n.startsWith('GV_IPDEC'))  return 'GV IP Decoders';
+  if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
+  if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
+  if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_BMCAST')) return 'GV Blue Multicast';
+  if (n.startsWith('GV_RMCAST')) return 'GV Red Multicast';
+  if (n.startsWith('LK_BMCAST')) return 'LK Blue Multicast';
+  if (n.startsWith('LK_RMCAST')) return 'LK Red Multicast';
+  if (n.startsWith('GV_RX'))     return 'GV Receivers';
+  if (n.startsWith('LK_RX'))     return 'LK Receivers';
+  if (n.endsWith('_OLD'))        return 'Legacy';
+  return 'Other';
+}
+
+const CAT_ORDER = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
+
 function normalizeLaneId(rawId) {
   const id = String(rawId || "").trim();
   if (!id) return "unknown";
@@ -147,6 +165,68 @@ function codecTypeScore(t) {
   return 0; // "unknown" or anything else
 }
 
+// Solid block shown in place of VU bars when an audio pair carries a
+// SMPTE 337M non-PCM data burst (e.g. Dolby E).  Broadcast standard:
+// amber/orange indicates non-PCM data channel — not a level meter.
+function DolbyEPairBlock({ programConfig }) {
+  return (
+    <div style={{
+      width: 7, height: "100%",
+      background: "linear-gradient(180deg, #7a3200 0%, #3d1800 100%)",
+      borderRadius: 1, position: "relative",
+      display: "flex", flexDirection: "column",
+      alignItems: "center", justifyContent: "space-between",
+      overflow: "hidden",
+    }}>
+      {/* amber top-rail — broadcast DE colour (EBU/SMPTE) */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+      {/* "DE" rotated label */}
+      <span style={{
+        fontSize: 5, fontWeight: 800, color: "#ff8c00",
+        letterSpacing: "0.05em", textTransform: "uppercase",
+        writingMode: "vertical-rl", transform: "rotate(180deg)",
+        lineHeight: 1, opacity: 0.9, userSelect: "none",
+      }}>DE</span>
+      {/* amber bottom-rail */}
+      <div style={{ width: "100%", height: 2, background: "#ff8c00", flexShrink: 0 }} />
+    </div>
+  );
+}
+
+// Vertical audio VU bar for Confidence Monitor (3 px wide, bottom-up fill, −60→0 dBFS)
+function DecoderVuBar({ rmsDb, peakDb }) {
+  const active = rmsDb != null && Number.isFinite(rmsDb);
+  const clampRms = active ? Math.max(-60, Math.min(0, rmsDb)) : -60;
+  const rmsH = active ? ((clampRms + 60) / 60) * 100 : 0;
+  const peakH =
+    peakDb != null && Number.isFinite(peakDb)
+      ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
+      : null;
+  const rmsColor = !active
+    ? "#0c0c0c"
+    : rmsDb > -9
+    ? "#cc1020"
+    : rmsDb > -18
+    ? "#b87800"
+    : "#007a28";
+  const peakColor =
+    (peakDb ?? -60) > -9 ? "#cc1020" : (peakDb ?? -60) > -18 ? "#b87800" : "#007a28";
+  return (
+    <div style={{ width: 3, flexShrink: 0, display: "flex", flexDirection: "column" }}>
+      <div style={{ flex: 1, position: "relative", background: "#060606", overflow: "hidden" }}>
+        {/* −18 dBFS tick (50% mark) */}
+        <div style={{ position: "absolute", bottom: "50%", left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.07)" }} />
+        {/* −9 dBFS tick (85% mark) */}
+        <div style={{ position: "absolute", bottom: "85%", left: 0, right: 0, height: 1, background: "rgba(255,255,255,0.07)" }} />
+        <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: "height 0.1s linear" }} />
+        {peakH != null && active && (
+          <div style={{ position: "absolute", bottom: `${peakH}%`, left: 0, right: 0, height: 1, background: peakColor }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
 function preferredPidRow(a, b) {
   // Prefer the more specific codec type — ffprobe over tsduck/fallback.
   const ctA = codecTypeScore(a.codecType);
@@ -180,6 +260,10 @@ function extractPidRows(selectedResult) {
     codecType: s.codecType || s.type || "unknown",
     codec: s.codecName || s.codec || s.description || "-",
     bitrate: Number(s.bitrate || 0),
+    sampleRate: s.sampleRate || null,
+    channels: s.channels || null,
+    bitsPerSample: s.bitsPerSample || null,
+    s302m: s.s302m || null,
     _idx: i, // used only as tiebreaker for PID-less entries
   }));
 
@@ -265,8 +349,8 @@ function StatBox({ label, value, color = C.text }) {
     >
       <div
         style={{
-          fontSize: 8,
-          color: C.muted,
+          fontSize: 10,
+          color: C.head,
           textTransform: "uppercase",
           letterSpacing: "0.08em",
         }}
@@ -276,7 +360,7 @@ function StatBox({ label, value, color = C.text }) {
       <div
         style={{
           fontFamily: "'Courier New',monospace",
-          fontSize: 11,
+          fontSize: 13,
           color,
           fontWeight: 700,
         }}
@@ -445,7 +529,7 @@ function pickPreferredVideoStream(streams) {
 export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [mode, setMode] = useState("rtp");
   const [decoderRows, setDecoderRows] = useState([newDecoderRow()]);
-  const [latency, setLatency] = useState("2000");
+  const [latency, setLatency] = useState("4000");
   const [passphrase, setPassphrase] = useState("");
   const [pbkeylen, setPbkeylen] = useState(16);
   const [intervalMs, setIntervalMs] = useState(5000);
@@ -479,6 +563,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [policyPickerOpen, setPolicyPickerOpen] = useState(false);
   const [policyBusy, setPolicyBusy] = useState(false);
   const [selectedPickerOpen, setSelectedPickerOpen] = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
 
   const {
     result,
@@ -503,6 +591,17 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   useEffect(() => {
     getMonitoringPolicy().then(setPolicyData).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    fetch('/api/multiview/catalog').then(r => r.json()).then(d => setCatalog(d.streams || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showCatalog) return;
+    const handler = (e) => { if (catalogRef.current && !catalogRef.current.contains(e.target)) setShowCatalog(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCatalog]);
 
   const handleSelectProfile = (profileId) => {
     setPolicyBusy(true);
@@ -694,6 +793,37 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     setDecoderRows((rows) => rows.map((r) => (r.key === rowKey ? { ...r, ...patch } : r)));
   };
 
+  // Smart-paste: if the user pastes an srt:// URI into the Host/IP field,
+  // extract host, port, passphrase, latency, and pbkeylen automatically.
+  const _applySrtUri = (rowKey, text) => {
+    const withoutScheme = text.slice('srt://'.length);
+    const [hostPort, query = ''] = withoutScheme.split('?');
+    const lastColon = hostPort.lastIndexOf(':');
+    const host = lastColon >= 0 ? hostPort.slice(0, lastColon) : hostPort;
+    const port = lastColon >= 0 ? hostPort.slice(lastColon + 1) : '';
+    const params = new URLSearchParams(query);
+    updateRow(rowKey, { host: host.trim(), port: port.trim() });
+    setMode('srt');
+    if (params.get('passphrase')) setPassphrase(decodeURIComponent(params.get('passphrase')));
+    if (params.get('pbkeylen'))   setPbkeylen(Number(params.get('pbkeylen')));
+    if (params.get('tsbpddelay')) setLatency(params.get('tsbpddelay'));
+  };
+
+  const handleHostPaste = (rowKey, e) => {
+    const text = (e.clipboardData || window.clipboardData)?.getData('text') || '';
+    if (!text.startsWith('srt://')) return; // let normal paste proceed
+    e.preventDefault();
+    try { _applySrtUri(rowKey, text); } catch (_) {}
+  };
+
+  const handleHostChange = (rowKey, e) => {
+    const val = e.target.value;
+    if (val.startsWith('srt://')) {
+      try { _applySrtUri(rowKey, val); return; } catch (_) {}
+    }
+    updateRow(rowKey, { host: val });
+  };
+
   const addDecoderRow = () => setDecoderRows((rows) => [...rows, newDecoderRow()]);
   const removeDecoderRow = (rowKey) => {
     setDecoderRows((rows) => {
@@ -852,6 +982,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         }
       }
       setEtrActionNote({ type: "err", text: msg });
+      toast.error(msg, { duration: 8000 });
     } finally { setBusy(false); }
   };
 
@@ -963,10 +1094,105 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 ))}
               </div>
 
+              {catalog.length > 0 && (
+                <div ref={catalogRef} style={{ position: 'relative' }}>
+                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                    <span style={{ position: 'absolute', left: 8, fontSize: 10, color: C.muted, pointerEvents: 'none' }}>⊞</span>
+                    <input
+                      type="text"
+                      value={catalogSearch}
+                      onChange={(e) => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
+                      onFocus={() => setShowCatalog(true)}
+                      placeholder="Select from stream catalog…"
+                      style={{
+                        width: '100%', boxSizing: 'border-box', padding: '5px 8px 5px 26px',
+                        background: C.input, border: `1px solid ${C.border}`, borderRadius: 2,
+                        color: C.text, fontSize: 11, fontFamily: "'Courier New', monospace",
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                  {showCatalog && (() => {
+                    const q = catalogSearch.toLowerCase();
+                    const filtered = q.length >= 1
+                      ? catalog.filter(s => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                      : catalog;
+                    const grouped = {};
+                    filtered.forEach(s => {
+                      const c = deriveCatalogCategory(s.name);
+                      if (!grouped[c]) grouped[c] = [];
+                      grouped[c].push(s);
+                    });
+                    const cats = CAT_ORDER.filter(c => grouped[c]);
+                    if (!cats.length && !filtered.length) return null;
+                    return (
+                      <div style={{
+                        position: 'absolute', left: 0, right: 0, zIndex: 50, marginTop: 2,
+                        background: '#0d1117', border: `1px solid ${C.borderHi}`,
+                        borderRadius: 2, boxShadow: '0 8px 24px rgba(0,0,0,0.7)',
+                        maxHeight: 280, overflowY: 'auto',
+                      }}>
+                        {cats.length === 0 && (
+                          <div style={{ padding: '6px 10px', fontSize: 10, color: C.muted }}>No streams match</div>
+                        )}
+                        {cats.map(cat => (
+                          <div key={cat}>
+                            <div style={{
+                              padding: '4px 10px', fontSize: 9, fontWeight: 800, textTransform: 'uppercase',
+                              letterSpacing: '0.1em', color: '#3a6a9a', background: '#0d1117',
+                              borderBottom: `1px solid rgba(40,90,160,0.2)`, position: 'sticky', top: 0,
+                            }}>
+                              {cat} ({grouped[cat].length})
+                            </div>
+                            {grouped[cat].map(s => (
+                              <button
+                                key={s.ip + ':' + s.port}
+                                onMouseDown={(e) => {
+                                  e.preventDefault();
+                                  // Fill first empty row, or the last row if all filled
+                                  const emptyRow = decoderRows.find(r => !r.host);
+                                  const targetRow = emptyRow || decoderRows[decoderRows.length - 1];
+                                  setDecoderRows(prev => prev.map(r =>
+                                    r.key === targetRow.key
+                                      ? { ...r, host: s.ip, port: String(s.port), decoderId: String(s.name || s.ip).trim().slice(0, 64) }
+                                      : r
+                                  ));
+                                  if (s.mode && ['rtp','srt','udp'].includes(s.mode)) setMode(s.mode);
+                                  setShowCatalog(false);
+                                  setCatalogSearch('');
+                                }}
+                                style={{
+                                  width: '100%', textAlign: 'left', padding: '5px 10px',
+                                  display: 'flex', alignItems: 'center', gap: 10,
+                                  background: 'transparent', border: 'none', cursor: 'pointer',
+                                }}
+                                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}
+                                onMouseLeave={e => e.currentTarget.style.background = 'transparent'}
+                              >
+                                <span style={{ fontSize: 10, fontFamily: "'Courier New',monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                                <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: '#3a6a9a', flexShrink: 0 }}>{s.ip}:{s.port}</span>
+                                {s.mode && <span style={{ fontSize: 8, color: C.muted, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.mode}</span>}
+                              </button>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               {decoderRows.map((row) => (
                 <div key={row.key} style={{ display: "grid", gridTemplateColumns: "1.45fr 100px 1.1fr 86px 86px", gap: 8, alignItems: "end" }}>
-                  <Field label="Host / IP">
-                    <Input value={row.host} onChange={(e) => updateRow(row.key, { host: e.target.value })} placeholder="Host / IP" mono style={{ color: row.host ? C.text : C.head }} />
+                  <Field label="Host / IP — paste srt:// URI to auto-fill">
+                    <Input
+                      value={row.host}
+                      onChange={(e) => handleHostChange(row.key, e)}
+                      onPaste={(e) => handleHostPaste(row.key, e)}
+                      placeholder="Host / IP  or paste srt:// URI"
+                      mono
+                      style={{ color: row.host ? C.text : C.head }}
+                    />
                   </Field>
                   <Field label="Port">
                     <Input
@@ -989,7 +1215,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       border: `1px solid ${row.host && row.port && !busy ? C.ok : C.border}`,
                       color: row.host && row.port && !busy ? C.bg : C.muted,
                       background: row.host && row.port && !busy ? C.ok : "transparent",
-                      boxShadow: row.host && row.port && !busy ? `0 0 8px ${C.ok}44` : "none",
+                      boxShadow: "none",
                       fontSize: 10,
                       fontWeight: 700,
                       cursor: row.host && row.port && !busy ? "pointer" : "not-allowed",
@@ -1045,7 +1271,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     fontSize: 10,
                     fontWeight: 700,
                     cursor: validRowPlans.length && !busy ? "pointer" : "not-allowed",
-                    boxShadow: validRowPlans.length && !busy ? `0 0 10px ${C.ok}55` : "none",
+                    boxShadow: "none",
                     opacity: busy ? 0.5 : 1,
                   }}
                 >
@@ -1078,7 +1304,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
                 <Field label="Capture NIC (optional)">
-                  <Input value={captureNic} onChange={(e) => setCaptureNic(e.target.value)} placeholder="eno2 (recommended)" mono />
+                  <Input value={captureNic} onChange={(e) => setCaptureNic(e.target.value)} placeholder={mode === "srt" ? "eno1 (SRT / management)" : "eno2 (multicast)"} mono />
                 </Field>
                 <Field label="Refresh">
                   <Select
@@ -1092,7 +1318,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
               {mode === "srt" && (
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 80px", gap: 10 }}>
                   <Field label="Latency (ms)">
-                    <Input value={latency} onChange={(e) => setLatency(e.target.value)} mono />
+                    <Input value={latency} onChange={(e) => setLatency(e.target.value)} placeholder="4000" mono />
                   </Field>
                   <Field label="Passphrase (AES key)">
                     <Input value={passphrase} onChange={(e) => setPassphrase(e.target.value)} />
@@ -1155,20 +1381,111 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           <PanelBox>
             <SectionHead icon="🎬" title="Confidence Monitor" />
             <div style={{ padding: 8 }}>
-              {selectedResult?.thumbnailUrl ? (
-                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
-                  <img
-                    src={selectedResult.thumbnailUrl}
-                    alt="Confidence monitor"
-                    style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                    onError={(e) => { e.target.style.display = "none"; }}
-                  />
-                </div>
-              ) : (
-                <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
-                  <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
-                </div>
-              )}
+              {/* Thumbnail + vertical audio meters side by side */}
+              {(() => {
+                const channels = selectedResult?.audioLevels?.channels || [];
+                // Count real audio ES (null-PID filtered)
+                const allAudioEs = (selectedResult?.programs || [])
+                  .flatMap((p) => (p.streams || []).filter((s) => s.codecType === "audio"));
+                const hasRealPidAudio = allAudioEs.some((s) => s.pid != null);
+                // Exclude S302M ESes — they carry SMPTE 337M data bursts and would
+                // inflate pairCount with phantom channels not in the amerge probe.
+                const audioEsCount = hasRealPidAudio
+                  ? allAudioEs.filter((s) => s.pid != null && !s.s302m).length
+                  : allAudioEs.filter((s) => !s.s302m).length;
+                const measuredPairs = Math.ceil(channels.length / 2);
+                const pairCount = Math.max(measuredPairs, audioEsCount, 0);
+                const hasMeter = pairCount > 0;
+                // audio panel: 4px per bar + 1px gap, 2 bars per pair + 1px gap between pairs
+                const panelW = hasMeter ? pairCount * (3 + 3 + 2) + (pairCount - 1) * 2 + 4 : 0;
+
+                // Dolby E / SMPTE 337M non-PCM pair detection.
+                // When dvb.dolbyE.detected is true, identify the carrier pair by the
+                // characteristic signature of a data burst in AES3: both channels carry
+                // near-identical constant-amplitude signal (data, not natural audio),
+                // typically measuring −28 to −8 dBFS with L/R symmetry < 3 dB.
+                const dolbyEOnStream = selectedResult?.dvb?.dolbyE?.detected === true;
+                const dolbyEProgramConfig = selectedResult?.dvb?.dolbyE?.programConfig || null;
+                const dolbyEPairFlags = Array.from({ length: pairCount }, (_, i) => {
+                  if (!dolbyEOnStream) return false;
+                  const lCh = channels[i * 2];
+                  const rCh = channels[i * 2 + 1];
+                  const lRms = Number(lCh?.rmsDb);
+                  const rRms = Number(rCh?.rmsDb);
+                  if (!Number.isFinite(lRms) || !Number.isFinite(rRms)) return false;
+                  const avg = (lRms + rRms) / 2;
+                  const diff = Math.abs(lRms - rRms);
+                  // Dolby E burst: constant near-equal amplitude, −35…−8 dBFS typical range
+                  return diff < 3.0 && avg > -35 && avg < -8;
+                });
+                // If Dolby E is detected but heuristic finds no pair (e.g. decoder not probed
+                // yet), show a stream-level badge instead.
+                const dolbyEFound = dolbyEPairFlags.some(Boolean);
+
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                      {/* Thumbnail — flex: 1 so it takes remaining width */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        {selectedResult?.thumbnailUrl ? (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
+                            <img
+                              src={selectedResult.thumbnailUrl}
+                              alt="Confidence monitor"
+                              style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
+                              onError={(e) => { e.target.style.display = "none"; }}
+                            />
+                          </div>
+                        ) : (
+                          <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 2 }}>
+                            <span style={{ fontSize: 10, color: C.muted, textTransform: "uppercase", letterSpacing: "0.08em" }}>Awaiting Frame</span>
+                          </div>
+                        )}
+                      </div>
+                      {/* Vertical audio meters */}
+                      {hasMeter && (
+                        <div style={{ width: panelW, flexShrink: 0, background: "#03060d", borderRadius: 2, padding: "4px 2px", display: "flex", flexDirection: "row", alignItems: "stretch", gap: 2 }}>
+                          {Array.from({ length: pairCount }, (_, i) => {
+                            const lCh = channels[i * 2];
+                            const rCh = channels[i * 2 + 1];
+                            if (dolbyEPairFlags[i]) {
+                              return (
+                                <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                  <DolbyEPairBlock programConfig={dolbyEProgramConfig} />
+                                </div>
+                              );
+                            }
+                            return (
+                              <div key={i} style={{ display: "flex", flexDirection: "row", gap: 1, alignItems: "stretch" }}>
+                                <DecoderVuBar rmsDb={lCh?.rmsDb} peakDb={lCh?.peakDb} />
+                                <DecoderVuBar rmsDb={rCh?.rmsDb} peakDb={rCh?.peakDb} />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                    {/* Dolby E stream indicator — shown when DE detected but pair heuristic
+                        has not yet identified the specific pair (e.g. first probe cycle). */}
+                    {dolbyEOnStream && !dolbyEFound && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E{dolbyEProgramConfig ? ` · ${dolbyEProgramConfig}` : ""} · SMPTE 337M carrier detected
+                        </span>
+                      </div>
+                    )}
+                    {dolbyEOnStream && dolbyEFound && dolbyEProgramConfig && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", background: "#1a0a00", border: "1px solid #7a3200", borderRadius: 2 }}>
+                        <div style={{ width: 6, height: 6, borderRadius: 1, background: "#ff8c00", flexShrink: 0 }} />
+                        <span style={{ fontSize: 9, fontWeight: 700, color: "#ff8c00", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                          Dolby E · {dolbyEProgramConfig}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
               {selectedResult?.programs?.[0]?.serviceName && (
                 <div style={{ fontSize: 9, color: C.cyan, padding: "4px 0 0", textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
                   {selectedResult.programs[0].serviceName}
@@ -1198,7 +1515,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       </select>
                     </Field>
     <button onClick={startEtrForSelected} disabled={!selectedId || busy}
-                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedId && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
+                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700,
+                        cursor: selectedId && !busy ? "pointer" : "not-allowed",
+                        opacity: busy ? 0.4 : 1,
                         border: `1px solid ${selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
                         color: selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.muted,
                         background: selectedEtrExists ? `${C.ok}10` : "transparent" }}>
@@ -1313,7 +1632,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       border: `1px solid ${selectedId && selectedEtrExists && !busy ? C.cyan : C.border}`,
                       color: selectedId && selectedEtrExists && !busy ? C.bg : C.muted,
                       background: selectedId && selectedEtrExists && !busy ? C.cyan : "transparent",
-                      boxShadow: selectedId && selectedEtrExists && !busy ? `0 0 10px ${C.cyan}44` : "none",
+                      boxShadow: "none",
                       opacity: busy ? 0.5 : 1,
                     }}
                   >
@@ -1442,9 +1761,16 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
             // Keep audio rows stable across probe cycles to avoid perceived "rotation".
             const audioStreams = allStreams
               .filter((s) => s.codecType === "audio")
+              // Ghost suppression: ffprobe emits each ES twice — once in the
+              // program list (with PID) and once in the global stream array
+              // (without PID). If any audio stream has a real PID, suppress
+              // all null-PID audio rows — they are duplicates.
+              .filter((() => {
+                const hasRealPid = allStreams.some((s) => s.codecType === "audio" && s.pid != null);
+                return hasRealPid ? (s) => s.pid != null : () => true;
+              })())
               .slice()
               .sort((a, b) => {
-                // Prefer streams with a valid PID; null PID sorts last (not first).
                 const pidA = a?.pid != null && Number.isFinite(Number(a.pid)) ? Number(a.pid) : Number.POSITIVE_INFINITY;
                 const pidB = b?.pid != null && Number.isFinite(Number(b.pid)) ? Number(b.pid) : Number.POSITIVE_INFINITY;
                 if (pidA !== pidB) return pidA - pidB;
@@ -1765,11 +2091,34 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Type</div>
-                            <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                            {p.s302m
+                              ? <Badge label="S302M" color={C.gold} small />
+                              : <Badge label={p.codecType || "unknown"} color={p.codecType === "video" ? C.purple : p.codecType === "audio" ? C.info : C.muted} small />
+                            }
                           </div>
                           <div style={{ minWidth: 0 }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Description</div>
-                            <span style={{ color: C.text, fontSize: 10, display: "block", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.25 }}>{p.codec}</span>
+                            {p.s302m ? (
+                              <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                                <div style={{ display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+                                  <span style={{ color: C.gold, fontSize: 9, fontWeight: 700, fontFamily: "'Courier New',monospace" }}>AES3</span>
+                                  {p.s302m.bitDepth && <span style={{ color: C.text, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.bitDepth}-bit</span>}
+                                  {p.s302m.pairCount != null && <span style={{ color: C.text, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.pairCount} pair{p.s302m.pairCount !== 1 ? "s" : ""}{p.s302m.channels ? ` (${p.s302m.channels}ch)` : ""}</span>}
+                                  {p.s302m.sampleRate && <span style={{ color: C.muted, fontSize: 9, fontFamily: "'Courier New',monospace" }}>{p.s302m.sampleRate / 1000}kHz</span>}
+                                </div>
+                                {p.s302m.pairs && (
+                                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
+                                    {p.s302m.pairs.map(pr => (
+                                      <span key={pr.pair} style={{ fontSize: 8, fontFamily: "'Courier New',monospace", color: C.muted, background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "1px 4px" }}>
+                                        P{pr.pair}: {pr.ch[0]}/{pr.ch[1]}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ) : (
+                              <span style={{ color: C.text, fontSize: 10, display: "block", whiteSpace: "normal", wordBreak: "break-word", lineHeight: 1.25 }}>{p.codec}</span>
+                            )}
                           </div>
                           <div style={{ minWidth: 0, textAlign: "right" }}>
                             <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Bitrate</div>
@@ -1780,6 +2129,73 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     )}
                   </div>
                 </PanelBox>
+
+                {/* ── AES3 / S302M Audio Detail ────────────────────────── */}
+                {(() => {
+                  const s302mPids = pids.filter(p => p.s302m);
+                  if (!s302mPids.length) return null;
+                  const totalCh = s302mPids.reduce((acc, p) => acc + (p.s302m.channels || 0), 0);
+                  const totalPairs = s302mPids.reduce((acc, p) => acc + (p.s302m.pairCount || 0), 0);
+                  // Reference sample rate / bit depth from first S302M PID
+                  const ref = s302mPids[0].s302m;
+                  return (
+                    <PanelBox>
+                      <SectionHead icon="🎚" title="AES3 / SMPTE 302M Audio"
+                        badge={<Badge label={`${totalPairs} pair${totalPairs !== 1 ? "s" : ""} · ${totalCh}ch`} color={C.gold} small />}
+                      />
+                      <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 }}>
+                        {/* Summary row */}
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 6 }}>
+                          {[
+                            { label: "Bit Depth", value: ref.bitDepth ? `${ref.bitDepth}-bit PCM` : "—" },
+                            { label: "Sample Rate", value: ref.sampleRate ? `${ref.sampleRate / 1000} kHz` : "—" },
+                            { label: "Total Pairs", value: totalPairs ? `${totalPairs} AES3 stereo pairs` : "—" },
+                            { label: "Total Channels", value: totalCh ? `${totalCh} channels` : "—" },
+                          ].map(({ label, value }) => (
+                            <div key={label} style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 2, padding: "6px 8px" }}>
+                              <div style={{ fontSize: 8, color: C.head, textTransform: "uppercase", letterSpacing: "0.09em", marginBottom: 3 }}>{label}</div>
+                              <div style={{ fontSize: 10, fontFamily: "'Courier New',monospace", color: C.text }}>{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        {/* Per-PID channel map */}
+                        {s302mPids.map(p => (
+                          <div key={p.pid ?? p._idx} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                              <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.muted }}>PID {p.pid ?? "—"}</span>
+                              <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.dim }}>({p.pidHex})</span>
+                              {p.s302m.bitDepth && <Badge label={`${p.s302m.bitDepth}-bit`} color={C.gold} small />}
+                              {p.s302m.sampleRate && <Badge label={`${p.s302m.sampleRate / 1000}kHz`} color={C.muted} small />}
+                              {p.bitrate > 0 && <span style={{ fontSize: 9, color: C.muted, fontFamily: "'Courier New',monospace" }}>{(p.bitrate / 1e6).toFixed(2)} Mbps</span>}
+                              {p.s302m.theoreticalBps > 0 && <span style={{ fontSize: 8, color: C.dim, fontFamily: "'Courier New',monospace" }}>({(p.s302m.theoreticalBps / 1e6).toFixed(2)} Mbps raw)</span>}
+                            </div>
+                            {/* Pair / channel strip */}
+                            {p.s302m.pairs && (
+                              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                                {p.s302m.pairs.map(pr => (
+                                  <div key={pr.pair} style={{
+                                    display: "flex", alignItems: "center", gap: 4,
+                                    background: C.panel, border: `1px solid ${C.borderHi}`,
+                                    borderRadius: 2, padding: "4px 8px",
+                                  }}>
+                                    <span style={{ fontSize: 8, fontWeight: 800, color: C.head, textTransform: "uppercase", letterSpacing: "0.1em" }}>Pair {pr.pair}</span>
+                                    <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.gold }}>Ch {pr.ch[0]}</span>
+                                    <span style={{ fontSize: 8, color: C.muted }}>+</span>
+                                    <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: C.gold }}>Ch {pr.ch[1]}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        <div style={{ fontSize: 8, color: C.muted, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+                          SMPTE 302M — AES3 PCM audio encapsulation in MPEG-TS · Channel pairs assigned sequentially from Ch 1
+                          {" · "}SMPTE 337M non-PCM carrier detection requires Dolby E adapter
+                        </div>
+                      </div>
+                    </PanelBox>
+                  );
+                })()}
 
                 {/* ── Active Decoders ──────────────────────────────────── */}
                 <PanelBox>
@@ -1847,7 +2263,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
 
           {subTab === "srt" && (() => {
             const srt = selectedResult?.dvb?.srtStats || null;
-            const isSrtUrl = String(legAUrl || "").startsWith("srt://");
+            const isSrtUrl = String(selectedResult?.url || legAUrl || "").startsWith("srt://");
             const rttMs = toFiniteNumber(srt?.rttMs);
             const lossPercent = toFiniteNumber(srt?.lossPercent);
             const rateMbps = toFiniteNumber(srt?.rateMbps);
@@ -1918,7 +2334,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     <div style={{ fontSize: 9, color: C.muted, background: C.dim, borderRadius: 2, padding: "6px 8px", border: `1px solid ${C.border}` }}>
                       <span style={{ color: C.info, fontWeight: 700 }}>Note:</span> SRT ARQ retransmissions produce higher IAT P95 and jitter than UDP multicast.
                       Health thresholds are automatically relaxed for SRT streams (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms).
-                      Use the <span style={{ color: C.info }}>SRT Contribution</span> monitoring policy for additional tuning.
                     </div>
 
                     {!srt && (
