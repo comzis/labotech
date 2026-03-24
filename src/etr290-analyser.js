@@ -93,6 +93,8 @@ class ETR290Analyser extends EventEmitter {
     this._status = {};   // checkId → 'ok' | 'error'
     this._activeIncidents = {}; // checkId -> incident
     this._startedAt = null;     // set in start(); gates startup grace
+    this._epoch = 0;            // incremented on each spawn; stale-close guard
+    this._suspendTimer = null;  // set by suspend(); cleared by resume() / stop()
     this._pendingCounts = {};       // checkId -> matches not yet escalated to incident
     this._pendingLastMatchAt = {};  // checkId -> ms timestamp of last pending match (burst window)
     this._incidentSeq = 0;
@@ -155,16 +157,77 @@ class ETR290Analyser extends EventEmitter {
     return true;
   }
 
-  start() {
+  /**
+   * @param {number} [delayMs=0]  Defer the first ffmpeg spawn by this many ms.
+   *   Use this when starting ETR alongside a persistent SRT thumbnail capture so
+   *   the thumbnail can win the SRT caller slot before ETR tries to connect.
+   */
+  start(delayMs = 0) {
     if (this.isRunning) return;
     this.isRunning = true;
 
-    const args = this._buildFFmpegArgs();
+    // Broadcast status every second for near-real-time operator feedback.
+    this._statusTimer = setInterval(() => {
+      if (!this.isRunning) return;
+      this._clearStaleIncidents(Date.now());
+      this.emit('etr290', this._buildStatus());
+    }, 1000);
 
-    this._proc = spawn('ffmpeg', args);
+    this._startedAt = Date.now();
+    this.emit('started', { id: this.id });
+    this.emit('etr290', this._buildStatus());
+
+    if (delayMs > 0) {
+      // Use the suspend timer slot so stop() / resume() cancel it correctly.
+      if (this._suspendTimer) clearTimeout(this._suspendTimer);
+      this._suspendTimer = setTimeout(() => {
+        this._suspendTimer = null;
+        if (this.isRunning) this._spawnProc();
+      }, delayMs);
+    } else {
+      this._spawnProc();
+    }
+  }
+
+  /**
+   * Temporarily yield the SRT connection slot for a competing probe.
+   * Kills the current ffmpeg process (freeing the SRT caller slot) and schedules
+   * a fallback restart after `durationMs`.  Call resume() as soon as the probe
+   * completes to restart immediately instead of waiting for the full budget.
+   * isRunning stays true — the ETR monitor is still logically active.
+   */
+  suspend(durationMs) {
+    if (!this.isRunning || !this._proc) return;
+    const proc = this._proc;
+    this._proc = null;
+    this._epoch++; // invalidate stale exit-handler for the killed proc
+    if (this._suspendTimer) clearTimeout(this._suspendTimer);
+    this._suspendTimer = setTimeout(() => {
+      this._suspendTimer = null;
+      if (this.isRunning) this._spawnProc();
+    }, durationMs);
+    try { proc.kill('SIGTERM'); } catch (_) {}
+  }
+
+  /**
+   * Cancel a pending suspend and restart ffmpeg immediately.
+   */
+  resume() {
+    if (!this.isRunning) return;
+    if (this._suspendTimer) { clearTimeout(this._suspendTimer); this._suspendTimer = null; }
+    if (!this._proc) this._spawnProc();
+  }
+
+  _spawnProc() {
+    if (!this.isRunning) return;
+    const epoch = ++this._epoch;
+    const args = this._buildFFmpegArgs();
+    const proc = spawn('ffmpeg', args);
+    this._proc = proc;
 
     let buf = '';
-    this._proc.stderr.on('data', d => {
+    proc.stderr.on('data', d => {
+      if (this._epoch !== epoch) return; // stale proc
       buf += d.toString();
       const lines = buf.split('\n');
       buf = lines.pop();
@@ -173,41 +236,44 @@ class ETR290Analyser extends EventEmitter {
       }
     });
 
-    this._proc.on('exit', (code, signal) => {
-      this.isRunning = false;
+    proc.on('exit', (code, signal) => {
+      if (this._epoch !== epoch) return; // killed by suspend() — not a real stop
       this._proc = null;
+      const wasExplicitStop = this._stopping || signal === 'SIGTERM';
+      this._stopping = false;
+
+      // Unexpected exit while still enabled — auto-restart to maintain monitoring.
+      // On SRT (single-listener source): use a long retry delay to avoid competing
+      // with the thumbnail's persistent connection.  A short retry would cause a
+      // fight loop (thumbnail ↔ ETR kicking each other) that destabilises the source.
+      if (!wasExplicitStop && this.isRunning) {
+        const isSrt = this.url && this.url.startsWith('srt://');
+        const retryMs = isSrt ? 60000 : 5000;
+        if (this._suspendTimer) clearTimeout(this._suspendTimer);
+        this._suspendTimer = setTimeout(() => {
+          this._suspendTimer = null;
+          if (this.isRunning) this._spawnProc();
+        }, retryMs);
+        return; // keep isRunning = true; status timer keeps broadcasting
+      }
+
       if (this._statusTimer) {
         clearInterval(this._statusTimer);
         this._statusTimer = null;
       }
+      this.isRunning = false;
       // FFmpeg handles SIGTERM internally and exits with code 255 — treat as clean stop
-      if (code !== 0 && code !== null && !(this._stopping && code === 255) && signal !== 'SIGTERM') {
+      if (code !== 0 && code !== null && !(wasExplicitStop && code === 255)) {
         this.emit('error', new Error(`FFmpeg exited with code ${code}`));
       }
-      this._stopping = false;
       this.emit('stopped', { id: this.id });
     });
 
-    this._proc.on('error', (err) => {
+    proc.on('error', (err) => {
+      if (this._epoch !== epoch) return;
       this.isRunning = false;
       this.emit('error', err);
     });
-
-    // Broadcast status every second for near-real-time operator feedback.
-    this._statusTimer = setInterval(() => {
-      if (!this.isRunning) return;
-      const changed = this._clearStaleIncidents(Date.now());
-      if (changed) {
-        this.emit('etr290', this._buildStatus());
-        return;
-      }
-      this.emit('etr290', this._buildStatus());
-    }, 1000);
-
-    this._startedAt = Date.now();
-    this.emit('started', { id: this.id });
-    // Emit initial status immediately
-    this.emit('etr290', this._buildStatus());
   }
 
   _parseLine(line) {
@@ -377,6 +443,11 @@ class ETR290Analyser extends EventEmitter {
       const liveUrl = `${this.url}${sep}fifo_size=10000000&overrun_nonfatal=1&timeout=7000000`;
       // Force mpegts demux on live RTP/UDP to expose PAT/PMT/CC/PCR faults.
       args.push('-f', 'mpegts', '-i', liveUrl);
+    } else if (type === 'srt') {
+      // Bind SRT caller socket to eno1 (10.67.18.29) — same invariant as ffprobe
+      // and thumbnail (SNAG-019/020). Without adapter= ffmpeg routes via eno2 (no IP).
+      const sep = this.url.includes('?') ? '&' : '?';
+      args.push('-i', `${this.url}${sep}adapter=10.67.18.29`);
     } else {
       args.push('-i', this.url);
     }
@@ -414,12 +485,14 @@ class ETR290Analyser extends EventEmitter {
   }
 
   stop() {
+    if (this._suspendTimer) { clearTimeout(this._suspendTimer); this._suspendTimer = null; }
     if (this._statusTimer) {
       clearInterval(this._statusTimer);
       this._statusTimer = null;
     }
     if (this._proc) {
       this._stopping = true;
+      this._epoch++; // invalidate any pending exit handler
       this._proc.kill('SIGTERM');
       this._proc = null;
     }

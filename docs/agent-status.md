@@ -42,34 +42,48 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Phase 3 PR #16 open, awaiting operator review/merge.
+**Current task:** SRT stability fixes merged — awaiting server deploy and confirmation.
 
 **Owns:**
-- `src/ts-analyser.js` (Phase 3 TSDuckMonitor wiring)
-- `src/tsduck-monitor.js` (new file, Phase 3 only)
-- `test/tsduck-monitor.test.js` (new file, Phase 3)
+- `src/ts-analyser.js`
+- `src/tsduck-monitor.js`
+- `src/etr290-analyser.js`
+- `src/monitoring.js`
+- `test/tsduck-monitor.test.js`
 
-**Last session:** 2026-03-17
-- Phase 3 implementation complete on PR #16 (`feat/phase3-tsduck-monitor`)
-- API wiring follow-up merged via PR #17 (`feat/phase2-api-wiring`)
-- Monitoring test suite passing on server validation
+**Last session:** 2026-03-18
 
-**Active branch:** `feat/phase3-tsduck-monitor` (PR #16 open)
+**Completed this session:**
+- PR #50 — `fix/decoder-pidrows-crash`: Fix `ReferenceError: pidRows` → blank page; add `PanelErrorBoundary` React error boundary. (v3.1.82 / web 3.1.99–3.1.100)
+- PR #51 — `fix/srt-hevc-thumbnail-and-etr-adapter`: `select=eq(pict_type,I)` for HEVC mid-GOP join; `adapter=10.67.18.29` in ETR290Analyser. (v3.1.82)
+- PR #52 — `fix/s302m-audio-thumbnail-fps`: Remove `setpts=N*AVTB` (thumbnail fps freeze); exclude S302M from amerge audio probe; ETR290 `suspend()`/`resume()` for SRT slot coordination. (v3.1.83–3.1.84 / web 3.1.102)
+- PR #53 — `chore/deploy-version-banner`: Print deployed backend/web versions at end of deploy-one-shot.sh.
+- PR #54 — `fix/deploy-web-version`: Read web version from host filesystem (not container — web/package.json not in final image).
+- PR #55 — `chore/snag-docs-update`: SNAG-025/026/027, invariants I-19–I-21 documented.
+- PR #56 — `fix/etr-srt-startup-race`: ETR290 deferred start on SRT — `start(delayMs)`, `getEtrStartDelay()`, link before start in route. (v3.1.85 / web 3.1.103)
+- SNAG-028 documented; invariants I-22, I-23 added.
 
-**Waiting for:** Operator review/merge for PR #16
+**Active branch:** `main` (all branches merged)
+
+**Current versions:** backend `3.1.85` / web `3.1.103` — 194 tests passing.
+
+**Waiting for:** Server deploy confirmation — thumbnail refresh, SRT Transport stats, correct audio VU levels on S302M stream.
+
+**Outstanding:**
+- SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter returning PID/pair number
+- SCTE-35 frontend panel (deferred by operator)
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
 - `src/thumbnail-worker-client.js`
-- `src/monitoring.js` (except minor imports if needed for Phase 3 integration)
 
 ---
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Phase 2 merged. Idle / supporting Phase 3 review.
+**Current task:** Idle — git worktree gitlink fix merged (PR #70).
 
-**Branch:** none (Phase 2 branch merged)
+**Branch:** `main` (PR #70 merged 2026-03-21)
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -77,9 +91,11 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
 - `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-17 — Phase 2 merged (PR #15), release notes updated, server validation passed.
+**Last session:** 2026-03-21 — PR **#70** merged: removed `.claude/worktrees/*` gitlinks; `.gitignore` ignores `.claude/worktrees/`; `git status` / `git diff` work on Linux.
 
 **Active branch:** `main`
+
+**Merged:** `cursor/fix-claude-worktree-gitlinks` → **PR #70** (`f9c7b33` on main).
 
 **Waiting for:** Operator review of Phase 3 PR #16.
 
@@ -169,6 +185,14 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | 2026-03-17 | A | main | — | v3.1.54–v3.1.58 (all prior work) |
 | 2026-03-17 | operator | cursor/phase0a-tsduck-findings | #13 | SRT hardening, multiview export, thumbnail backoff, agent infra |
 | 2026-03-17 | A | feat/phase1-probe-scheduling | #14 | Phase 1: severity-aware probe scheduling (v3.1.59) |
+| 2026-03-18 | A | feat/audio-vu-bars | #32 | feat(ui): audio VU bars in Decoder Confidence Monitor |
+| 2026-03-18 | A | fix/audio-probe-and-ghost-filter | #36 | fix: ghost null-PID filter + audio probe all tracks |
+| 2026-03-18 | A | feat/srt-live-transmit-engine | #35 | feat(encap): srt-live-transmit preferred engine (v3.1.75) |
+| 2026-03-18 | A | fix/srt-binary-volume-mount | #37/#38 | fix(docker): build srt-live-transmit from source in Bookworm stage |
+| 2026-03-18 | A | fix/srt-analyser-eno1-binding | #39 | fix(analyser): bind SRT ffprobe to eno1 (v3.1.76) |
+| 2026-03-18 | A | fix/srt-thumbnail-eno1-binding | #40 | fix(monitoring): bind SRT thumbnail ffmpeg to eno1 (v3.1.77) |
+| 2026-03-18 | A | feat/landing-bebas-srt-paste | #41 | feat(ui): Bebas Neue landing + SRT URI smart-paste (web 3.1.89) |
+| 2026-03-21 | B | cursor/fix-claude-worktree-gitlinks | #70 | chore(git): drop Claude worktree gitlinks; ignore `.claude/worktrees/` — fixes `git status` on Linux |
 
 ---
 

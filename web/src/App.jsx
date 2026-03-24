@@ -1,4 +1,28 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, Component } from 'react';
+
+class PanelErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { err: null }; }
+  static getDerivedStateFromError(err) { return { err }; }
+  render() {
+    if (this.state.err) {
+      return (
+        <div style={{ margin: 24, padding: 16, background: '#1a0505', border: '1px solid #7a1515', borderRadius: 4 }}>
+          <div style={{ fontSize: 11, fontWeight: 700, color: '#ff5555', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 8 }}>
+            Panel error — {this.props.label || 'unknown panel'}
+          </div>
+          <div style={{ fontSize: 10, color: '#cc4444', fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+            {this.state.err.message}
+          </div>
+          <button
+            style={{ marginTop: 10, fontSize: 10, padding: '3px 10px', background: '#2a0808', border: '1px solid #7a1515', borderRadius: 3, color: '#ff5555', cursor: 'pointer' }}
+            onClick={() => this.setState({ err: null })}
+          >Retry</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 import { motion } from 'framer-motion';
 import { Activity, Radio, Network, Search, ShieldCheck, Monitor, Cpu, Terminal, LineChart, LogIn, Lock } from 'lucide-react';
 import { Toaster, toast } from 'sonner';
@@ -65,7 +89,7 @@ const LOGIN_PROFILES = {
   admin: { password: 'labotech', role: ROLES.BES },
   evc: { password: 'evcpass', role: ROLES.OPS },
 };
-const OPS_HIDDEN_TABS = new Set(['streams', 'transcode', 'multicast', 'api']);
+const OPS_HIDDEN_TABS = new Set(['transcode', 'multicast', 'api']);
 const PARTNER_LOGO_SRC = '/eurovision-services.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
@@ -310,15 +334,29 @@ function LandingAuth({ onLogin, punchline }) {
 
           <div className="my-6 rounded-sm border p-5" style={{ borderColor: '#2c3b52', background: 'linear-gradient(180deg, #162233, #101a29)' }}>
             {!showForm ? (
-              <div className="flex flex-col items-start gap-4">
-                <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: '#8ba3c7' }}>
-                  Secure operator access
+              <div className="flex flex-col items-start gap-3">
+                <div className="text-[9px] uppercase tracking-[0.22em]" style={{ color: '#4e6a8f', fontFamily: "'Courier New', monospace" }}>
+                  Operator Access
                 </div>
-                <div className="text-[20px] font-black uppercase tracking-[0.12em] leading-none" style={{ color: '#c8dcff' }}>
-                  Control Room Access
+                <div style={{ marginTop: 10 }}>
+                  <div
+                    className="font-black uppercase"
+                    style={{
+                      fontSize: 42,
+                      lineHeight: 1,
+                      letterSpacing: '0.18em',
+                      color: '#7b879a',
+                      textShadow: '0 1px 0 rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    LABOTECH
+                  </div>
+                  <div style={{ fontFamily: '"Palatino Linotype","Book Antiqua",Palatino,Georgia,serif', fontStyle: 'italic', fontSize: 9, color: '#738199', letterSpacing: '0.05em', marginTop: 3 }}>
+                    Powered by Docker
+                  </div>
                 </div>
-                <div className="text-[11px] text-gray-300 max-w-[720px]">
-                  Use your operator credentials to enter the shared engineering and operations workspace.
+                <div style={{ fontFamily: "'Courier New', monospace", fontSize: 11, color: '#3d5470', letterSpacing: '0.04em', marginTop: 6 }}>
+                  Stream Management Platform
                 </div>
                 <button
                   onClick={() => setShowForm(true)}
@@ -1038,13 +1076,13 @@ export default function App() {
           transition={{ duration: 0.15 }}
           className="py-4"
         >
-          {tab === 'streams'    && <StreamsPanel lastMessage={lastMessage} />}
-          {tab === 'transcode'  && <TranscodePanel lastMessage={lastMessage} />}
-          {tab === 'multicast'  && <MulticastPanel lastMessage={lastMessage} />}
-          {tab === 'decoder'    && <DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} />}
-          {tab === 'analyse'    && <TSAnalyser lastMessage={lastMessage} />}
-          {tab === 'decoders'   && <DecoderMultiviewPanel lastMessage={lastMessage} />}
-          {tab === 'streamView' && <StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} />}
+          {tab === 'streams'    && <PanelErrorBoundary label="SRT Encapsulator"><StreamsPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'transcode'  && <PanelErrorBoundary label="Transcoder"><TranscodePanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'multicast'  && <PanelErrorBoundary label="Forwarding"><MulticastPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'decoder'    && <PanelErrorBoundary label="Decoder"><DecoderPanel lastMessage={lastMessage} selectedDecoderRequest={decoderSelectionRequest} /></PanelErrorBoundary>}
+          {tab === 'analyse'    && <PanelErrorBoundary label="TS Analyser"><TSAnalyser lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'decoders'   && <PanelErrorBoundary label="Multiview"><DecoderMultiviewPanel lastMessage={lastMessage} /></PanelErrorBoundary>}
+          {tab === 'streamView' && <PanelErrorBoundary label="Live View"><StreamViewPanel lastMessage={lastMessage} onSelectDecoder={handleSelectDecoderFromTimeline} /></PanelErrorBoundary>}
           {tab === 'alarms'     && (
             <EventLogPanel
               events={eventLog}

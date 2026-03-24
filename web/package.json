@@ -1,10 +1,6 @@
 {
   "name": "labotech-web",
-<<<<<<< HEAD
-  "version": "3.1.60",
-=======
-  "version": "3.1.68",
->>>>>>> origin/main
+  "version": "3.1.116",
   "private": true,
   "type": "module",
   "scripts": {

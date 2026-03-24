@@ -815,8 +815,8 @@ export default function TSAnalyser({ lastMessage }) {
       <div style={{ display: "grid", gridTemplateColumns: "repeat(9,1fr)", gap: 5, marginBottom: 8 }}>
         {[{ l: "BITRATE", v: bps != null ? `${bps.toFixed(3)} Mbps` : "-", c: bps != null ? C.cyan : C.muted }, { l: "RATE SRC", v: String((transportRate.source || '-')).toUpperCase(), c: transportRate.trusted ? C.ok : C.warn }, { l: "PACKETS", v: packets.toLocaleString(), c: C.text }, { l: "CC ERRORS", v: String(ccErrors), c: ccErrors > 0 ? C.err : C.ok }, { l: "PCR JITTER", v: pcrJitter != null ? `${pcrJitter} ms` : "-", c: pcrJitter != null ? C.ok : C.muted }, { l: "NULL PKT", v: nullPct != null ? `${nullPct} %` : "-", c: C.text }, { l: "SERVICES", v: String(servicesCount), c: C.ok }, { l: "PIDs", v: String(pidsCount), c: C.text }, { l: "SCORE", v: score != null ? `${score} %` : "-", c: score != null && score >= 90 ? C.ok : C.warn }].map((s) => (
           <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
-            <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
-            <div style={{ fontSize: 12, color: s.c, fontWeight: 700 }}>{s.v}</div>
+            <div style={{ fontSize: 10, color: C.head, marginBottom: 1 }}>{s.l}</div>
+            <div style={{ fontSize: 13, color: s.c, fontWeight: 700 }}>{s.v}</div>
           </div>
         ))}
       </div>
@@ -831,8 +831,8 @@ export default function TSAnalyser({ lastMessage }) {
           { l: "PREFLIGHT", v: captureMethod === "UNAVAILABLE" ? "DEGRADED" : "READY", c: captureMethod === "UNAVAILABLE" ? C.warn : C.ok },
         ].map((s) => (
           <div key={s.l} style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 6px", textAlign: "center" }}>
-            <div style={{ fontSize: 8, color: C.muted, marginBottom: 1 }}>{s.l}</div>
-            <div style={{ fontSize: 11, color: s.c, fontWeight: 700 }}>{s.v}</div>
+            <div style={{ fontSize: 10, color: C.head, marginBottom: 1 }}>{s.l}</div>
+            <div style={{ fontSize: 13, color: s.c, fontWeight: 700 }}>{s.v}</div>
           </div>
         ))}
       </div>
@@ -1184,8 +1184,8 @@ export default function TSAnalyser({ lastMessage }) {
         const lostColor     = lossPercent > 0.1 ? C.err : lossPercent > 0 ? C.warn : C.ok;
         const Stat = ({ label, value, color }) => (
           <div style={{ background: C.panelB, border: `1px solid ${C.border}`, borderRadius: 3, padding: "4px 8px", textAlign: "center" }}>
-            <div style={{ fontSize: 8, color: C.muted, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-            <div style={{ fontSize: 12, fontWeight: 700, color: color || C.text }}>{value ?? "-"}</div>
+            <div style={{ fontSize: 10, color: C.head, marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
+            <div style={{ fontSize: 13, fontWeight: 700, color: color || C.text }}>{value ?? "-"}</div>
           </div>
         );
         return (

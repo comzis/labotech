@@ -5,7 +5,7 @@ const WebSocket = require('ws');
 const ETR290Analyser = require('../src/etr290-analyser');
 const ETR290ProfileStore = require('../src/etr290-profile-store');
 
-module.exports = function (etr290monitors, wss, broadcastFn = null) {
+module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = null) {
   const router = express.Router();
   const profileStore = new ETR290ProfileStore();
 
@@ -54,6 +54,30 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (etr290monitors.has(id)) return res.status(409).json({ error: `ETR290 monitor ${id} already exists` });
 
+    // SRT single-listener guard: ETR cannot connect directly to an SRT source
+    // that already has a relay or thumbnail holding the caller slot.
+    // When a TSAnalyser relay is active for this stream, ETR uses the relay's
+    // local UDP copy instead — unlimited readers, no slot contention.
+    let effectiveUrl = url;
+    if (url.startsWith('srt://')) {
+      const linkedId = /^etr-/i.test(id) ? id.slice(4) : null;
+      const linkedAnalyser = linkedId && analysers ? analysers.get(linkedId) : null;
+      const relayUrl = linkedAnalyser && typeof linkedAnalyser.getRelayUrl === 'function'
+        ? linkedAnalyser.getRelayUrl()
+        : null;
+      if (relayUrl) {
+        // Relay is active — redirect ETR to the local UDP copy.
+        effectiveUrl = relayUrl;
+      } else {
+        // No relay present — direct SRT ETR is not supported.
+        return res.status(422).json({
+          error: 'ETR290 monitoring is not available on single-listener SRT sources. ' +
+            'Start the decoder first (the SRT relay will be created automatically), ' +
+            'then enable ETR. The relay provides a shared UDP copy for unlimited consumers.',
+        });
+      }
+    }
+
     let profileConfig = {};
     if (profileName) {
       const profile = profileStore.get(profileName);
@@ -68,7 +92,7 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
 
     const mon = new ETR290Analyser({
       id,
-      url,
+      url: effectiveUrl,
       nicName: nicName || undefined,
       config: mergedConfig,
       profileName: profileName || mergedConfig.profileName || null,
@@ -82,7 +106,23 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
     mon.on('error',  err    => broadcast({ type: 'error', id, message: err.message }));
     mon.on('stopped', ()    => broadcast({ type: 'etr290_stopped', id }));
 
-    mon.start();
+    // Link to TSAnalyser BEFORE starting so the start delay can be computed.
+    // On SRT streams the analyser's thumbnail already holds the caller slot —
+    // ETR must wait (latency + 15 s) before its first ffmpeg spawn to avoid
+    // being immediately rejected by the single-listener SRT source.
+    let startDelay = 0;
+    if (analysers && /^etr-/i.test(id)) {
+      const linkedId = id.slice(4);
+      const linkedAnalyser = analysers.get(linkedId);
+      if (linkedAnalyser && typeof linkedAnalyser.setEtrMonitor === 'function') {
+        linkedAnalyser.setEtrMonitor(mon);
+        if (typeof linkedAnalyser.getEtrStartDelay === 'function') {
+          startDelay = linkedAnalyser.getEtrStartDelay();
+        }
+      }
+    }
+
+    mon.start(startDelay);
     etr290monitors.set(id, mon);
     res.status(201).json(mon.toJSON());
   });
@@ -121,11 +161,19 @@ module.exports = function (etr290monitors, wss, broadcastFn = null) {
 
   // DELETE /etr290/:id
   router.delete('/:id', (req, res) => {
-    const mon = etr290monitors.get(req.params.id);
+    const id = req.params.id;
+    const mon = etr290monitors.get(id);
     if (!mon) return res.status(404).json({ error: 'Monitor not found' });
     mon.stop();
-    etr290monitors.delete(req.params.id);
-    res.json({ stopped: req.params.id });
+    etr290monitors.delete(id);
+    // Unlink from TSAnalyser if managed
+    if (analysers && /^etr-/i.test(id)) {
+      const linkedAnalyser = analysers.get(id.slice(4));
+      if (linkedAnalyser && typeof linkedAnalyser.clearEtrMonitor === 'function') {
+        linkedAnalyser.clearEtrMonitor();
+      }
+    }
+    res.json({ stopped: id });
   });
 
   return router;
