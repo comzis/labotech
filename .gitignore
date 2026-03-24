@@ -15,5 +15,9 @@ REREFENCE ONLY/
 REFERENCE ONLY/
 "REFERENCE ONLY"/
 
+# ── Claude Code worktrees — local snapshots; gitlink stubs pointed at macOS paths
+# and broke `git status` / `git diff` on Linux. Keep this tree untracked.
+.claude/worktrees/
+
 # ── PRIVATE — local drafts, emails, handover notes — never commit ─────────────
 private/

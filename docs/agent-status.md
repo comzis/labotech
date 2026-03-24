@@ -42,50 +42,36 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT A STATUS — Claude Code
 
-**Current task:** Session complete — all operator-reported issues resolved. Awaiting server deploy.
+**Current task:** SRT stability fixes merged — awaiting server deploy and confirmation.
 
 **Owns:**
 - `src/ts-analyser.js`
-- `src/srt-relay.js`
 - `src/tsduck-monitor.js`
 - `src/etr290-analyser.js`
 - `src/monitoring.js`
-- `src/api.js` (shared with B — coordinate before editing)
 - `test/tsduck-monitor.test.js`
-- `web/src/components/DecoderMultiviewPanel.jsx`
-- `web/src/components/DecoderPanelRevamp.jsx`
 
-**Last session:** 2026-03-22
+**Last session:** 2026-03-18
 
-**Completed this session (all on branch `cursor/phase2-complete-thumb-migration`):**
-- `fix(srt)`: SRT relay thumbnail — H.264 mid-GOP failure root cause fixed; integrated thumbnail capture into relay ffmpeg as second output branch (`thumbnail=100,scale=480:-2`); replaced `doCapture` with `pollRelayThumb` 2 s mtime poller. (v3.2.9–v3.2.10)
-- `fix(srt)`: Thumbnail persistence across tab switches — `pollRelayThumb` now always seeds `lastResult`; `toJSON()` disk fallback via `_resolveCachedThumbnailUrl()`. (v3.2.11–v3.2.12)
-- `fix(dev)`: nodemon restarts on every `saveState()` write — added `nodemon.json` + inline `--ignore` flags in `docker-compose.dev.yml`. OFFLINE flash on decoder stop eliminated after `docker compose up -d`. (v3.2.13)
-- `feat(multiview)`: "+" tile on Multiview grid to provision decoder without leaving the tab. Mini modal with Host/IP, Port, optional Decoder ID. (web v3.1.119)
-- `fix(multiview)`: Existing tiles disappear when adding new decoder — replaced full-reseed effect with prune-then-seed; ghost IDs removed on every `activeIds` update. Catalog search dropdown + RTP/SRT/UDP mode buttons + SRT latency/passphrase added to "+" modal. (web v3.1.120)
-- `fix(decoder-tab)`: Active Decoders list does not show decoders started from Multiview tab — added 5 s polling interval to `DecoderPanel`. (web v3.1.121)
-- `fix(srt-stats)`: SRT Transport panel showed only RATE — removed `|| this._relay` guard from `_probeSrtLinkStats()`; added `pktNak`/`pktAck` parsing from `srt-live-transmit` JSON; added `retransRatio`. (v3.2.14)
-- `fix(api)`: Agent B review blocker — `thumbnail_frame` handler only wrote `_lastThumbnailUrl`, not `lastResult`; thumbnails lost on tab switch for worker-managed streams (direct SRT, RTP/UDP). Fixed to mirror `pollRelayThumb` pattern. (v3.2.15)
-- `docs(claude)`: CLAUDE.md updated with Docker rebuild requirement for all frontend changes.
-- Various SRT relay/ffmpeg/slt attempts and reversions. (v3.2.16–v3.2.21)
-- `fix(ts-analyser)`: Suppress spurious "Input signal missing" alarms during SRT relay restart window. (v3.2.22)
-- `fix(thumbnail-worker-client)`: Stall watchdog (SIGKILL on hung worker after 120 s) + shutdown visibility warning + 3 new tests — backlog items from Agent B peer review. (v3.2.23)
+**Completed this session:**
+- PR #50 — `fix/decoder-pidrows-crash`: Fix `ReferenceError: pidRows` → blank page; add `PanelErrorBoundary` React error boundary. (v3.1.82 / web 3.1.99–3.1.100)
+- PR #51 — `fix/srt-hevc-thumbnail-and-etr-adapter`: `select=eq(pict_type,I)` for HEVC mid-GOP join; `adapter=10.67.18.29` in ETR290Analyser. (v3.1.82)
+- PR #52 — `fix/s302m-audio-thumbnail-fps`: Remove `setpts=N*AVTB` (thumbnail fps freeze); exclude S302M from amerge audio probe; ETR290 `suspend()`/`resume()` for SRT slot coordination. (v3.1.83–3.1.84 / web 3.1.102)
+- PR #53 — `chore/deploy-version-banner`: Print deployed backend/web versions at end of deploy-one-shot.sh.
+- PR #54 — `fix/deploy-web-version`: Read web version from host filesystem (not container — web/package.json not in final image).
+- PR #55 — `chore/snag-docs-update`: SNAG-025/026/027, invariants I-19–I-21 documented.
+- PR #56 — `fix/etr-srt-startup-race`: ETR290 deferred start on SRT — `start(delayMs)`, `getEtrStartDelay()`, link before start in route. (v3.1.85 / web 3.1.103)
+- SNAG-028 documented; invariants I-22, I-23 added.
 
-**Active branch:** `cursor/phase2-complete-thumb-migration` (shared with Agent B — all A work committed)
+**Active branch:** `main` (all branches merged)
 
-**Current versions:** backend `3.2.23` / web `3.1.121` — 243 tests passing.
+**Current versions:** backend `3.1.85` / web `3.1.103` — 194 tests passing.
 
-**Waiting for:** Operator to run `git pull && docker compose -f docker-compose.dev.yml build labotech && docker compose -f docker-compose.dev.yml up -d` on server to deploy all fixes.
+**Waiting for:** Server deploy confirmation — thumbnail refresh, SRT Transport stats, correct audio VU levels on S302M stream.
 
-**Agent B backlog items — all now done:**
-- ✅ `ThumbnailWorkerClient` stall watchdog (v3.2.23)
-- ✅ `ThumbnailWorkerClient.shutdown()` warning log (v3.2.23)
-- ✅ `start()` during backoff test (v3.2.23)
-
-**Outstanding (deferred):**
-- SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter
+**Outstanding:**
+- SMPTE 337M pair identification is heuristic-based; exact pair requires Dolby E adapter returning PID/pair number
 - SCTE-35 frontend panel (deferred by operator)
-- Full SRT stats (RTT/BW/NAK/ACK) for relay streams — requires ffmpeg upgrade (7.x static build caused instability, deferred)
 
 **Do NOT touch (Agent B owns):**
 - `src/thumbnail-worker.js`
@@ -95,35 +81,27 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Phase 2 migration complete — PR pending operator review.
+**Current task:** Idle — git worktree gitlink fix merged (PR #70).
 
-**Branch:** `cursor/phase2-complete-thumb-migration`
+**Branch:** `main` (PR #70 merged 2026-03-21)
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
-- `src/thumbnail-worker-client.js` (Phase 2 + backoff reset fix) ✅
-- `test/thumbnail-worker.test.js` (Phase 2 + backoff reset test) ✅
-- `docs/release-notes-v3.2.md` (entries to add before PR) ✅
+- `src/thumbnail-worker-client.js` (new file, Phase 2) ✅
+- `test/thumbnail-worker.test.js` (new file, Phase 2) ✅
+- `docs/release-notes-v3.1.md` (v3.1.60–v3.1.61 entries added) ✅
 
-**Last session:** 2026-03-21 — Phase 2 migration completed. TSAnalyser now delegates thumbnails to ThumbnailWorkerClient. All 221 tests passing. PR opened for operator review.
+**Last session:** 2026-03-21 — PR **#70** merged: removed `.claude/worktrees/*` gitlinks; `.gitignore` ignores `.claude/worktrees/`; `git status` / `git diff` work on Linux.
 
-**Active branch:** `cursor/phase2-complete-thumb-migration`
+**Active branch:** `main`
 
-**Files touched this session:**
-- `src/ts-analyser.js` — constructor injection, startContinuous() 3-branch thumb logic, probe() suspend/resume, getEtrStartDelay(), stop()
-- `src/thumbnail-worker-client.js` — backoff reset on ready event
-- `routes/analyse.js` — pass thumbnailClient to TSAnalyser constructor
-- `src/api.js` — restoreState() passes thumbnailClient; SIGTERM stops analysers before shutdown
-- `test/thumbnail-worker.test.js` — backoff reset test added
+**Merged:** `cursor/fix-claude-worktree-gitlinks` → **PR #70** (`f9c7b33` on main).
 
-**Design decisions:**
-- Relay-backed SRT (loopback unicast) keeps in-process one-shot timer — persistent worker connection would hold the UDP port and block ffprobe probes
-- Direct SRT and RTP/UDP multicast → worker (PersistentThumbnailCapture out-of-process)
-- In-process PersistentThumbnailCapture kept as fallback (no thumbnailClient injected)
+**Waiting for:** Operator review of Phase 3 PR #16.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
-- `src/ts-analyser.js` (scoped edits this session now done — treat as A's again)
+- `src/ts-analyser.js` (beyond the ~3-line constructor addition)
 - Any file in `web/src/` (UI Change Policy — operator approval required)
 
 ---
@@ -214,9 +192,7 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 | 2026-03-18 | A | fix/srt-analyser-eno1-binding | #39 | fix(analyser): bind SRT ffprobe to eno1 (v3.1.76) |
 | 2026-03-18 | A | fix/srt-thumbnail-eno1-binding | #40 | fix(monitoring): bind SRT thumbnail ffmpeg to eno1 (v3.1.77) |
 | 2026-03-18 | A | feat/landing-bebas-srt-paste | #41 | feat(ui): Bebas Neue landing + SRT URI smart-paste (web 3.1.89) |
-| 2026-03-17 | B | cursor/fix-claude-worktree-gitlinks | #70 | fix: remove broken gitlink worktrees; .gitignore .claude/worktrees/ |
-| 2026-03-17 | B | cursor/docs-agent-status-pr70-sync | #71 | docs: agent-status sync after PR #70 |
-| 2026-03-22 | A | cursor/phase2-complete-thumb-migration | — | SRT relay thumbnail, OFFLINE flash fix, Multiview + tile, SRT stats, tab sync, Agent B review blocker (backend v3.2.9–v3.2.15 / web v3.1.119–v3.1.121) — PR pending |
+| 2026-03-21 | B | cursor/fix-claude-worktree-gitlinks | #70 | chore(git): drop Claude worktree gitlinks; ignore `.claude/worktrees/` — fixes `git status` on Linux |
 
 ---
 
@@ -224,8 +200,6 @@ tsduckMonitor.on('exit',    ({ code, signal }) => {})
 
 | File | Risk | Resolution |
 |---|---|---|
-| `src/ts-analyser.js` | Both agents have edited on `cursor/phase2-complete-thumb-migration`. A owns this file going forward. B's Phase 2 injection (`_thumbnailClient`) is already in place — do not revert. | Low — on shared branch, changes committed. |
-| `src/api.js` | Both agents edited this session. A fixed `thumbnail_frame` handler (v3.2.15). B owns worker IPC wiring. Coordinate before any further edits. | Low — changes committed, no pending conflicts. |
-| `package.json` | Currently at `3.2.15` (backend) / `3.1.121` (web). Both agents must pull before bumping version. | Pull main after this branch merges. |
-| `docs/release-notes-v3.1.md` | Agent A only. Agent B uses `docs/release-notes-v3.2.md`. | No conflict. |
-| `web/src/components/DecoderMultiviewPanel.jsx` | Agent A made extensive changes this session. UI Change Policy applies — operator approval required for further changes. | Committed on shared branch. |
+| `src/ts-analyser.js` | Both agents edit constructor | Agent B branches off main AFTER Phase 1 merges. Agent B's change is additive only (new optional param). |
+| `src/api.js` | Both agents add wiring | Coordinate via this file. Agent B adds thumbnail client; Agent A adds TSDuckMonitor. Do not both edit in the same session without checking this file first. |
+| `docs/release-notes-v3.1.md` | Both agents may need to add entries | Only Agent A adds to this file (Phase 1). Agent B creates a new `docs/release-notes-v3.2.md`. |
