@@ -44,6 +44,9 @@ const EVENT_BLOCK_DURATION_MS = {
   health_alarm: 14000,
   etr290_status: 5000,
 };
+const EVENT_BLOCK_TRACK_HEIGHT_PX = 6;
+const STOP_LINE_HEIGHT_PX = 2;
+const STOP_LINE_TOP_PX = Math.floor((EVENT_BLOCK_TRACK_HEIGHT_PX - STOP_LINE_HEIGHT_PX) / 2);
 const EVENT_STYLE_BY_CATEGORY = {
   etr290_alarm: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '88' },
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
@@ -526,7 +529,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     return 'linear-gradient(90deg, #44556638 0%, #44556638 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
-  const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
+  // Use ETR colouring only when ETR status heartbeats are present in the
+  // current visible window. Otherwise, fall back to decoder/analyser gradient
+  // even if older etr290_status events remain in localStorage.
+  const hasEtrStateEvents = sorted.some(
+    (e) => laneStateSeverity(e) != null && e.ts >= timeStart && e.ts <= (timeStart + windowMs)
+  );
 
   // Fallback for decoder/analyser lanes (no ETR heartbeat present).
   // Build a severity-aware gradient: green = healthy, red = LOS/error, amber = warning.
@@ -639,7 +647,7 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const lastExplicitStartTs = hasExplicitStart
       ? explicitStarts[explicitStarts.length - 1].ts
       : firstActiveTs;
-    const stopAfterActive = sorted.find(
+    let stopAfterActive = sorted.find(
       (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStartTs
     );
     const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
@@ -647,6 +655,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
     // live-colored between probe cycles (heartbeats arrive every ~5s while the
     // process runs; analyse_result may only arrive every 30-60s+).
     const lastHeartbeatTs = sorted.filter((e) => e.category === 'runtime_heartbeat').pop()?.ts || 0;
+    // If heartbeats keep arriving after a runtime_stopped marker, treat that stop
+    // as spurious (e.g. tombstone/race) and keep the lane live.
+    if (stopAfterActive) {
+      const heartbeatAfterStopTs = sorted
+        .filter((e) => e.category === 'runtime_heartbeat' && e.ts > stopAfterActive.ts)
+        .pop()?.ts;
+      if (heartbeatAfterStopTs != null && heartbeatAfterStopTs >= timeStart) {
+        stopAfterActive = null;
+      }
+    }
     const lastActivityTs = Math.max(lastSevEvtTs, lastHeartbeatTs);
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     const timeEnd = timeStart + windowMs;
@@ -734,10 +752,24 @@ function buildLaneGradient(events, timeStart, windowMs) {
     if (state) currentSeverity = state;
   }
 
-  // Respect runtime_stopped — find the earliest stop after the first ETR status event.
-  const firstEtrTs = sorted.find((e) => laneStateSeverity(e) != null)?.ts ?? -Infinity;
-  const stopEvent = sorted.find((e) => e.category === 'runtime_stopped' && e.ts >= firstEtrTs);
+  // Respect runtime_stopped — but only for the ETR monitor itself.
+  // Decoder/analyser lifecycle runtime_stopped events can share the same lane id
+  // after normalization, prematurely terminating the ETR lane and creating a
+  // visible gap even while etr290_status heartbeats continue.
   const timeEnd = timeStart + windowMs;
+  // End ETR lane only on the next ETR monitor stop after the most recent
+  // etr290_status heartbeat within/at the end of the visible window.
+  const lastEtrStatusTs = sorted
+    .filter((e) => laneStateSeverity(e) != null && e.ts <= timeEnd)
+    .pop()?.ts;
+  const stopEvent = lastEtrStatusTs != null
+    ? sorted.find(
+      (e) =>
+        e.category === 'runtime_stopped'
+        && e.title === 'ETR monitor stopped'
+        && e.ts >= lastEtrStatusTs
+    )
+    : null;
   // ETR gradient ends at stop event (if within window), otherwise extends to window edge.
   const gradientEnd = (stopEvent && stopEvent.ts < timeEnd) ? stopEvent.ts : timeEnd;
 
@@ -767,8 +799,11 @@ function buildLaneGradient(events, timeStart, windowMs) {
 function buildEventBlocks(events, timeStart, windowMs) {
   if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) return [];
   const end = timeStart + windowMs;
-  return events
-    .filter((e) => e && e.ts != null)
+  const laneSorted = [...events]
+    .filter((e) => e && e.ts != null && Number.isFinite(e.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  return laneSorted
     // Suppress nominal analyse heartbeat blocks; they create misleading
     // gray/green segmentation when lane baseline already indicates state.
     .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
@@ -786,16 +821,48 @@ function buildEventBlocks(events, timeStart, windowMs) {
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
-      const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
-      const sev = laneSeverity(e);
-      const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
-      const dur = Math.round(baseDur * severityFactor);
-      const endTs = Math.min(end, startTs + dur);
+      // Render ANY non-ETR operational "stopped" marker as a thin timeline line
+      // (prevents misleading 6px "blocks" for synthetic/runtime stop events).
+      const isStopLine = e.category === 'runtime_stopped'
+        && e.title !== 'ETR monitor stopped';
+      const nextStartTitle = e.title === 'Analyser stopped' ? 'Analyser started' : e.title === 'Stream stopped' ? 'Stream started' : null;
+
+      let endTs;
+      if (isStopLine && nextStartTitle) {
+        // Real stop duration: until the next matching non-bootstrap "started".
+        const nextStart = laneSorted.find(
+          (x) =>
+            x.category === 'runtime_started'
+            && x.title === nextStartTitle
+            && !x?.evidence?.bootstrap
+            && x.ts > e.ts
+        );
+        endTs = Math.min(end, nextStart ? nextStart.ts : end);
+      } else {
+        const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
+        const sev = laneSeverity(e);
+        const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
+        const dur = Math.round(baseDur * severityFactor);
+        endTs = Math.min(end, startTs + dur);
+      }
+
       if (endTs <= timeStart || startTs >= end) return null;
       const leftPct = ((startTs - timeStart) / windowMs) * 100;
       const rightPct = ((endTs - timeStart) / windowMs) * 100;
-      const widthPct = Math.max(0.45, rightPct - leftPct);
+      const widthPctRaw = rightPct - leftPct;
+      const widthPct = isStopLine
+        ? Math.max(0, Math.min(100, widthPctRaw))
+        : Math.max(0.45, Math.min(100, widthPctRaw));
       const vis = getEventVisualStyle(e.category, e.severity);
+
+      // “Analyser stopped” should be visible only in the TS analyser logs,
+      // not as a timeline marker in Live View.
+      if (e.category === 'runtime_stopped' && e.title === 'Analyser stopped') return null;
+
+      // Hide ETR monitor started/stopped markers from Live View.
+      // (ETR errors/incident/alarm blocks remain visible.)
+      if (e.category === 'runtime_stopped' && e.title === 'ETR monitor stopped') return null;
+
       return {
         key: `${e.key}-blk-${idx}`,
         leftPct: Math.max(0, Math.min(100, leftPct)),
@@ -804,14 +871,39 @@ function buildEventBlocks(events, timeStart, windowMs) {
         bg: vis.bg,
         border: vis.border,
         glow: vis.glow,
-        title: `${toUtc(e.ts)} - ${e.title}`,
+        title: isStopLine
+          ? `${toUtc(e.ts)} - ${toUtc(endTs)} (${Math.round(endTs - e.ts)}ms) - ${e.title}`
+          : `${toUtc(e.ts)} - ${e.title}`,
+        shape: isStopLine ? 'line' : 'rect',
+        heightPx: isStopLine ? STOP_LINE_HEIGHT_PX : null,
+        topPx: isStopLine ? STOP_LINE_TOP_PX : null,
       };
     })
     .filter(Boolean);
 }
 
-function getEventVisualDurationMs(event) {
+function getEventVisualDurationMs(event, laneEventsSorted, windowEndTs) {
   if (!event) return 6000;
+
+  // Stop timeline lines should reflect real stop duration (stop -> next matching started).
+  if (
+    event.category === 'runtime_stopped'
+    && (event.title === 'Analyser stopped' || event.title === 'Stream stopped')
+    && Number.isFinite(windowEndTs)
+    && Array.isArray(laneEventsSorted)
+  ) {
+    const targetStartedTitle = event.title === 'Analyser stopped' ? 'Analyser started' : 'Stream started';
+    const nextStart = laneEventsSorted.find(
+      (e) =>
+        e.category === 'runtime_started'
+        && e.title === targetStartedTitle
+        && !e?.evidence?.bootstrap
+        && e.ts > event.ts
+    );
+    const endTs = nextStart ? nextStart.ts : windowEndTs;
+    return Math.max(1, Math.round(endTs - event.ts));
+  }
+
   const baseDur = EVENT_BLOCK_DURATION_MS[event.category] || 6000;
   const sev = laneSeverity(event);
   const severityFactor = (sev === 'critical' || sev === 'p1') ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
@@ -908,7 +1000,13 @@ function LaneCanvas({ gradient, height = 8 }) {
 // surface as the "nearest event" in the cursor readout.
 function isInternalEvent(e) {
   return e.category === 'runtime_heartbeat' ||
-    (e.category === 'runtime_started' && e?.evidence?.bootstrap);
+    (e.category === 'runtime_started' && e?.evidence?.bootstrap) ||
+    // ETR status heartbeats are used for lane coloring, but should not appear as selectable events.
+    e.category === 'etr290_status' ||
+    // “Analyser stopped” is operational status/log-only; exclude from Live View hover selection.
+    (e.category === 'runtime_stopped' && e?.title === 'Analyser stopped') ||
+    // ETR monitor started/stopped are operational status; show ETR errors/alarms/incidents instead.
+    (e.category === 'runtime_stopped' && e?.title === 'ETR monitor stopped');
 }
 
 function canonicalizeEventLane(event) {
@@ -941,6 +1039,8 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [rangeError, setRangeError] = useState('');
   const [uiRestored, setUiRestored] = useState(false);
   const [laneThumbnailById, setLaneThumbnailById] = useState({});
+  // Throttle per-lane thumbnail state updates so we don't re-render excessively.
+  const lastThumbUpdateTsByLaneRef = useRef({});
   // Crosshair DOM ref — updated directly to avoid React re-renders on every mousemove
   const crosshairLineRef = useRef(null);
   // Pending mouse position for rAF-throttled state update
@@ -1052,6 +1152,26 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       }
       return mergeTimelineEvents(prev, [event]);
     });
+  }, [lastMessage]);
+
+  // Keep Live View thumbnails "near real-time" by updating per-lane <img src>
+  // from backend `thumbnail_frame` WS messages.
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== 'thumbnail_frame') return;
+    if (!lastMessage.id) return;
+    const laneId = normalizeLaneId(lastMessage.id);
+    const filePath = typeof lastMessage.path === 'string' ? lastMessage.path.trim() : '';
+    const baseName = filePath ? filePath.split('/').pop() : '';
+    if (!baseName) return;
+
+    const now = Date.now();
+    const lastTs = lastThumbUpdateTsByLaneRef.current[laneId] || 0;
+    // Default thumbnail cadence is ~5s; keep a small guard anyway.
+    if (now - lastTs < 1500) return;
+    lastThumbUpdateTsByLaneRef.current[laneId] = now;
+
+    const thumbUrl = `/logs/thumbnails/${baseName}?t=${now}`;
+    setLaneThumbnailById((prev) => (prev[laneId] === thumbUrl ? prev : { ...prev, [laneId]: thumbUrl }));
   }, [lastMessage]);
 
   useEffect(() => {
@@ -1190,6 +1310,36 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           const seen = new Set(prev.map((e) => e.id));
           const missing = synthetic.filter((e) => !seen.has(e.id));
 
+          // Prevent "ghost running" after a user stop:
+          // if we already have a recent runtime_stopped for a lane, do not
+          // inject bootstrap heartbeats / OK seeds for that lane even if the
+          // server's isRunning flag lags for a few seconds.
+          const STOP_SEED_SUPPRESS_MS = 15000;
+          const candidateIds = new Set([
+            ...heartbeat.map((e) => e.id),
+            ...analyseSeeds.map((e) => e.id),
+            ...synthetic.map((e) => e.id),
+          ]);
+          const suppressSeedIds = new Set();
+          const now = Date.now();
+          const lastDecoderStopTsById = new Map();
+          for (const e of prev) {
+            if (!e || !candidateIds.has(e.id)) continue;
+            if (e.category !== 'runtime_stopped') continue;
+            if (e.title === 'ETR monitor stopped') continue;
+            if (!Number.isFinite(e.ts)) continue;
+            const prevTs = lastDecoderStopTsById.get(e.id);
+            if (prevTs == null || e.ts > prevTs) lastDecoderStopTsById.set(e.id, e.ts);
+          }
+          for (const id of candidateIds) {
+            const lastStopTs = lastDecoderStopTsById.get(id);
+            if (lastStopTs != null && (now - lastStopTs) <= STOP_SEED_SUPPRESS_MS) suppressSeedIds.add(id);
+          }
+
+          const missingFiltered = missing.filter((e) => !suppressSeedIds.has(e.id));
+          const analyseSeedsFiltered = analyseSeeds.filter((e) => !suppressSeedIds.has(e.id));
+          const heartbeatFiltered = heartbeat.filter((e) => !suppressSeedIds.has(e.id));
+
           // Tombstone: any lane with an explicit start but no stop that is NOT
           // in the current active server list gets a synthetic runtime_stopped.
           // This recovers from server restarts where analyse_stopped was never
@@ -1221,7 +1371,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             });
           }
 
-          return mergeTimelineEvents(prev, [...missing, ...analyseSeeds, ...heartbeat, ...tombstones]);
+          return mergeTimelineEvents(prev, [...missingFiltered, ...analyseSeedsFiltered, ...heartbeatFiltered, ...tombstones]);
         });
       } catch (_) {}
     };
@@ -1356,25 +1506,30 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   );
   const selectedLaneExactEvents = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
-    return (laneMap[selectedLaneId] || [])
+    const laneEventsSorted = [...(laneMap[selectedLaneId] || [])]
       .filter((e) => !isInternalEvent(e))
+      .sort((a, b) => a.ts - b.ts);
+    return laneEventsSorted
       .filter((e) => {
         const tsMatch = Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs;
-        const durationMs = getEventVisualDurationMs(e);
+        const durationMs = getEventVisualDurationMs(e, laneEventsSorted, timeEnd);
         const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
         return tsMatch || inVisualBlock;
       })
       .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
       .slice(0, 5);
-  }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs]);
+  }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs, timeEnd]);
   const selectedLaneNearestEvent = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return null;
-    const laneEvents = (laneMap[selectedLaneId] || []).filter((e) => !isInternalEvent(e));
+    const laneEventsSorted = [...(laneMap[selectedLaneId] || [])]
+      .filter((e) => !isInternalEvent(e))
+      .sort((a, b) => a.ts - b.ts);
+    const laneEvents = laneEventsSorted;
     if (laneEvents.length === 0) return null;
     let best = null;
     let bestDist = Infinity;
     for (const e of laneEvents) {
-      const durationMs = getEventVisualDurationMs(e);
+      const durationMs = getEventVisualDurationMs(e, laneEventsSorted, timeEnd);
       const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
       const dist = inVisualBlock ? 0 : Math.abs(e.ts - pointerUtc);
       if (dist < bestDist) {
@@ -1383,7 +1538,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       }
     }
     return best;
-  }, [selectedLaneId, pointerUtc, laneMap]);
+  }, [selectedLaneId, pointerUtc, laneMap, timeEnd]);
   const selectedLaneEvent = selectedLaneExactEvents[0] || null;
   const selectedEvent = selectedLaneEvent || selectedLaneNearestEvent;
 
@@ -1763,21 +1918,27 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     <div
                       className="absolute left-0 right-0 overflow-hidden"
                       style={{
-                        top: `${y - 3}px`,
-                        height: '6px',
+                        top: `${y - (EVENT_BLOCK_TRACK_HEIGHT_PX / 2)}px`,
+                        height: `${EVENT_BLOCK_TRACK_HEIGHT_PX}px`,
                         zIndex: 2,
                       }}
                     >
                       {laneBlocks.map((blk) => (
                         <div
                           key={blk.key}
-                          className="absolute h-full rounded-sm border"
+                          className={blk.shape === 'line' ? 'absolute rounded-sm' : 'absolute h-full rounded-sm border'}
                           style={{
                             left: `${blk.leftPct}%`,
                             width: `${blk.widthPct}%`,
                             background: blk.bg,
                             borderColor: blk.border,
                             boxShadow: `0 0 5px ${blk.glow}`,
+                            ...(blk.shape === 'line' ? {
+                              height: `${blk.heightPx}px`,
+                              top: `${blk.topPx}px`,
+                              border: 'none',
+                              minWidth: '1px',
+                            } : null),
                           }}
                           title={blk.title}
                         />
