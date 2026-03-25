@@ -81,7 +81,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Server validation (Live View stop markers) — pushed updates
+**Current task:** Live View thumbnails: refresh on `thumbnail_frame`
 
 **Branch:** `cursor/liveview-stop-lines-real`
 
@@ -99,15 +99,12 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Files modified this session:**
 - `web/src/components/StreamViewPanel.jsx`
-- `web/package.json`
-- `web/package-lock.json`
-- `docs/release-notes-v3.2.md`
+- `web/src/hooks/useTSAnalysis.js`
 - `docs/agent-status.md`
 
 **Waiting for:** Operator validation in Live View:
-- All `runtime_stopped` markers (except “ETR monitor stopped”) render as thin duration lines (not 6px rectangles).
-- Lanes stay live/green when `runtime_stopped` is followed by continued heartbeats.
-- “ETR monitor stopped” is hidden from Live View; ETR errors/alarm/incident remain visible.
+- Per-lane thumbnails update automatically when backend sends `thumbnail_frame` (default cadence ~5s).
+- Multiview tiles update thumbnails live as well (hook wired to `thumbnail_frame`).
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
