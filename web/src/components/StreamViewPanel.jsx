@@ -802,8 +802,10 @@ function buildEventBlocks(events, timeStart, windowMs) {
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
+      // Render ANY non-ETR operational "stopped" marker as a thin timeline line
+      // (prevents misleading 6px "blocks" for synthetic/runtime stop events).
       const isStopLine = e.category === 'runtime_stopped'
-        && (e.title === 'Analyser stopped' || e.title === 'Stream stopped');
+        && e.title !== 'ETR monitor stopped';
       const nextStartTitle = e.title === 'Analyser stopped' ? 'Analyser started' : e.title === 'Stream stopped' ? 'Stream started' : null;
 
       let endTs;
