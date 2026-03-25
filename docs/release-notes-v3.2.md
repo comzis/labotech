@@ -23,6 +23,21 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 - Live lanes remain green when the service is actually healthy (heartbeats continue).
 - ETR monitor start/stop markers do not clutter Live View, while ETR alarms/incidents remain available for integrity verification.
 
+## v3.2.2 — 2026-03-25
+
+### fix(live-view): render all runtime_stopped markers as lines
+
+**What changed:**
+- Live View stop-marker rendering now treats *all* `runtime_stopped` events as thin duration lines **except** `ETR monitor stopped` (still hidden).
+- This prevents synthetic “Session ended” (and other non-analyser/stream stop titles) from appearing as misleading fixed-height rectangles.
+
+**Why:**
+- Operators reported that stop markers still looked like rectangles in Live View. The remaining cases were `runtime_stopped` titles other than the exact “Analyser stopped” / “Stream stopped” strings we initially matched.
+
+**Operator impact:**
+- All stop markers become visually consistent as thin time-lines.
+- Fewer false “outage-sized” blocks on the Live View timeline.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process
