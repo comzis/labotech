@@ -97,6 +97,16 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 **Operator impact:**
 - Multiview and Live View thumbnail motion/updates are more responsive and consistent during short probing gaps.
 
+## v3.2.7 — 2026-03-25
+
+### fix(thumbnails): remove multiview thumbnail flicker/drop
+
+**What changed:**
+- Fixed multiview “decode live” wiring to build the thumbnail image URL from `thumbnail_frame.msg.path` (JPEG file path) instead of `thumbnail_frame.msg.url` (input stream URL).
+
+**Operator impact:**
+- Multiview tile thumbnails should update smoothly without intermittent dropouts/up-refresh flicker.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process

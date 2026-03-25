@@ -144,12 +144,20 @@ export default function useTSAnalysis() {
     // the backend worker emits a new `thumbnail_frame`.
     if (msg.type === 'thumbnail_frame') {
       if (isSuppressed(msg.id)) return;
-      if (typeof msg.url !== 'string' || msg.url.trim() === '') return;
+      // Worker sends the generated JPEG file path as `msg.path`.
+      // `msg.url` is the *input stream URL* (not the thumbnail image URL), so
+      // we must build the `/logs/thumbnails/<file>.jpg?t=...` URL ourselves.
+      const filePath = typeof msg.path === 'string' ? msg.path.trim() : '';
+      if (!filePath) return;
+      const baseName = filePath.split('/').pop();
+      if (!baseName) return;
       const id = msg.id;
+      const now = Date.now();
+      const thumbUrl = `/logs/thumbnails/${baseName}?t=${now}`;
       setResultsById((prev) => {
         const next = { ...prev };
         const existing = next[id] || { id };
-        next[id] = { ...existing, thumbnailUrl: msg.url.trim() };
+        next[id] = { ...existing, thumbnailUrl: thumbUrl };
         return next;
       });
       // Ensure the tile is considered active so it stays visible while frames
