@@ -122,6 +122,12 @@ class TSAnalyser extends EventEmitter {
     this._ccHeavyCount = 0; // heavy CC probe cycles completed
     this._relay        = null;        // SRTRelay instance (srt:// sources only)
     this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
+    this._lastRelaySrtStats = null;   // latest parsed srt-live-transmit JSON stats from relay
+    this._relayProbeRunning = false;  // true while sequential relay probes hold the UDP port
+    // Optional out-of-process thumbnail worker client (Phase 2).
+    // When provided, thumbnail management is delegated to the worker process
+    // instead of running PersistentThumbnailCapture in the API process.
+    this._thumbnailClient = options.thumbnailClient || null;
   }
 
   probe(options = {}) {
@@ -220,12 +226,18 @@ class TSAnalyser extends EventEmitter {
           // When a relay is active, all probes read from local UDP — no SRT slot
           // contention. Only suspend/sequential-mode when running direct SRT (no relay).
           const isSrtDirect = runHeavyProbe && this.url && this.url.startsWith('srt://') && !this._relay;
-          const isSrtHeavy  = isSrtDirect && this._persistentThumb;
+          // Suspend thumbnail for the duration of sequential SRT heavy probes so only
+          // one caller occupies the SRT slot at a time.
+          // Note: isSrtDirect requires !this._relay. In practice the SRT relay is
+          // always active (created above), so isSrtHeavy is never true in the current
+          // architecture.  Kept as a safety net for the hypothetical no-relay path.
+          const isSrtHeavy  = isSrtDirect && (this._thumbnailClient || this._persistentThumb);
           if (isSrtHeavy) {
             const srtLatMs = parseSrtLatency(this.url);
             // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
             const suspendMs = srtLatMs + 70000;
-            this._persistentThumb.suspend(suspendMs);
+            if (this._thumbnailClient) this._thumbnailClient.suspend(this.id, suspendMs);
+            else if (this._persistentThumb) this._persistentThumb.suspend(suspendMs);
             if (this._tsduckMonitor) this._tsduckMonitor.suspend();
             if (this._etrMonitor) this._etrMonitor.suspend(suspendMs + 5000);
             await new Promise(r => setTimeout(r, 600));
@@ -234,12 +246,19 @@ class TSAnalyser extends EventEmitter {
           let heavyProbeResults;
           // Small settle between sequential SRT probes: gives the SRT source time
           // to reset its accept state after a caller disconnects before the next
-          // caller connects.  When relay is active, probes use UDP — no settle needed,
-          // but the sequential path is still used for isSrtDirect for backward compat.
+          // caller connects.  Not needed for relay/UDP but retained for direct SRT.
           const _srtSettle = () => new Promise(r => setTimeout(r, 1000));
+          // Relay-backed SRT outputs loopback UDP unicast to the probe port.
+          // Unicast UDP does NOT duplicate packets to multiple readers the way
+          // multicast does — parallel probes split the packet stream, starving
+          // each other and making bitrate measurement unreliable (falls back to
+          // codec metadata "STREAMS" at ~0.38 Mb/s instead of the real rate).
+          // Run sequentially on the probe port, same as direct SRT, but without
+          // the inter-probe settle delay (no SRT reconnect cooldown needed for UDP).
+          const isRelayBacked = runHeavyProbe && Boolean(this._relay);
           try {
             if (isSrtDirect) {
-              // Sequential: one SRT connection at a time.
+              // Sequential: one SRT connection at a time (slot contention).
               const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
               await _srtSettle();
               const transport = await (runHeavyProbe ? this._probeTransportBitrateBps()     : Promise.resolve(null));
@@ -254,8 +273,28 @@ class TSAnalyser extends EventEmitter {
               await _srtSettle();
               const dolby     = await (runHeavyProbe ? this._probeDolbyE()                  : Promise.resolve(null));
               heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
+            } else if (isRelayBacked) {
+              // Sequential: relay probe port is loopback unicast — no packet duplication.
+              // No inter-probe settle needed (UDP bind/release is instant).
+              // Flag tells the thumbnail timer to back off while the port is held.
+              this._relayProbeRunning = true;
+              const tsduck    = await this._probeTSDuck();
+              const transport = await this._probeTransportBitrateBps();
+              const srtLink   = await this._probeSrtLinkStats(); // uses relay stats line, not UDP
+              const audio     = await this._probeAudioLevels();
+              const tsDisc    = await this._probeTimestampDiscontinuities();
+              const cc        = await this._probeContinuityCounterErrors();
+              const dolby     = await this._probeDolbyE();
+              heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
+            } else if (Boolean(this._relay)) {
+              // Light-cycle relay path: audio probe still binds the loopback
+              // unicast UDP port — run it sequentially with the flag set so the
+              // thumbnail timer backs off rather than competing for the port.
+              this._relayProbeRunning = true;
+              const audio = await this._probeAudioLevels();
+              heavyProbeResults = [null, null, null, audio, null, null, null];
             } else {
-              // RTP/UDP multicast: parallel is fine — unlimited simultaneous receivers.
+              // RTP/UDP multicast: parallel is fine — multicast duplicates to all readers.
               heavyProbeResults = await Promise.all([
                 runHeavyProbe ? this._probeTSDuck()                   : Promise.resolve(null),
                 runHeavyProbe ? this._probeTransportBitrateBps()      : Promise.resolve(null),
@@ -267,12 +306,14 @@ class TSAnalyser extends EventEmitter {
               ]);
             }
           } finally {
+            this._relayProbeRunning = false;
             if (runHeavyProbe) _releaseHeavyProbeSlot();
-            if (isSrtHeavy && this._persistentThumb) {
+            if (isSrtHeavy) {
               // Brief settle delay: SRT sources may have a 1–2s reconnect cooldown after
               // the last probe connection closed.  Avoid immediate rejection of the thumbnail.
               setTimeout(() => {
-                if (this._persistentThumb) this._persistentThumb.resume();
+                if (this._thumbnailClient) this._thumbnailClient.resume(this.id);
+                else if (this._persistentThumb) this._persistentThumb.resume();
                 if (this._tsduckMonitor) this._tsduckMonitor.resume();
                 if (this._etrMonitor) this._etrMonitor.resume();
               }, 1500);
@@ -721,7 +762,8 @@ class TSAnalyser extends EventEmitter {
       // duration and analyze window from the URL's latency parameter.
       const srtLatencyMs   = isSrt ? parseSrtLatency(this.url) : 0;
       const analyzeDurUs   = isSrt ? String((srtLatencyMs + 2000) * 1000) : '1000000';
-      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : '3.0';
+      // Relay: loopback UDP unicast — no latency fill needed; use short capture.
+      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : (this._relay ? '2.0' : '3.0');
       const killTimerMs    = isSrt ? (srtLatencyMs + 20000) : 12000;
       const args = [
         '-hide_banner',
@@ -783,7 +825,17 @@ class TSAnalyser extends EventEmitter {
         // Fallback: bitrate= field reported directly by FFmpeg
         if (progressKbps > 0) bitrateBps = Math.round(progressKbps * 1000);
 
-        const srtStats = this._extractSrtStatsFromLog(stderr);
+        // For relay-backed SRT the transport probe runs on UDP (no libsrt output).
+        // ffmpeg 5.x / Debian 12 does not emit periodic libsrt stats lines so
+        // _lastRelaySrtStats is effectively always null — synthesise a minimal
+        // srtStats object from the measured bitrate so the SRT Transport panel
+        // shows RATE. RTT/bandwidth/loss remain "—" (genuinely unavailable).
+        let srtStats = this._relay
+          ? (this._lastRelaySrtStats ? this._extractSrtStatsFromLog(this._lastRelaySrtStats) : null)
+          : this._extractSrtStatsFromLog(stderr);
+        if (this._relay && !srtStats && bitrateBps) {
+          srtStats = { rateMbps: parseFloat((bitrateBps / 1e6).toFixed(3)) };
+        }
         if (bitrateBps || srtStats) {
           return resolve({
             bitrateBps: bitrateBps || null,
@@ -793,6 +845,40 @@ class TSAnalyser extends EventEmitter {
         resolve(null);
       });
     });
+  }
+
+  // Parse a srt-live-transmit JSON stats object (as emitted via -pf json) into
+  // the normalised srtStats shape consumed by the SRT Transport panel.
+  _parseSltStats(obj) {
+    if (!obj) return null;
+    const recv = obj.recv || {};
+    const link = obj.link || {};
+    const srt = {};
+    const rttMs      = Number(link.rtt);
+    const bwMbps     = Number(link.bandwidth);
+    const rateMbps   = Number(recv.mbitRate);
+    const pktTotal   = Number(recv.packets);
+    const pktLost    = Number(recv.packetsLost);
+    const pktDropped = Number(recv.packetsDropped);
+    const pktRetrans = Number(recv.packetsRetransmitted);
+    const pktNak     = Number(recv.naksSent);
+    const pktAck     = Number(recv.acksSent);
+    if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
+    if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
+    if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
+    if (Number.isFinite(pktTotal))   srt.pktTotal   = pktTotal;
+    if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
+    if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
+    if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+    if (Number.isFinite(pktNak))     srt.pktNak     = pktNak;
+    if (Number.isFinite(pktAck))     srt.pktAck     = pktAck;
+    if (pktTotal > 0 && Number.isFinite(pktLost)) {
+      srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+    }
+    if (pktTotal > 0 && Number.isFinite(pktRetrans)) {
+      srt.retransRatio = parseFloat(((pktRetrans / pktTotal) * 100).toFixed(3));
+    }
+    return Object.keys(srt).length > 0 ? srt : null;
   }
 
   _extractSrtStatsFromLog(stderr) {
@@ -808,9 +894,12 @@ class TSAnalyser extends EventEmitter {
     // By filtering to libsrt stat lines first, we eliminate all false positives.
     // libsrt dumps stats as space-separated key=value pairs on lines that contain
     // at least one unambiguous libsrt-only field (msRTT=, mbpsRecvRate=, mbpsBandwidth=).
+    // libsrt periodic stats (statsintvl=N) → key=value: msRTT=X mbpsRecvRate=Y
+    // ffmpeg verbose log            → key:value: msRTT:X mbpsBandwidth:Y
+    // Accept both separator styles so the pipeline works regardless of which layer fires.
     const srtStatLines = String(stderr)
       .split('\n')
-      .filter(l => /msRTT=|mbpsRecvRate=|mbpsSendRate=|mbpsBandwidth=/i.test(l))
+      .filter(l => /msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(l))
       .join('\n');
 
     // No genuine libsrt output found — return null so the UI shows "AWAITING" not false zeros.
@@ -831,28 +920,33 @@ class TSAnalyser extends EventEmitter {
 
     // All patterns use exact libsrt field names as emitted by ffmpeg's libsrt.c.
     // No short fallback aliases — those caused false matches against ffmpeg progress output.
-    // libsrt format: space-separated key=value on the statistics line, e.g.:
-    //   msRTT=18.500 mbpsBandwidth=1024.000 mbpsRecvRate=21.234 pktRecvTotal=12345 ...
-    const rateMbps   = num(last(/\bmbpsRecvRate=([\d.]+)/i)) ?? num(last(/\bmbpsSendRate=([\d.]+)/i));
-    const bwMbps     = num(last(/\bmbpsBandwidth=([\d.]+)/i));
-    const maxBwMbps  = num(last(/\bmbpsMaxBW=([\d.]+)/i));
-    const rttMs      = num(last(/\bmsRTT=([\d.]+)/i));
-    const pktTotal   = num(last(/\bpktRecvTotal=(\d+)/i));
-    const pktRetrans = num(last(/\bpktRetransTotal=(\d+)/i)) ?? num(last(/\bpktRcvRetrans=(\d+)/i));
-    const pktLost    = num(last(/\bpktRcvLossTotal=(\d+)/i)) ?? num(last(/\bpktRcvLoss=(\d+)/i));
+    // Two log sources, two separator styles:
+    //   libsrt periodic stats (statsintvl=N): key=value  — msRTT=18.500 mbpsRecvRate=21.234
+    //   ffmpeg verbose log:                   key: value — msRTT: 18.500 mbpsRecvRate: 21.234
+    // SEP uses [:=]\s* so both formats are captured (space after colon is optional).
+    const SEP = '[:=]\\s*';
+    const f   = (name, fp = '([\\d.]+)') => new RegExp(`\\b${name}${SEP}${fp}`, 'i');
+    const fi  = (name)                    => new RegExp(`\\b${name}${SEP}(\\d+)`, 'i');
+    const rateMbps   = num(last(f('mbpsRecvRate'))) ?? num(last(f('mbpsSendRate')));
+    const bwMbps     = num(last(f('mbpsBandwidth')));
+    const maxBwMbps  = num(last(f('mbpsMaxBW')));
+    const rttMs      = num(last(f('msRTT')));
+    const pktTotal   = num(last(fi('pktRecvTotal'))) ?? num(last(fi('pktRecv')));
+    const pktRetrans = num(last(fi('pktRetransTotal'))) ?? num(last(fi('pktRcvRetrans'))) ?? num(last(fi('pktRetrans')));
+    const pktLost    = num(last(fi('pktRcvLossTotal'))) ?? num(last(fi('pktRcvLoss'))) ?? num(last(fi('pktSndLoss')));
     // pktRcvDrop / pktSndDrop: non-zero = latency window too short (per Haivision SRT spec)
-    const pktRcvDrop = num(last(/\bpktRcvDrop=(\d+)/i));
-    const pktSndDrop = num(last(/\bpktSndDrop=(\d+)/i));
+    const pktRcvDrop = num(last(fi('pktRcvDrop')));
+    const pktSndDrop = num(last(fi('pktSndDrop')));
     // pktRcvBelated: arrived after latency deadline — early warning before drops
-    const pktRcvBelated        = num(last(/\bpktRcvBelated=(\d+)/i));
-    const pktRcvAvgBelatedTime = num(last(/\bpktRcvAvgBelatedTime=([\d.]+)/i));
+    const pktRcvBelated        = num(last(fi('pktRcvBelated')));
+    const pktRcvAvgBelatedTime = num(last(f('pktRcvAvgBelatedTime')));
     // Buffer headroom: remaining receive buffer capacity
-    const byteAvailRcvBuf = num(last(/\bbyteAvailRcvBuf=(\d+)/i));
-    const msRcvBuf        = num(last(/\bmsRcvBuf=([\d.]+)/i));
+    const byteAvailRcvBuf = num(last(fi('byteAvailRcvBuf')));
+    const msRcvBuf        = num(last(f('msRcvBuf')));
     // Flow window
-    const pktFlowWindow   = num(last(/\bpktFlowWindow=(\d+)/i));
-    const pktNak     = num(last(/\bpktSentNAKTotal=(\d+)/i)) ?? num(last(/\bpktSentNAK=(\d+)/i));
-    const pktAck     = num(last(/\bpktSentACKTotal=(\d+)/i)) ?? num(last(/\bpktSentACK=(\d+)/i));
+    const pktFlowWindow   = num(last(fi('pktFlowWindow')));
+    const pktNak     = num(last(fi('pktSentNAKTotal'))) ?? num(last(fi('pktSentNAK'))) ?? num(last(fi('pktRecvNAK')));
+    const pktAck     = num(last(fi('pktSentACKTotal'))) ?? num(last(fi('pktSentACK'))) ?? num(last(fi('pktRecvACK')));
 
     if (rateMbps   != null) srt.rateMbps   = rateMbps;
     if (bwMbps     != null) srt.bwMbps     = bwMbps;
@@ -1041,10 +1135,14 @@ class TSAnalyser extends EventEmitter {
 
   // Run srt-live-transmit for (latency + 2s) and parse its JSON stats output.
   // This is the only reliable way to get RTT, loss, NAK, retransmit for SRT RX —
-  // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format.
+  // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format
+  // on ffmpeg 5.x / Debian Bookworm.
+  // Note: relay-backed streams (this._relay set) skip this probe — the relay's
+  // ffmpeg holds the only caller slot and senders typically reject a second connection.
   _probeSrtLinkStats() {
     return new Promise((resolve) => {
-      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://') || this._relay) return resolve(null);
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      if (this._relay) return resolve(null);
       const latencyMs = parseSrtLatency(this.url);
       const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
       const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
@@ -1075,6 +1173,8 @@ class TSAnalyser extends EventEmitter {
         const pktLost    = Number(recv.packetsLost);
         const pktDropped = Number(recv.packetsDropped);
         const pktRetrans = Number(recv.packetsRetransmitted);
+        const pktNak     = Number(recv.naksSent);
+        const pktAck     = Number(recv.acksSent);
         if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
         if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
         if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
@@ -1082,8 +1182,13 @@ class TSAnalyser extends EventEmitter {
         if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
         if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
         if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+        if (Number.isFinite(pktNak))     srt.pktNak     = pktNak;
+        if (Number.isFinite(pktAck))     srt.pktAck     = pktAck;
         if (pktTotal > 0 && Number.isFinite(pktLost)) {
           srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+        }
+        if (pktTotal > 0 && Number.isFinite(pktRetrans)) {
+          srt.retransRatio = parseFloat(((pktRetrans / pktTotal) * 100).toFixed(3));
         }
         resolve(Object.keys(srt).length > 0 ? srt : null);
       });
@@ -1096,9 +1201,11 @@ class TSAnalyser extends EventEmitter {
       const proc = spawn('tsanalyze', args);
       let stdout = '';
       let stderr = '';
+      // Relay streams use loopback UDP unicast — reduce kill timer to free the
+      // port sooner so the next sequential probe can bind without delay.
       const timeout = setTimeout(() => {
         try { proc.kill('SIGTERM'); } catch (_) {}
-      }, 9000);
+      }, this._relay ? 5000 : 9000);
 
       proc.stdout.on('data', (d) => { stdout += d.toString(); });
       proc.stderr.on('data', (d) => { stderr += d.toString(); });
@@ -2749,13 +2856,18 @@ class TSAnalyser extends EventEmitter {
     // SRT caller slot and re-outputs as local UDP. All probes and the
     // thumbnail then read from the unlimited-reader UDP copy.
     if (this.url && this.url.startsWith('srt://') && !this._relay) {
-      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay` });
+      const _relayThumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay`, thumbPath: _relayThumbPath });
       this._effectiveUrl = this._relay.localUrl;
       this._relay.on('error', (err) => {
         this.emit('info', { message: `SRT relay error: ${err.message}` });
       });
       this._relay.on('ready', ({ localUrl }) => {
+        console.log(`[relay:${this.id}] ready — stream flowing on ${localUrl}`);
         this.emit('info', { message: `SRT relay ready → ${localUrl}` });
+      });
+      this._relay.on('srt_stats_line', (line) => {
+        this._lastRelaySrtStats = line;
       });
       this._relay.start();
     }
@@ -2775,36 +2887,53 @@ class TSAnalyser extends EventEmitter {
     if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
     if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
 
-    if (!this._relay && this.url && this.url.startsWith('srt://')) {
-      // Direct SRT (no relay): persistent long-lived ffmpeg avoids paying the full
-      // SRT latency window on every reconnect. Safe because only one consumer
-      // (PersistentThumbnailCapture) ever reads this SRT URL.
-      // When relay IS active we fall through to the one-shot timer path below —
-      // loopback unicast UDP (the relay output) cannot be bound by two simultaneous
-      // readers, so we must release the socket between captures.
-      this._persistentThumb = new PersistentThumbnailCapture({
-        streamId: this.id,
-        inputUrl: this._effectiveUrl,
-        intervalSec: thumbIntervalSec,
-      });
-      this._persistentThumb.on('frame', () => {
-        this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
-      });
+    if (this._thumbnailClient && !this._relay) {
+      // Out-of-process worker: RTP/UDP multicast only in practice.
+      // SRT sources always have this._relay set (relay block above), so they never
+      // reach this branch — relay-backed SRT falls through to the persistent path below.
+      // PersistentThumbnailCapture runs in the worker process, keeping ffmpeg CPU
+      // load isolated from the API process and benefiting from worker-level crash
+      // isolation and automatic restart.
+      // Hash-based jitter preserves thundering-herd spreading across decoders.
       this._thumbnailTimer = setTimeout(() => {
         this._thumbnailTimer = null;
-        if (this.isRunning && this._persistentThumb) this._persistentThumb.start();
+        if (this.isRunning && this._thumbnailClient) {
+          this._thumbnailClient.start(this.id, this._effectiveUrl, thumbIntervalSec);
+        }
       }, thumbStartJitterMs);
+    } else if (this._relay) {
+      // Relay-backed SRT: the relay's own ffmpeg writes thumbnails to disk via a
+      // second ffmpeg output branch (select=eq(pict_type\,I),thumbnail=1,scale=480:-2).
+      // No separate capture process is needed — and none should run, because the
+      // relay UDP port is unicast and only one reader can bind at a time.
+      // This poller just watches the file mtime and updates _lastThumbnailUrl when
+      // the relay writes a new frame (once per GOP ≈ every 2–10 s).
+      const _thumbFilePath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      const pollRelayThumb = () => {
+        if (!this.isRunning) return;
+        try {
+          const stat = fs.statSync(_thumbFilePath);
+          if (stat.mtimeMs > this._lastThumbnailAt) {
+            this._lastThumbnailAt = stat.mtimeMs;
+            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Math.round(stat.mtimeMs)}`;
+            // Push the new thumbnail URL to live WS clients without waiting for the
+            // next full probe cycle. Also persist it in lastResult so refreshActives()
+            // restores it correctly after a tab switch.
+            // Seed lastResult with a minimal object if no probe has run yet — the
+            // full result will be overwritten on the next probe cycle.
+            this.lastResult = this.lastResult
+              ? { ...this.lastResult, thumbnailUrl: this._lastThumbnailUrl }
+              : { id: this.id, thumbnailUrl: this._lastThumbnailUrl };
+            this.emit('result', { ...this.lastResult });
+          }
+        } catch (_) {
+          // File not yet written — relay may still be connecting. Retry silently.
+        }
+        this._thumbnailTimer = setTimeout(pollRelayThumb, 2000);
+      };
+      this._thumbnailTimer = setTimeout(pollRelayThumb, 1000);
     } else {
-      // RTP / UDP multicast, OR relay-backed SRT: one-shot timer loop.
-      // Multicast join is near-instant so per-frame reconnect is fine.
-      // For relay-backed SRT, releasing the loopback UDP socket between captures
-      // is mandatory — ffprobe probes need to bind the same port and unicast UDP
-      // does not support simultaneous multiple receivers.
-      //
-      // First capture fires after thumbStartJitterMs only (hash-based, 0–1.5 s).
-      // Subsequent captures use the full thumbIntervalMs cadence.
-      // This cuts first-frame latency from (jitter + interval) ~6.5 s down to
-      // jitter-only ~1.5 s max without removing the thundering-herd jitter.
+      // RTP/UDP without worker: one-shot timer loop.
       const doCapture = async () => {
         this._thumbnailTimer = null;
         if (!this.isRunning) return;
@@ -2812,15 +2941,13 @@ class TSAnalyser extends EventEmitter {
           await captureThumbnail(this.id, this._effectiveUrl);
           this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
         } catch (err) {
-          console.error(`[thumb:${this.id}] capture failed: ${err && err.message}`);
+          const msg = (err && err.message) || '';
+          console.error(`[thumb:${this.id}] capture failed: ${msg}`);
         }
-        scheduleThumb();
+        if (this.isRunning) {
+          this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
+        }
       };
-      const scheduleThumb = () => {
-        if (!this.isRunning) return;
-        this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
-      };
-      // First capture: jitter only — no extra thumbIntervalMs wait
       this._thumbnailTimer = setTimeout(doCapture, thumbStartJitterMs);
     }
 
@@ -2829,6 +2956,9 @@ class TSAnalyser extends EventEmitter {
       try {
         await this.probe({ continuous: true });
       } catch (err) {
+        // Suppress probe errors during SRT relay restart window — ffprobe reads an
+        // empty UDP loopback while the relay's ffmpeg is restarting. Not a real signal loss.
+        if (this._relay && !this._relay.isReady()) return;
         this.emit('error', err);
       }
       if (this.isRunning) {
@@ -2873,7 +3003,7 @@ class TSAnalyser extends EventEmitter {
   getEtrStartDelay() {
     // When relay is active, ETR reads from local UDP — no SRT slot delay needed.
     if (this._relay) return 0;
-    if (this._persistentThumb && this.url && this.url.startsWith('srt://')) {
+    if (!this._relay && this.url && this.url.startsWith('srt://') && (this._thumbnailClient || this._persistentThumb)) {
       return parseSrtLatency(this.url) + 15000;
     }
     return 0;
@@ -2903,6 +3033,9 @@ class TSAnalyser extends EventEmitter {
       this._persistentThumb.stop();
       this._persistentThumb = null;
     }
+    if (this._thumbnailClient) {
+      this._thumbnailClient.stop(this.id);
+    }
     if (this._iatSniffer) {
       this._iatSniffer.stop();
       this._iatSniffer = null;
@@ -2915,6 +3048,7 @@ class TSAnalyser extends EventEmitter {
       this._relay.stop();
       this._relay = null;
       this._effectiveUrl = this.url;
+      this._lastRelaySrtStats = null;
     }
     this.emit('stopped', { id: this.id });
   }
@@ -2976,11 +3110,23 @@ class TSAnalyser extends EventEmitter {
   }
 
   toJSON() {
+    // Ensure the REST snapshot always carries a thumbnailUrl when one is available,
+    // even after a backend restart (nodemon) where lastResult is null but the JPEG
+    // file from a previous session still exists on disk.
+    let lastResult = this.lastResult;
+    if (!lastResult?.thumbnailUrl) {
+      const thumbUrl = this._lastThumbnailUrl || this._resolveCachedThumbnailUrl();
+      if (thumbUrl) {
+        lastResult = lastResult
+          ? { ...lastResult, thumbnailUrl: thumbUrl }
+          : { id: this.id, thumbnailUrl: thumbUrl };
+      }
+    }
     return {
       id: this.id,
       url: this.url,
       isRunning: this.isRunning,
-      lastResult: this.lastResult,
+      lastResult,
     };
   }
 }

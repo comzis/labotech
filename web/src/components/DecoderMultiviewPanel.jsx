@@ -288,9 +288,10 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
   const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
   const isRunning = Boolean(meta?.isRunning);
   const telemetryFresh = hasTelemetry && staleMs <= 15000;
-  // Operator preference: active running decoders remain green while lock/telemetry warms up.
-  // If telemetry exists and goes stale, downgrade to warning.
-  const signalOk = isRunning && (!hasTelemetry || telemetryFresh);
+  // In engineer mode, downgrade to warning when telemetry goes stale.
+  // In MCR (operator) mode, running = green — no telemetry-freshness penalty so the
+  // badge never flips to amber just because a probe cycle is delayed or MCR was toggled.
+  const signalOk = isRunning && (engineerMode ? (!hasTelemetry || telemetryFresh) : true);
 
   return (
     <div
@@ -362,26 +363,32 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
 
       {/* Info panel */}
       <div className="p-2 space-y-1.5" style={{ background: '#141414' }}>
-        <div
-          className="text-[10px] font-mono engraved"
-          style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
-        >
-          {meta?.url || result?.url || '-'}
-        </div>
-        <div
-          className="text-[10px] font-mono uppercase tracking-wider"
-          style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
-        >
-          {hasProbeError
-            ? `probe error: ${String(result.probeError).slice(0, 60)}`
-            : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
-        </div>
-        <div
-          className="text-[10px] font-mono uppercase tracking-wider"
-          style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
-        >
-          thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
-        </div>
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono engraved"
+            style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
+          >
+            {meta?.url || result?.url || '-'}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
+          >
+            {hasProbeError
+              ? `probe error: ${String(result.probeError).slice(0, 60)}`
+              : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
+          >
+            thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
+          </div>
+        )}
         <div className="text-[11px] text-gray-300 font-mono" style={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
           <span className="engraved">SVC </span>{primaryService}
           {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
@@ -429,20 +436,24 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
           )}
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-4 gap-1">
-          <Stat label="Programs" value={String(result?.programs?.length || 0)} />
-          <Stat label="PIDs" value={
-            result?.dvb?.streamBreakdown
-              ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
-              : String(countPids(result))
-          } />
-          <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
-          <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
-        </div>
-        <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
-          TS source: {transportRate.source.toUpperCase()}
-        </div>
+        {/* Stats — engineer mode only */}
+        {engineerMode && (
+          <>
+            <div className="grid grid-cols-4 gap-1">
+              <Stat label="Programs" value={String(result?.programs?.length || 0)} />
+              <Stat label="PIDs" value={
+                result?.dvb?.streamBreakdown
+                  ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
+                  : String(countPids(result))
+              } />
+              <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
+              <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+            </div>
+            <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
+              TS source: {transportRate.source.toUpperCase()}
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -641,7 +652,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [nowMs, setNowMs] = useState(Date.now());
-  const [engineerMode, setEngineerMode] = useState(true);
+  const [engineerMode, setEngineerMode] = useState(false);
   const [engineerModeLabel, setEngineerModeLabel] = useState(DEFAULT_ENGINEER_MODE_LABEL);
   const [isEditingEngineerModeLabel, setIsEditingEngineerModeLabel] = useState(false);
   const [engineerModeLabelDraft, setEngineerModeLabelDraft] = useState(DEFAULT_ENGINEER_MODE_LABEL);
@@ -649,10 +660,22 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
   const [newPanelName, setNewPanelName] = useState('');
   const [stoppingIds, setStoppingIds] = useState(new Set());
+  const [addTileOpen, setAddTileOpen] = useState(false);
+  const [addTileHost, setAddTileHost] = useState('');
+  const [addTilePort, setAddTilePort] = useState('');
+  const [addTileDecoderId, setAddTileDecoderId] = useState('');
+  const [addTileMode, setAddTileMode] = useState('rtp');
+  const [addTileLatency, setAddTileLatency] = useState('');
+  const [addTilePassphrase, setAddTilePassphrase] = useState('');
+  const [addTileCatalogSearch, setAddTileCatalogSearch] = useState('');
+  const [addTileShowCatalog, setAddTileShowCatalog] = useState(false);
+  const [addTileError, setAddTileError] = useState(null);
+  const [addTileSubmitting, setAddTileSubmitting] = useState(false);
   const [catalog, setCatalog] = useState([]);
   const [catalogSearch, setCatalogSearch] = useState('');
   const [showCatalog, setShowCatalog] = useState(false);
   const catalogRef = useRef(null);
+  const addTileCatalogRef = useRef(null);
   const importFileRef = useRef(null);
   const configImportFileRef = useRef(null);
   const fullscreenRef = useRef(null);
@@ -781,6 +804,19 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     return () => document.removeEventListener('mousedown', handler);
   }, [showCatalog]);
 
+  // Close add-tile catalog dropdown on outside click
+  useEffect(() => {
+    if (!addTileShowCatalog) return;
+    const handler = (e) => {
+      if (addTileCatalogRef.current && !addTileCatalogRef.current.contains(e.target)) {
+        setAddTileShowCatalog(false);
+        setAddTileCatalogSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [addTileShowCatalog]);
+
   useEffect(() => {
     refreshActives();
   }, [refreshActives]);
@@ -872,14 +908,16 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     setPanels((prev) => {
       if (!Array.isArray(prev) || prev.length === 0) return prev;
       if (activeIds.length === 0) return prev; // no active analysers yet — wait
-      const assignedCount = prev.reduce((acc, p) => acc + (p.decoderIds?.length || 0), 0);
-      // Check if any stored decoder ID is still in the active set.
-      // If assignedCount > 0 but ALL stored IDs are stale (server restart with new IDs),
-      // treat as empty and reseed — otherwise zero tiles would render permanently.
-      const anyActive = prev.some((p) => (p.decoderIds || []).some((id) => activeIds.includes(id)));
-      if (assignedCount > 0 && anyActive) return prev; // routing is valid, keep it
-      // No valid routing: first-time seed or full stale-ID recovery.
-      return prev.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
+      // Prune stale IDs from all panels — ghost processes removed from the server.
+      const cleaned = prev.map((p) => ({
+        ...p,
+        decoderIds: (p.decoderIds || []).filter((id) => activeIds.includes(id)),
+      }));
+      // If nothing is assigned after pruning, seed panel 0 with all active IDs
+      // (first-time load or full server-restart recovery).
+      const anyActive = cleaned.some((p) => p.decoderIds.length > 0);
+      if (anyActive) return cleaned;
+      return cleaned.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
     });
   }, [activeIds]);
 
@@ -1033,6 +1071,57 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     };
     reader.readAsText(file);
   }, [refreshActives]);
+
+  // Close add-tile modal on Escape
+  useEffect(() => {
+    if (!addTileOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setAddTileOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addTileOpen]);
+
+  const resetAddTileForm = () => {
+    setAddTileHost('');
+    setAddTilePort('');
+    setAddTileDecoderId('');
+    setAddTileMode('rtp');
+    setAddTileLatency('');
+    setAddTilePassphrase('');
+    setAddTileCatalogSearch('');
+    setAddTileShowCatalog(false);
+    setAddTileError(null);
+  };
+
+  const handleAddTile = async () => {
+    const h = addTileHost.trim();
+    if (!h) { setAddTileError('Host / IP or SRT URL is required'); return; }
+    let url;
+    if (/^(srt|rtp|udp):\/\//i.test(h)) {
+      url = h;
+    } else {
+      const p = addTilePort.trim();
+      if (!p) { setAddTileError('Port is required'); return; }
+      url = buildProbeUrl({ mode: addTileMode, host: h, port: p, latency: addTileLatency, passphrase: addTilePassphrase });
+    }
+    const id = addTileDecoderId.trim() || `decoder-${Date.now()}`;
+    setAddTileSubmitting(true);
+    setAddTileError(null);
+    try {
+      await startContinuous(id, url, 5000);
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), id] };
+      }));
+      setAddTileOpen(false);
+      resetAddTileForm();
+      refreshActives();
+    } catch (err) {
+      setAddTileError(err?.message || 'Failed to start decoder');
+    } finally {
+      setAddTileSubmitting(false);
+    }
+  };
 
   const handleCreate = async () => {
     if (!probeUrl) return;
@@ -1422,39 +1511,266 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
         )}
 
-        {/* Active decoder tiles only */}
-        {activeIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No active decoders. Use + Decoder to start monitoring a stream.</p>
-        )}
-        {activeIds.length > 0 && visibleIds.length === 0 && (
-          <p className="text-gray-500 text-sm mt-4">No decoders assigned to panel {activePanel?.name || '-'}. Route decoders above.</p>
-        )}
-        {visibleIds.length > 0 && (
-          <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-            {visibleIds.map((id) => (
-              <DecoderCard
-                key={id}
-                id={id}
-                displayName={getMultiviewDisplayName(id)}
-                meta={decoderMeta[id]}
-                result={resultsById[id]}
-                onStop={async () => {
-                  if (stoppingIds.has(id)) return;
-                  setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
-                  try { await stop(id); } finally {
-                    refreshActives();
-                    setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
-                  }
-                }}
-                nowMs={nowMs}
-                engineerMode={engineerMode}
-                isStopping={stoppingIds.has(id)}
-              />
-            ))}
-          </div>
-        )}
+        {/* Decoder tile grid — always rendered; "+" tile is always the last slot */}
+        <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {visibleIds.map((id) => (
+            <DecoderCard
+              key={id}
+              id={id}
+              displayName={getMultiviewDisplayName(id)}
+              meta={decoderMeta[id]}
+              result={resultsById[id]}
+              onStop={async () => {
+                if (stoppingIds.has(id)) return;
+                setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
+                try { await stop(id); } finally {
+                  refreshActives();
+                  setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+                }
+              }}
+              nowMs={nowMs}
+              engineerMode={engineerMode}
+              isStopping={stoppingIds.has(id)}
+            />
+          ))}
+          {/* Quick-add slot */}
+          <button
+            onClick={() => setAddTileOpen(true)}
+            style={{
+              minHeight: '200px',
+              border: '1px dashed #1c3040',
+              borderRadius: '4px',
+              background: 'transparent',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+            className="hover:border-teal-600 hover:bg-teal-950/20 transition-colors group"
+            title="Add decoder to multiview"
+          >
+            <Plus size={32} className="text-gray-700 group-hover:text-teal-500 transition-colors" />
+          </button>
+        </div>
       </BentoCard>
     </div>
+
+    {/* ── Add decoder modal (triggered by "+" tile) ── */}
+    {addTileOpen && (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={(e) => { if (e.target === e.currentTarget) { setAddTileOpen(false); resetAddTileForm(); } }}
+      >
+        <div style={{ background: '#0d1117', border: '1px solid #1a2d3a', borderRadius: '6px', padding: '28px 28px 24px', width: '480px', maxWidth: '96vw' }}>
+          <p style={{ fontFamily: 'monospace', fontSize: '11px', color: '#00ff9f', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
+            Add Decoder
+          </p>
+
+          {/* Catalog search + mode buttons */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ flex: 1, position: 'relative' }} ref={addTileCatalogRef}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 8px', background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px' }}>
+                <Search size={12} style={{ color: '#4b5563', flexShrink: 0 }} />
+                <input
+                  type="text"
+                  value={addTileCatalogSearch}
+                  onChange={(e) => { setAddTileCatalogSearch(e.target.value); setAddTileShowCatalog(true); }}
+                  onFocus={() => setAddTileShowCatalog(true)}
+                  placeholder="Select from catalog…"
+                  style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#d1d5db', fontFamily: 'monospace', fontSize: '11px' }}
+                />
+              </div>
+              {addTileShowCatalog && catalog.length > 0 && (() => {
+                const q = addTileCatalogSearch.toLowerCase();
+                const filtered = q.length >= 1
+                  ? catalog.filter((s) => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                  : catalog;
+                const catOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
+                const grouped = {};
+                filtered.forEach((s) => {
+                  const c = deriveCategory(s.name);
+                  if (!grouped[c]) grouped[c] = [];
+                  grouped[c].push(s);
+                });
+                const cats = catOrder.filter((c) => grouped[c]);
+                return (
+                  <div
+                    style={{ position: 'absolute', left: 0, right: 0, zIndex: 100, marginTop: '2px', background: '#0d1117', border: '1px solid #1a2d3a', borderRadius: '3px', boxShadow: '0 8px 32px rgba(0,0,0,0.7)', maxHeight: '280px', overflowY: 'auto' }}
+                  >
+                    {cats.length === 0 && (
+                      <div style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: '10px', color: '#4b5563' }}>No streams match</div>
+                    )}
+                    {cats.map((cat) => (
+                      <div key={cat}>
+                        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, color: '#3a6a9a', background: '#0d1117', borderBottom: '1px solid rgba(40,90,160,0.2)', position: 'sticky', top: 0 }}>
+                          {cat} ({grouped[cat].length})
+                        </div>
+                        {grouped[cat].map((s) => (
+                          <button
+                            key={s.ip + ':' + s.port}
+                            style={{ width: '100%', textAlign: 'left', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', cursor: 'pointer', outline: 'none' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setAddTileHost(s.ip);
+                              setAddTilePort(String(s.port));
+                              setAddTileMode(s.mode || 'rtp');
+                              setAddTileDecoderId(deriveStreamDecoderId(s));
+                              setAddTileShowCatalog(false);
+                              setAddTileCatalogSearch('');
+                            }}
+                          >
+                            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#d1d5db', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3a6a9a', flexShrink: 0 }}>{s.ip}:{s.port}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+            {['rtp', 'srt', 'udp'].map((v) => (
+              <button
+                key={v}
+                onClick={() => setAddTileMode(v)}
+                style={{
+                  fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.1em', padding: '6px 10px', borderRadius: '3px', cursor: 'pointer', flexShrink: 0,
+                  background: addTileMode === v ? 'rgba(34,211,238,0.15)' : '#080d12',
+                  border: addTileMode === v ? '1px solid rgba(34,211,238,0.5)' : '1px solid #1a2d3a',
+                  color: addTileMode === v ? '#a5f3fc' : '#6b7280',
+                }}
+              >
+                {v.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Host / IP */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Host / IP
+          </label>
+          <input
+            type="text"
+            value={addTileHost}
+            onChange={(e) => { setAddTileHost(e.target.value); setAddTileError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="239.x.x.x"
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {/* Port */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Port
+          </label>
+          <input
+            type="text"
+            value={addTilePort}
+            onChange={(e) => { setAddTilePort(e.target.value); setAddTileError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="e.g. 9000"
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {/* SRT latency + passphrase */}
+          {addTileMode === 'srt' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  Latency (ms)
+                </label>
+                <input
+                  type="text"
+                  value={addTileLatency}
+                  onChange={(e) => setAddTileLatency(e.target.value)}
+                  placeholder="2000"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+                    color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  Passphrase <span style={{ color: '#374151' }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={addTilePassphrase}
+                  onChange={(e) => setAddTilePassphrase(e.target.value)}
+                  placeholder="optional"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+                    color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Optional decoder ID */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Decoder ID <span style={{ color: '#374151' }}>(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={addTileDecoderId}
+            onChange={(e) => setAddTileDecoderId(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="auto-generated if blank"
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '20px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {addTileError && (
+            <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#f87171', marginBottom: '12px' }}>{addTileError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => { setAddTileOpen(false); resetAddTileForm(); }}
+              style={{ fontFamily: 'monospace', fontSize: '11px', color: '#6b7280', background: 'transparent', border: '1px solid #1a2d3a', borderRadius: '3px', padding: '6px 16px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddTile}
+              disabled={addTileSubmitting}
+              style={{
+                fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.1em',
+                color: addTileSubmitting ? '#374151' : '#00ff9f',
+                background: 'transparent', border: `1px solid ${addTileSubmitting ? '#1a2d3a' : '#00ff9f'}`,
+                borderRadius: '3px', padding: '6px 20px', cursor: addTileSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {addTileSubmitting ? 'STARTING…' : 'START'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
     {/* ── Professional MCR-style fullscreen multiview overlay ── */}
     {isFullscreen && (() => {

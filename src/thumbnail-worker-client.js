@@ -9,14 +9,27 @@ class ThumbnailWorkerClient extends EventEmitter {
     super();
     this._workerPath = options.workerPath || path.join(__dirname, 'thumbnail-worker.js');
     this._forkFn = options.forkFn || fork;
-    this._restartDelayMs = Math.max(1000, Number(options.restartDelayMs) || 2000);
-    this._maxRestartDelayMs = Math.max(this._restartDelayMs, Number(options.maxRestartDelayMs) || 30000);
+    this._initialRestartDelayMs = Math.max(1000, Number(options.restartDelayMs) || 2000);
+    this._restartDelayMs = this._initialRestartDelayMs;
+    this._maxRestartDelayMs = Math.max(this._initialRestartDelayMs, Number(options.maxRestartDelayMs) || 30000);
     this._active = new Map(); // id -> { url, intervalSec }
     this._worker = null;
     this._respawnTimer = null;
     this._shuttingDown = false;
     this._awaitingReplay = false;
     this._shutdownResolver = null;
+
+    // Stall watchdog: if no IPC arrives for stallWatchdogMs while captures are active,
+    // the worker is considered hung and receives SIGKILL so the respawn path runs.
+    // Default 120 s. Pass 0 to disable. Minimum 1 s (for testability).
+    const swMs = Number(options.stallWatchdogMs);
+    this._stallWatchdogMs = (options.stallWatchdogMs === undefined)
+      ? 120000
+      : (Number.isFinite(swMs) && swMs > 0 ? Math.max(1000, swMs) : 0);
+    this._now = (typeof options.now === 'function') ? options.now : () => Date.now();
+    this._lastIpcAt = 0;
+    this._stallTimer = null;
+
     this._spawnWorker();
   }
 
@@ -30,8 +43,32 @@ class ThumbnailWorkerClient extends EventEmitter {
     if (this._worker) return;
     const child = this._forkFn(this._workerPath, [], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
     this._worker = child;
+    this._lastIpcAt = this._now();
     child.on('message', (msg) => this._onWorkerMessage(msg));
     child.on('exit', (code, signal) => this._onWorkerExit(code, signal));
+    if (this._stallWatchdogMs > 0) {
+      this._startStallWatchdog();
+    }
+  }
+
+  _startStallWatchdog() {
+    if (this._stallTimer) return;
+    this._stallTimer = setInterval(() => {
+      if (!this._worker || this._shuttingDown || this._active.size === 0) return;
+      const stallMs = this._now() - this._lastIpcAt;
+      if (stallMs >= this._stallWatchdogMs) {
+        console.warn(`[ThumbnailWorkerClient] worker stalled for ${stallMs}ms; sending SIGKILL`);
+        this.emit('worker_stall', { stallMs });
+        try { this._worker.kill('SIGKILL'); } catch (_) {}
+      }
+    }, this._stallWatchdogMs);
+  }
+
+  _stopStallWatchdog() {
+    if (this._stallTimer) {
+      clearInterval(this._stallTimer);
+      this._stallTimer = null;
+    }
   }
 
   _send(message) {
@@ -45,8 +82,11 @@ class ThumbnailWorkerClient extends EventEmitter {
   }
 
   _onWorkerMessage(msg) {
+    this._lastIpcAt = this._now();
     if (!msg || typeof msg !== 'object') return;
     if (msg.event === 'ready') {
+      // Reset backoff so a subsequent crash doesn't inherit a grown delay.
+      this._restartDelayMs = this._initialRestartDelayMs;
       if (this._awaitingReplay) {
         this._replayActiveCaptures();
         this._awaitingReplay = false;
@@ -73,6 +113,7 @@ class ThumbnailWorkerClient extends EventEmitter {
   }
 
   _onWorkerExit(code, signal) {
+    this._stopStallWatchdog();
     this._worker = null;
     if (this._shuttingDown) {
       this._finalizeShutdown();
@@ -136,6 +177,7 @@ class ThumbnailWorkerClient extends EventEmitter {
   }
 
   _finalizeShutdown() {
+    this._stopStallWatchdog();
     if (this._respawnTimer) {
       clearTimeout(this._respawnTimer);
       this._respawnTimer = null;
@@ -169,6 +211,7 @@ class ThumbnailWorkerClient extends EventEmitter {
       }
       setTimeout(() => {
         if (this._shutdownResolver) {
+          console.warn('[ThumbnailWorkerClient] worker did not acknowledge shutdown within 5s; sending SIGTERM');
           try { if (this._worker) this._worker.kill('SIGTERM'); } catch (_) {}
           this._finalizeShutdown();
         }

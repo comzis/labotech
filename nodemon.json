@@ -1,0 +1,6 @@
+{
+  "ignore": [
+    "config/state.json",
+    "logs/"
+  ]
+}

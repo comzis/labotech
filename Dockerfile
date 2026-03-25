@@ -26,7 +26,7 @@ ENV LABOTECH_RELEASE=$LABOTECH_RELEASE
 RUN cd web && npm run build
 
 # Stage 3: Production runtime
-FROM node:20-slim
+FROM node:20-slim AS production
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -62,3 +62,8 @@ RUN mkdir -p /app/logs
 EXPOSE 4000
 EXPOSE 4100
 CMD ["node", "src/index.js"]
+
+# Stage 4: Development — same runtime tools as production, but with devDependencies
+# (nodemon). Source files are volume-mounted by docker-compose.dev.yml.
+FROM production AS dev
+RUN npm install

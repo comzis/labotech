@@ -1,6 +1,254 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-18 (latest: v3.1.92 / web 3.1.114)
+Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
+
+## v3.1.117 / web — 2026-03-25
+### Fix: Live View noise — suppress ETR 290 status heartbeat blocks
+
+- ETR 290 `etr290_status` heartbeats are still used to drive lane coloring/state.
+- Visible timeline blocks for `etr290_status` are now suppressed to avoid periodic "probe pulse" noise in Live View.
+- Operator impact: Live View focuses on real signal-loss/runtime faults (and ETR incidents/alarms), not periodic ETR monitor heartbeat ticks.
+
+## v3.2.23 — 2026-03-22
+
+### Fix: ThumbnailWorkerClient — stall watchdog + shutdown visibility
+
+- **Stall watchdog:** Added a periodic `setInterval` (period = `stallWatchdogMs`, default 120 s) that fires while `_active.size > 0`. If no IPC has been received from the worker for at least `stallWatchdogMs`, the worker is presumed hung: a `console.warn` is emitted, the `worker_stall` event fires with `{ stallMs }`, and the process receives `SIGKILL` so the existing respawn/backoff path takes over. Pass `stallWatchdogMs: 0` to disable. Minimum enforced value is 1 s (allows fast test cycles with `options.now` clock injection).
+- **Shutdown visibility:** The existing 5 s force-kill timeout now logs `[ThumbnailWorkerClient] worker did not acknowledge shutdown within 5s; sending SIGTERM` before killing, making silent shutdown failures visible in operator logs.
+- **Tests (3 new):** `start()` during respawn backoff → stream replays after ready; stall watchdog fires SIGKILL deterministically; shutdown warning logged on timeout.
+- **Operator impact:** Hung thumbnail worker processes are now automatically recovered within 120 s rather than blocking stream thumbnail updates indefinitely.
+
+## v3.2.22 — 2026-03-22
+
+### Fix: suppress spurious "Input signal missing" alarms during SRT relay restart window
+
+- **Root cause:** When the relay's ffmpeg exits (network blip → `Input/output error`), `SRTRelay._ready` becomes `false` and the relay schedules a restart with 5 s+ backoff. During this window the UDP loopback has no sender, so any in-flight `ffprobe` reads an empty socket and throws "ffprobe returned empty probe payload (no input packets observed during probe window)". `TSAnalyser.run()` caught this and emitted `error`, which `App.jsx`'s `isExpectedNoSignalError()` correctly classified as "Input signal missing" — but the stream was not actually lost; only the relay was momentarily restarting.
+- **Fix:** Added a guard in `TSAnalyser.run()` catch block: if `this._relay` exists and `!this._relay.isReady()`, the probe error is silently swallowed (no `emit('error')`). The relay's own restart logging still fires; only the false-positive alarm is suppressed.
+- **Operator impact:** SRT streams will no longer generate "Input signal missing" alarm log entries during the relay's brief restart window after a transient network interruption.
+
+## v3.2.21 — 2026-03-22
+
+### Revert: ffmpeg upgrade rolled back — static 7.x build caused SRT connection instability
+
+- **Reason:** John Van Sickle ffmpeg 7.x static build caused SRT connection instability in production. Likely cause: SRT socket option handling differences between 5.1.8 and 7.x (adapter binding, timeout semantics, or OpenSSL vs GnuTLS differences). Reverted to Debian Bookworm apt `ffmpeg` 5.1.8.
+- **Known limitation:** Full SRT stats remain unavailable for relay streams (RATE only). Revisit with a controlled ffmpeg upgrade when the root cause of the instability is understood.
+
+## v3.2.20 — 2026-03-22
+
+### Feat: upgrade ffmpeg to 7.x (John Van Sickle static build) for full SRT stats
+
+- **Change:** Replaced Debian Bookworm's `ffmpeg` apt package (5.1.8) with the John Van Sickle static build of ffmpeg 7.x in the Dockerfile. The static build is placed at `/usr/local/bin/ffmpeg` and `/usr/local/bin/ffprobe`, taking precedence over any system-installed version.
+- **Why:** ffmpeg 5.1.8 does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines (`msRTT=`, `mbpsBandwidth=`, etc.) to stderr, even with `-loglevel verbose` and `statsintvl=1000`. ffmpeg 7.x corrects this.
+- **Also:** Re-enabled `statsintvl=1000` in SRT relay URL and `srt_stats_line` event emission in `srt-relay.js` so the existing `_extractSrtStatsFromLog()` parsing path produces RTT, Bandwidth, Loss, NAK, ACK for relay-backed SRT streams if ffmpeg 7.x confirms the stats output.
+- **Operator impact:** SRT Transport panel should now show full stats (RTT, RATE, BANDWIDTH, LOSS) after the first probe cycle (~30 s). RATE was already available; all other fields require the ffmpeg upgrade to take effect.
+
+## v3.2.19 — 2026-03-22
+
+### Revert: SRT relay back to ffmpeg (v3.2.16–v3.2.18 srt-live-transmit approach reverted)
+
+- **Reason:** The srt-live-transmit relay (v3.2.16) introduced two regressions: (1) stream rate spikes and gaps visible in monitoring due to slt reconnect behaviour differing from ffmpeg's internal handling; (2) thumbnails stuck on "Awaiting Frame" because slt-to-UDP mid-stream joiners cannot decode H.264 without the SPS/PPS headers that are only available at SRT session start. The latency-delay workaround (v3.2.17) was insufficient in practice.
+- **Reverted to:** ffmpeg as SRT connection holder with integrated thumbnail output (v3.2.9–v3.2.13 architecture). ffmpeg holds SPS/PPS from initial connection, writes thumbnails directly, and handles reconnects stably.
+- **Known limitation:** Full SRT stats (RTT, Bandwidth, NAK, ACK) remain unavailable for relay-backed streams — ffmpeg 5.1.8 on Debian Bookworm does not emit periodic libsrt stats. RATE is synthesised from measured bitrate. Revisit when ffmpeg is upgraded to 6.x/7.x.
+- **Retained from the reverted work:** `_parseSltStats()` helper and NAK/ACK parsing (v3.2.14 fix 2) remain in ts-analyser.js for non-relay SRT paths.
+
+## v3.2.18 — 2026-03-22
+
+### Fix: SRT relay — stream gaps on transient network blips (srt-live-transmit `-a no`)
+
+- **Root cause:** `srt-live-transmit` was started with `-a no` (auto-reconnect disabled). Any brief network interruption caused slt to exit immediately, triggering the Node.js 5 s restart delay (doubling on repeated drops). This produced visible gaps in the stream every time the SRT sender had a minor network blip, whereas the previous ffmpeg relay handled transient disconnects internally.
+- **Fix:** Removed `-a no` — auto-reconnect is now enabled (slt default). Transient drops are recovered internally by slt without restarting the Node.js relay process or the backoff timer. The `close` handler now only fires on fatal exits (bad URL, explicit `stop()`).
+- **Operator impact:** SRT stream gaps caused by brief network interruptions are eliminated. The transmission stability matches the pre-v3.2.16 ffmpeg relay behaviour.
+
+## v3.2.17 — 2026-03-22
+
+### Fix: SRT relay thumbnail not arriving after v3.2.16 srt-live-transmit relay change
+
+- **Root cause:** `srt-live-transmit` with `latency=4000` buffers 4 seconds of data before outputting anything to the UDP loopback. The thumbnail ffmpeg was spawned at 800 ms (relay ready timer) with a 3 s UDP read timeout — it timed out and exited before the first UDP packet arrived, then restarted and repeated the cycle indefinitely.
+- **Fix:** Thumbnail ffmpeg is now spawned after a delay of `latencyMs + 500 ms` (parsed from the SRT URL). UDP read timeout is set to `max(5s, latencyMs + 3s)` so ffmpeg waits long enough for the latency buffer to fill before giving up.
+- **Operator impact:** Thumbnails and full SRT stats (RTT, Bandwidth, NAK, ACK, Loss) now both work simultaneously for SRT streams with any latency setting.
+
+### Fix: `stop()` leaked stale field reference `_lastRelayStatsLine` after rename to `_lastRelaySrtStats`
+
+- **Root cause:** Agent B peer review caught that `ts-analyser.js` `stop()` still cleared `this._lastRelayStatsLine = null` after the field was renamed to `this._lastRelaySrtStats` in v3.2.16. The stale field was silently assigned to `undefined` on every `stop()` call; the actual field retained its last value across restarts, causing stale stats from a previous session to appear briefly after a decoder stop/start cycle.
+- **Fix:** `stop()` now clears `this._lastRelaySrtStats = null`.
+- **Operator impact:** SRT Transport stats correctly show "AWAITING STATS" immediately after a decoder is stopped and restarted.
+
+## v3.2.16 — 2026-03-22
+
+### Fix: SRT Transport stats — RTT, Bandwidth, NAK, ACK, Loss all missing for relay-backed SRT streams
+
+- **Root cause:** The relay used `ffmpeg` to hold the SRT caller connection. ffmpeg 5.1.8 (Debian Bookworm) does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines to stderr, even with `-loglevel verbose` and `statsintvl=1000` in the URL. No stats lines → `_lastRelayStatsLine` was always null → only `RATE` was synthesised from bitrate. The v3.2.14 fix (second `srt-live-transmit` caller) was also ineffective because the SRT sender at the operator's site only accepts one simultaneous caller and immediately rejected the second connection.
+- **Fix:** Replaced `ffmpeg` with `srt-live-transmit` as the SRT connection holder in `SRTRelay`. `srt-live-transmit 1.5.3` emits full JSON stats (RTT, bandwidth, packet loss, NAK, ACK, retransmissions) on stdout every ~0.75 s (`-s 1000 -pf json`). A separate `ffmpeg` process now reads from the UDP loopback for thumbnail capture (mid-GOP join is tolerated because SPS/PPS are embedded per-IDR in the MPEG-TS bitstream). `_probeSrtLinkStats()` for relay streams now returns the cached relay stats directly — no second SRT connection is ever opened.
+- **Operator impact:** SRT Transport panel now shows full stats (RTT, RATE, BANDWIDTH, LOSS, NAK SENT, ACK SENT, RETRANSMITTED, DROPPED, LOST, TOTAL RECEIVED) for all SRT streams, including those from senders that only accept a single caller.
+
+## v3.2.15 — 2026-03-22
+
+### Fix: thumbnail disappears on tab switch for worker-managed streams (direct SRT, RTP/UDP)
+
+- **Root cause:** The `thumbnail_frame` event handler in `api.js` only updated `a._lastThumbnailUrl` but never merged the URL into `a.lastResult`. On tab switch, `refreshActives()` → `toJSON()` reads `lastResult` to build the REST snapshot — `_lastThumbnailUrl` is in-memory only and not visible to `toJSON()`. The thumbnail appeared live via WS but was lost on any navigation that caused a REST re-fetch.
+- **Affected streams:** All streams using `ThumbnailWorkerClient` — direct SRT caller and RTP/UDP multicast. Relay-backed SRT was already fixed via `pollRelayThumb`.
+- **Fix:** Frame handler now merges `thumbnailUrl` into `a.lastResult` on every new frame, matching the pattern established in `pollRelayThumb`.
+- **Operator impact:** Thumbnails for direct SRT and multicast decoders now persist correctly across Multiview ↔ Decoder tab switches and after nodemon restarts.
+
+## v3.2.14 — 2026-03-22
+
+### Fix: SRT Transport stats — only RATE shown; RTT, Bandwidth, NAK, ACK, retransmissions, loss all missing
+
+- **Root cause 1 (relay streams):** `_probeSrtLinkStats()` had an early-return guard `|| this._relay` that caused it to always return null for relay-backed SRT streams. The fallback path synthesised a minimal `srtStats = { rateMbps }` from the measured bitrate, so only RATE ever populated the SRT Transport panel.
+- **Root cause 2 (all SRT streams):** The `srt-live-transmit -pf json` output includes `recv.naksSent` and `recv.acksSent` but these fields were never parsed and mapped to `srt.pktNak` / `srt.pktAck`. NAK and ACK always showed "—" even when stats were available.
+- **Fix 1:** Removed the `|| this._relay` guard. `srt-live-transmit` now connects to the SRT source as a second caller alongside the relay's ffmpeg process. Professional broadcast SRT senders (GV/LK receivers, encoders) accept multiple simultaneous callers. If the sender rejects the second connection, `srt-live-transmit` exits immediately and the system falls back to rate-only — the relay is unaffected.
+- **Fix 2:** Added parsing of `recv.naksSent` → `srt.pktNak` and `recv.acksSent` → `srt.pktAck`. Added `retransRatio` calculation for the health penalty scorer.
+- **Operator impact:** SRT Transport panel now shows RTT, Bandwidth, Total Received, Dropped, Lost, Retransmissions, NAK Sent, and ACK Sent for both relay and non-relay SRT streams.
+- **Superseded (relay stats path):** Fix 1 above (second `srt-live-transmit` caller for relay streams) was superseded by v3.2.16, which replaced `ffmpeg` with `srt-live-transmit` as the primary SRT connection holder. The operator's sender rejects second callers; the v3.2.16 approach avoids the problem entirely. Fix 2 (NAK/ACK parsing) remains in effect.
+
+## v3.1.121 / web — 2026-03-22
+
+### Fix: Decoder tab — Active Decoders list does not show decoders started from Multiview tab
+
+- **Root cause:** `DecoderPanel` called `refreshActives()` only once on mount. If a decoder was started from the Multiview tab, the `analyse_started` WS event fired while `DecoderPanel` was unmounted (conditional render). On switching back, the mount-time REST call was the only opportunity to pick up the new decoder — any timing race left the list stale until the next `analyse_result` WS event arrived (up to 5 s later).
+- **Fix:** Added a 5 s polling interval to `DecoderPanel` (matching the Multiview cadence). Active Decoders now stays in sync with the backend regardless of which tab provisioned the decoder.
+- **Operator impact:** Decoders started from the Multiview "+" tile (or any other source) appear in the Decoder tab's Active Decoders list within 5 seconds without any manual refresh.
+
+## v3.1.120 / web — 2026-03-22
+
+### Fix: Multiview — existing tiles disappear when adding a new decoder; ghost processes shown in grid
+
+- **Root cause:** The auto-seeding `useEffect` used a "prune or full-reseed" approach that only checked whether *any* stored decoder ID was still in `activeIds`. If a panel held stale IDs from a previous session (stopped decoders, server restart with new IDs), `anyActive` evaluated to `false` → the effect replaced all `decoderIds` with the entire current `activeIds` set, wiping tile assignments built by the operator.
+- **Fix:** The effect now *prunes* stale IDs from every panel before checking `anyActive`. Ghost IDs (processes that are no longer active on the server) are silently removed. Only if every panel ends up empty after pruning does a first-time reseed occur (placing all active IDs onto panel 0). Existing tile assignments are preserved.
+- **Operator impact:** Adding a new decoder via the "+" tile or the "+ Decoder" form no longer causes existing tiles to disappear. Ghost decoder entries in the grid are automatically cleared on the next `activeIds` refresh.
+
+### Feature: Multiview "+" tile modal — catalog stream picker, protocol selector, SRT latency/passphrase
+
+- **What's new:** The "+" tile modal now includes: (1) a catalog search dropdown identical to the existing "+ Decoder" form — streams can be selected by name or IP/port with grouped category headers; selecting a stream auto-fills Host, Port, Mode, and Decoder ID. (2) Protocol mode buttons (RTP / SRT / UDP). (3) SRT-specific Latency and Passphrase fields that appear when SRT mode is selected. URL construction uses `buildProbeUrl` for consistency.
+- **Operator impact:** Operators can add any catalogued stream to the multiview directly from the "+" tile without having to type addresses manually.
+
+## v3.1.119 / web — 2026-03-22
+
+### Feature: Multiview — "+" tile to add decoder without leaving the Multiview tab
+
+- **What's new:** The Decoder Multiview grid now always shows a "+" tile as the last slot. Clicking it opens a compact modal (Host/IP or full SRT:// URL · Port · optional Decoder ID). On submit, the decoder is provisioned and immediately added to the active panel — no need to switch to the Decoder tab.
+- **UX:** Port field is hidden when a full `srt://` / `rtp://` / `udp://` URL is typed. Decoder ID is optional (auto-generated from timestamp if blank). Modal closes on Escape or backdrop click. Enter key submits. Consistent with existing provisioning flow (`handleCreate`).
+- **Operator impact:** Operators can build a multiview stack from the Multiview tab in a single session without switching tabs.
+
+## v3.2.13 — 2026-03-22
+
+### Fix: system status flashes "OFFLINE" briefly when stopping a decoder
+
+- **Root cause:** `saveState()` writes `config/state.json` via `fs.writeFileSync` on every decoder start/stop. `docker-compose.dev.yml` mounts `./config:/app/config` into the container, and nodemon (running without an ignore list) watches `*.json` files in the working directory — which includes `config/state.json`. Every stop triggered a nodemon restart → WebSocket dropped → status indicator briefly showed "OFFLINE" (red LED) → WebSocket reconnected → "RUNNING" restored.
+- **Fix:** Added `nodemon.json` to the project root with `ignore: ["config/state.json", "logs/"]`. Nodemon now ignores runtime state writes and the thumbnail directory. Code changes in `src/` and `routes/` still trigger restarts as expected.
+- **Operator impact:** Stopping decoders no longer causes a server restart or WS disconnect. Status indicator stays green throughout.
+
+## v3.2.12 — 2026-03-22
+
+### Fix: SRT relay thumbnail — disappears on tab switch; lost after nodemon restart
+
+- **Root cause 1 (null lastResult seed):** In v3.2.11, `pollRelayThumb` guarded `lastResult` update with `if (this.lastResult)`. If no probe had run yet (`lastResult === null`), the thumbnail URL was emitted as a live WS event but `lastResult` stayed null. On tab switch, `refreshActives()` → `toJSON()` → `lastResult: null` — the URL was not in the REST snapshot and was lost.
+- **Fix 1:** `pollRelayThumb` now always seeds `lastResult`: `this.lastResult = this.lastResult ? { ...this.lastResult, thumbnailUrl } : { id, thumbnailUrl }`. The minimal seed is overwritten by the next full probe result.
+- **Root cause 2 (toJSON never checks disk):** After a nodemon restart, all in-memory TSAnalyser state is gone — `lastResult` is null, `_lastThumbnailUrl` is null. Even though the JPEG file from the previous session still exists on disk, `toJSON()` returned `lastResult: null` and `refreshActives()` could not restore the thumbnail.
+- **Fix 2:** `toJSON()` now falls back to `_resolveCachedThumbnailUrl()` (disk file check) when `lastResult` has no `thumbnailUrl`. If the file exists it seeds a minimal `lastResult` with the URL, so the Multiview and Confidence Monitor restore the thumbnail immediately after restart.
+
+## v3.2.11 — 2026-03-22
+
+### Fix: SRT relay thumbnail — URL not persisted across tab switches; multiview tile delayed
+
+- **Root cause (persistence):** `pollRelayThumb` set `_lastThumbnailUrl` in-memory but never updated `this.lastResult`. On tab switch the component remounts and calls `refreshActives()` → `GET /api/analysers` → `toJSON()` → `lastResult` — but `lastResult` had no `thumbnailUrl` (it was set before the thumbnail was ever written). Result: "AWAITING FRAME" on every tab switch.
+- **Root cause (multiview delay):** No `analyse_result` WS event fires until the first probe cycle completes (up to 30–60 s with startup jitter). The multiview tile renders from `resultsById[id]`, which only populates from `analyse_result`. The decoder appeared in Active Decoders immediately (from `analyse_started`) but the multiview tile had no data.
+- **Fix:** When `pollRelayThumb` detects a new file mtime (relay wrote a JPEG), immediately: (1) merge `thumbnailUrl` into `this.lastResult` so the REST snapshot is always current; (2) emit a `result` event with the merged lastResult so the WS broadcast pushes the new URL to all live clients without waiting for the next probe cycle. Thumbnails now appear in both panels within ~2 s of the relay writing the first frame.
+
+## v3.2.10 — 2026-03-22
+
+### Fix: SRT relay thumbnail — `thumbnail=1` crashes filter graph on ffmpeg 5.1.8
+
+- **Root cause 1:** `thumbnail=1` is invalid — ffmpeg 5.1.8's `thumbnail` filter requires `n ≥ 2` (default 100). The filter graph failed to initialise on every relay spawn → `Error reinitializing filters!` → exit code 1 → 30 s restart loop. No thumbnail was ever written.
+- **Root cause 2:** `select=eq(pict_type\,I)` before `thumbnail=1` would have fed only I-frames to the thumbnail batch. With a 10 s GOP that is one I-frame every 250 frames; `thumbnail=100` on that input would need 100 I-frames (≈ 1000 s) before writing the first JPEG. Even without the crash this was self-defeating.
+- **Fix:** Replace `select=eq(pict_type\,I),thumbnail=1` with `thumbnail=100`. All decoded frames feed the 100-frame sliding window. At 25 fps one JPEG is written every ~4 s. The thumbnail filter tolerates a mix of corrupt/valid frames from the initial mid-GOP probe window and starts producing output once a decodeable frame arrives.
+- **Operator impact:** Relay no longer crashes on startup. First thumbnail appears within ~4 s of the relay connecting (one 100-frame window at 25 fps). Thumbnails rotate continuously while the stream is live.
+
+## v3.2.9 — 2026-03-22
+
+### Fix: SRT relay thumbnail — integrate JPEG capture into relay ffmpeg to fix permanent H.264 mid-GOP failure
+
+- **Root cause:** Any separate ffmpeg process joining the relay's loopback UDP stream mid-stream cannot decode H.264. The encoder sends SPS/PPS only at initial SRT connection — not before subsequent IDR slices. Any joiner that misses the opening connection (which is always the case for the one-shot `doCapture` timer) never receives the SPS/PPS → `non-existing PPS 0 referenced` → exit code 69. Neither `thumbnail=pick` nor `select=eq(pict_type\,I)` can work from a mid-stream joiner because both require H.264 decoding, which requires SPS/PPS.
+- **Fix:** Integrated thumbnail capture into the relay's own ffmpeg process as a second output branch. Since the relay connects to SRT from scratch at startup, it sees the SPS/PPS from the encoder's initial sequence. A second ffmpeg output (`-map 0:v:0 -vf "select=eq(pict_type\,I),thumbnail=1,scale=480:-2" -vsync vfr -update 1 -f image2 -q:v 3`) writes a JPEG on each I-frame directly to `THUMBNAIL_DIR`. The `thumbPath` parameter is added to `SRTRelay`'s constructor and wired from `TSAnalyser`.
+- **Fix:** Replaced the `doCapture` one-shot timer loop for relay streams with a lightweight mtime poller (`pollRelayThumb`, 2 s interval). The poller checks the JPEG file's mtime and updates `_lastThumbnailUrl` when the relay writes a new frame. No separate ffmpeg process, no UDP port competition, no EADDRINUSE.
+- **Removed:** The `_relayProbeRunning` backoff logic in `doCapture` and the EADDRINUSE silent-retry in `doCapture` are no longer needed for SRT relay streams (the `doCapture` path is no longer used for relay).
+- **Operator impact:** SRT relay thumbnails now appear and rotate reliably on every I-frame boundary (≈ every 2–10 s depending on encoder GOP). No capture failures logged. Log is clean for SRT relay streams.
+
+## v3.2.8 — 2026-03-22
+
+### Fix: SRT relay — thumbnail always fails mid-GOP; SRT stats "AWAITING" on ffmpeg 5.x
+
+- **Root cause (thumbnail):** `thumbnail=pick` requires at least one decoded H.264 frame. Joining a long-GOP stream (10–25 s GOPs) mid-GOP means no IDR frame is available in the short capture window → exit code 69 with `decode_slice_header error`. Only the very first capture (which happened to land on a keyframe boundary) ever succeeded.
+- **Fix:** For loopback UDP relay streams, skip `thumbnail=pick` entirely and use `select=eq(pict_type\,I),thumbnail=1` with a 30 s timeout. This waits for the next I-frame (average ~5–12 s on a 25 s GOP) and captures it cleanly. The JPEG is always a fully decoded reference frame.
+- **Root cause (SRT stats):** ffmpeg 5.1.8/Debian 12 does not call `srt_bistats()` periodically — the `statsintvl` SRT option is accepted by the socket but this build never logs the result via `av_log`. The relay's stderr contains only H.264 parser noise during the initial GOP join; no stats lines appear after stabilisation.
+- **Fix:** When the relay transport probe measures a valid `bitrateBps` but has no libsrt stats, synthesise `srtStats = { rateMbps }` from the measured value. The SRT Transport panel shows RATE (from PCR/ffmpeg progress) and `—` for RTT/bandwidth/loss (genuinely unavailable from this ffmpeg build). The "AWAITING STATS" placeholder is cleared.
+- **Operator impact:** Thumbnails now rotate for SRT relay streams. SRT Transport panel shows measured receive rate immediately after first probe cycle.
+
+## v3.2.7 — 2026-03-22
+
+### Fix: SRT relay — statsintvl too low floods stderr; add relay connection log lines
+
+- **Fix:** `_buildInputUrl()` now normalises any `statsintvl` value below 500 ms to 1000 ms. Decoder URLs provisioned with `statsintvl=1` (1 ms — effectively ~1000 stats lines/second) are silently corrected to 1 s. Values ≥ 500 ms are left as-is.
+- **Logging:** Added `console.log` on relay `ready` event and on first `srt_stats_line` received. Operators can confirm relay connection and stats pipeline from `docker logs` without needing to inspect the UI.
+
+## v3.2.6 — 2026-03-22
+
+### Fix: SRT relay — thumbnail EADDRINUSE flood and H.264 log noise
+
+- **Root cause 1 (thumbnail EADDRINUSE flood):** The thumbnail one-shot timer fires every 2 s. The sequential `isRelayBacked` probe path holds the loopback UDP port for ~15–20 s (tsanalyze 5 s + ffprobe transport 2 s + audio + tsDisc + CC + Dolby). Every thumbnail attempt during a probe cycle failed with `bind failed: Address already in use`, producing a flood of errors in the log and never capturing a frame.
+- **Fix:** Added `_relayProbeRunning` flag. Set to `true` at the start of the `isRelayBacked` sequential probe block, cleared in the `finally`. `doCapture` checks the flag and if set, backs off 3 s without attempting the bind — no error logged. Thumbnail runs in the gaps between probe cycles.
+- **Root cause 2 (H.264 decode_slice_header noise):** The relay runs ffmpeg at `-loglevel verbose` (needed for libsrt periodic stats). Verbose level exposes H.264 parser warnings (`decode_slice_header error`, `non-existing PPS`, `mmco:`) that occur when ffmpeg joins the stream mid-GOP before the first keyframe. These are harmless but polluted the log with hundreds of lines per minute.
+- **Fix:** Added a suppression rule in the relay's stderr filter — lines matching H.264 parser patterns are skipped before reaching `console.error`.
+- **Operator impact:** Log is clean under normal operation. Thumbnails now capture successfully between probe cycles.
+
+## v3.2.5 — 2026-03-22
+
+### Fix: SRT transport stats — colon-space separator not parsed; sequential probe port hold time reduced
+
+- **Root cause 1 (stats still "AWAITING"):** FFmpeg's verbose log emits libsrt stats with a space after the colon: `msRTT: 18.500`. The `SEP = '[:=]'` pattern in `_extractSrtStatsFromLog` expected the digit to immediately follow the separator. With a space present, `Number('') === NaN` — every field returned `null` and stats stayed at "AWAITING STATS" even though the line filter passed.
+- **Fix:** Changed `SEP` to `'[:=]\\s*'` (with optional whitespace) so both `msRTT=18.500` (libsrt format) and `msRTT: 18.500` (ffmpeg verbose format) are captured correctly.
+- **Root cause 2 (slow thumbnail rotation):** The sequential `isRelayBacked` probe path ran `_probeTSDuck()` with a 9 s kill timer and `_probeTransportBitrateBps()` with a 3 s capture window. For loopback UDP the relay stream is already buffered — there is no SRT latency fill needed. The combined probe cycle took 40+ seconds, leaving the thumbnail one-shot path waiting for the port.
+- **Fix:** For relay-backed streams, `_probeTSDuck()` kill timer is reduced from 9 s to 5 s, and `_probeTransportBitrateBps()` capture is reduced from 3.0 s to 2.0 s. Total sequential probe cycle now ~15–20 s vs. 40+ s previously.
+- **Operator impact:** RTT, bandwidth, and packet-loss stats now populate on first relay stats event. Thumbnail rotation resumes between probe cycles rather than being starved.
+
+## v3.2.4 — 2026-03-22
+
+### Fix: SRT relay — no-signal spurious alarms from dual UDP output
+
+## v3.2.3 — 2026-03-22
+
+### Fix: SRT relay — TS bitrate shows 0.38 Mb/s "STREAMS" instead of measured rate
+
+- **Root cause:** For relay-backed SRT, all heavy probes (`tsanalyze`, `ffprobe` transport, `ffprobe` tsDisc/CC/Dolby/audio) ran in parallel on the relay's loopback unicast UDP probe port. Unicast UDP does not duplicate packets to multiple readers the way multicast does — parallel processes split the packet stream, each getting only a fraction. `tsanalyze` (PCR bitrate) and the transport ffprobe both received partial streams, producing no usable bitrate. The fallback is codec-metadata `bitrateSource='streams'`, which was 0.38 Mb/s from the encoder's declared elementary stream bitrate — not the actual transport rate.
+- **Fix:** Added `isRelayBacked` path that serialises heavy probes on the relay probe port sequentially (same as `isSrtDirect`) but without inter-probe settle delays (no SRT reconnect cooldown needed for loopback UDP). Each probe now gets the full packet stream.
+- **Operator impact:** SRT decoder tiles now show the correct TS rate (TSDUCK PCR-based source) and complete program information (PIDs, bitrate, DVB service info) matching the quality of RTP/UDP multicast tiles.
+
+## v3.2.2 — 2026-03-22
+
+### Fix: SRT transport stats always "AWAITING" — wrong separator in regex
+
+- **Root cause:** Two different log sources produce SRT statistics in different formats. libsrt's own periodic stats output (enabled by `statsintvl=N` in the SRT URL) uses `key=value` (`msRTT=18.5`). FFmpeg's verbose log layer uses `key:value` (`msRTT:18.5`). All regex patterns in `_extractSrtStatsFromLog` used only `=`, so lines from ffmpeg's verbose layer never matched and `srtStats` was always `null`.
+- **Fix 1 — enable libsrt stats:** Added `statsintvl=1000` to the relay's SRT input URL (`_buildInputUrl`). This enables libsrt's built-in 1 s periodic stats output in `key=value` format.
+- **Fix 2 — both separators:** Updated the relay's line-filter regex and all field-extraction regexes to accept `[:=]` as separator, covering both libsrt (`=`) and ffmpeg verbose (`:`). Added short field-name aliases (`pktRecv`, `pktSndLoss`, `pktRetrans`, `pktRecvACK`, `pktRecvNAK`) used by ffmpeg's verbose log variant.
+- **Operator impact:** RTT, Receive Rate, Bandwidth, and ARQ counters now populate in the SRT Transport tab within one probe cycle (~5–10 s) of starting an SRT decoder.
+
+## v3.2.1 — 2026-03-22
+
+### Fix: SRT thumbnail refresh — persistent capture via dedicated relay output port
+
+- **Problem:** SRT relay thumbnails refreshed every ~7 s (5 s interval + ~2 s ffmpeg startup + analyze time). Each one-shot capture had to start ffmpeg from scratch, connect to the relay UDP port, wait for `analyzeduration` (2 s), grab a frame, and release the socket. The RTP/UDP path uses `PersistentThumbnailCapture` (continuous ffmpeg) and updates at the configured interval with no reconnect overhead.
+- **Root cause:** The relay outputs a single loopback UDP unicast stream. Only one process can bind to a unicast UDP port at a time. `PersistentThumbnailCapture` holding the port would block `tsanalyze`/`ffprobe` probes from binding — so thumbnails were forced into one-shot mode.
+- **Fix:** The relay now outputs **two UDP streams**: the existing probe port (`5500–5599`) for `tsanalyze`/`ffprobe`/ETR, and a new dedicated thumbnail port (probe port + 100, range `5600–5699`). `TSAnalyser.startContinuous()` launches `PersistentThumbnailCapture` on the thumb port — no port conflict, continuous like RTP/UDP. The one-shot path is retained only as the no-worker fallback for RTP/UDP without a thumbnail worker.
+- **Operator impact:** SRT decoder thumbnails now refresh at the configured interval (default 5 s) with no startup latency between frames — matching the RTP/UDP multicast experience.
+
+## web 3.1.118 — 2026-03-22
+
+### Fix: MCR mode — default off, stable status, simplified tile view
+
+- **Default MCR off:** `engineerMode` now defaults to `false` (MCR/operator view). Engineer details are opt-in via the MRC toggle. Previous sessions that saved `engineerMode: true` to localStorage continue to restore correctly.
+- **Status stabilised during toggle:** In MCR-off mode `signalOk` is now simply `isRunning` — the telemetry-freshness penalty (`staleMs > 15000`) is no longer applied. This eliminates the amber flash that appeared when toggling MCR while a probe cycle was delayed. Engineer mode retains the full staleness check.
+- **Simplified tile (MCR off):** When MCR is off, each tile shows only the service name and audio level meters. Source URL, update age, thumbnail age, and the stats grid (Programs / PIDs / TS Rate / Last Probe / TS source) are hidden. Thumbnail frame is preserved in both modes.
+- **Operator impact:** MCR operators see a clean, uncluttered multiview by default. Engineers can turn MRC on for full diagnostic details.
 
 ## v3.1.92 — 2026-03-18
 

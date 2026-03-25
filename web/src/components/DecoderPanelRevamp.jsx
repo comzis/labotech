@@ -588,6 +588,12 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     etr.loadProfiles();
   }, [refreshActives, etr.refreshActives, etr.loadProfiles]);
 
+  // Poll every 5 s so decoders started from the Multiview tab appear here automatically.
+  useEffect(() => {
+    const t = setInterval(() => refreshActives(), 5000);
+    return () => clearInterval(t);
+  }, [refreshActives]);
+
   useEffect(() => {
     getMonitoringPolicy().then(setPolicyData).catch(() => {});
   }, []);
