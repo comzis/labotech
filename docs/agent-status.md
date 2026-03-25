@@ -81,7 +81,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Live View stop-line + ETR status gating
+**Current task:** Idle — pushed Live View stop-line changes for server validation
 
 **Branch:** `cursor/liveview-stop-lines-real`
 
@@ -99,11 +99,15 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Files modified this session:**
 - `web/src/components/StreamViewPanel.jsx`
+- `web/package.json`
+- `web/package-lock.json`
+- `docs/release-notes-v3.2.md`
+- `docs/agent-status.md`
 
 **Waiting for:** Operator validation in Live View:
 - “Analyser stopped” / “Stream stopped” appear as thin duration lines (not 6px rectangles).
 - Lanes stay live/green when `runtime_stopped` is followed by continued heartbeats.
-- “ETR monitor stopped” does not appear as Live View status; ETR errors/alarm/incident remain visible.
+- “ETR monitor stopped” is hidden from Live View; ETR errors/alarm/incident remain visible.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
