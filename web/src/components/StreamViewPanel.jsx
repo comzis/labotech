@@ -1276,6 +1276,36 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
           const seen = new Set(prev.map((e) => e.id));
           const missing = synthetic.filter((e) => !seen.has(e.id));
 
+          // Prevent "ghost running" after a user stop:
+          // if we already have a recent runtime_stopped for a lane, do not
+          // inject bootstrap heartbeats / OK seeds for that lane even if the
+          // server's isRunning flag lags for a few seconds.
+          const STOP_SEED_SUPPRESS_MS = 15000;
+          const candidateIds = new Set([
+            ...heartbeat.map((e) => e.id),
+            ...analyseSeeds.map((e) => e.id),
+            ...synthetic.map((e) => e.id),
+          ]);
+          const suppressSeedIds = new Set();
+          const now = Date.now();
+          const lastDecoderStopTsById = new Map();
+          for (const e of prev) {
+            if (!e || !candidateIds.has(e.id)) continue;
+            if (e.category !== 'runtime_stopped') continue;
+            if (e.title === 'ETR monitor stopped') continue;
+            if (!Number.isFinite(e.ts)) continue;
+            const prevTs = lastDecoderStopTsById.get(e.id);
+            if (prevTs == null || e.ts > prevTs) lastDecoderStopTsById.set(e.id, e.ts);
+          }
+          for (const id of candidateIds) {
+            const lastStopTs = lastDecoderStopTsById.get(id);
+            if (lastStopTs != null && (now - lastStopTs) <= STOP_SEED_SUPPRESS_MS) suppressSeedIds.add(id);
+          }
+
+          const missingFiltered = missing.filter((e) => !suppressSeedIds.has(e.id));
+          const analyseSeedsFiltered = analyseSeeds.filter((e) => !suppressSeedIds.has(e.id));
+          const heartbeatFiltered = heartbeat.filter((e) => !suppressSeedIds.has(e.id));
+
           // Tombstone: any lane with an explicit start but no stop that is NOT
           // in the current active server list gets a synthetic runtime_stopped.
           // This recovers from server restarts where analyse_stopped was never
@@ -1307,7 +1337,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
             });
           }
 
-          return mergeTimelineEvents(prev, [...missing, ...analyseSeeds, ...heartbeat, ...tombstones]);
+          return mergeTimelineEvents(prev, [...missingFiltered, ...analyseSeedsFiltered, ...heartbeatFiltered, ...tombstones]);
         });
       } catch (_) {}
     };
