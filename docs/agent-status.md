@@ -81,7 +81,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Idle — pushed Live View stop-line changes for server validation
+**Current task:** Server validation (Live View stop markers) — pushed updates
 
 **Branch:** `cursor/liveview-stop-lines-real`
 
@@ -105,7 +105,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 - `docs/agent-status.md`
 
 **Waiting for:** Operator validation in Live View:
-- “Analyser stopped” / “Stream stopped” appear as thin duration lines (not 6px rectangles).
+- All `runtime_stopped` markers (except “ETR monitor stopped”) render as thin duration lines (not 6px rectangles).
 - Lanes stay live/green when `runtime_stopped` is followed by continued heartbeats.
 - “ETR monitor stopped” is hidden from Live View; ETR errors/alarm/incident remain visible.
 
