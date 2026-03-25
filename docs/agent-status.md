@@ -81,7 +81,7 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Live View thumbnails: refresh on `thumbnail_frame`
+**Current task:** fix: multiview thumbnail flicker/drop
 
 **Branch:** `cursor/liveview-stop-lines-real`
 
@@ -100,11 +100,14 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 **Files modified this session:**
 - `web/src/components/StreamViewPanel.jsx`
 - `web/src/hooks/useTSAnalysis.js`
+- `web/package.json`
+- `web/package-lock.json`
+- `docs/release-notes-v3.2.md`
 - `docs/agent-status.md`
 
-**Waiting for:** Operator validation in Live View:
+**Waiting for:** Operator validation in Multiview:
 - Per-lane thumbnails update automatically when backend sends `thumbnail_frame` (default cadence ~5s).
-- Multiview tiles update thumbnails live as well (hook wired to `thumbnail_frame`).
+- Multiview tiles update thumbnails smoothly without intermittent dropouts.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
