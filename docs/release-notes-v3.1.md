@@ -2,6 +2,13 @@
 
 Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
 
+## v3.1.117 / web — 2026-03-25
+### Fix: Live View noise — suppress ETR 290 status heartbeat blocks
+
+- ETR 290 `etr290_status` heartbeats are still used to drive lane coloring/state.
+- Visible timeline blocks for `etr290_status` are now suppressed to avoid periodic "probe pulse" noise in Live View.
+- Operator impact: Live View focuses on real signal-loss/runtime faults (and ETR incidents/alarms), not periodic ETR monitor heartbeat ticks.
+
 ## v3.2.23 — 2026-03-22
 
 ### Fix: ThumbnailWorkerClient — stall watchdog + shutdown visibility
