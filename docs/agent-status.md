@@ -81,9 +81,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Idle — git worktree gitlink fix merged (PR #70).
+**Current task:** fix: multiview thumbnail flicker/drop
 
-**Branch:** `main` (PR #70 merged 2026-03-21)
+**Branch:** `cursor/liveview-stop-lines-real`
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -93,11 +93,21 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Last session:** 2026-03-21 — PR **#70** merged: removed `.claude/worktrees/*` gitlinks; `.gitignore` ignores `.claude/worktrees/`; `git status` / `git diff` work on Linux.
 
-**Active branch:** `main`
+**Active branch:** `cursor/liveview-stop-lines-real`
 
 **Merged:** `cursor/fix-claude-worktree-gitlinks` → **PR #70** (`f9c7b33` on main).
 
-**Waiting for:** Operator review of Phase 3 PR #16.
+**Files modified this session:**
+- `web/src/components/StreamViewPanel.jsx`
+- `web/src/hooks/useTSAnalysis.js`
+- `web/package.json`
+- `web/package-lock.json`
+- `docs/release-notes-v3.2.md`
+- `docs/agent-status.md`
+
+**Waiting for:** Operator validation in Multiview:
+- Per-lane thumbnails update automatically when backend sends `thumbnail_frame` (default cadence ~5s).
+- Multiview tiles update thumbnails smoothly without intermittent dropouts.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`

@@ -140,6 +140,32 @@ export default function useTSAnalysis() {
   // Called from WS messages
   const onWsResult = useCallback((msg) => {
     if (!msg || !msg.type || !msg.id) return;
+    // Keep Multiview thumbnails "live" by updating the per-tile src as soon as
+    // the backend worker emits a new `thumbnail_frame`.
+    if (msg.type === 'thumbnail_frame') {
+      if (isSuppressed(msg.id)) return;
+      // Worker sends the generated JPEG file path as `msg.path`.
+      // `msg.url` is the *input stream URL* (not the thumbnail image URL), so
+      // we must build the `/logs/thumbnails/<file>.jpg?t=...` URL ourselves.
+      const filePath = typeof msg.path === 'string' ? msg.path.trim() : '';
+      if (!filePath) return;
+      const baseName = filePath.split('/').pop();
+      if (!baseName) return;
+      const id = msg.id;
+      const now = Date.now();
+      const thumbUrl = `/logs/thumbnails/${baseName}?t=${now}`;
+      setResultsById((prev) => {
+        // Do not create/revive decoders from thumbnail-only messages.
+        // A stopped decoder can emit a trailing frame while teardown settles;
+        // re-adding it here causes "ghost" tiles to return after stop.
+        if (!prev[id]) return prev;
+        const next = { ...prev };
+        const existing = next[id];
+        next[id] = { ...existing, thumbnailUrl: thumbUrl };
+        return next;
+      });
+      return;
+    }
     if (msg.type === 'analyse_result') {
       if (isSuppressed(msg.id)) return;
       setResultsById((prev) => ({
