@@ -44,6 +44,9 @@ const EVENT_BLOCK_DURATION_MS = {
   health_alarm: 14000,
   etr290_status: 5000,
 };
+const EVENT_BLOCK_TRACK_HEIGHT_PX = 6;
+const STOP_LINE_HEIGHT_PX = 2;
+const STOP_LINE_TOP_PX = Math.floor((EVENT_BLOCK_TRACK_HEIGHT_PX - STOP_LINE_HEIGHT_PX) / 2);
 const EVENT_STYLE_BY_CATEGORY = {
   etr290_alarm: { alpha: 'ee', borderAlpha: 'cc', glowAlpha: '88' },
   etr290_incident: { alpha: 'dd', borderAlpha: 'bb', glowAlpha: '70' },
@@ -639,7 +642,7 @@ function buildLaneGradient(events, timeStart, windowMs) {
     const lastExplicitStartTs = hasExplicitStart
       ? explicitStarts[explicitStarts.length - 1].ts
       : firstActiveTs;
-    const stopAfterActive = sorted.find(
+    let stopAfterActive = sorted.find(
       (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStartTs
     );
     const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
@@ -647,6 +650,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
     // live-colored between probe cycles (heartbeats arrive every ~5s while the
     // process runs; analyse_result may only arrive every 30-60s+).
     const lastHeartbeatTs = sorted.filter((e) => e.category === 'runtime_heartbeat').pop()?.ts || 0;
+    // If heartbeats keep arriving after a runtime_stopped marker, treat that stop
+    // as spurious (e.g. tombstone/race) and keep the lane live.
+    if (stopAfterActive) {
+      const heartbeatAfterStopTs = sorted
+        .filter((e) => e.category === 'runtime_heartbeat' && e.ts > stopAfterActive.ts)
+        .pop()?.ts;
+      if (heartbeatAfterStopTs != null && heartbeatAfterStopTs >= timeStart) {
+        stopAfterActive = null;
+      }
+    }
     const lastActivityTs = Math.max(lastSevEvtTs, lastHeartbeatTs);
     const staleStopTs = lastActivityTs + LANE_ACTIVITY_STALE_MS;
     const timeEnd = timeStart + windowMs;
@@ -767,8 +780,11 @@ function buildLaneGradient(events, timeStart, windowMs) {
 function buildEventBlocks(events, timeStart, windowMs) {
   if (!Array.isArray(events) || events.length === 0 || windowMs <= 0) return [];
   const end = timeStart + windowMs;
-  return events
-    .filter((e) => e && e.ts != null)
+  const laneSorted = [...events]
+    .filter((e) => e && e.ts != null && Number.isFinite(e.ts))
+    .sort((a, b) => a.ts - b.ts);
+
+  return laneSorted
     // Suppress nominal analyse heartbeat blocks; they create misleading
     // gray/green segmentation when lane baseline already indicates state.
     .filter((e) => !(e.category === 'analyse_result' && e.severity === 'ok'))
@@ -786,16 +802,42 @@ function buildEventBlocks(events, timeStart, windowMs) {
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
     .map((e, idx) => {
       const startTs = Math.max(timeStart, e.ts);
-      const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
-      const sev = laneSeverity(e);
-      const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
-      const dur = Math.round(baseDur * severityFactor);
-      const endTs = Math.min(end, startTs + dur);
+      const isStopLine = e.category === 'runtime_stopped'
+        && (e.title === 'Analyser stopped' || e.title === 'Stream stopped');
+      const nextStartTitle = e.title === 'Analyser stopped' ? 'Analyser started' : e.title === 'Stream stopped' ? 'Stream started' : null;
+
+      let endTs;
+      if (isStopLine && nextStartTitle) {
+        // Real stop duration: until the next matching non-bootstrap "started".
+        const nextStart = laneSorted.find(
+          (x) =>
+            x.category === 'runtime_started'
+            && x.title === nextStartTitle
+            && !x?.evidence?.bootstrap
+            && x.ts > e.ts
+        );
+        endTs = Math.min(end, nextStart ? nextStart.ts : end);
+      } else {
+        const baseDur = EVENT_BLOCK_DURATION_MS[e.category] || 6000;
+        const sev = laneSeverity(e);
+        const severityFactor = sev === 'critical' ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
+        const dur = Math.round(baseDur * severityFactor);
+        endTs = Math.min(end, startTs + dur);
+      }
+
       if (endTs <= timeStart || startTs >= end) return null;
       const leftPct = ((startTs - timeStart) / windowMs) * 100;
       const rightPct = ((endTs - timeStart) / windowMs) * 100;
-      const widthPct = Math.max(0.45, rightPct - leftPct);
+      const widthPctRaw = rightPct - leftPct;
+      const widthPct = isStopLine
+        ? Math.max(0, Math.min(100, widthPctRaw))
+        : Math.max(0.45, Math.min(100, widthPctRaw));
       const vis = getEventVisualStyle(e.category, e.severity);
+
+      // Hide ETR monitor started/stopped markers from Live View.
+      // (ETR errors/incident/alarm blocks remain visible.)
+      if (e.category === 'runtime_stopped' && e.title === 'ETR monitor stopped') return null;
+
       return {
         key: `${e.key}-blk-${idx}`,
         leftPct: Math.max(0, Math.min(100, leftPct)),
@@ -804,14 +846,39 @@ function buildEventBlocks(events, timeStart, windowMs) {
         bg: vis.bg,
         border: vis.border,
         glow: vis.glow,
-        title: `${toUtc(e.ts)} - ${e.title}`,
+        title: isStopLine
+          ? `${toUtc(e.ts)} - ${toUtc(endTs)} (${Math.round(endTs - e.ts)}ms) - ${e.title}`
+          : `${toUtc(e.ts)} - ${e.title}`,
+        shape: isStopLine ? 'line' : 'rect',
+        heightPx: isStopLine ? STOP_LINE_HEIGHT_PX : null,
+        topPx: isStopLine ? STOP_LINE_TOP_PX : null,
       };
     })
     .filter(Boolean);
 }
 
-function getEventVisualDurationMs(event) {
+function getEventVisualDurationMs(event, laneEventsSorted, windowEndTs) {
   if (!event) return 6000;
+
+  // Stop timeline lines should reflect real stop duration (stop -> next matching started).
+  if (
+    event.category === 'runtime_stopped'
+    && (event.title === 'Analyser stopped' || event.title === 'Stream stopped')
+    && Number.isFinite(windowEndTs)
+    && Array.isArray(laneEventsSorted)
+  ) {
+    const targetStartedTitle = event.title === 'Analyser stopped' ? 'Analyser started' : 'Stream started';
+    const nextStart = laneEventsSorted.find(
+      (e) =>
+        e.category === 'runtime_started'
+        && e.title === targetStartedTitle
+        && !e?.evidence?.bootstrap
+        && e.ts > event.ts
+    );
+    const endTs = nextStart ? nextStart.ts : windowEndTs;
+    return Math.max(1, Math.round(endTs - event.ts));
+  }
+
   const baseDur = EVENT_BLOCK_DURATION_MS[event.category] || 6000;
   const sev = laneSeverity(event);
   const severityFactor = (sev === 'critical' || sev === 'p1') ? 1.35 : sev === 'warning' ? 1.15 : 1.0;
@@ -908,7 +975,11 @@ function LaneCanvas({ gradient, height = 8 }) {
 // surface as the "nearest event" in the cursor readout.
 function isInternalEvent(e) {
   return e.category === 'runtime_heartbeat' ||
-    (e.category === 'runtime_started' && e?.evidence?.bootstrap);
+    (e.category === 'runtime_started' && e?.evidence?.bootstrap) ||
+    // ETR status heartbeats are used for lane coloring, but should not appear as selectable events.
+    e.category === 'etr290_status' ||
+    // ETR monitor started/stopped are operational status; show ETR errors/alarms/incidents instead.
+    (e.category === 'runtime_stopped' && e?.title === 'ETR monitor stopped');
 }
 
 function canonicalizeEventLane(event) {
@@ -1356,25 +1427,30 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   );
   const selectedLaneExactEvents = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return [];
-    return (laneMap[selectedLaneId] || [])
+    const laneEventsSorted = [...(laneMap[selectedLaneId] || [])]
       .filter((e) => !isInternalEvent(e))
+      .sort((a, b) => a.ts - b.ts);
+    return laneEventsSorted
       .filter((e) => {
         const tsMatch = Math.abs(e.ts - pointerUtc) <= pointerMatchWindowMs;
-        const durationMs = getEventVisualDurationMs(e);
+        const durationMs = getEventVisualDurationMs(e, laneEventsSorted, timeEnd);
         const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
         return tsMatch || inVisualBlock;
       })
       .sort((a, b) => Math.abs(a.ts - pointerUtc) - Math.abs(b.ts - pointerUtc))
       .slice(0, 5);
-  }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs]);
+  }, [selectedLaneId, pointerUtc, laneMap, pointerMatchWindowMs, timeEnd]);
   const selectedLaneNearestEvent = useMemo(() => {
     if (!selectedLaneId || pointerUtc == null) return null;
-    const laneEvents = (laneMap[selectedLaneId] || []).filter((e) => !isInternalEvent(e));
+    const laneEventsSorted = [...(laneMap[selectedLaneId] || [])]
+      .filter((e) => !isInternalEvent(e))
+      .sort((a, b) => a.ts - b.ts);
+    const laneEvents = laneEventsSorted;
     if (laneEvents.length === 0) return null;
     let best = null;
     let bestDist = Infinity;
     for (const e of laneEvents) {
-      const durationMs = getEventVisualDurationMs(e);
+      const durationMs = getEventVisualDurationMs(e, laneEventsSorted, timeEnd);
       const inVisualBlock = pointerUtc >= e.ts && pointerUtc <= (e.ts + durationMs);
       const dist = inVisualBlock ? 0 : Math.abs(e.ts - pointerUtc);
       if (dist < bestDist) {
@@ -1383,7 +1459,7 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       }
     }
     return best;
-  }, [selectedLaneId, pointerUtc, laneMap]);
+  }, [selectedLaneId, pointerUtc, laneMap, timeEnd]);
   const selectedLaneEvent = selectedLaneExactEvents[0] || null;
   const selectedEvent = selectedLaneEvent || selectedLaneNearestEvent;
 
@@ -1763,21 +1839,27 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
                     <div
                       className="absolute left-0 right-0 overflow-hidden"
                       style={{
-                        top: `${y - 3}px`,
-                        height: '6px',
+                        top: `${y - (EVENT_BLOCK_TRACK_HEIGHT_PX / 2)}px`,
+                        height: `${EVENT_BLOCK_TRACK_HEIGHT_PX}px`,
                         zIndex: 2,
                       }}
                     >
                       {laneBlocks.map((blk) => (
                         <div
                           key={blk.key}
-                          className="absolute h-full rounded-sm border"
+                          className={blk.shape === 'line' ? 'absolute rounded-sm' : 'absolute h-full rounded-sm border'}
                           style={{
                             left: `${blk.leftPct}%`,
                             width: `${blk.widthPct}%`,
                             background: blk.bg,
                             borderColor: blk.border,
                             boxShadow: `0 0 5px ${blk.glow}`,
+                            ...(blk.shape === 'line' ? {
+                              height: `${blk.heightPx}px`,
+                              top: `${blk.topPx}px`,
+                              border: 'none',
+                              minWidth: '1px',
+                            } : null),
                           }}
                           title={blk.title}
                         />

@@ -4,6 +4,25 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 
 ---
 
+## v3.2.1 — 2026-03-25
+
+### fix(live-view): show stopped markers as thin duration lines
+
+**What changed:**
+- In Live View timeline (`StreamViewPanel`), `runtime_stopped` markers titled “Analyser stopped” and “Stream stopped” render as thin time-lines (ms duration) instead of fixed-height rectangles.
+- “ETR monitor stopped” is hidden from Live View (ETR integrity remains automatic for users via ETR analysis, while ETR errors/incidents/alarms continue to appear in alarm views).
+- Lane live/offline logic no longer greys the lane if `runtime_stopped` is followed by continued `runtime_heartbeat` events (treats transient stops as spurious).
+
+**Why:**
+- Fixed-duration rectangles made brief analyser transitions look like long outages.
+- Transient `runtime_stopped` events could incorrectly drive lane offline/grey state even while heartbeats were still arriving.
+- ETR operational start/stop status is not needed in Live View; operators should rely on ETR errors/alarms for integrity checks.
+
+**Operator impact:**
+- Timeline is less noisy: “stopped” signals are now time-accurate thin lines.
+- Live lanes remain green when the service is actually healthy (heartbeats continue).
+- ETR monitor start/stop markers do not clutter Live View, while ETR alarms/incidents remain available for integrity verification.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process
