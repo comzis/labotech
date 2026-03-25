@@ -107,6 +107,20 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 **Operator impact:**
 - Multiview tile thumbnails should update smoothly without intermittent dropouts/up-refresh flicker.
 
+## v3.2.8 — 2026-03-25
+
+### fix(multiview): prevent stopped decoder ghost re-appearance
+
+**What changed:**
+- `thumbnail_frame` handling in `useTSAnalysis` now updates thumbnail URLs only for decoders that already exist in `resultsById`.
+- Thumbnail-only messages no longer re-add decoders to `activeIds` / `decoderMeta`.
+
+**Why:**
+- During stop/teardown, a trailing thumbnail frame can still arrive briefly. Treating that as an active signal caused stopped decoders to reappear as ghost tiles.
+
+**Operator impact:**
+- Stopped decoders should remain stopped in multiview and no longer pop back in from late thumbnail frames.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process

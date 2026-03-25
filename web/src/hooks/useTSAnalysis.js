@@ -155,18 +155,15 @@ export default function useTSAnalysis() {
       const now = Date.now();
       const thumbUrl = `/logs/thumbnails/${baseName}?t=${now}`;
       setResultsById((prev) => {
+        // Do not create/revive decoders from thumbnail-only messages.
+        // A stopped decoder can emit a trailing frame while teardown settles;
+        // re-adding it here causes "ghost" tiles to return after stop.
+        if (!prev[id]) return prev;
         const next = { ...prev };
-        const existing = next[id] || { id };
+        const existing = next[id];
         next[id] = { ...existing, thumbnailUrl: thumbUrl };
         return next;
       });
-      // Ensure the tile is considered active so it stays visible while frames
-      // are being written.
-      setActiveIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
-      setDecoderMeta((prev) => ({
-        ...prev,
-        [id]: { ...(prev[id] || {}), id, isRunning: true },
-      }));
       return;
     }
     if (msg.type === 'analyse_result') {
