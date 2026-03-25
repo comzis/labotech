@@ -1039,6 +1039,8 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
   const [rangeError, setRangeError] = useState('');
   const [uiRestored, setUiRestored] = useState(false);
   const [laneThumbnailById, setLaneThumbnailById] = useState({});
+  // Throttle per-lane thumbnail state updates so we don't re-render excessively.
+  const lastThumbUpdateTsByLaneRef = useRef({});
   // Crosshair DOM ref — updated directly to avoid React re-renders on every mousemove
   const crosshairLineRef = useRef(null);
   // Pending mouse position for rAF-throttled state update
@@ -1150,6 +1152,26 @@ export default function StreamViewPanel({ lastMessage, onSelectDecoder }) {
       }
       return mergeTimelineEvents(prev, [event]);
     });
+  }, [lastMessage]);
+
+  // Keep Live View thumbnails "near real-time" by updating per-lane <img src>
+  // from backend `thumbnail_frame` WS messages.
+  useEffect(() => {
+    if (!lastMessage || lastMessage.type !== 'thumbnail_frame') return;
+    if (!lastMessage.id) return;
+    const laneId = normalizeLaneId(lastMessage.id);
+    const filePath = typeof lastMessage.path === 'string' ? lastMessage.path.trim() : '';
+    const baseName = filePath ? filePath.split('/').pop() : '';
+    if (!baseName) return;
+
+    const now = Date.now();
+    const lastTs = lastThumbUpdateTsByLaneRef.current[laneId] || 0;
+    // Default thumbnail cadence is ~5s; keep a small guard anyway.
+    if (now - lastTs < 1500) return;
+    lastThumbUpdateTsByLaneRef.current[laneId] = now;
+
+    const thumbUrl = `/logs/thumbnails/${baseName}?t=${now}`;
+    setLaneThumbnailById((prev) => (prev[laneId] === thumbUrl ? prev : { ...prev, [laneId]: thumbUrl }));
   }, [lastMessage]);
 
   useEffect(() => {

@@ -83,6 +83,20 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 - Enabling ETR under a decoder should immediately color the ETR lane based on current `etr290_status` heartbeats.
 - Disabling ETR should revert the lane back to decoder/analyser-based coloring (no permanent grey).
 
+## v3.2.6 — 2026-03-25
+
+### feat(thumbnails): update Live View + Multiview from `thumbnail_frame`
+
+**What changed:**
+- Live View (`StreamViewPanel`) per-lane thumbnails now refresh as soon as the backend worker emits `thumbnail_frame`, instead of waiting for the next `analyse_result`.
+- Multiview tiles (`DecoderMultiviewPanel`) now update their `result.thumbnailUrl` live from the same `thumbnail_frame` stream, so tiles stay “decode-live” during continuous monitoring.
+
+**Why:**
+- Operators want the visual thumbnail to track the running service in near real-time, not at probe-result cadence.
+
+**Operator impact:**
+- Multiview and Live View thumbnail motion/updates are more responsive and consistent during short probing gaps.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process

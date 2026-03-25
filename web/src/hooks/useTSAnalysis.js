@@ -140,6 +140,27 @@ export default function useTSAnalysis() {
   // Called from WS messages
   const onWsResult = useCallback((msg) => {
     if (!msg || !msg.type || !msg.id) return;
+    // Keep Multiview thumbnails "live" by updating the per-tile src as soon as
+    // the backend worker emits a new `thumbnail_frame`.
+    if (msg.type === 'thumbnail_frame') {
+      if (isSuppressed(msg.id)) return;
+      if (typeof msg.url !== 'string' || msg.url.trim() === '') return;
+      const id = msg.id;
+      setResultsById((prev) => {
+        const next = { ...prev };
+        const existing = next[id] || { id };
+        next[id] = { ...existing, thumbnailUrl: msg.url.trim() };
+        return next;
+      });
+      // Ensure the tile is considered active so it stays visible while frames
+      // are being written.
+      setActiveIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+      setDecoderMeta((prev) => ({
+        ...prev,
+        [id]: { ...(prev[id] || {}), id, isRunning: true },
+      }));
+      return;
+    }
     if (msg.type === 'analyse_result') {
       if (isSuppressed(msg.id)) return;
       setResultsById((prev) => ({
