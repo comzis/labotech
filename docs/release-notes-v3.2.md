@@ -67,6 +67,22 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 **Operator impact:**
 - After STOP, lanes go offline consistently and do not re-appear by themselves in subsequent Live View ranges.
 
+## v3.2.5 — 2026-03-25
+
+### fix(live-view): correct ETR enable/disable grey behaviour
+
+**What changed:**
+- `StreamViewPanel` now uses the ETR lane gradient only when `etr290_status` heartbeats exist inside the current Live View window.
+- The ETR lane gradient end marker is paired with the most recent `etr290_status` heartbeat (so old `ETR monitor stopped` events can’t truncate a re-enabled ETR lane).
+
+**Why:**
+- Previously, older retained `etr290_status` events caused the ETR lane to stay in an “unknown/grey” state after enabling/disabling ETR.
+- ETR lane truncation could also be driven by an older stop event from a previous ETR run.
+
+**Operator impact:**
+- Enabling ETR under a decoder should immediately color the ETR lane based on current `etr290_status` heartbeats.
+- Disabling ETR should revert the lane back to decoder/analyser-based coloring (no permanent grey).
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process

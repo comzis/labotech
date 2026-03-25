@@ -529,7 +529,12 @@ function buildLaneGradient(events, timeStart, windowMs) {
     return 'linear-gradient(90deg, #44556638 0%, #44556638 100%)';
   }
   const sorted = [...events].sort((a, b) => a.ts - b.ts);
-  const hasEtrStateEvents = sorted.some((e) => laneStateSeverity(e) != null);
+  // Use ETR colouring only when ETR status heartbeats are present in the
+  // current visible window. Otherwise, fall back to decoder/analyser gradient
+  // even if older etr290_status events remain in localStorage.
+  const hasEtrStateEvents = sorted.some(
+    (e) => laneStateSeverity(e) != null && e.ts >= timeStart && e.ts <= (timeStart + windowMs)
+  );
 
   // Fallback for decoder/analyser lanes (no ETR heartbeat present).
   // Build a severity-aware gradient: green = healthy, red = LOS/error, amber = warning.
@@ -751,13 +756,20 @@ function buildLaneGradient(events, timeStart, windowMs) {
   // Decoder/analyser lifecycle runtime_stopped events can share the same lane id
   // after normalization, prematurely terminating the ETR lane and creating a
   // visible gap even while etr290_status heartbeats continue.
-  const firstEtrTs = sorted.find((e) => laneStateSeverity(e) != null)?.ts ?? -Infinity;
-  const stopEvent = sorted.find(
-    (e) => e.category === 'runtime_stopped'
-      && e.ts >= firstEtrTs
-      && e.title === 'ETR monitor stopped'
-  );
   const timeEnd = timeStart + windowMs;
+  // End ETR lane only on the next ETR monitor stop after the most recent
+  // etr290_status heartbeat within/at the end of the visible window.
+  const lastEtrStatusTs = sorted
+    .filter((e) => laneStateSeverity(e) != null && e.ts <= timeEnd)
+    .pop()?.ts;
+  const stopEvent = lastEtrStatusTs != null
+    ? sorted.find(
+      (e) =>
+        e.category === 'runtime_stopped'
+        && e.title === 'ETR monitor stopped'
+        && e.ts >= lastEtrStatusTs
+    )
+    : null;
   // ETR gradient ends at stop event (if within window), otherwise extends to window edge.
   const gradientEnd = (stopEvent && stopEvent.ts < timeEnd) ? stopEvent.ts : timeEnd;
 
