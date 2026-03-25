@@ -777,6 +777,10 @@ function buildEventBlocks(events, timeStart, windowMs) {
     // already reflects severity via analyse_result events, so rendering a separate
     // block here creates duplicate/overlapping tinting on the lane.
     .filter((e) => e.category !== 'health_alarm')
+    // Suppress ETR status heartbeat blocks: lane coloring is driven by etr290_status
+    // via buildLaneGradient() / laneStateSeverity(), but visible blocks create noisy
+    // "pulse" ticks on Live View.
+    .filter((e) => e.category !== 'etr290_status')
     // Synthetic "bootstrap started" markers are only lane-seeding helpers
     // and should not render as visible event blocks.
     .filter((e) => !(e.category === 'runtime_started' && e?.evidence?.bootstrap))
