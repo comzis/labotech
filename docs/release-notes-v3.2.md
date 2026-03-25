@@ -54,6 +54,19 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 - ETR Live View becomes continuous when ETR is running under a decoder.
 - “Analyser stopped” appears in logs only, reducing timeline clutter/noise.
 
+## v3.2.4 — 2026-03-25
+
+### fix(live-view): prevent ghost running after decoder stop
+
+**What changed:**
+- Live View (`StreamViewPanel`) no longer injects bootstrap `runtime_heartbeat` / OK `analyse_result` seeds for a lane if there is a recent `runtime_stopped` for that same lane.
+
+**Why:**
+- When STOP/STOP ALL is used, the server’s `isRunning` flag can lag for a few seconds. The Live View bootstrap seeding loop could re-assert “running” during that window, making stopped decoders look active again (especially in longer history ranges).
+
+**Operator impact:**
+- After STOP, lanes go offline consistently and do not re-appear by themselves in subsequent Live View ranges.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process
