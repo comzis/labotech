@@ -747,9 +747,16 @@ function buildLaneGradient(events, timeStart, windowMs) {
     if (state) currentSeverity = state;
   }
 
-  // Respect runtime_stopped — find the earliest stop after the first ETR status event.
+  // Respect runtime_stopped — but only for the ETR monitor itself.
+  // Decoder/analyser lifecycle runtime_stopped events can share the same lane id
+  // after normalization, prematurely terminating the ETR lane and creating a
+  // visible gap even while etr290_status heartbeats continue.
   const firstEtrTs = sorted.find((e) => laneStateSeverity(e) != null)?.ts ?? -Infinity;
-  const stopEvent = sorted.find((e) => e.category === 'runtime_stopped' && e.ts >= firstEtrTs);
+  const stopEvent = sorted.find(
+    (e) => e.category === 'runtime_stopped'
+      && e.ts >= firstEtrTs
+      && e.title === 'ETR monitor stopped'
+  );
   const timeEnd = timeStart + windowMs;
   // ETR gradient ends at stop event (if within window), otherwise extends to window edge.
   const gradientEnd = (stopEvent && stopEvent.ts < timeEnd) ? stopEvent.ts : timeEnd;
@@ -835,6 +842,10 @@ function buildEventBlocks(events, timeStart, windowMs) {
         ? Math.max(0, Math.min(100, widthPctRaw))
         : Math.max(0.45, Math.min(100, widthPctRaw));
       const vis = getEventVisualStyle(e.category, e.severity);
+
+      // “Analyser stopped” should be visible only in the TS analyser logs,
+      // not as a timeline marker in Live View.
+      if (e.category === 'runtime_stopped' && e.title === 'Analyser stopped') return null;
 
       // Hide ETR monitor started/stopped markers from Live View.
       // (ETR errors/incident/alarm blocks remain visible.)
@@ -980,6 +991,8 @@ function isInternalEvent(e) {
     (e.category === 'runtime_started' && e?.evidence?.bootstrap) ||
     // ETR status heartbeats are used for lane coloring, but should not appear as selectable events.
     e.category === 'etr290_status' ||
+    // “Analyser stopped” is operational status/log-only; exclude from Live View hover selection.
+    (e.category === 'runtime_stopped' && e?.title === 'Analyser stopped') ||
     // ETR monitor started/stopped are operational status; show ETR errors/alarms/incidents instead.
     (e.category === 'runtime_stopped' && e?.title === 'ETR monitor stopped');
 }

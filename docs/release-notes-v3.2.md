@@ -38,6 +38,22 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 - All stop markers become visually consistent as thin time-lines.
 - Fewer false “outage-sized” blocks on the Live View timeline.
 
+## v3.2.3 — 2026-03-25
+
+### fix(live-view): correct ETR gap + hide analyser-stopped timeline marker
+
+**What changed:**
+- Live View ETR lane gradient no longer ends on decoder/analyser `runtime_stopped` events; it now ends only on `runtime_stopped` titled “ETR monitor stopped”.
+- Live View no longer renders the “Analyser stopped” marker on the timeline (it remains visible in TS analyser logs/alarm views).
+
+**Why:**
+- Starting ETR under a decoder could prematurely terminate the ETR lane gradient, producing a visible gap even while `etr290_status` heartbeats were continuing.
+- “Analyser stopped” is operational/log-only information; displaying it as a timeline marker created misleading “leftover” visuals.
+
+**Operator impact:**
+- ETR Live View becomes continuous when ETR is running under a decoder.
+- “Analyser stopped” appears in logs only, reducing timeline clutter/noise.
+
 ## v3.2.0 — 2026-03-21
 
 ### feat(thumbnail): complete Phase 2 migration — thumbnails out-of-process
