@@ -81,9 +81,9 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 ## AGENT B STATUS — Cursor
 
-**Current task:** Idle — git worktree gitlink fix merged (PR #70).
+**Current task:** Live View stop-line + ETR status gating
 
-**Branch:** `main` (PR #70 merged 2026-03-21)
+**Branch:** `cursor/liveview-stop-lines-real`
 
 **Owns:**
 - `src/thumbnail-worker.js` (new file, Phase 2) ✅
@@ -93,11 +93,17 @@ These are hard stops. Neither agent proceeds past a gate until the operator mark
 
 **Last session:** 2026-03-21 — PR **#70** merged: removed `.claude/worktrees/*` gitlinks; `.gitignore` ignores `.claude/worktrees/`; `git status` / `git diff` work on Linux.
 
-**Active branch:** `main`
+**Active branch:** `cursor/liveview-stop-lines-real`
 
 **Merged:** `cursor/fix-claude-worktree-gitlinks` → **PR #70** (`f9c7b33` on main).
 
-**Waiting for:** Operator review of Phase 3 PR #16.
+**Files modified this session:**
+- `web/src/components/StreamViewPanel.jsx`
+
+**Waiting for:** Operator validation in Live View:
+- “Analyser stopped” / “Stream stopped” appear as thin duration lines (not 6px rectangles).
+- Lanes stay live/green when `runtime_stopped` is followed by continued heartbeats.
+- “ETR monitor stopped” does not appear as Live View status; ETR errors/alarm/incident remain visible.
 
 **Do NOT touch (Agent A owns):**
 - `src/tsduck-monitor.js`
