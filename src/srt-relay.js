@@ -13,6 +13,11 @@ const { spawn } = require('child_process');
  * Architecture: one long-lived ffmpeg process per SRT source.
  *   ffmpeg -i srt://source:port?... -c copy -f mpegts udp://127.0.0.1:PORT?pkt_size=1316
  *
+ * Optional thumbnail output: when thumbPath is set, ffmpeg writes a JPEG on every
+ * ~100-frame window directly from the SRT connection (which has SPS/PPS from stream
+ * start — separate processes joining the UDP copy mid-stream cannot decode H.264
+ * without those initial headers).
+ *
  * Port allocation: deterministic djb2 hash of srtUrl, range 5500–5599.
  * Same URL always gets same port — stable across restarts.
  *
@@ -39,21 +44,25 @@ function hashPort(url) {
 class SRTRelay extends EventEmitter {
   /**
    * @param {object} opts
-   * @param {string}  opts.srtUrl  - Source SRT URL (srt://host:port?latency=N...)
-   * @param {string}  [opts.id]    - Human-readable identifier for logging
-   * @param {number}  [opts.port]  - Override UDP output port (default: hash of srtUrl)
+   * @param {string}  opts.srtUrl   - Source SRT URL (srt://host:port?latency=N...)
+   * @param {string}  [opts.id]     - Human-readable identifier for logging
+   * @param {number}  [opts.port]   - Override UDP output port (default: hash of srtUrl)
+   * @param {string}  [opts.thumbPath] - Absolute path for relay-written JPEG thumbnail.
+   *                                     When set, ffmpeg writes a thumbnail on every I-frame
+   *                                     window (no separate capture process needed).
    */
-  constructor({ srtUrl, id, port } = {}) {
+  constructor({ srtUrl, id, port, thumbPath } = {}) {
     super();
     if (!srtUrl || !String(srtUrl).startsWith('srt://')) {
       throw new Error(`SRTRelay: srtUrl must be a srt:// URL, got: ${srtUrl}`);
     }
-    this.srtUrl   = srtUrl;
-    this.id       = id || `relay-${Date.now()}`;
-    this.port     = Number.isFinite(Number(port)) && Number(port) > 0
+    this.srtUrl    = srtUrl;
+    this.id        = id || `relay-${Date.now()}`;
+    this.port      = Number.isFinite(Number(port)) && Number(port) > 0
       ? Number(port)
       : hashPort(srtUrl);
-    this.localUrl = `udp://127.0.0.1:${this.port}`;
+    this.localUrl  = `udp://127.0.0.1:${this.port}`;
+    this.thumbPath = (typeof thumbPath === 'string' && thumbPath) ? thumbPath : null;
 
     this._proc         = null;
     this._running      = false;
@@ -100,10 +109,10 @@ class SRTRelay extends EventEmitter {
     if (!src.includes('mode='))    src += `${sep}mode=caller`;
     if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
     if (!src.includes('timeout=')) src += '&timeout=8000000';
-    // Give the SRT receive buffer 500 ms headroom unless the URL already sets it.
-    // Without this, transient network jitter (>latency ms) causes RCV-DROPPED which
-    // corrupts the TS and makes consumers see glitches.
-    if (!src.includes('latency=') && !src.includes('rcvlatency=')) src += '&rcvlatency=500';
+    // Give the SRT receive buffer 500 ms headroom unless the URL already sets a
+    // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,
+    // tsbpddelay= — the last is the legacy libsrt option name accepted by some encoders).
+    if (!src.includes('latency=') && !src.includes('rcvlatency=') && !src.includes('tsbpddelay=')) src += '&rcvlatency=500';
     return src;
   }
 
@@ -115,18 +124,35 @@ class SRTRelay extends EventEmitter {
     const outputUrl = `${this.localUrl}?pkt_size=1316`;
 
     const args = [
-      '-loglevel', 'error',
+      '-loglevel', 'verbose',
       '-fflags', '+discardcorrupt',
-      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening an H.264
-      // parser context, which eliminates the wall of 'non-existing PPS / decode_slice_header'
-      // warnings that appear when joining a live stream mid-GOP. The relay only
-      // copies TS packets; it never needs to understand the elementary streams.
+      // Force MPEG-TS demux on the SRT input — prevents ffmpeg opening a bare
+      // H.264 parser context. The relay has SPS/PPS from initial SRT connection
+      // start (unlike a mid-stream UDP joiner that never sees them).
       '-f', 'mpegts',
       '-i', inputUrl,
+      // Output 1 — MPEG-TS UDP relay (stream copy, no decode)
       '-c', 'copy',
       '-f', 'mpegts',
       outputUrl,
     ];
+
+    // Output 2 — JPEG thumbnail (only when thumbPath is configured).
+    // thumbnail=100 buffers 100 frames and picks the sharpest one — at 25 fps
+    // that is ~1 JPEG every 4 s. Integrated here (not a separate process) because
+    // this ffmpeg has SPS/PPS from the initial SRT connection; separate processes
+    // joining the UDP loopback mid-stream fail H.264 decode without those headers.
+    if (this.thumbPath) {
+      args.push(
+        '-map', '0:v:0',
+        '-vf', 'thumbnail=100,scale=480:-2',
+        '-vsync', 'vfr',
+        '-update', '1',
+        '-f', 'image2',
+        '-q:v', '3',
+        this.thumbPath,
+      );
+    }
 
     const proc = spawn('ffmpeg', args);
     this._proc  = proc;
@@ -143,8 +169,15 @@ class SRTRelay extends EventEmitter {
     }, 600);
 
     proc.stderr.on('data', (d) => {
-      const t = d.toString().trim();
-      if (t) console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
+      for (const line of d.toString().split('\n')) {
+        const t = line.trim();
+        if (!t) continue;
+        if (/error|warning|failed|reject|refused/i.test(t)) {
+          // Suppress known-harmless H.264 parser noise from mid-GOP SRT join.
+          if (/decode_slice_header|non.existing PPS|mmco:|non existing PPS/i.test(t)) continue;
+          console.error(`[srt-relay:${this.id}] ${t.slice(0, 200)}`);
+        }
+      }
     });
 
     proc.on('error', (err) => {

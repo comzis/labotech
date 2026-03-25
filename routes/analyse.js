@@ -42,7 +42,7 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
     if (analysers.has(id)) return res.status(409).json({ error: `Analyser ${id} already exists` });
 
-    const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined });
+    const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined, thumbnailClient: thumbnailClient || undefined });
 
     analyser.on('result', result => broadcast({ type: 'analyse_result', id, ...result }));
     analyser.on('health_alarm', data => broadcast({ type: 'health_alarm', id, ...data }));
@@ -50,11 +50,6 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
 
     analyser.startContinuous();
     analysers.set(id, analyser);
-    // NOTE: thumbnailClient is intentionally NOT started here.
-    // TSAnalyser.startContinuous() manages its own thumbnail capture internally
-    // (captureThumbnail timer for RTP/UDP; PersistentThumbnailCapture for SRT).
-    // Starting the worker on top creates duplicate ffmpeg processes that compete
-    // for CPU and delay the first frame by minutes instead of seconds.
     if (saveState) saveState();
     broadcast({ type: 'analyse_started', id, message: `${id} analyser started` });
     res.status(201).json(analyser.toJSON());
