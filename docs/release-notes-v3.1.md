@@ -1,6 +1,34 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
+Date: 2026-04-06 (latest: web 3.1.126 / backend 3.2.24)
+
+## v3.2.24 — 2026-04-06
+
+### Feat: Replace ETR 290 engine with TSDuck (`src/etr290-analyser.js`, `src/tsduck-process.js`)
+
+- **Root cause of previous engine failure:** The FFmpeg engine regex-matched log output rather than measuring the transport stream directly. PCR jitter could not be measured, `pcr_rep` never fired, P3 SI table checks were structurally blind, and SRT streams required a 60-second retry cycle to avoid fighting the thumbnail relay for the single-listener slot.
+- **New engine:** Replaces the FFmpeg subprocess with a `tsp` pipeline that performs real TS packet analysis:
+  - `tsp -I ip|srt ... -P continuity --json-line -P analyze -i 1 --json-line -O drop`
+  - `continuity` plugin emits per-PID CC discontinuity events immediately as they occur.
+  - `analyze` plugin emits full per-PID + transport-stream statistics every 1 second.
+  - JSON output is read from `tsp` stderr (where `--json-line` writes via the message logger), parsed line-by-line with `readline`, and mapped to the existing incident model via `_parseTsduckLine()`.
+- **ETR 290 field mapping:**
+  - `ts.packets["invalid-syncs"]` → `ts_sync` (P1)
+  - continuity event `{ pid, type: "missing"|"break" }` → `cc_error` (P1)
+  - `ts.packets["transport-errors"]` → `transport_error` (P2)
+  - `pids[N].packets["pcr-leap"] > 0` → `pcr_disc` (P2)
+  - `pids[N].packets["pts-leap"] > 0` → `pts_error` (P2)
+  - `pids[N].packets["dts-leap"] > 0` → `pcr_disc` supplementary (P2)
+- **Zero false alarms on join:** The existing 5-second startup grace period absorbs the initial CC noise when tsp begins reading a mid-stream feed. Confirmed via live test.
+- **Input plugin routing:**
+  - `srt://host:port` → `-I srt --caller host:port`
+  - `udp://239.x.x.x:port` → `-I ip 239.x.x.x:port` (multicast group join)
+  - `udp://host:port` (unicast) → `-I ip :port` (listen on all interfaces)
+  - `rtp://` follows the same multicast/unicast split as UDP
+- **Bitrate:** Derived from `ts["pcr-bitrate"]` when available; falls back to `ts.bytes × 8` for the 1-second reporting interval on streams without reliable PCR timestamps.
+- **FFmpeg fallback:** Set `ETR290_ENGINE=ffmpeg` in `.env` to revert to the legacy log-scraping engine. Default is `tsduck`.
+- **Unchanged:** Incident model, startup grace, burst-window threshold, PID filter, WebSocket broadcast shape, REST API, React frontend.
+- **Operator impact:** ETR 290 alarms now reflect real measured values — CC errors are counted per-PID from actual continuity counter deltas, PCR discontinuities are detected from real timestamp leaps, and transport errors are measured at the packet TEI flag level. False-alarm rate on stream join is zero.
 
 ## v3.1.117 / web — 2026-03-25
 ### Fix: Live View noise — suppress ETR 290 status heartbeat blocks
