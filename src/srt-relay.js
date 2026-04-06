@@ -1,3 +1,7 @@
+// Labotech — Open Source Broadcast Stream Monitor
+// Copyright (c) 2026 Milorad Stevanovic
+// MIT Licence — github.com/comzis/labotech
+
 'use strict';
 
 const { EventEmitter } = require('events');
@@ -107,7 +111,7 @@ class SRTRelay extends EventEmitter {
     const sep = src.includes('?') ? '&' : '?';
     // Ensure caller mode and eno1 binding (same convention as monitoring.js _buildSrtSrc)
     if (!src.includes('mode='))    src += `${sep}mode=caller`;
-    if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
+    if (!src.includes('adapter=')) src += `&adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`;
     if (!src.includes('timeout=')) src += '&timeout=8000000';
     // Give the SRT receive buffer 500 ms headroom unless the URL already sets a
     // latency value via any of the accepted SRT parameter names (latency=, rcvlatency=,

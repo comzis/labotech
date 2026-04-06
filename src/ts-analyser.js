@@ -1,3 +1,7 @@
+// Labotech — Open Source Broadcast Stream Monitor
+// Copyright (c) 2026 Milorad Stevanovic
+// MIT Licence — github.com/comzis/labotech
+
 'use strict';
 
 const { EventEmitter } = require('events');
@@ -1145,7 +1149,7 @@ class TSAnalyser extends EventEmitter {
       if (this._relay) return resolve(null);
       const latencyMs = parseSrtLatency(this.url);
       const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
-      const inputUrl = this._withLiveInputHints(this.url); // adds adapter=10.67.18.29
+      const inputUrl = this._withLiveInputHints(this.url); // adds adapter=MANAGEMENT_IP
       const proc = spawn('srt-live-transmit', ['-s', '1000', '-pf', 'json', inputUrl, 'file:///dev/null']);
       let lastStats = null;
       const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch (_) {} }, runMs);
@@ -2169,11 +2173,11 @@ class TSAnalyser extends EventEmitter {
 
   _withLiveInputHints(url) {
     if (!url) return url;
-    // SRT — bind caller socket to eno1 (10.67.18.29) so ffprobe routes via the
-    // management NIC, not eno2 (no IP). Hardwired for now; configurable in future.
+    // SRT — bind caller socket to the management NIC so ffprobe routes via the
+    // correct interface, not a secondary NIC with no IP. Set MANAGEMENT_IP env var.
     if (url.startsWith('srt://')) {
       const sep = url.includes('?') ? '&' : '?';
-      return `${url}${sep}adapter=10.67.18.29`;
+      return `${url}${sep}adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`;
     }
     if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
     const sep = url.includes('?') ? '&' : '?';
@@ -2722,7 +2726,7 @@ class TSAnalyser extends EventEmitter {
       }
     }
 
-    // SRT link health — Haivision SRT spec + Eurovision broadcast thresholds
+    // SRT link health — Haivision SRT spec + broadcast contribution link thresholds
     // Applied only when SRT stats are present in the probe result.
     const srtStats = result.srtStats || dvb.srtStats || null;
     if (srtStats && this.url && this.url.startsWith('srt://')) {

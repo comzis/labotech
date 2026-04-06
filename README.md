@@ -1,6 +1,6 @@
 # LABOTECH
 
-**v3.1.73 / web 3.1.83**
+**v3.2.23 / web 3.1.125**
 
 Professional DVB-IP stream processor for broadcast MCR operations on HPE DL360 / Ubuntu Server.
 Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 compliance, decoder multiview monitoring, and 1080p↔1080i interlace conversion.
@@ -15,7 +15,7 @@ Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 complian
 | Component | Detail |
 |---|---|
 | Server | HPE DL360, Ubuntu Server |
-| Management NIC | `eno1` → `10.67.18.29` → Web UI + API port `4000` |
+| Management NIC | `eno1` → `$API_HOST` → Web UI + API port `4000` |
 | Multicast NIC | `eno2` → no IP → all `239.0.0.0/8` traffic |
 | Multicast subnet | `239.100.25.0/26` (default address `239.100.25.29`) |
 | Container | Docker with `network_mode: host` |
@@ -75,7 +75,7 @@ bash scripts/update-and-deploy-safe.sh
 Post-deploy smoke test:
 
 ```bash
-bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+bash scripts/post-deploy-smoke.sh "$API_HOST" 4000
 ```
 
 Recovery to a known ref:
@@ -99,7 +99,7 @@ npm install && npm start
 cd web && npm install && npm run dev
 ```
 
-Web UI: `http://10.67.18.29:4000`
+Web UI: `http://<API_HOST>:4000`  (set `API_HOST` in `.env`)
 
 ---
 
@@ -147,7 +147,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 | `failover.js` | `FailoverEncoder` | Primary/backup input watchdog. 3 s switchover threshold. Emits `switched`. |
 | `event-log.js` | — | 1000-event in-memory ring + `logs/events.jsonl` append. Seeded from disk on startup. |
 | `scte35.js` | `SCTE35Injector` | SCTE-35 splice_insert payload builder. |
-| `api.js` | — | Express bound to `10.67.18.29:4000`. WebSocket broadcasts all stream events. Serves React SPA. |
+| `api.js` | — | Express bound to `API_HOST:4000` (env var). WebSocket broadcasts all stream events. Serves React SPA. |
 
 ### Routes (`routes/`)
 
@@ -290,7 +290,7 @@ DOLBYE_REQUIRED_WHEN_DETECTED=false
 ### Key `.env` variables
 
 ```env
-API_HOST=10.67.18.29
+API_HOST=<your-management-nic-ip>
 API_PORT=4000
 MULTICAST_NIC=eno2
 FORWARD_MULTICAST_SUBNET=239.100.25.0/26
@@ -328,7 +328,7 @@ npm test -- --runInBand    # 191 tests across 8 suites
 - FFmpeg and TSDuck always via `child_process.spawn` — never `exec`
 - Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
 - All multicast addresses validated against `239.100.25.0/26` before use
-- API always binds to `10.67.18.29` — never `0.0.0.0`
+- API binds to `API_HOST` env var — never `0.0.0.0`
 - All state in-memory `Map()` — no database, no ORM
 - `pid != null && Number.isFinite(Number(pid))` — never coerce nullable PIDs
 - `matchAll` requires `g` flag — derive: `new RegExp(rx.source, rx.flags + 'g')`

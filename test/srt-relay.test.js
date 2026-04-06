@@ -99,10 +99,10 @@ describe('SRTRelay — spawn args', () => {
     expect(args[iIdx + 1]).toContain('mode=caller');
   });
 
-  test('input URL has adapter=10.67.18.29', () => {
+  test('input URL has adapter matching MANAGEMENT_IP env var', () => {
     const args = spawn.mock.calls[0][1];
     const iIdx = args.indexOf('-i');
-    expect(args[iIdx + 1]).toContain('adapter=10.67.18.29');
+    expect(args[iIdx + 1]).toContain(`adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`);
   });
 
   test('output URL has pkt_size=1316', () => {
