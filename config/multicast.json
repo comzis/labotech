@@ -1,6 +1,0 @@
-{
-  "nic": "<multicast-nic>",
-  "subnet": "<multicast-forward-subnet>",
-  "address": "<multicast-forward-ip>",
-  "ttl": 10
-}

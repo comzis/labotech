@@ -1,5 +1,0 @@
-[
-  { "name": "Example Stream 1", "ip": "239.0.0.1", "port": "5000", "mode": "rtp" },
-  { "name": "Example Stream 2", "ip": "239.0.0.2", "port": "5000", "mode": "rtp" },
-  { "name": "Example Stream 3", "ip": "239.0.0.3", "port": "5000", "mode": "udp" }
-]
