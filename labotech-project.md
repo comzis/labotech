@@ -31,7 +31,7 @@ labotech/
 │   │                             #   INTERLACE_PRESETS map
 │   │
 │   ├── multicast-forward.js      # MulticastForwarder class
-│   │                             #   eno2 / 239.100.25.0/26
+│   │                             #   <multicast-nic> / <multicast-forward-subnet>
 │   │                             #   buildMulticastUrl()
 │   │                             #   ensureMulticastRoute()
 │   │                             #   checkMulticastRoute()
@@ -59,7 +59,7 @@ labotech/
 │   │                             #   sendSnmpTrap()
 │   │
 │   └── api.js                    # Express REST API + WebSocket server
-│                                 #   Binds to 10.67.18.30:3000
+│                                 #   Binds to <management-nic-ip>:3000
 │                                 #   All routes wired here
 │
 ├── routes/                       # ── API ROUTES (separate files) ────────
@@ -75,9 +75,9 @@ labotech/
 ├── config/                       # ── CONFIGURATION ──────────────────────
 │   ├── presets.json              # 64 encoder preset slots
 │   └── multicast.json            # Multicast subnet config
-│                                 #   { nic: "eno2",
-│                                 #     subnet: "239.100.25.0/26",
-│                                 #     address: "239.100.25.29" }
+│                                 #   { nic: "<multicast-nic>",
+│                                 #     subnet: "<multicast-forward-subnet>",
+│                                 #     address: "<multicast-forward-ip>" }
 │
 ├── web/                          # ── FRONTEND (React) ───────────────────
 │   │
@@ -90,7 +90,7 @@ labotech/
 │       │   ├── StreamsPanel.jsx          # Active streams list + controls
 │       │   ├── EncoderForm.jsx           # Start encoder/transcoder form
 │       │   ├── TranscodePanel.jsx        # 1080p→1080i presets UI
-│       │   ├── MulticastPanel.jsx        # eno2 forward controls + status
+│       │   ├── MulticastPanel.jsx        # <multicast-nic> forward controls + status
 │       │   ├── TSAnalyser.jsx            # PAT→PMT→PID tree + metrics
 │       │   ├── ConfidenceMonitor.jsx     # Thumbnail mosaic grid
 │       │   ├── MetricsTile.jsx           # Bitrate tile + sparkline
@@ -110,7 +110,7 @@ labotech/
 │   │                             #   install smcroute, netplan config,
 │   │                             #   sysctl multicast settings,
 │   │                             #   UDP buffer tuning (25MB)
-│   ├── add-multicast-route.sh    # ip route add 239.100.25.0/26 dev eno2
+│   ├── add-multicast-route.sh    # ip route add <multicast-forward-subnet> dev <multicast-nic>
 │   └── check-routes.sh           # Verify all routes + rp_filter status
 │
 └── test/                         # ── TESTS ──────────────────────────────
@@ -126,17 +126,17 @@ labotech/
 
 ```env
 # ── Server ─────────────────────────────────────────
-API_HOST=10.67.18.30
+API_HOST=<management-nic-ip>
 API_PORT=3000
 NODE_ENV=production
 
 # ── Network interfaces ──────────────────────────────
-MANAGEMENT_NIC=eno1
-MULTICAST_NIC=eno2
+MANAGEMENT_NIC=<management-nic>
+MULTICAST_NIC=<multicast-nic>
 
 # ── Multicast forward subnet ────────────────────────
-FORWARD_MULTICAST_SUBNET=239.100.25.0/26
-FORWARD_MULTICAST_IP=239.100.25.29
+FORWARD_MULTICAST_SUBNET=<multicast-forward-subnet>
+FORWARD_MULTICAST_IP=<multicast-forward-ip>
 MULTICAST_TTL=10
 
 # ── SRT output defaults ─────────────────────────────
@@ -152,8 +152,8 @@ VIDEO_CODEC=libx264
 AUDIO_CODEC=aac
 
 # ── Monitoring ──────────────────────────────────────
-SNMP_MANAGER_HOST=10.67.18.1
-SYSLOG_HOST=10.67.18.1
+SNMP_MANAGER_HOST=<snmp-manager-ip>
+SYSLOG_HOST=<syslog-host-ip>
 SYSLOG_PORT=514
 THUMBNAIL_INTERVAL_SEC=5
 ```
@@ -215,9 +215,9 @@ Use the **labotech skill** for all implementation decisions. Read the relevant r
 ### Infrastructure
 
 - **Server:** HPE DL360, Ubuntu Server, Docker (`network_mode: host`)
-- **eno1:** Management NIC → IP `10.67.18.30` → Web UI and API on port `3000`
-- **eno2:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
-- **Multicast forward subnet:** `239.100.25.0/26` (address `239.100.25.29`)
+- **<management-nic>:** Management NIC → IP `<management-nic-ip>` → Web UI and API on port `4000`
+- **<multicast-nic>:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
+- **Multicast forward subnet:** `<multicast-forward-subnet>` (address `<multicast-forward-ip>`)
 
 ---
 
@@ -266,7 +266,7 @@ Start with **Phase 1** only. Build these four things in order:
 - `isRunning` boolean property
 
 **4. `src/api.js` + `routes/streams.js`**
-- Express server binding to `10.67.18.30:3000`
+- Express server binding to `<management-nic-ip>:4000`
 - WebSocket server on same port
 - Routes:
   - `GET /streams` — list all active streams
@@ -287,8 +287,8 @@ Start with **Phase 1** only. Build these four things in order:
 - No TypeScript — plain ES6 Node.js with `require()`
 - No ORM — no database — all state is in-memory `Map()` objects
 - FFmpeg is always called via `child_process.spawn` — never `exec`
-- All multicast addresses must be validated against `239.100.25.0/26` before use
-- Docker container must never bind to `0.0.0.0` on the API — always `10.67.18.30`
+- All multicast addresses must be validated against `<multicast-forward-subnet>` before use
+- Docker container must never bind to `0.0.0.0` on the API — always `<management-nic-ip>`
 
 ---
 

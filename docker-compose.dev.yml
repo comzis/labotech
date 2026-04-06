@@ -31,7 +31,7 @@ services:
     command: npx nodemon --ignore "config/state.json" --ignore "logs/" src/index.js
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD-SHELL", "wget -qO- \"http://$${API_HOST:-10.67.18.29}:$${API_PORT:-4000}/health\" >/dev/null 2>&1 || exit 1" ]
+      test: [ "CMD-SHELL", "wget -qO- \"http://$${API_HOST}:$${API_PORT:-4000}/health\" >/dev/null 2>&1 || exit 1" ]
       interval: 30s
       timeout: 5s
       retries: 3

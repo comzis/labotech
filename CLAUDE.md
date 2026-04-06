@@ -7,9 +7,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Labotech** is a professional DVB-IP stream processor for an HPE DL360 server running Ubuntu. It handles SRT encapsulation, multicast routing, MPEG-TS analysis, multiview monitoring, and ETR 290 compliance checking. Transcoding (1080p→1080i interlace conversion) is present but considered a secondary and currently limited feature. There is no broadcast encoding capability — the product is an encapsulator, analyser, and multiview platform.
 
 **Server target:** HPE DL360, Ubuntu Server, Docker with `network_mode: host`
-- **eno1:** Management NIC → `10.67.18.29` → Web UI + API on port `4000`
-- **eno2:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
-- **Multicast forward subnet:** `239.100.25.0/26` (address `239.100.25.29`)
+- **<management-nic>:** Management NIC → `<management-nic-ip>` → Web UI + API on port `4000`
+- **<multicast-nic>:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
+- **Multicast forward subnet:** `<multicast-forward-subnet>` (address `<multicast-forward-ip>`)
 
 ## Tech Stack
 
@@ -65,11 +65,11 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 
 - **`encoder.js`** — Core `SRTEncoder` class (extends `EventEmitter`). Key methods: `detectInputType()`, `buildInputArgs()`, `buildSRTUrl()`, `buildFFmpegArgs()`, `start()`, `stop()`, `parseStats()`.
 - **`transcoder.js`** — Extends `SRTEncoder`. Implements `INTERLACE_PRESETS` map for four broadcast conversions: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (deinterlace/OTT).
-- **`multicast-forward.js`** — `MulticastForwarder` extends `EventEmitter` directly (not `SRTEncoder`). Validates all multicast addresses against `239.100.25.0/26` before use. Manages `eno2` routes via `ensureMulticastRoute()`.
+- **`multicast-forward.js`** — `MulticastForwarder` extends `EventEmitter` directly (not `SRTEncoder`). Validates all multicast addresses against `<multicast-forward-subnet>` before use. Manages `<multicast-nic>` routes via `ensureMulticastRoute()`.
 - **`ts-analyser.js`** — `TSAnalyser` extends `EventEmitter` directly (not `SRTEncoder`). Parses PAT/PMT/PID tree via `parseStructure()`. Health assessment (`_attachHealthAssessment`) gates bitrate-drift scoring on `bitrateSource === 'tsduck'` only; SMPTE ST 2022-7 `insufficient_data` carries no score penalty.
 - **`srt-relay.js`** — `SRTRelay` — two-process design (v3.2.16+): (1) `srt-live-transmit` holds the SRT caller connection, re-outputs as UDP loopback, and emits full JSON stats (`srt_stats` event — RTT, BW, loss, NAK, ACK) on stdout via `-s 1000 -pf json`; (2) a separate `ffmpeg` process reads from the UDP loopback and writes JPEG thumbnails. Thumbnail spawn is delayed by `latencyMs + 500ms` so it starts after the SRT latency buffer fills. Port allocation is deterministic djb2 hash of the source URL (range 5500–5599).
 - **`failover.js`** — `FailoverEncoder` with primary/backup input watchdog, 3s switchover threshold.
-- **`api.js`** — Express server bound to `10.67.18.29:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active stream processors.
+- **`api.js`** — Express server bound to `<management-nic-ip>:3000` (never `0.0.0.0`). WebSocket server on same port broadcasts `{ type: "stats", id, ...stats }` from all active stream processors.
 
 ### Routes (`routes/`)
 
@@ -100,8 +100,8 @@ This rule applies to Claude Code and Cursor equally. No exceptions for "small" f
 - Plain ES6 Node.js with `require()` — no TypeScript
 - FFmpeg is always called via `child_process.spawn` — never `exec`
 - Every class must extend `EventEmitter` and emit `started`, `stopped`, `error`, `stats`
-- All multicast addresses must be validated against `239.100.25.0/26` before use
-- API server must always bind to `10.67.18.29`, never `0.0.0.0`
+- All multicast addresses must be validated against `<multicast-forward-subnet>` before use
+- API server must always bind to `<management-nic-ip>`, never `0.0.0.0`
 
 ## Build Order
 
@@ -199,5 +199,5 @@ See `WORKFLOW.md` for the full day-to-day process.
 ## Configuration
 
 - `config/presets.json` — 64 encapsulator/transcoder preset slots
-- `config/multicast.json` — `{ nic: "eno2", subnet: "239.100.25.0/26", address: "239.100.25.29" }`
+- `config/multicast.json` — `{ nic: "<multicast-nic>", subnet: "<multicast-forward-subnet>", address: "<multicast-forward-ip>" }`
 - `.env` — copy from `.env.example`; never commit `.env`
