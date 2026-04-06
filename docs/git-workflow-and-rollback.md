@@ -23,8 +23,8 @@ git push origin main --tags
 
 - Confirm target tag exists on remote: `git ls-remote --tags origin`
 - Confirm no local changes on server: `git status --porcelain` should be empty
-- Confirm service health endpoint after deploy: `curl -f http://10.67.18.29:4000/health`
-- Confirm stream list endpoint: `curl -f http://10.67.18.29:4000/streams`
+- Confirm service health endpoint after deploy: `curl -f http://<YOUR_SERVER_IP>:4000/health`
+- Confirm stream list endpoint: `curl -f http://<YOUR_SERVER_IP>:4000/streams`
 
 ## 3) Deploy a specific version
 
@@ -82,8 +82,8 @@ bash scripts/deploy-ref.sh v1.4.3
 Run immediately after rollback:
 
 ```bash
-curl -f http://10.67.18.29:4000/health
-curl -f http://10.67.18.29:4000/streams
+curl -f http://<YOUR_SERVER_IP>:4000/health
+curl -f http://<YOUR_SERVER_IP>:4000/streams
 sudo systemctl status labotech --no-pager -l
 ```
 

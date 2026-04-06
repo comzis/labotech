@@ -5,7 +5,7 @@ Use this checklist for the first 24 hours after deploying Labotech UI/decoder/SM
 ## 0-15 Minutes (Immediate Validation)
 
 - Verify API health repeatedly:
-  - `curl -fsS http://10.67.18.29:4000/health`
+  - `curl -fsS http://<YOUR_SERVER_IP>:4000/health`
 - Check container/service startup logs:
   - `docker compose logs --tail=200 labotech`
 - UI quick validation:
@@ -54,7 +54,7 @@ Spot-check active decoder(s):
   - `docker compose logs --tail=200 labotech > /tmp/labotech-day1.log`
 - Re-run host validation:
   - `sudo bash scripts/check-routes.sh`
-  - `curl -fsS http://10.67.18.29:4000/health`
+  - `curl -fsS http://<YOUR_SERVER_IP>:4000/health`
 
 ## Trigger Conditions (Escalate Immediately)
 
@@ -73,5 +73,5 @@ Spot-check active decoder(s):
    - `sudo bash scripts/rollback-host-optimization-v2.sh`
 4. Restart runtime and re-check health:
    - `docker compose up -d`
-   - `curl -fsS http://10.67.18.29:4000/health`
+   - `curl -fsS http://<YOUR_SERVER_IP>:4000/health`
 
