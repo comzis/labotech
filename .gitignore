@@ -3,6 +3,8 @@ node_modules/
 logs/
 docker-env.txt
 config/state.json
+config/multicast.json
+config/multiview-stream-catalog.json
 *.log
 dist/
 web/dist/
