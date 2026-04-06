@@ -40,7 +40,7 @@ Canonical usage guide for scripts under `scripts/`.
 - **Purpose:** safe production flow: disk headroom checks, optional auto-clean, git update, deploy.
 - **Run as:** regular deploy user on server.
 - **Command:** `bash scripts/update-and-deploy-safe.sh`
-- **Args:** `[API_HOST] [API_PORT] [SERVICE]` (defaults: `10.67.18.29`, `4000`, `labotech`).
+- **Args:** `[API_HOST] [API_PORT] [SERVICE]` (defaults: `<YOUR_SERVER_IP>`, `4000`, `labotech`).
 - **Key env:** `MIN_FREE_MB`, `MIN_FREE_INODE_PCT`, `AUTO_CLEAN_ON_LOW_DISK`, `AUTO_CLEAN_AGGRESSIVE`, `GIT_REMOTE`, `GIT_BRANCH`.
 
 ### `scripts/deploy-one-shot.sh`

@@ -21,7 +21,7 @@ Run SRT encapsulation as an isolated sidecar with predictable CPU behavior, guar
 Use this exact `docker-env.txt` baseline:
 
 ```bash
-API_HOST=10.67.18.29
+API_HOST=<YOUR_SERVER_IP>
 API_PORT=4000
 
 LABOTECH_CPUS=4.0
@@ -82,9 +82,9 @@ docker compose ps
 ## Verification Commands
 
 ```bash
-curl "http://10.67.18.29:4000/health"
-curl "http://10.67.18.29:4000/encap/health"
-curl "http://10.67.18.29:4000/encap/channels"
+curl "http://<YOUR_SERVER_IP>:4000/health"
+curl "http://<YOUR_SERVER_IP>:4000/encap/health"
+curl "http://<YOUR_SERVER_IP>:4000/encap/channels"
 ```
 
 Expected encapsulator health signals:
@@ -108,11 +108,11 @@ Expected encapsulator health signals:
 Create one UDP->SRT and one RTP->SRT test channel:
 
 ```bash
-curl -X POST "http://10.67.18.29:4000/encap/channels" \
+curl -X POST "http://<YOUR_SERVER_IP>:4000/encap/channels" \
   -H "Content-Type: application/json" \
   -d '{"id":"smoke-udp-srt","input":"udp://127.0.0.1:6000","host":"127.0.0.1","port":9000,"latency":2000}'
 
-curl -X POST "http://10.67.18.29:4000/encap/channels" \
+curl -X POST "http://<YOUR_SERVER_IP>:4000/encap/channels" \
   -H "Content-Type: application/json" \
   -d '{"id":"smoke-rtp-srt","input":"rtp://127.0.0.1:5000","host":"127.0.0.1","port":9001,"latency":2000}'
 ```
@@ -120,8 +120,8 @@ curl -X POST "http://10.67.18.29:4000/encap/channels" \
 Cleanup:
 
 ```bash
-curl -X DELETE "http://10.67.18.29:4000/encap/channels/smoke-udp-srt"
-curl -X DELETE "http://10.67.18.29:4000/encap/channels/smoke-rtp-srt"
+curl -X DELETE "http://<YOUR_SERVER_IP>:4000/encap/channels/smoke-udp-srt"
+curl -X DELETE "http://<YOUR_SERVER_IP>:4000/encap/channels/smoke-rtp-srt"
 ```
 
 ## Rollback

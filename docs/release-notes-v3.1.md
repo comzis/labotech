@@ -413,8 +413,8 @@ Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
 
 ### Fix: ETR290 analyser SRT ffmpeg missing `adapter=` — exits code 1 (SNAG-024)
 
-- **Problem:** `ETR290Analyser._buildFFmpegArgs()` passed the raw SRT URL to ffmpeg without `adapter=10.67.18.29`. ffmpeg routed the SRT caller socket via eno2 (multicast NIC, no IP assigned) → connection refused → `FFmpeg exited with code 1`. ETR monitoring was non-functional on all SRT streams.
-- **Fix:** Added `adapter=10.67.18.29` to the SRT URL in `_buildFFmpegArgs()` for the `srt` input type, matching the invariant already applied in ffprobe (`_withLiveInputHints`) and thumbnail capture (`_buildSrtSrc`).
+- **Problem:** `ETR290Analyser._buildFFmpegArgs()` passed the raw SRT URL to ffmpeg without `adapter=<YOUR_SERVER_IP>`. ffmpeg routed the SRT caller socket via eno2 (multicast NIC, no IP assigned) → connection refused → `FFmpeg exited with code 1`. ETR monitoring was non-functional on all SRT streams.
+- **Fix:** Added `adapter=<YOUR_SERVER_IP>` to the SRT URL in `_buildFFmpegArgs()` for the `srt` input type, matching the invariant already applied in ffprobe (`_withLiveInputHints`) and thumbnail capture (`_buildSrtSrc`).
 - **Operator impact:** ETR 290 alarm monitoring now connects and runs on SRT RX streams.
 
 ## web v3.1.100 — 2026-03-18
@@ -532,7 +532,7 @@ Removed the "Use the SRT Contribution monitoring policy for additional tuning" s
 
 ### SRT thumbnail capture: bind ffmpeg to eno1
 
-`_buildSrtSrc()` in `monitoring.js` now appends `adapter=10.67.18.29` to all SRT thumbnail capture URLs (both `captureThumbnail()` and `PersistentThumbnailCapture`). Without this, the thumbnail ffmpeg process routed SRT connections via eno2 (no IP address), causing silent capture failures and a permanently blank Confidence Monitor in SRT decoder mode.
+`_buildSrtSrc()` in `monitoring.js` now appends `adapter=<YOUR_SERVER_IP>` to all SRT thumbnail capture URLs (both `captureThumbnail()` and `PersistentThumbnailCapture`). Without this, the thumbnail ffmpeg process routed SRT connections via eno2 (no IP address), causing silent capture failures and a permanently blank Confidence Monitor in SRT decoder mode.
 
 **Operator impact:** Confidence Monitor now shows a live thumbnail when decoding SRT streams.
 
@@ -540,7 +540,7 @@ Removed the "Use the SRT Contribution monitoring policy for additional tuning" s
 
 ### SRT analyser: bind ffprobe to eno1 + correct Capture NIC hint
 
-`_withLiveInputHints()` in `ts-analyser.js` now appends `adapter=10.67.18.29` to all `srt://` probe URLs — same fix already applied to the encapsulator. Without this, ffprobe routed SRT connections via eno2 (no IP) causing code 1 exits. Decoder Provisioning form placeholder updated to show `eno1 (SRT / management)` when SRT mode is selected instead of the misleading `eno2 (recommended)`.
+`_withLiveInputHints()` in `ts-analyser.js` now appends `adapter=<YOUR_SERVER_IP>` to all `srt://` probe URLs — same fix already applied to the encapsulator. Without this, ffprobe routed SRT connections via eno2 (no IP) causing code 1 exits. Decoder Provisioning form placeholder updated to show `eno1 (SRT / management)` when SRT mode is selected instead of the misleading `eno2 (recommended)`.
 
 **Operator impact:** SRT decoder provisioning now connects correctly via eno1 without any manual NIC configuration.
 
@@ -771,7 +771,7 @@ Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `
 **`src/tsduck-monitor.js`:**
 
 - **SRT caller mode** (`_inputPluginArgs`): replaced `--listener --local-port` with `--caller --remote-host HOST --remote-port PORT`. `--listener` made tsp open a local port waiting for an inbound connection — wrong direction for monitoring a remote encoder/mux. tsp must connect TO the source.
-- **Remove `--all-sections`** from `tables` plugin args: incompatible with `--json-line` on TSDuck 3.44-4581 (the version on gva-boro-probe). Absence detection still works — without `--all-sections`, tables are emitted on version change; complete table absence within a sample window is still detectable.
+- **Remove `--all-sections`** from `tables` plugin args: incompatible with `--json-line` on TSDuck 3.44-4581 (the version on <YOUR_SERVER_HOSTNAME>). Absence detection still works — without `--all-sections`, tables are emitted on version change; complete table absence within a sample window is still detectable.
 - **SI stale detection fix** (`_checkSiIntervals`): `_siTableTimes` persisted across sample runs, so `lastSeen == null` was only ever true on the very first sample. After that, tables were never flagged absent even if they stopped appearing. Fix: `_parseOutput` now passes `windowStartMs` (the `startMs` of the current `tsp` run) through to `_checkSiIntervals`. A table is absent from the current window if `lastSeen < windowStartMs`.
 
 **`src/ts-analyser.js`:**
@@ -1422,7 +1422,7 @@ Replaces manual copy-paste commands with two runnable scripts:
 ```bash
 bash scripts/setup-disk-guard-cron.sh
 ```
-Writes `/etc/cron.d/labotech-disk-guard` automatically. Accepts optional username arg (default: `boro`).
+Writes `/etc/cron.d/labotech-disk-guard` automatically. Accepts optional username arg (default: `<service-user>`).
 
 **`scripts/setup-docker-log-rotation.sh`** — configures Docker daemon global log rotation:
 ```bash
@@ -1449,7 +1449,7 @@ Logs before/after free space for root and Docker volumes, with a warning if free
 
 **Cron entry (run once on server as root):**
 ```bash
-echo '0 3 * * * boro bash /home/boro/LaboTech/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1' \
+echo '0 3 * * * <service-user> bash /home/<service-user>/LaboTech/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1' \
   | sudo tee /etc/cron.d/labotech-disk-guard
 ```
 

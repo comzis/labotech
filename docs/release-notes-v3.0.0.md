@@ -79,8 +79,8 @@ Date: 2026-03-14
 ## Operational Upgrade Notes
 
 - After deploy, run:
-  - `bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000`
-  - `bash scripts/post-deploy-smoke.sh 10.67.18.29 4000`
+  - `bash scripts/preflight-monitoring-tools.sh <YOUR_SERVER_IP> 4000`
+  - `bash scripts/post-deploy-smoke.sh <YOUR_SERVER_IP> 4000`
 - If NIC capture is degraded due to permissions, monitoring remains functional with fallback sources but confidence/method indicators will show degraded state.
 
 ## Changed Files (v3.0.0 scope)
