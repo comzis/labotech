@@ -339,7 +339,7 @@ Date: 2026-03-22 (latest: web 3.1.121 / backend 3.2.23)
 
 - **Problem:** Starting ETR290 monitoring on an SRT contribution source caused a persistent fight loop: the thumbnail ffmpeg process held the single SRT caller slot; ETR's ffmpeg was rejected and restarted every 60 s (v3.1.86 retry delay). Each retry briefly displaced the thumbnail, causing periodic SRT instability visible in the Intinor stats graph as repeated send-rate dips.
 - **Fix:** `POST /etr290/start` now returns HTTP 422 if the URL begins with `srt://`. The ETR panel in the frontend surfaces this as a clear operator message: *"ETR290 monitoring is not available on single-listener SRT sources. Use a UDP/RTP multicast feed for ETR290 monitoring."*
-- **Rationale:** SRT contribution encoders (Eurovision, Intinor, Haivision) accept exactly one simultaneous caller. Thumbnail capture must hold that slot continuously. ETR monitoring requires its own persistent ffmpeg connection and cannot share the slot. The correct architecture is a UDP/RTP multicast feed (unlimited receivers) for ETR290 monitoring.
+- **Rationale:** SRT contribution encoders (Intinor, Haivision, and similar) accept exactly one simultaneous caller. Thumbnail capture must hold that slot continuously. ETR monitoring requires its own persistent ffmpeg connection and cannot share the slot. The correct architecture is a UDP/RTP multicast feed (unlimited receivers) for ETR290 monitoring.
 - **Operator impact:** "Enable ETR" button on SRT decoders now immediately shows the reason it is unavailable instead of silently fighting the thumbnail and destabilising the link.
 
 ## v3.1.87 — 2026-03-18
@@ -745,7 +745,7 @@ Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `
 
 - **Tile status indicator moved to top border** (3px, status color) — Evertz VMX style replaces the left-edge accent strip. Uniform 1px dark dividers between tiles; tile background changed from transparent to `#040507` for cleaner contrast against rack SVG.
 - **Tile label bar**: coloured status dot (4px, matching tile border) + service name in slightly brighter text; bitrate readout right-aligned; label bar background tied to status color at 14% alpha for subtle context.
-- **Header redesigned** (40px): LaboTech mark · PANEL callsign · live-stream count indicator (green LED + `N/M` ratio) · centered LABOTECH wordmark · UTC timecode (14px monospace, tabular nums, 1 Hz update) · EXIT button. Eurovision Services logo removed.
+- **Header redesigned** (40px): LaboTech mark · PANEL callsign · live-stream count indicator (green LED + `N/M` ratio) · centered LABOTECH wordmark · UTC timecode (14px monospace, tabular nums, 1 Hz update) · EXIT button. Partner logo removed.
 - **Bottom status bus** (26px): `LABOTECH MVW · PANEL-NAME` left, `YYYY-MM-DD HH:MM:SS UTC` centre, `N LIVE / M STREAMS` right — all in very dark blue text, visible only at close range (not distracting at MCR distance).
 - **Tile grid**: 2px gap + 2px padding on a `#020304` background so rack SVG frames the grid as a bezel.
 - **UTC clock**: `fsNowMs` state with 1 Hz interval only active when fullscreen is open — no timer overhead in normal view.
@@ -795,7 +795,7 @@ Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `
 - Added **FULL SCREEN** button (amber, visible when tiles are active). Invokes the browser Fullscreen API on the overlay container; ESC exits natively.
 - Fullscreen overlay renders `FullscreenThumbTile` components in a responsive grid (2/3/4/5 columns by tile count) with no UI chrome.
 - Each tile: 16:9 thumbnail fills the cell, thin left-edge status accent (green/amber/red), LED dot in corner, decoder-ID badge (top-right, dimmed), service name + bitrate label bar at the bottom.
-- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · Eurovision Services logo (right) · EXIT button.
+- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · EXIT button.
 - Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
 
 **Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
@@ -833,7 +833,7 @@ Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `
 - Now uses 2 attempts: (1) `thumbnail=pick + pp=de/de + scale`, (2) `thumbnail=pick + scale` (handles builds without the `pp` filter).
 - `thumbnail=N` buffers N frames and picks the least-blurry one — no keyframe wait required.
 
-**Why:** Broadcast contribution links (Eurovision, GNVE) commonly use GOPs of 10–25 s. `-skip_frame nokey -frames:v 1` waited up to one full GOP for a keyframe — reliably hitting the 8 s timeout on all three I-frame attempts every cycle. The fallback (attempt 4) also failed intermittently, causing the 5 s reschedule to fire before any frame was written. First thumbnail was appearing at 40–45 s. `thumbnail=pick` needs only a small frame window (160 ms at 25 fps) — no keyframe alignment required.
+**Why:** Broadcast contribution links commonly use GOPs of 10–25 s. `-skip_frame nokey -frames:v 1` waited up to one full GOP for a keyframe — reliably hitting the 8 s timeout on all three I-frame attempts every cycle. The fallback (attempt 4) also failed intermittently, causing the 5 s reschedule to fire before any frame was written. First thumbnail was appearing at 40–45 s. `thumbnail=pick` needs only a small frame window (160 ms at 25 fps) — no keyframe alignment required.
 
 **Operator impact:** First thumbnail expected within 4–6 s of decoder start regardless of GOP length.
 
@@ -1194,9 +1194,9 @@ Operator impact: SRT Transport tab now correctly shows "AWAITING" until the firs
 
 ## v3.1.46 — 2026-03-17
 
-### Feat: SRT professional broadcast health thresholds (Haivision spec + Eurovision dashboard)
+### Feat: SRT professional broadcast health thresholds (Haivision spec)
 
-SRT link quality assessment aligned to Haivision SRT specification and Eurovision contribution link data (RTT ~19ms, 22–24 Mbps, all drops at 0).
+SRT link quality assessment aligned to Haivision SRT specification and broadcast contribution link data (RTT ~19ms, 22–24 Mbps, all drops at 0).
 
 **Backend (`ts-analyser.js`):**
 
