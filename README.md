@@ -1,6 +1,6 @@
 # LABOTECH
 
-**v3.2.23 / web 3.1.125**
+**v3.2.24 / web 3.1.129**
 
 Professional DVB-IP stream processor for broadcast MCR operations on HPE DL360 / Ubuntu Server.
 Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 compliance, decoder multiview monitoring, and 1080p↔1080i interlace conversion.
@@ -15,9 +15,9 @@ Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 complian
 | Component | Detail |
 |---|---|
 | Server | HPE DL360, Ubuntu Server |
-| Management NIC | `eno1` → `$API_HOST` → Web UI + API port `4000` |
-| Multicast NIC | `eno2` → no IP → all `239.0.0.0/8` traffic |
-| Multicast subnet | `239.100.25.0/26` (default address `239.100.25.29`) |
+| Management NIC | `<management-nic>` → `$API_HOST` → Web UI + API port `4000` |
+| Multicast NIC | `<multicast-nic>` → no IP → all `239.0.0.0/8` traffic |
+| Multicast subnet | `<multicast-forward-subnet>` (default address `<multicast-forward-ip>`) |
 | Container | Docker with `network_mode: host` |
 
 ---
@@ -134,7 +134,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 |---|---|---|
 | `encoder.js` | `SRTEncoder` | Core FFmpeg wrapper. SRT/UDP/RTP output, full DVB/MPEG-TS muxer compliance. Per-audio-pair codec, bitrate, PID and ISO 639-2 language. |
 | `transcoder.js` | `Transcoder` | Extends `SRTEncoder`. Four broadcast interlace presets: 1080p25→1080i50 (PAL), 1080p29.97→1080i59.94 (NTSC), 1080p50→1080i50 (HFR-PAL), 1080i50→1080p25 (OTT). |
-| `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `eno2`. Validates all addresses against `239.100.25.0/26`. |
+| `multicast-forward.js` | `MulticastForwarder` | UDP multicast forwarding via `<multicast-nic>`. Validates all addresses against `<multicast-forward-subnet>`. |
 | `ts-analyser.js` | `TSAnalyser` | Continuous/one-shot MPEG-TS probe. PAT/PMT/PID tree, health scoring, TSDuckMonitor integration, thumbnail lifecycle, severity-aware probe cadence. |
 | `tsduck-monitor.js` | `TSDuckMonitor` | Persistent `tsanalyze` runner per stream. Real-time PCR / SI / bitrate events. Suspend/resume for SRT single-connection constraint. |
 | `thumbnail-worker.js` | — | Isolated worker process (Node `fork`). Owns all `ffmpeg` thumbnail captures. Crash-isolated from API. IPC: `start/stop/suspend/resume/shutdown`. |
@@ -171,7 +171,7 @@ All state is **in-memory `Map()` objects** — no database, no ORM.
 | `StreamsPanel` | Active streams grid — output mode, DVB identity, audio PIDs, real-time metrics |
 | `EncoderForm` | Full encoder config: output mode (SRT/UDP/RTP), DVB/TS service, per-pair audio matrix |
 | `TranscodePanel` | 1080p→1080i presets + broadcast preset slot selector |
-| `MulticastPanel` | `eno2` forwarder controls and subnet status |
+| `MulticastPanel` | `<multicast-nic>` forwarder controls and subnet status |
 | `DecoderPanelRevamp` | Decoder provisioning, Confidence Monitor (16:9 thumbnail), ETR 290 alarm config, PID/audio/video breakdown |
 | `DecoderMultiviewPanel` | Fullscreen MCR multiview — true 16:9 tiles, UMD overlays, vertical VU meters (all audio ES pairs), UTC clock, professional dark chrome header |
 | `TSAnalyser` | One-shot TS probe, DVB service summary, ETR 290 view, continuous monitor workflows |
@@ -278,7 +278,7 @@ DOLBYE_REQUIRED_WHEN_DETECTED=false
 ### `config/multicast.json`
 
 ```json
-{ "nic": "eno2", "subnet": "239.100.25.0/26", "address": "239.100.25.29", "ttl": 10 }
+{ "nic": "<multicast-nic>", "subnet": "<multicast-forward-subnet>", "address": "<multicast-forward-ip>", "ttl": 10 }
 ```
 
 ### `config/monitoring-policy.json` (optional override)
@@ -292,8 +292,8 @@ DOLBYE_REQUIRED_WHEN_DETECTED=false
 ```env
 API_HOST=<your-management-nic-ip>
 API_PORT=4000
-MULTICAST_NIC=eno2
-FORWARD_MULTICAST_SUBNET=239.100.25.0/26
+MULTICAST_NIC=<multicast-nic>
+FORWARD_MULTICAST_SUBNET=<multicast-forward-subnet>
 THUMBNAIL_INTERVAL_SEC=5
 THUMBNAIL_QUALITY_PROFILE=high        # or: low
 EVENT_LOG_RING_SIZE=1000
@@ -327,7 +327,7 @@ npm test -- --runInBand    # 191 tests across 8 suites
 - Plain ES6 `require()` — no TypeScript
 - FFmpeg and TSDuck always via `child_process.spawn` — never `exec`
 - Every class extends `EventEmitter` and emits `started`, `stopped`, `error`, `stats`
-- All multicast addresses validated against `239.100.25.0/26` before use
+- All multicast addresses validated against `<multicast-forward-subnet>` before use
 - API binds to `API_HOST` env var — never `0.0.0.0`
 - All state in-memory `Map()` — no database, no ORM
 - `pid != null && Number.isFinite(Number(pid))` — never coerce nullable PIDs
