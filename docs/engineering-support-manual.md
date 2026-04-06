@@ -1482,7 +1482,7 @@ If Bebas Neue fails to load (no internet on isolated deployment), the browser fa
 
 ### Background — what "single-listener" means
 
-Eurovision/contribution SRT encoders (Intinor, Haivision, Videon, and similar) operate in **listener mode**: they accept **exactly one simultaneous caller connection**. The moment a second caller attempts to connect it is either:
+Broadcast contribution SRT encoders (Intinor, Haivision, Videon, and similar) operate in **listener mode**: they accept **exactly one simultaneous caller connection**. The moment a second caller attempts to connect it is either:
 
 - Rejected immediately with `"Connection rejected by peer"`, or
 - Accepted — which **kicks the existing caller** and resets its state machine.

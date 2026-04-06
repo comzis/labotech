@@ -1,3 +1,7 @@
+// Labotech — Open Source Broadcast Stream Monitor
+// Copyright (c) 2026 Milorad Stevanovic
+// MIT Licence — github.com/comzis/labotech
+
 'use strict';
 
 const { EventEmitter } = require('events');
@@ -451,10 +455,10 @@ class ETR290Analyser extends EventEmitter {
       // Force mpegts demux on live RTP/UDP to expose PAT/PMT/CC/PCR faults.
       args.push('-f', 'mpegts', '-i', liveUrl);
     } else if (type === 'srt') {
-      // Bind SRT caller socket to eno1 (10.67.18.29) — same invariant as ffprobe
-      // and thumbnail (SNAG-019/020). Without adapter= ffmpeg routes via eno2 (no IP).
+      // Bind SRT caller socket to the management NIC so ffmpeg routes via the
+      // correct interface. Set MANAGEMENT_IP env var to the management NIC address.
       const sep = this.url.includes('?') ? '&' : '?';
-      args.push('-i', `${this.url}${sep}adapter=10.67.18.29`);
+      args.push('-i', `${this.url}${sep}adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`);
     } else {
       args.push('-i', this.url);
     }
