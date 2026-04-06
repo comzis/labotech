@@ -201,3 +201,7 @@ See `WORKFLOW.md` for the full day-to-day process.
 - `config/presets.json` — 64 encapsulator/transcoder preset slots
 - `config/multicast.json` — `{ nic: "<multicast-nic>", subnet: "<multicast-forward-subnet>", address: "<multicast-forward-ip>" }`
 - `.env` — copy from `.env.example`; never commit `.env`
+
+## Design Inspiration
+
+The Live View stream timeline (`StreamViewPanel.jsx`) was inspired by professional broadcast monitoring platforms used in the industry. The implementation is entirely original — canvas lane rendering, rAF now-line, event-block gradient, health hysteresis, and heartbeat seeding are all purpose-built. When working on this component, preserve the broadcast-monitoring UX intent: continuous left-to-right time fill, colour-coded severity lanes, and MCR-distance legibility.

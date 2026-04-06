@@ -369,3 +369,15 @@ Rules: never push directly to `main` · always branch + PR · human reviews and 
 Pre-commit hook blocks Cursor AI telemetry patterns (`127.0.0.1:7265`, `#region agent log`).
 
 See `CLAUDE.md` and `docs/agent-status.md` for the full collaboration protocol.
+
+---
+
+## Acknowledgements
+
+Labotech's stream timeline and monitoring interface was inspired by professional broadcast analysis tools used in the industry. The implementation is original, built entirely on open source foundations:
+
+- [FFmpeg](https://ffmpeg.org) — Media processing
+- [TSDuck](https://tsduck.io) — MPEG-TS analysis
+- [Node.js](https://nodejs.org) — Backend runtime
+- [React](https://reactjs.org) — Frontend framework
+- [Docker](https://docker.com) — Container deployment
