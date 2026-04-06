@@ -1,6 +1,22 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-06 (latest: web 3.1.126 / backend 3.2.24)
+Date: 2026-04-06 (latest: web 3.1.128 / backend 3.2.24)
+
+## v3.1.128 — 2026-04-06
+
+### Fix: Thumbnail clears without browser refresh; ETR stop no longer greys decoder lane
+
+**Thumbnail cache not clearing on decoder state change (`web/src/hooks/useTSAnalysis.js`)**
+
+- **Root cause:** `refreshActives()` polled the server every 5 s and restored `lastResult` (including `thumbnailUrl`) for *all* analysers — including stopped ones. After the 12 s stop-suppression window, the stale thumbnail re-appeared in the confidence monitor without a browser refresh. Additionally, the `analyse_stopped` WS handler did not clear the one-shot `result` state, leaving `selectedResult` with a stale fallback via `result?.id === selectedId`.
+- **Fix:** `refreshActives()` now only restores `lastResult` into `resultsById` for analysers where `isRunning === true`. The `analyse_stopped` WS handler now also clears `result` state, matching the existing `stop()` code path.
+- **Operator impact:** Confidence monitor thumbnail clears immediately when a decoder is stopped, with no browser refresh required. On restart, "Awaiting Frame" is shown correctly until the first frame arrives.
+
+**ETR 290 stop causing decoder lane to appear stopped on Live View (`web/src/components/StreamViewPanel.jsx`)**
+
+- **Root cause:** `buildLaneGradient()` computed `stopAfterActive` by finding the first `runtime_stopped` event after the last decoder start, with no distinction between decoder stops and ETR monitor stops. `etr290_stopped` WS messages are mapped to `category: 'runtime_stopped'` (title `'ETR monitor stopped'`); since the ETR monitor shares the same normalised lane ID as its linked decoder, the ETR stop event became `stopAfterActive`, clipping the lane to grey. The 5 s heartbeat guard recovered the lane, but left a visible grey flash at MCR distance.
+- **Fix:** Added `&& e.title !== 'ETR monitor stopped'` to the `stopAfterActive` filter in `buildLaneGradient()`, mirroring the identical guard already applied in the ETR-lane gradient function (line 769) and the seed-suppression logic (line 1329).
+- **Operator impact:** Stopping ETR 290 monitoring for a stream no longer causes the decoder lane on Live View to flash grey. Decoder running status and ETR monitor status remain visually independent.
 
 ## v3.2.24 — 2026-04-06
 
