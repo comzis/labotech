@@ -4,7 +4,7 @@ This runbook validates end-to-end multicast forwarding and TS probing in product
 
 ## Preconditions
 
-- API is reachable on `http://10.67.18.29:4000`
+- API is reachable on `http://<YOUR_SERVER_IP>:4000`
 - Docker/system service is healthy (`/health` returns `status: ok`)
 - You have a known-live RTP source URL (example used below):
   - `rtp://239.100.29.49:6501`
@@ -14,37 +14,37 @@ This runbook validates end-to-end multicast forwarding and TS probing in product
 1) **Start test forwarder**
 
 ```bash
-curl -sS -X POST "http://10.67.18.29:4000/multicast/forward" -H "Content-Type: application/json" -d '{"id":"fwd-smoke-1","sourceUrl":"rtp://239.100.29.49:6501","destIp":"239.100.25.29","destPort":6501,"engineerApproved":true}'
+curl -sS -X POST "http://<YOUR_SERVER_IP>:4000/multicast/forward" -H "Content-Type: application/json" -d '{"id":"fwd-smoke-1","sourceUrl":"rtp://239.100.29.49:6501","destIp":"239.100.25.29","destPort":6501,"engineerApproved":true}'
 ```
 
 2) **Confirm forwarder is active**
 
 ```bash
-curl -sS "http://10.67.18.29:4000/multicast/forward"
+curl -sS "http://<YOUR_SERVER_IP>:4000/multicast/forward"
 ```
 
 3) **Run analyser probe against forwarded destination**
 
 ```bash
-curl -sS "http://10.67.18.29:4000/analyse?url=rtp://239.100.25.29:6501"
+curl -sS "http://<YOUR_SERVER_IP>:4000/analyse?url=rtp://239.100.25.29:6501"
 ```
 
 4) **Stop test forwarder**
 
 ```bash
-curl -sS -X DELETE "http://10.67.18.29:4000/multicast/forward/fwd-smoke-1"
+curl -sS -X DELETE "http://<YOUR_SERVER_IP>:4000/multicast/forward/fwd-smoke-1"
 ```
 
 5) **Confirm forwarder list is empty/expected**
 
 ```bash
-curl -sS "http://10.67.18.29:4000/multicast/forward"
+curl -sS "http://<YOUR_SERVER_IP>:4000/multicast/forward"
 ```
 
 6) **Clear test event noise (optional but recommended)**
 
 ```bash
-curl -sS -X DELETE "http://10.67.18.29:4000/api/events"
+curl -sS -X DELETE "http://<YOUR_SERVER_IP>:4000/api/events"
 ```
 
 ## Expected outcomes

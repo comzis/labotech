@@ -158,7 +158,7 @@ Run on target Ubuntu server:
 
 ```bash
 ffprobe -version
-curl -fsS http://10.67.18.29:4000/health
+curl -fsS http://<YOUR_SERVER_IP>:4000/health
 ```
 
 Then validate in UI:

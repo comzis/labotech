@@ -34,9 +34,9 @@ bash scripts/upgrade-prod.sh <tag-or-commit>
 
 ```bash
 systemctl is-active labotech
-curl -fsS http://10.67.18.29:4000/health
-bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
-bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+curl -fsS http://<YOUR_SERVER_IP>:4000/health
+bash scripts/preflight-monitoring-tools.sh <YOUR_SERVER_IP> 4000
+bash scripts/post-deploy-smoke.sh <YOUR_SERVER_IP> 4000
 ```
 
 ### Fast production recovery (UI/features missing after deploy)
@@ -74,7 +74,7 @@ Defaults:
 Override example:
 
 ```bash
-MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/deploy-one-shot.sh 10.67.18.29 4000
+MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/deploy-one-shot.sh <YOUR_SERVER_IP> 4000
 ```
 
 ### Automated housekeeping (systemd timer example)
@@ -135,9 +135,9 @@ MIN_FREE_MB=12288 MIN_FREE_INODE_PCT=12 bash scripts/deploy-one-shot.sh
 Post-deploy verification:
 
 ```bash
-curl -fsS http://10.67.18.29:4000/health | jq .
-bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
-bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+curl -fsS http://<YOUR_SERVER_IP>:4000/health | jq .
+bash scripts/preflight-monitoring-tools.sh <YOUR_SERVER_IP> 4000
+bash scripts/post-deploy-smoke.sh <YOUR_SERVER_IP> 4000
 ```
 
 If disk-related failure occurs:
@@ -167,7 +167,7 @@ It performs:
 
 ```bash
 cd ~/LaboTech/labotech
-bash scripts/update-and-deploy-safe.sh 10.67.18.29 4000 labotech
+bash scripts/update-and-deploy-safe.sh <YOUR_SERVER_IP> 4000 labotech
 ```
 
 Engineer notes:
@@ -221,34 +221,34 @@ docker system df
 MIN_FREE_MB=12288 AUTO_CLEAN_AGGRESSIVE=1 bash scripts/update-and-deploy-safe.sh
 
 # 3) if still failing, run normal deploy diagnostics
-bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
-bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+bash scripts/preflight-monitoring-tools.sh <YOUR_SERVER_IP> 4000
+bash scripts/post-deploy-smoke.sh <YOUR_SERVER_IP> 4000
 ```
 
 Strict encapsulator gate (optional):
 
 ```bash
 ENCAP_HEALTH_CHECK_ENABLED=1 ENCAP_HEALTH_REQUIRED=1 ENCAP_HEALTH_RETRIES=24 ENCAP_HEALTH_DELAY_SEC=5 \
-  bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+  bash scripts/deploy-one-shot.sh <YOUR_SERVER_IP> 4000 labotech
 ```
 
 Disable deploy triage output (optional):
 
 ```bash
-ENCAP_TRIAGE_ON_FAIL=0 bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+ENCAP_TRIAGE_ON_FAIL=0 bash scripts/deploy-one-shot.sh <YOUR_SERVER_IP> 4000 labotech
 ```
 
 Disable interactive kill prompt (optional):
 
 ```bash
-ENCAP_PROMPT_KILL_ON_4100=0 bash scripts/deploy-one-shot.sh 10.67.18.29 4000 labotech
+ENCAP_PROMPT_KILL_ON_4100=0 bash scripts/deploy-one-shot.sh <YOUR_SERVER_IP> 4000 labotech
 ```
 
 UI-assisted offender resolution (Streams panel):
 
 - In `Streams` when the red sidecar error banner is shown, use `Resolve Port 4100`.
 - Flow: inspect listeners on `127.0.0.1:4100` -> confirm dialog -> backend sends `SIGTERM` to allowlisted offenders.
-- Allowlist defaults to: `encapsulator,boro,dashboard`.
+- Allowlist defaults to: `encapsulator,<service-user>,dashboard`.
 - Configure with env:
   - `ENCAP_KILL_ALLOWLIST` (comma-separated regex tokens)
   - `ENCAP_KILL_ENABLED=0` to disable kill action
@@ -305,7 +305,7 @@ curl -fsS --max-time 5 http://127.0.0.1:4100/health
 After sidecar health recovers:
 
 ```bash
-RECREATE_ALL=1 bash scripts/update-and-deploy-safe.sh 10.67.18.29 4000 labotech
+RECREATE_ALL=1 bash scripts/update-and-deploy-safe.sh <YOUR_SERVER_IP> 4000 labotech
 ```
 
 Interpretation guide:
@@ -440,7 +440,7 @@ LABOTECH supports Dolby E via an optional external decoder adapter. This path is
 #### Requirements
 
 1. Use a Linux executable/script as decoder command target.
-2. Decoder must be callable by the LABOTECH runtime user (`boro` in systemd installs).
+2. Decoder must be callable by the LABOTECH runtime user (`<service-user>` in systemd installs).
 3. Prefer JSON output from decoder for deterministic parsing.
 
 #### Environment configuration
@@ -510,7 +510,7 @@ Penalties accumulate against the stream health score (0–100). Scores below 70 
 
 ```bash
 sudo install -m 0755 /path/to/vendor-decoder /usr/local/bin/dolbye-decoder
-sudo -u boro /usr/local/bin/dolbye-decoder --version
+sudo -u <service-user> /usr/local/bin/dolbye-decoder --version
 ```
 
 If the command requires shared libs, verify with:
@@ -744,7 +744,7 @@ For live feeds where startup descriptors are missing, use `inputBitrateSource` t
 Symptom:
 
 - service starts then exits immediately
-- logs show bind error on `10.67.18.29:4000`
+- logs show bind error on `<YOUR_SERVER_IP>:4000`
 
 Action:
 
@@ -778,7 +778,7 @@ Check:
 - service user can execute decoder:
 
 ```bash
-sudo -u boro "$DOLBYE_DECODER_PATH" --version
+sudo -u <service-user> "$DOLBYE_DECODER_PATH" --version
 ```
 
 - `dvb.probeDiagnostics.dolbyE.error` for exact adapter failure
@@ -803,8 +803,8 @@ For production support:
 - Run preflight and smoke scripts after deployment:
 
 ```bash
-bash scripts/preflight-monitoring-tools.sh 10.67.18.29 4000
-bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
+bash scripts/preflight-monitoring-tools.sh <YOUR_SERVER_IP> 4000
+bash scripts/post-deploy-smoke.sh <YOUR_SERVER_IP> 4000
 ```
 
 - Keep this manual updated whenever probe cadence, timelines, or TS analysis paths change.
@@ -815,20 +815,20 @@ bash scripts/post-deploy-smoke.sh 10.67.18.29 4000
 
 ### INC-001 — `Uncaught exception: Error: tcpdump exited 1` (2026-03-11)
 
-**Server:** `gva-boro-probe` · **Service:** `labotech[853167]`
+**Server:** `<YOUR_SERVER_HOSTNAME>` · **Service:** `labotech[853167]`
 
 **Symptom**
 
 ```
-Mar 11 11:22:01 gva-boro-probe labotech[853167]: Uncaught exception: Error: tcpdump exited 1
-Mar 11 11:22:23 gva-boro-probe labotech[853167]: Uncaught exception: Error: tcpdump exited 1
+Mar 11 11:22:01 <YOUR_SERVER_HOSTNAME> labotech[853167]: Uncaught exception: Error: tcpdump exited 1
+Mar 11 11:22:23 <YOUR_SERVER_HOSTNAME> labotech[853167]: Uncaught exception: Error: tcpdump exited 1
 ```
 
 Repeated every ~22 seconds. Service continued running (global `uncaughtException` handler in `src/index.js` logs and swallows), but IAT forensics were non-functional.
 
 **Root cause**
 
-`boro` user lacked `CAP_NET_RAW` capability. `tcpdump` was found via `which` (binary exists), spawned successfully, attempted to open a raw socket on `eno2`, received `Operation not permitted`, and exited with code 1.
+`<service-user>` user lacked `CAP_NET_RAW` capability. `tcpdump` was found via `which` (binary exists), spawned successfully, attempted to open a raw socket on `eno2`, received `Operation not permitted`, and exited with code 1.
 
 Two code bugs amplified this into an uncaught exception:
 
@@ -851,7 +851,7 @@ sudo setcap cap_net_raw+eip /usr/bin/tcpdump
 getcap /usr/bin/tcpdump
 # → /usr/bin/tcpdump cap_net_raw=eip
 
-sudo -u boro tcpdump -i eno2 -c 3 udp -q 2>&1 | head -5
+sudo -u <service-user> tcpdump -i eno2 -c 3 udp -q 2>&1 | head -5
 ```
 
 Add to `scripts/setup-host.sh` so the capability survives `apt upgrade`:
@@ -1097,7 +1097,7 @@ On a fresh `srt://` connection, libsrt performs key negotiation and the I-frame 
 If the sender uses AES-256 (`pbkeylen=32`) and the probe URL uses the default `pbkeylen=16` (AES-128), the ffprobe handshake fails and the probe exits 1. The SRT tab will show "AWAITING STATS". Workaround: add `pbkeylen=32` to the decoder URL. Example:
 
 ```
-srt://10.67.18.29:5000?stats=1&statsintvl=1&pbkeylen=32&passphrase=<key>
+srt://<YOUR_SERVER_IP>:5000?stats=1&statsintvl=1&pbkeylen=32&passphrase=<key>
 ```
 
 ---
@@ -1171,9 +1171,9 @@ This policy was established after several sessions where UI refactoring (thumbna
 
 ---
 
-## 14) CPU and Memory Tuning (gva-boro-probe)
+## 14) CPU and Memory Tuning (<YOUR_SERVER_HOSTNAME>)
 
-### Hardware — gva-boro-probe
+### Hardware — <YOUR_SERVER_HOSTNAME>
 
 | | |
 |---|---|
@@ -1399,7 +1399,7 @@ After upgrade, open a running decoder and confirm:
 
 ### Overview
 
-Labotech supports SRT in **caller mode only** for decoder inputs. The system connects outbound to the gateway/encoder; there is no listener/rendezvous mode. All SRT connections use eno1 (management NIC, `10.67.18.29`) — eno2 has no IP address and must never be used for SRT.
+Labotech supports SRT in **caller mode only** for decoder inputs. The system connects outbound to the gateway/encoder; there is no listener/rendezvous mode. All SRT connections use eno1 (management NIC, `<YOUR_SERVER_IP>`) — eno2 has no IP address and must never be used for SRT.
 
 ### Provisioning an SRT decoder
 
@@ -1435,7 +1435,7 @@ Stream cards show a green `SLT` badge or grey `FFmpeg` badge. `/health` reports 
 
 ### NIC binding — mandatory
 
-Every SRT caller connection must include `adapter=10.67.18.29`. This is applied automatically in:
+Every SRT caller connection must include `adapter=<YOUR_SERVER_IP>`. This is applied automatically in:
 - `ts-analyser.js` → `_withLiveInputHints()` (ffprobe probes)
 - `monitoring.js` → `_buildSrtSrc()` (thumbnail capture)
 - `encoder.js` → `_buildSltInputUri()` / `buildInputArgs()` (encapsulator)
@@ -1621,7 +1621,7 @@ Causes in order of likelihood:
 
 | Check | Command |
 |---|---|
-| Is the SRT source active and accepting connections? | `ffprobe "srt://<host>:<port>?mode=caller&adapter=10.67.18.29&latency=4000" -v error -show_entries format=duration -t 5` |
+| Is the SRT source active and accepting connections? | `ffprobe "srt://<host>:<port>?mode=caller&adapter=<YOUR_SERVER_IP>&latency=4000" -v error -show_entries format=duration -t 5` |
 | Is passphrase / pbkeylen correct? | Verify against gateway config. Try `pbkeylen=32` if using AES-256. |
 | Is another process holding the slot? | `docker compose logs --tail=50 labotech \| grep "Peer rejected\|AWAITING\|thumb"` |
 | HEVC 4:2:2 codec issue? | Ensure v3.1.86+ deployed; check `select=key` is in vf args via logs |
@@ -1652,7 +1652,7 @@ Multiple decoder IDs connecting to the same host:port confirms a ghost. Fix:
 
 ### INC-004 — SRT single-listener fight loop (2026-03-18)
 
-**Server:** `gva-boro-probe` · **Versions affected:** v3.1.1 – v3.1.87
+**Server:** `<YOUR_SERVER_HOSTNAME>` · **Versions affected:** v3.1.1 – v3.1.87
 
 **Symptom**
 
