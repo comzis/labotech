@@ -5,7 +5,12 @@
 'use strict';
 
 const { EventEmitter } = require('events');
-const { spawn } = require('child_process');
+const { spawn }        = require('child_process');
+const readline         = require('readline');
+// ETR290_ENGINE=tsduck (default) | ffmpeg
+// Set to 'ffmpeg' in .env to fall back to the legacy FFmpeg log-scraping engine.
+const ETR290_ENGINE = (process.env.ETR290_ENGINE || 'tsduck').toLowerCase();
+
 const INCIDENT_CLEAR_GRACE_MS = parseInt(process.env.ETR290_INCIDENT_CLEAR_GRACE_MS || '12000', 10) || 12000;
 const INCIDENT_SAMPLE_LINES = 6;
 // Pending counts are only meaningful within a burst window. If the last match
@@ -109,7 +114,7 @@ class ETR290Analyser extends EventEmitter {
       dropFrames: 0,
     };
     this._diagnostics = {
-      parser: 'ffmpeg-log',
+      parser: ETR290_ENGINE === 'tsduck' ? 'tsduck' : 'ffmpeg-log',
       lastMatchAt: null,
       lastLines: [],
       totalMatchedLines: 0,
@@ -223,6 +228,14 @@ class ETR290Analyser extends EventEmitter {
   }
 
   _spawnProc() {
+    if (ETR290_ENGINE === 'tsduck') {
+      this._spawnTsp();
+    } else {
+      this._spawnProcFFmpeg();
+    }
+  }
+
+  _spawnProcFFmpeg() {
     if (!this.isRunning) return;
     const epoch = ++this._epoch;
     const args = this._buildFFmpegArgs();
@@ -287,6 +300,115 @@ class ETR290Analyser extends EventEmitter {
     });
   }
 
+  // ─── TSDuck engine ──────────────────────────────────────────────────────────
+
+  _spawnTsp() {
+    if (!this.isRunning) return;
+    const epoch = ++this._epoch;
+    const args  = this._buildTspArgs();
+    const proc  = spawn('tsp', args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    this._proc  = proc;
+
+    // tsp --json-line outputs to its message logger (stderr), not stdout.
+    // Each line is: "* pluginName: {json}" — strip the prefix before parsing.
+    // Non-JSON tsp diagnostic lines (startup banner, warnings) are logged.
+    const rl = readline.createInterface({ input: proc.stderr, crlfDelay: Infinity });
+    rl.on('line', (line) => {
+      if (this._epoch !== epoch) return;
+      const m = line.match(/^\* (analyze|continuity): (\{.+\})$/);
+      if (m) {
+        try {
+          const json = JSON.parse(m[2]);
+          json['plugin-name'] = m[1]; // inject so _parseTsduckLine can discriminate
+          this._parseTsduckLine(json);
+        } catch (_) {}
+        return;
+      }
+      const text = line.trim();
+      if (text) console.log(`[TSDuck] ${text}`);
+    });
+
+    // stdout is unused but must be drained to prevent backpressure stalling tsp.
+    proc.stdout.resume();
+
+    proc.on('exit', (code, signal) => {
+      if (this._epoch !== epoch) return;
+      rl.close();
+      this._proc = null;
+      const wasExplicitStop = this._stopping || signal === 'SIGTERM';
+      this._stopping = false;
+
+      if (!wasExplicitStop && this.isRunning) {
+        const isSrt  = this.url && this.url.startsWith('srt://');
+        const retryMs = isSrt ? 60000 : 5000;
+        if (this._suspendTimer) clearTimeout(this._suspendTimer);
+        this._suspendTimer = setTimeout(() => {
+          this._suspendTimer = null;
+          if (this.isRunning) this._spawnTsp();
+        }, retryMs);
+        return;
+      }
+
+      if (this._statusTimer) { clearInterval(this._statusTimer); this._statusTimer = null; }
+      this.isRunning = false;
+      if (code !== 0 && code !== null && !(wasExplicitStop && code === 255)) {
+        this.emit('error', new Error(`tsp exited with code ${code}`));
+      }
+      this.emit('stopped', { id: this.id });
+    });
+
+    proc.on('error', (err) => {
+      if (this._epoch !== epoch) return;
+      this.isRunning = false;
+      this.emit('error', err);
+    });
+  }
+
+  /**
+   * Build the tsp argument array.
+   *
+   *   srt://host:port[?…]   →  -I srt --caller host:port
+   *   udp://239.x.x.x:port  →  -I ip  239.x.x.x:port   (multicast join)
+   *   udp://host:port        →  -I ip  :port             (unicast listen on port)
+   *   rtp://239.x.x.x:port  →  -I ip  239.x.x.x:port   (multicast, RTP is auto-stripped)
+   *   rtp://host:port        →  -I ip  :port             (unicast RTP)
+   *
+   * Query strings are stripped — they carry FFmpeg/fifo options irrelevant to tsp.
+   */
+  _buildTspArgs() {
+    const url         = this.url;
+    const args        = [];
+    const stripScheme = (s) => url.slice(s.length + 3).split('?')[0].split('#')[0];
+    const isMulticast = (host) => {
+      const first = parseInt((host || '').split('.')[0], 10);
+      return first >= 224 && first <= 239;
+    };
+
+    if (url.startsWith('srt://')) {
+      // Dedicated SRT input plugin — caller mode connects to the SRT source.
+      args.push('-I', 'srt', '--caller', stripScheme('srt'));
+    } else if (url.startsWith('udp://') || url.startsWith('rtp://')) {
+      const scheme   = url.startsWith('udp://') ? 'udp' : 'rtp';
+      const hostPort = stripScheme(scheme);              // 'host:port'
+      const host     = hostPort.split(':')[0];
+      const port     = hostPort.split(':')[1];
+      // Multicast: pass the group address so tsp joins the group.
+      // Unicast: pass only ':port' — tsp listens on all local interfaces.
+      args.push('-I', 'ip', isMulticast(host) ? hostPort : `:${port}`);
+    } else {
+      args.push('-I', 'ip', url);
+    }
+
+    args.push(
+      '-P', 'continuity', '--json-line',
+      '-P', 'analyze', '-i', '1', '--json-line',
+      '-O', 'drop'
+    );
+    return args;
+  }
+
+  // ─── FFmpeg engine ───────────────────────────────────────────────────────────
+
   _parseLine(line) {
     const lineTrim = String(line || '').trim();
     this._diagnostics.lastLines = [...this._diagnostics.lastLines.slice(-19), lineTrim];
@@ -310,91 +432,207 @@ class ETR290Analyser extends EventEmitter {
     for (const [priority, checks] of Object.entries(CHECKS)) {
       for (const c of checks) {
         if (c.pattern.test(line)) {
-          const now = Date.now();
+          const now      = Date.now();
           const evidence = this._extractEvidence(lineTrim);
-          if (!this._pidAllowed(evidence.pid)) {
-            continue;
-          }
-          this._counts[c.id]++;
-          // Burst-window reset: if the previous pending match for this check
-          // was more than PENDING_BURST_WINDOW_MS ago, isolated blips that
-          // slowly accumulated can no longer carry over — start a fresh count.
-          if (now - (this._pendingLastMatchAt[c.id] || 0) > PENDING_BURST_WINDOW_MS) {
-            this._pendingCounts[c.id] = 0;
-          }
-          this._pendingCounts[c.id] = (this._pendingCounts[c.id] || 0) + 1;
-          this._pendingLastMatchAt[c.id] = now;
-          this._diagnostics.lastMatchAt = now;
-          this._diagnostics.totalMatchedLines += 1;
-          this._diagnostics.perCheck[c.id] = {
-            matches: (this._diagnostics.perCheck[c.id]?.matches || 0) + 1,
-            lastMatchAt: now,
-            lastMessage: lineTrim,
-          };
-
-          const existing = this._activeIncidents[c.id];
-          const threshold = this._config.thresholds[c.id] || 1;
-          // Startup grace: absorb multicast join noise (RTP: missed N packets,
-          // first-GOP artefacts) without raising incidents. Counts still accumulate.
-          const inGrace = this._startedAt !== null && (now - this._startedAt) < STARTUP_GRACE_MS;
-          if (inGrace && !existing) {
-            matched = true;
-            break;
-          }
-          if (!existing && this._pendingCounts[c.id] < threshold) {
-            matched = true;
-            break;
-          }
-          if (!existing) {
-            const incident = {
-              incidentId: `${this.id}-${c.id}-${++this._incidentSeq}`,
-              checkId: c.id,
-              label: c.label,
-              priority,
-              status: 'active',
-              firstSeen: now,
-              lastSeen: now,
-              hitCount: 1,
-              lastMessage: lineTrim.slice(0, 240),
-              messages: [lineTrim.slice(0, 240)],
-              pid: evidence.pid,
-              pidHex: evidence.pidHex,
-            };
-            this._activeIncidents[c.id] = incident;
-            this._pendingCounts[c.id] = 0;
-            this._pendingLastMatchAt[c.id] = now;
-            this._status[c.id] = 'error';
-            this.emit('incident_started', { ...incident });
-          } else {
-            existing.lastSeen = now;
-            existing.hitCount += 1;
-            existing.lastMessage = lineTrim.slice(0, 240);
-            existing.messages = [...(existing.messages || []), lineTrim.slice(0, 240)].slice(-INCIDENT_SAMPLE_LINES);
-            if (existing.pid == null && evidence.pid != null) existing.pid = evidence.pid;
-            if (!existing.pidHex && evidence.pidHex) existing.pidHex = evidence.pidHex;
-            this._status[c.id] = 'error';
-            this.emit('incident_updated', { ...existing });
-          }
-
-          const alarm = {
-            time: now,
-            priority,
-            checkId: c.id,
-            label: c.label,
-            message: lineTrim.slice(0, 240),
-            incidentId: this._activeIncidents[c.id]?.incidentId || null,
-            pid: this._activeIncidents[c.id]?.pid ?? null,
-            pidHex: this._activeIncidents[c.id]?.pidHex || null,
-          };
-          this._alarms.unshift(alarm);
-          if (this._alarms.length > 300) this._alarms.pop();
-          this.emit('alarm', alarm);
-          this.emit('etr290', this._buildStatus());
+          if (!this._pidAllowed(evidence.pid)) continue;
+          this._handleMatch(priority, c, evidence, lineTrim, now);
           matched = true;
           break;
         }
       }
       if (matched) break;
+    }
+  }
+
+  /**
+   * _handleMatch — shared incident model used by both FFmpeg and TSDuck engines.
+   *
+   * Called once a check has fired (pattern matched or TSDuck field non-zero).
+   * Applies burst-window reset, startup grace, threshold gating, incident
+   * create/update, alarm emit, and status broadcast.
+   *
+   * DO NOT alter this method independently of the existing test suite — the
+   * incident model is covered by etr290-analyser.test.js.
+   */
+  _handleMatch(priority, c, evidence, message, now) {
+    this._counts[c.id]++;
+    // Burst-window reset: if the previous pending match for this check
+    // was more than PENDING_BURST_WINDOW_MS ago, isolated blips that
+    // slowly accumulated can no longer carry over — start a fresh count.
+    if (now - (this._pendingLastMatchAt[c.id] || 0) > PENDING_BURST_WINDOW_MS) {
+      this._pendingCounts[c.id] = 0;
+    }
+    this._pendingCounts[c.id] = (this._pendingCounts[c.id] || 0) + 1;
+    this._pendingLastMatchAt[c.id] = now;
+    this._diagnostics.lastMatchAt = now;
+    this._diagnostics.totalMatchedLines += 1;
+    this._diagnostics.perCheck[c.id] = {
+      matches: (this._diagnostics.perCheck[c.id]?.matches || 0) + 1,
+      lastMatchAt: now,
+      lastMessage: message,
+    };
+
+    const existing  = this._activeIncidents[c.id];
+    const threshold = this._config.thresholds[c.id] || 1;
+    // Startup grace: absorb multicast join noise (RTP: missed N packets,
+    // first-GOP artefacts) without raising incidents. Counts still accumulate.
+    const inGrace = this._startedAt !== null && (now - this._startedAt) < STARTUP_GRACE_MS;
+    if (inGrace && !existing) return;
+    if (!existing && this._pendingCounts[c.id] < threshold) return;
+
+    if (!existing) {
+      const incident = {
+        incidentId: `${this.id}-${c.id}-${++this._incidentSeq}`,
+        checkId: c.id,
+        label: c.label,
+        priority,
+        status: 'active',
+        firstSeen: now,
+        lastSeen: now,
+        hitCount: 1,
+        lastMessage: message.slice(0, 240),
+        messages: [message.slice(0, 240)],
+        pid: evidence.pid,
+        pidHex: evidence.pidHex,
+      };
+      this._activeIncidents[c.id] = incident;
+      this._pendingCounts[c.id] = 0;
+      this._pendingLastMatchAt[c.id] = now;
+      this._status[c.id] = 'error';
+      this.emit('incident_started', { ...incident });
+    } else {
+      existing.lastSeen = now;
+      existing.hitCount += 1;
+      existing.lastMessage = message.slice(0, 240);
+      existing.messages = [...(existing.messages || []), message.slice(0, 240)].slice(-INCIDENT_SAMPLE_LINES);
+      if (existing.pid == null && evidence.pid != null) existing.pid = evidence.pid;
+      if (!existing.pidHex && evidence.pidHex) existing.pidHex = evidence.pidHex;
+      this._status[c.id] = 'error';
+      this.emit('incident_updated', { ...existing });
+    }
+
+    const alarm = {
+      time: now,
+      priority,
+      checkId: c.id,
+      label: c.label,
+      message: message.slice(0, 240),
+      incidentId: this._activeIncidents[c.id]?.incidentId || null,
+      pid: this._activeIncidents[c.id]?.pid ?? null,
+      pidHex: this._activeIncidents[c.id]?.pidHex || null,
+    };
+    this._alarms.unshift(alarm);
+    if (this._alarms.length > 300) this._alarms.pop();
+    this.emit('alarm', alarm);
+    this.emit('etr290', this._buildStatus());
+  }
+
+  /**
+   * _parseTsduckLine — TSDuck JSON → incident model.
+   *
+   * tsp emits two interleaved JSON streams on stdout:
+   *
+   *   continuity plugin  →  { "plugin-name": "continuity", pid, "prev-cc", "curr-cc" }
+   *   analyze plugin     →  { "plugin-name": "analyze", ts: { packets: {…} }, pids: […] }
+   *
+   * Field mapping (per ETSI TR 101 290):
+   *   ts.packets.invalid-syncs      → ts_sync (P1)
+   *   ts.packets.transport-errors   → transport_error (P2)
+   *   continuity: per-PID event     → cc_error (P1)
+   *   per-PID pcr-leap              → pcr_disc (P2)
+   *   per-PID pts-leap              → pts_error (P2)
+   *   per-PID dts-leap              → pcr_disc  (supplementary)
+   */
+  _parseTsduckLine(json) {
+    if (!json || typeof json !== 'object') return;
+    const now = Date.now();
+
+    // ── analyze plugin output ────────────────────────────────────────────────
+    const isAnalyze = json['plugin-name'] === 'analyze' ||
+                      (json.ts && json.ts.packets && Array.isArray(json.pids));
+    if (isAnalyze) {
+      const pkts = json.ts && json.ts.packets;
+
+      // ts_sync (P1) — invalid sync bytes at TS packet level
+      if (pkts && pkts['invalid-syncs'] > 0) {
+        const c = CHECKS.p1.find(x => x.id === 'ts_sync');
+        if (c) {
+          this._handleMatch('p1', c, { pid: null, pidHex: null },
+            `TSDuck: ${pkts['invalid-syncs']} invalid sync byte(s)`, now);
+        }
+      }
+
+      // transport_error (P2) — transport error indicator flag set
+      if (pkts && pkts['transport-errors'] > 0) {
+        const c = CHECKS.p2.find(x => x.id === 'transport_error');
+        if (c) {
+          this._handleMatch('p2', c, { pid: null, pidHex: null },
+            `TSDuck: ${pkts['transport-errors']} transport error indicator(s)`, now);
+        }
+      }
+
+      // Per-PID checks
+      // All leap/discontinuity fields live under pidInfo.packets (integer counts, not booleans).
+      if (Array.isArray(json.pids)) {
+        for (const pidInfo of json.pids) {
+          const rawPid = pidInfo.id;
+          const pid    = rawPid != null && Number.isFinite(Number(rawPid)) ? Number(rawPid) : null;
+          const pidHex = pid != null ? `0x${pid.toString(16)}` : null;
+          const ev     = { pid, pidHex };
+          if (!this._pidAllowed(pid)) continue;
+          const pp = pidInfo.packets; // per-PID packet counters
+          if (!pp) continue;
+
+          // pcr_disc (P2) — PCR value leap count
+          if (pp['pcr-leap'] > 0) {
+            const c = CHECKS.p2.find(x => x.id === 'pcr_disc');
+            if (c) this._handleMatch('p2', c, ev, `TSDuck: PCR leap on PID ${pid} (count: ${pp['pcr-leap']})`, now);
+          }
+
+          // pts_error (P2) — PTS value leap count
+          if (pp['pts-leap'] > 0) {
+            const c = CHECKS.p2.find(x => x.id === 'pts_error');
+            if (c) this._handleMatch('p2', c, ev, `TSDuck: PTS leap on PID ${pid} (count: ${pp['pts-leap']})`, now);
+          }
+
+          // pcr_disc (P2) — DTS leap is a supplementary PCR discontinuity signal
+          if (pp['dts-leap'] > 0) {
+            const c = CHECKS.p2.find(x => x.id === 'pcr_disc');
+            if (c) this._handleMatch('p2', c, ev, `TSDuck: DTS leap on PID ${pid} (count: ${pp['dts-leap']})`, now);
+          }
+        }
+      }
+
+      // Bitrate from analyze output (bps → Mbps).
+      // ts.bitrate is PCR-derived and is 0 when PCR data is unavailable (e.g. UDP test streams).
+      // Fall back to ts.bytes × 8 for the -i 1 reporting interval.
+      if (json.ts) {
+        const bps = Number(json.ts.bitrate) || Number(json.ts['pcr-bitrate']) || 0;
+        if (bps > 0) {
+          this._runtime.bitrateMbps = parseFloat((bps / 1e6).toFixed(3));
+        } else if (json.ts.bytes > 0) {
+          // bytes in the ~1 s window × 8 gives an approximate bps figure
+          this._runtime.bitrateMbps = parseFloat((Number(json.ts.bytes) * 8 / 1e6).toFixed(3));
+        }
+      }
+      return;
+    }
+
+    // ── continuity plugin output ─────────────────────────────────────────────
+    // Actual format: { "index": N, "packets": N, "pid": PID, "type": "missing"|"break" }
+    // No prev-cc/curr-cc fields exist — discrimination uses plugin-name (injected above)
+    // or the presence of the "type" field alongside "pid".
+    const isContinuity = json['plugin-name'] === 'continuity' ||
+                         (json.pid != null && json.type != null && json.index != null);
+    if (isContinuity) {
+      const rawPid = json.pid;
+      const pid    = rawPid != null && Number.isFinite(Number(rawPid)) ? Number(rawPid) : null;
+      const pidHex = pid != null ? `0x${pid.toString(16)}` : null;
+      if (!this._pidAllowed(pid)) return;
+      const c = CHECKS.p1.find(x => x.id === 'cc_error');
+      if (!c) return;
+      this._handleMatch('p1', c, { pid, pidHex },
+        `TSDuck: CC ${json.type || 'discontinuity'} on PID ${pid}`, now);
     }
   }
 
