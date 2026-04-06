@@ -215,23 +215,23 @@ The ETR alarm log (right column in Stream View) shows each incident with:
 docker compose logs labotech | grep -i "etr-" | tail -20
 
 # List active ETR monitors via API:
-curl -s http://10.67.18.29:4000/etr290 | jq '[.[] | {id, url, isRunning}]'
+curl -s http://<YOUR_SERVER_IP>:4000/etr290 | jq '[.[] | {id, url, isRunning}]'
 ```
 
 ### Check alarm counts
 
 ```bash
-curl -s http://10.67.18.29:4000/etr290 | jq '.[] | {id, counts: .alarms | group_by(.checkId) | map({check: .[0].checkId, count: length})}'
+curl -s http://<YOUR_SERVER_IP>:4000/etr290 | jq '.[] | {id, counts: .alarms | group_by(.checkId) | map({check: .[0].checkId, count: length})}'
 ```
 
 ### Restart an ETR monitor
 
 ```bash
 # Stop:
-curl -s -X DELETE http://10.67.18.29:4000/etr290/etr-<decoder-id>
+curl -s -X DELETE http://<YOUR_SERVER_IP>:4000/etr290/etr-<decoder-id>
 
 # Start again (replace URL):
-curl -s -X POST http://10.67.18.29:4000/etr290/start \
+curl -s -X POST http://<YOUR_SERVER_IP>:4000/etr290/start \
   -H "Content-Type: application/json" \
   -d '{"id": "etr-<decoder-id>", "url": "udp://239.x.x.x:PORT"}'
 ```
@@ -251,8 +251,8 @@ docker compose logs labotech | grep -i "srt-relay" | tail -10
 If relay is not starting, restart the decoder:
 
 ```bash
-curl -s -X DELETE http://10.67.18.29:4000/analyse/etr-<decoder-id>
-curl -s -X POST http://10.67.18.29:4000/analyse/start -H "Content-Type: application/json" \
+curl -s -X DELETE http://<YOUR_SERVER_IP>:4000/analyse/etr-<decoder-id>
+curl -s -X POST http://<YOUR_SERVER_IP>:4000/analyse/start -H "Content-Type: application/json" \
   -d '{"id": "<decoder-id>", "url": "srt://..."}'
 ```
 

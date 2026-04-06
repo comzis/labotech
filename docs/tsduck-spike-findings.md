@@ -1,11 +1,8 @@
 # TSDuck Phase 0a Spike Findings
 
-## Date and Host
+## Date
 
 - **Spike date:** 2026-03-17
-- **Host:** `gva-boro-probe`
-- **Service user:** `boro`
-- **Access path:** operator-run SSH session on production host; command transcript captured and relayed into this repository (`private/tsduck-phase0a.txt`).
 
 ## TSDuck Version
 

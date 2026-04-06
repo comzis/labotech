@@ -1,6 +1,6 @@
 # Labotech API Reference
 
-**Base URL:** `http://10.67.18.29:4000`
+**Base URL:** `http://<YOUR_SERVER_IP>:4000`
 **Version:** v3.1.91
 **Protocol:** REST (JSON) + WebSocket
 
@@ -534,7 +534,7 @@ Save multiview layout configuration.
 
 ## WebSocket Protocol
 
-Connect to `ws://10.67.18.29:4000`.
+Connect to `ws://<YOUR_SERVER_IP>:4000`.
 
 On connect the server sends:
 ```json
@@ -641,7 +641,7 @@ Key env vars that affect API behaviour:
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_HOST` | `10.67.18.29` | Bind address — never change to `0.0.0.0` |
+| `API_HOST` | `<YOUR_SERVER_IP>` | Bind address — never change to `0.0.0.0` |
 | `API_PORT` | `4000` | Listen port |
 | `MULTICAST_NIC` | `eno2` | Multicast output NIC |
 | `FORWARD_MULTICAST_SUBNET` | `239.100.25.0/26` | Allowed multicast subnet |
