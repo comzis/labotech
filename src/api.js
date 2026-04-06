@@ -15,7 +15,7 @@ const persistence = require('./state-persistence');
 const eventLog = require('./event-log');
 const { ThumbnailWorkerClient } = require('./thumbnail-worker-client');
 
-const API_HOST = process.env.API_HOST || '10.67.18.29';
+const API_HOST = process.env.API_HOST || '0.0.0.0';
 const API_PORT = parseInt(process.env.API_PORT, 10) || 4000;
 const APP_VERSION = pkg.version || '0.0.0';
 const RELEASE_VERSION = process.env.LABOTECH_RELEASE || `v${APP_VERSION}`;

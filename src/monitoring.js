@@ -1,3 +1,7 @@
+// Labotech — Open Source Broadcast Stream Monitor
+// Copyright (c) 2026 Milorad Stevanovic
+// MIT Licence — github.com/comzis/labotech
+
 'use strict';
 
 const { spawn, execFile } = require('child_process');
@@ -35,8 +39,8 @@ const TS_INPUT_TIMEOUT_US = Number.isFinite(parseInt(process.env.TS_INPUT_TIMEOU
 const TS_INPUT_REORDER_QUEUE_SIZE = Number.isFinite(parseInt(process.env.TS_INPUT_REORDER_QUEUE_SIZE, 10))
   ? Math.max(1, parseInt(process.env.TS_INPUT_REORDER_QUEUE_SIZE, 10))
   : 1024;
-const SNMP_HOST          = process.env.SNMP_MANAGER_HOST || '10.67.18.1';
-const SYSLOG_HOST        = process.env.SYSLOG_HOST       || '10.67.18.1';
+const SNMP_HOST          = process.env.SNMP_MANAGER_HOST || '127.0.0.1';
+const SYSLOG_HOST        = process.env.SYSLOG_HOST       || '127.0.0.1';
 const SYSLOG_PORT        = parseInt(process.env.SYSLOG_PORT) || 514;
 const SAFE_STREAM_ID_RE  = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -67,9 +71,9 @@ function _buildSrtSrc(inputUrl) {
   const sep = src.includes('?') ? '&' : '?';
   if (!src.includes('mode=')) src += `${sep}mode=caller`;
   if (!src.includes('timeout=')) src += '&timeout=8000000';
-  // Bind caller socket to eno1 (management NIC) so ffmpeg routes SRT via
-  // 10.67.18.29 and not eno2 which has no IP address.
-  if (!src.includes('adapter=')) src += '&adapter=10.67.18.29';
+  // Bind caller socket to the management NIC so ffmpeg routes SRT via the
+  // correct interface. Set MANAGEMENT_IP env var to the management NIC address.
+  if (!src.includes('adapter=')) src += `&adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`;
   return src;
 }
 
@@ -358,7 +362,7 @@ function _doCaptureThumbnail(streamId, inputUrl) {
 
     // One-shot thumbnail capture.
     //
-    // Do NOT use -skip_frame nokey: broadcast contribution links (Eurovision, GNVE,
+    // Do NOT use -skip_frame nokey: broadcast contribution links (Intinor, Haivision,
     // etc.) commonly use long GOPs (10–25 s).  Waiting for a keyframe with
     // -skip_frame nokey causes reliable 8 s timeouts on every attempt, making
     // first-frame latency 30–45 s.  The thumbnail=N filter picks the "least blurry"

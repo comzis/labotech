@@ -85,12 +85,12 @@ const ROLES = {
   BES: 'bes',
   OPS: 'ops',
 };
+// Never hardcode credentials — use .env file (VITE_ADMIN_PASS, VITE_OPS_PASS)
 const LOGIN_PROFILES = {
-  admin: { password: '', role: ROLES.BES },
-  evc: { password: '', role: ROLES.OPS },
+  admin: { password: import.meta.env.VITE_ADMIN_PASS || '', role: ROLES.BES },
+  ops:   { password: import.meta.env.VITE_OPS_PASS  || '', role: ROLES.OPS },
 };
 const OPS_HIDDEN_TABS = new Set(['transcode', 'multicast', 'api']);
-const PARTNER_LOGO_SRC = '/eurovision-services.png';
 const APP_VERSION = import.meta.env.VITE_APP_VERSION || '0.0.0';
 const RELEASE_VERSION = import.meta.env.VITE_RELEASE_VERSION || `v${APP_VERSION}`;
 const BUILD_TIME_UTC = import.meta.env.VITE_BUILD_TIME_UTC || null;
@@ -314,18 +314,6 @@ function LandingAuth({ onLogin, punchline }) {
                 </span>
               </div>
             </div>
-            <img
-              src={PARTNER_LOGO_SRC}
-              alt="Eurovision Services"
-              className="shrink-0"
-              style={{
-                height: 34,
-                width: 'auto',
-                opacity: 0.92,
-                filter: 'drop-shadow(0 0 8px rgba(255,255,255,0.14))',
-              }}
-              onError={(e) => { e.currentTarget.style.display = 'none'; }}
-            />
           </div>
           <div className="text-[8px] uppercase tracking-[0.14em] mt-2" style={{ color: '#8ea9d1', textShadow: '0 1px 0 rgba(0,0,0,0.35)' }}>
             Team Work · Engineering · Operations · SLA
@@ -380,7 +368,7 @@ function LandingAuth({ onLogin, punchline }) {
                     onChange={(e) => setUsername(e.target.value)}
                     className="w-full px-3 py-2 rounded-sm border text-[11px] bg-black/30 text-gray-200"
                     style={{ borderColor: '#2f425f' }}
-                    placeholder="admin or evc"
+                    placeholder="admin or ops"
                     autoFocus
                   />
                 </label>
