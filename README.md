@@ -1,5 +1,12 @@
 # LABOTECH
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-243%20passed-brightgreen)](#testing)
+[![Version](https://img.shields.io/badge/version-3.2.24-blue)](docs/release-notes-v3.1.md)
+[![Node](https://img.shields.io/badge/node-18+-green)](https://nodejs.org)
+[![TSDuck](https://img.shields.io/badge/ETR290-TSDuck-orange)](https://tsduck.io)
+[![Docker](https://img.shields.io/badge/docker-ready-blue)](https://docker.com)
+
 **v3.2.24 / web 3.1.129**
 
 Professional DVB-IP stream processor for broadcast MCR operations on HPE DL360 / Ubuntu Server.
@@ -273,6 +280,12 @@ DOLBYE_REQUIRED_WHEN_DETECTED=false
 
 ---
 
+## Screenshots
+
+> 📸 Screenshots coming soon — see the Quick Start guide to run Labotech and explore the interface.
+
+---
+
 ## Configuration
 
 ### `config/multicast.json`
@@ -333,6 +346,24 @@ npm test -- --runInBand    # 191 tests across 8 suites
 - `pid != null && Number.isFinite(Number(pid))` — never coerce nullable PIDs
 - `matchAll` requires `g` flag — derive: `new RegExp(rx.source, rx.flags + 'g')`
 - `-af` must not follow a `-filter_complex` mapped output — embed in the chain
+
+---
+
+## Known Limitations
+
+- ETR 290 P3 SI table checks not yet implemented via TSDuck JSON output
+- Authentication is frontend-only — server-side auth planned
+- PCR accuracy numerical values not yet exposed in live view
+- Compliance TS recording not yet implemented
+
+## Roadmap
+
+- [ ] ETR 290 P3 SI table monitoring (NIT/SDT/EIT/TDT via TSDuck)
+- [ ] Server-side authentication
+- [ ] AI-assisted alarm correlation and plain-language fault diagnosis
+- [ ] Per-PID bitrate history graphs
+- [ ] Compliance TS recording with event-triggered sidecar JSON
+- [ ] Multi-site deployment support
 
 ---
 
