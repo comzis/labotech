@@ -1806,14 +1806,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             flexShrink: 0,
             gap: 12,
           }}>
-            {/* Left: LaboTech mark + panel callsign */}
+            {/* Left: panel callsign */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-              <img
-                src="/labotech-mark.png"
-                alt="LaboTech"
-                style={{ height: 20, width: 'auto', opacity: 0.75, filter: 'brightness(0.85)' }}
-                onError={(e) => { e.currentTarget.style.display = 'none'; }}
-              />
               <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
               <div style={{ lineHeight: 1 }}>
                 <div style={{ color: '#3a3a3a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>PANEL</div>
