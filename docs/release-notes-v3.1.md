@@ -1,6 +1,13 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-06 (latest: web 3.1.128 / backend 3.2.24)
+Date: 2026-04-06 (latest: web 3.1.129 / backend 3.2.24)
+
+## v3.1.129 — 2026-04-06
+
+### Chore: Remove logo mark asset (`web/public/labotech-mark.png`)
+
+- The PNG was already unreferenced after the fullscreen multiview header cleanup (v3.1.126). Deleted the file to avoid shipping an unused binary asset.
+- No UI change — the mark was not visible anywhere in the current build.
 
 ## v3.1.128 — 2026-04-06
 
