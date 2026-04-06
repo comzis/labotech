@@ -648,7 +648,7 @@ function buildLaneGradient(events, timeStart, windowMs) {
       ? explicitStarts[explicitStarts.length - 1].ts
       : firstActiveTs;
     let stopAfterActive = sorted.find(
-      (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStartTs
+      (e) => e.category === 'runtime_stopped' && e.ts >= lastExplicitStartTs && e.title !== 'ETR monitor stopped'
     );
     const lastSevEvtTs = sevEvts[sevEvts.length - 1]?.ts || firstActiveTs;
     // Include runtime_heartbeat in the activity timestamp so the lane stays

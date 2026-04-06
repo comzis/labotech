@@ -79,7 +79,7 @@ export default function useTSAnalysis() {
         analysers.forEach(a => {
           if (isSuppressed(a.id)) return;
           meta[a.id] = { id: a.id, url: a.url, isRunning: a.isRunning };
-          if (a.lastResult) {
+          if (a.isRunning && a.lastResult) {
             restored[a.id] = { id: a.id, ...a.lastResult };
           }
         });
@@ -192,6 +192,7 @@ export default function useTSAnalysis() {
         delete next[msg.id];
         return next;
       });
+      setResult(prev => (prev?.id === msg.id ? null : prev));
       return;
     }
     if (msg.type === 'analyse_started') {
