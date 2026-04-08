@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.150 / backend 3.2.36)
+Date: 2026-04-08 (latest: web 3.1.151 / backend 3.2.37)
+
+## v3.2.37 / v3.1.151 — 2026-04-08
+
+### Fix: allow multiple multiview tiles for the same source URL
+
+- **Issue** — operators could add only one tile when using the same multicast URL multiple times (manual add path), while some workflows require the same feed in different panel positions.
+- **Cause** — frontend tile assignment used unique-by-ID behavior (`activeIds` filter + duplicate guard), so repeated assignments to the same analyser ID were collapsed.
+- **Fix** — multiview now supports tile aliasing: if a decoder URL already exists, the UI reuses that analyser ID and appends another panel tile entry; tile rendering keys preserve duplicates.
+- **Operator impact** — same source can be placed multiple times in multiview without spawning duplicate backend probe workers.
 
 ## v3.2.36 / v3.1.150 — 2026-04-08
 
