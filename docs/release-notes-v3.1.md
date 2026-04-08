@@ -4,11 +4,12 @@ Date: 2026-04-08 (latest: web 3.1.135 / backend 3.2.28)
 
 ## v3.1.135 — 2026-04-08
 
-### Fix: Fullscreen multiview audio bar count no longer flips between probes
+### Fix: Fullscreen multiview audio meters stable and persistent — broadcast standard
 
-- ffprobe inconsistently returns 2 or 8 channels between probe cycles; `pairCount` in `FullscreenThumbTile` was recomputed from raw probe data each render, causing the bar count to flip between 1 pair and 4 pairs on the same stream.
-- **Fix:** Added a `pairCountLatch` that only increases — once 4 pairs are seen they remain visible even when a subsequent probe returns only 2 channels.
-- **Operator impact:** Audio bars in fullscreen multiview are stable and consistent.
+- ffprobe inconsistently returns 2 or 8 channels between probe cycles. `FullscreenThumbTile` had no audio data latch, causing two separate issues: (1) bar count flipping between 1 and 4 pairs every cycle, (2) meters going dark on probes that returned only the primary stereo pair.
+- **Fix 1:** `audioSnapshot` latch holds the last known channel data; `displayChannels` falls back to the snapshot when the current probe returns fewer channels — meters stay live between probes, matching the standard tile behaviour.
+- **Fix 2:** `pairCountLatch` only increases — once 4 pairs are seen the layout remains stable at 4 pairs.
+- **Operator impact:** Fullscreen multiview audio meters are continuously live and structurally stable — consistent with broadcast monitoring standards.
 
 ## v3.1.134 — 2026-04-08
 
