@@ -1,7 +1,7 @@
 # LABOTECH
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-jest%20suite-brightgreen)](#testing)
+[![Tests](https://img.shields.io/badge/tests-243%20passed-brightgreen)](#testing)
 [![Version](https://img.shields.io/badge/version-3.2.25-blue)](docs/release-notes-v3.2.md)
 [![Node](https://img.shields.io/badge/node-20-green)](https://nodejs.org)
 [![TSDuck](https://img.shields.io/badge/ETR290-TSDuck-orange)](https://tsduck.io)
