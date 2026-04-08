@@ -19,12 +19,13 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 
 ## Agent B Status
 
-- Current task: post-release doc consistency cleanup
-- Active branch: `cursor/post-release-docs-cleanup`
+- Current task: idle — duplicate analyser auto-heal shipped (PR #111 merged)
+- Active branch: none
 - Files modified this session:
-  - `docs/agent-status.md`
-  - `docs/api-reference.md`
-  - `docs/production-forward-probe-runbook.md`
+  - `.env.example`
+  - `docs/release-notes-v3.1.md`
+  - `routes/analyse.js`
+  - `src/api.js`
 - Open questions: none
 
 ## Merge Log
@@ -46,6 +47,7 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 - PR #100 merged: fullscreen multiview thumbnail prefetch layer (instant first-entry)
 - PR #101 closed: superseded by PR #102
 - PR #102 merged: ETR290 auto-start/stop/restore + compliance API + event log filtering + 24 new tests (267/267)
+- PR #111 merged: analyser URL dedupe + runtime auto-heal watchdog (duplicate worker containment)
 
 ## Notes
 
