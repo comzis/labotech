@@ -1,6 +1,6 @@
 {
   "name": "labotech",
-  "version": "3.2.36",
+  "version": "3.2.37",
   "description": "Professional DVB-IP stream processor — SRT encapsulation, multiview monitoring, and MPEG-TS analysis",
   "author": "Milorad Stevanovic",
   "license": "MIT",

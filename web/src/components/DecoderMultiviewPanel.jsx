@@ -174,6 +174,25 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   return url;
 }
 
+function normaliseProbeUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const u = new URL(value);
+    const params = Array.from(u.searchParams.entries()).sort(([ak, av], [bk, bv]) => {
+      if (ak === bk) return av.localeCompare(bv);
+      return ak.localeCompare(bk);
+    });
+    u.search = '';
+    for (const [k, v] of params) u.searchParams.append(k, v);
+    u.protocol = String(u.protocol || '').toLowerCase();
+    u.hostname = String(u.hostname || '').toLowerCase();
+    return u.toString();
+  } catch (_) {
+    return value;
+  }
+}
+
 function getMultiviewDisplayName(id) {
   const raw = String(id || '');
   const m = raw.match(/^2022-7-consolidated(?:-(\d+))?$/i);
@@ -951,7 +970,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
   const probeUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
   const activePanel = panels.find((p) => p.id === activePanelId) || panels[0] || null;
-  const visibleIds = activeIds.filter((id) => (activePanel?.decoderIds || []).includes(id));
+  const activeSet = new Set(activeIds);
+  const visibleIds = (activePanel?.decoderIds || []).filter((id) => activeSet.has(id));
   const normalizedDraftPanelName = normalizePanelName(newPanelName);
   const panelNameInUse = panels.some((p) => p.name.toUpperCase() === normalizedDraftPanelName);
   const panelNameValid = normalizedDraftPanelName.length >= 3 && !panelNameInUse;
@@ -1174,10 +1194,22 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     setAddTileSubmitting(true);
     setAddTileError(null);
     try {
+      const targetUrl = normaliseProbeUrl(url);
+      const existingId = Object.values(decoderMeta).find((m) => normaliseProbeUrl(m?.url) === targetUrl)?.id || null;
+      if (existingId) {
+        // Alias tile to the already-running analyser for this source URL.
+        setPanels((prev) => prev.map((p) => {
+          if (p.id !== activePanelId) return p;
+          return { ...p, decoderIds: [...(p.decoderIds || []), existingId] };
+        }));
+        setAddTileOpen(false);
+        resetAddTileForm();
+        refreshActives();
+        return;
+      }
       await startContinuous(id, url, 5000);
       setPanels((prev) => prev.map((p) => {
         if (p.id !== activePanelId) return p;
-        if ((p.decoderIds || []).includes(id)) return p;
         return { ...p, decoderIds: [...(p.decoderIds || []), id] };
       }));
       setAddTileOpen(false);
@@ -1194,10 +1226,21 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     if (!probeUrl) return;
     const id = decoderId || `decoder-${Date.now()}`;
     try {
+      const targetUrl = normaliseProbeUrl(probeUrl);
+      const existingId = Object.values(decoderMeta).find((m) => normaliseProbeUrl(m?.url) === targetUrl)?.id || null;
+      if (existingId) {
+        setPanels((prev) => prev.map((p) => {
+          if (p.id !== activePanelId) return p;
+          return { ...p, decoderIds: [...(p.decoderIds || []), existingId] };
+        }));
+        setOpenCreate(false);
+        setDecoderId('');
+        refreshActives();
+        return;
+      }
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
       setPanels((prev) => prev.map((p) => {
         if (p.id !== activePanelId) return p;
-        if ((p.decoderIds || []).includes(id)) return p;
         return { ...p, decoderIds: [...(p.decoderIds || []), id] };
       }));
       setOpenCreate(false);
@@ -1606,9 +1649,9 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
 
         {/* Decoder tile grid — always rendered; "+" tile is always the last slot */}
         <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
-          {visibleIds.map((id) => (
+          {visibleIds.map((id, idx) => (
             <DecoderCard
-              key={id}
+              key={`${id}-${idx}`}
               id={id}
               displayName={getMultiviewDisplayName(id)}
               meta={decoderMeta[id]}
@@ -1876,11 +1919,11 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       aria-hidden="true"
       style={{ position: 'fixed', top: 0, left: 0, width: 1, height: 1, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' }}
     >
-      {visibleIds.map((id) => {
+      {visibleIds.map((id, idx) => {
         const url = resultsById[id]?.thumbnailUrl;
         return url ? (
           <img
-            key={id}
+            key={`${id}-${idx}`}
             src={url}
             alt=""
             width={1}
