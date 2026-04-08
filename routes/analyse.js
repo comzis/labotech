@@ -43,6 +43,7 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
       const startDelay = typeof analyser.getEtrStartDelay === 'function' ? analyser.getEtrStartDelay() : 0;
       mon.start(startDelay);
       etr290monitors.set(etrId, mon);
+      broadcast({ type: 'etr290_started', id: etrId, url: etrUrl, time: new Date().toISOString() });
     } catch (err) {
       console.error(`[analyse] Failed to auto-start ETR monitor for ${id}:`, err.message);
     }
