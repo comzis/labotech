@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.144 / backend 3.2.33)
+Date: 2026-04-08 (latest: web 3.1.146 / backend 3.2.33)
+
+## v3.1.146 — 2026-04-08
+
+### Fix: TS Analyser startup crash after catalog integration
+
+- **Root cause** — catalog state (`catalog`, `showCatalog`, `catalogRef`) was declared after `useEffect` blocks that referenced it.
+- **Symptom** — TS Analyser tab failed to render with runtime error: "can't access lexical declaration before initialization".
+- **Fix** — moved catalog state/ref declarations to the main hook section before those effects so lexical bindings are initialized before use.
+- **Operator impact** — TS Analyser loads normally again; no behavior change to probe logic or API payloads.
 
 ## v3.2.33 / v3.1.144 — 2026-04-08
 
