@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.137 / backend 3.2.29)
+Date: 2026-04-08 (latest: web 3.1.138 / backend 3.2.30)
+
+## v3.2.30 / v3.1.138 — 2026-04-08
+
+### Feat: I-frame-only thumbnail capture — broadcast-standard clean images
+
+- Thumbnail capture now uses `select=key,fps=${THUMBNAIL_FPS}` in both `PersistentThumbnailCapture` (RTP/UDP) and the SRT relay.
+- `select=key` ensures every captured JPEG comes from a complete keyframe (IDR for H.264/H.265, I-frame for MPEG-2) — no inter-frame prediction artefacts, no block noise. Broadcast monitoring standard.
+- `fps=${THUMBNAIL_FPS}` caps the rate for low-latency encoders with short GOPs.
+- Effective refresh rate: `min(keyframe_rate, THUMBNAIL_FPS)`. On a 2s-GOP stream at 25fps = 0.5fps; on a 200ms-GOP low-latency encoder = up to 5fps.
+- **Operator impact:** Confidence monitor and multiview tiles always display clean, full-frame images regardless of source codec or GOP structure.
 
 ## v3.2.29 / v3.1.137 — 2026-04-08
 

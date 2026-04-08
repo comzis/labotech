@@ -217,13 +217,18 @@ class PersistentThumbnailCapture extends EventEmitter {
     const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
-    // Near-live thumbnail mode: all decoded frames are passed to the fps filter.
-    // select=key was removed — it limited output to one frame per GOP (0.5fps on a
-    // 2s-GOP broadcast stream) regardless of THUMBNAIL_FPS. Full decode is required
-    // for sub-GOP frame rates. mjpeg re-encodes any fully decoded frame cleanly.
+    // I-frame capture: select=key ensures every thumbnail is taken from a clean
+    // keyframe (IDR for H.264/H.265, I-frame for MPEG-2) — no inter-frame prediction
+    // artefacts. fps=THUMBNAIL_FPS caps the output rate when keyframes arrive faster
+    // than needed (low-latency encoders with short GOPs). On a 2s-GOP broadcast
+    // stream, effective rate = min(0.5fps, THUMBNAIL_FPS).
+    // NOTE: -skip_frame nokey is NOT used — it breaks HEVC decoder initialisation
+    // by skipping frames that carry VPS/SPS/PPS context. select=key in the vf
+    // chain correctly filters after full decode, avoiding this problem.
     // format=yuv420p: mjpeg encoder has no 10-bit pixel format support; yuv422p10le
     // input (HEVC 4:2:2 Rext) must be explicitly downconverted before the encoder.
     const vf = [
+      'select=key',
       `fps=${THUMBNAIL_FPS}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
