@@ -19,7 +19,7 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
     env_file:
-      - docker-env.txt
+      - .env
     restart: unless-stopped
     logging:
       driver: json-file
@@ -53,7 +53,7 @@ services:
       - ./config:/app/config
       - ./logs:/app/logs
     env_file:
-      - docker-env.txt
+      - .env
     environment:
       - ENCAPSULATOR_HOST=127.0.0.1
       - ENCAPSULATOR_PORT=4100
