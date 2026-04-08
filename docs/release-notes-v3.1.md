@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.154 / backend 3.2.37)
+Date: 2026-04-08 (latest: web 3.1.155 / backend 3.2.37)
+
+## v3.1.155 — 2026-04-08
+
+### Fix: fullscreen multiview UTC clock live-tick regression
+
+- **Issue** — UTC clock in fullscreen multiview could freeze instead of updating every second.
+- **Cause** — local state setter name `setInterval` shadowed the global timer API inside the component scope.
+- **Fix** — renamed state setter to `setProbeInterval` and switched timer calls to `window.setInterval` / `window.clearInterval`.
+- **Operator impact** — fullscreen UTC now ticks live again and stays aligned to server-offset time.
 
 ## v3.1.154 — 2026-04-08
 
