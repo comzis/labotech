@@ -2,6 +2,11 @@
 
 Canonical usage guide for scripts under `scripts/`.
 
+Related runbooks:
+
+- `docs/server-optimisation-ubuntu.md` — Ubuntu-specific runtime optimization, verification, and incident response.
+- `docs/day1-monitoring-checklist.md` — first-24h post-deploy monitoring cadence.
+
 ## Host Setup and Network
 
 ### `scripts/setup-host.sh`
