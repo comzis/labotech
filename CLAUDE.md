@@ -26,7 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```bash
 # Backend
 npm install
-npm test -- --runInBand            # all tests (240 tests across 11 suites)
+npm test -- --runInBand            # all tests (243 tests across 11 suites)
 npm test -- test/encoder.test.js  # single test file
 npm start                         # run API server
 
