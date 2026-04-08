@@ -1,6 +1,12 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.142 / backend 3.2.32)
+Date: 2026-04-08 (latest: web 3.1.143 / backend 3.2.32)
+
+## v3.1.143 — 2026-04-08
+
+### UI: Add auto-start notice to ETR 290 Alarm Configuration section
+
+Added a one-line subtitle — "ETR analysis starts automatically when a decoder is provisioned." — below the section header so operators understand why no Enable button is present.
 
 ## v3.1.142 — 2026-04-08
 

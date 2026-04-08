@@ -1416,6 +1416,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     : <Badge label="NOT RUNNING" color={C.muted} small />}
                 />
                 <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 9, color: C.muted }}>ETR analysis starts automatically when a decoder is provisioned.</div>
 
                   {/* ── Decoder selector + ETR controls ────────────────── */}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center" }}>
