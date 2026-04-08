@@ -1,8 +1,8 @@
 # LABOTECH
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-243%20passed-brightgreen)](#testing)
-[![Version](https://img.shields.io/badge/version-3.2.24-blue)](docs/release-notes-v3.1.md)
+[![Tests](https://img.shields.io/badge/tests-jest%20suite-brightgreen)](#testing)
+[![Version](https://img.shields.io/badge/version-3.2.24-blue)](docs/release-notes-v3.2.md)
 [![Node](https://img.shields.io/badge/node-18+-green)](https://nodejs.org)
 [![TSDuck](https://img.shields.io/badge/ETR290-TSDuck-orange)](https://tsduck.io)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://docker.com)
@@ -115,7 +115,7 @@ Web UI: `http://<API_HOST>:4000`  (set `API_HOST` in `.env`)
 ```bash
 # Backend
 npm install
-npm test -- --runInBand               # 191 tests across 8 suites
+npm test -- --runInBand               # run full backend Jest suite
 npm test -- test/encoder.test.js      # single suite
 npm start                             # API server
 
@@ -319,7 +319,7 @@ MONITORING_POLICY_PROFILE=broadcast-balanced-v1
 ## Tests
 
 ```bash
-npm test -- --runInBand    # 191 tests across 8 suites
+npm test -- --runInBand    # run full backend Jest suite
 ```
 
 | Suite | Tests | Coverage |
@@ -371,7 +371,8 @@ npm test -- --runInBand    # 191 tests across 8 suites
 
 | Document | Purpose |
 |---|---|
-| `docs/release-notes-v3.1.md` | Full changelog from v3.1.1 |
+| `docs/release-notes-v3.1.md` | Historical changelog for v3.1.x series |
+| `docs/release-notes-v3.2.md` | Active changelog for current v3.2.x releases |
 | `docs/engineering-snag-list.md` | Defect log — 18 closed snags, root causes, lessons, invariants |
 | `docs/engineering-support-manual.md` | Operator and engineer runbook |
 | `docs/architecture-roadmap-continuous-monitoring.md` | Continuous monitoring + thumbnail worker architecture |
