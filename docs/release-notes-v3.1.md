@@ -1,6 +1,17 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.139 / backend 3.2.30)
+Date: 2026-04-08 (latest: web 3.1.139 / backend 3.2.31)
+
+## v3.2.31 — 2026-04-08
+
+### Feat: ETR290 monitors auto-restore on container restart
+
+- ETR290 monitors previously required manual re-enable after every container restart. Decoders (TSAnalyser) already restored automatically; ETR did not.
+- **Fix:** ETR state is now saved to `config/state.json` alongside decoders and restored unconditionally on boot — consistent with how decoders behave.
+- **Ordering:** ETR restore runs after analyser restore so the SRT relay is already instantiated. For SRT streams the relay URL is re-derived via `getRelayUrl()` rather than storing the UDP loopback address directly.
+- **SRT guard:** if a saved ETR monitor's linked decoder relay is unavailable at restore time, that ETR entry is skipped with a warning rather than crashing.
+- **Suspend/resume link** (`setEtrMonitor`) is re-established on restore so SRT probe cycles continue to coordinate ETR suspension correctly.
+- **Operator impact:** Enable ETR once per stream — it survives all subsequent restarts without operator intervention.
 
 ## v3.1.139 — 2026-04-08
 

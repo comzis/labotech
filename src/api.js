@@ -123,7 +123,7 @@ function broadcastStats(wss, type, id, stats) {
 }
 
 function saveState() {
-  persistence.save(streams, transcoders, forwarders, analysers);
+  persistence.save(streams, transcoders, forwarders, analysers, etr290monitors);
 }
 
 function _isManagedEtrMonitorId(id) {
@@ -288,6 +288,56 @@ async function restoreState(broadcast, thumbnailClient) {
       console.log(`[state] Restored analyser: ${cfg.id}`);
     } catch (err) {
       console.error(`[state] Failed to restore analyser ${cfg.id}:`, err.message);
+    }
+  }
+
+  // ETR290 monitors always restore — linked to their decoder's lifecycle.
+  // Must run AFTER analysers: SRT streams need the relay (created by TSAnalyser.start())
+  // to exist before ETR can derive the correct UDP loopback URL via getRelayUrl().
+  const ETR290Analyser = require('./etr290-analyser');
+  const savedEtr = state.etr290monitors || [];
+  for (const cfg of savedEtr) {
+    if (etr290monitors.has(cfg.id)) continue;
+    try {
+      let effectiveUrl = cfg.url;
+      if (cfg.url && cfg.url.startsWith('srt://')) {
+        const linkedId = /^etr-/i.test(cfg.id) ? cfg.id.slice(4) : null;
+        const linkedAnalyser = linkedId ? analysers.get(linkedId) : null;
+        const relayUrl = linkedAnalyser && typeof linkedAnalyser.getRelayUrl === 'function'
+          ? linkedAnalyser.getRelayUrl()
+          : null;
+        if (!relayUrl) {
+          console.warn(`[state] ETR restore skipped ${cfg.id}: decoder relay not available`);
+          continue;
+        }
+        effectiveUrl = relayUrl;
+      }
+      const mon = new ETR290Analyser({
+        id:          cfg.id,
+        url:         effectiveUrl,
+        nicName:     cfg.nicName     || undefined,
+        config:      cfg.config      || {},
+        profileName: cfg.profileName || null,
+      });
+      mon.on('etr290',            status   => broadcast({ type: 'etr290_status',           id: cfg.id, ...status   }));
+      mon.on('alarm',             alarm    => broadcast({ type: 'etr290_alarm',             id: cfg.id, ...alarm    }));
+      mon.on('incident_started',  incident => broadcast({ type: 'etr290_incident_started',  id: cfg.id, ...incident }));
+      mon.on('incident_updated',  incident => broadcast({ type: 'etr290_incident_updated',  id: cfg.id, ...incident }));
+      mon.on('incident_cleared',  incident => broadcast({ type: 'etr290_incident_cleared',  id: cfg.id, ...incident }));
+      mon.on('error',             err      => broadcast({ type: 'error',                    id: cfg.id, message: err.message }));
+      mon.on('stopped',           ()       => broadcast({ type: 'etr290_stopped',           id: cfg.id }));
+      // Re-link to TSAnalyser for suspend/resume coordination during SRT probe cycles.
+      if (/^etr-/i.test(cfg.id)) {
+        const linkedAnalyser = analysers.get(cfg.id.slice(4));
+        if (linkedAnalyser && typeof linkedAnalyser.setEtrMonitor === 'function') {
+          linkedAnalyser.setEtrMonitor(mon);
+        }
+      }
+      mon.start(0); // relay already running — no SRT slot contention, no start delay needed
+      etr290monitors.set(cfg.id, mon);
+      console.log(`[state] Restored ETR290 monitor: ${cfg.id}`);
+    } catch (err) {
+      console.error(`[state] Failed to restore ETR290 monitor ${cfg.id}:`, err.message);
     }
   }
 }
