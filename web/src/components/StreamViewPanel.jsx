@@ -787,9 +787,20 @@ function buildLaneGradient(events, timeStart, windowMs) {
   const INACTIVE_ETR = laneTintForSeverity(null);
   if (stopEvent && stopEvent.ts < timeEnd) {
     const stopX = Math.min(100, Math.max(0, ((stopEvent.ts - timeStart) / windowMs) * 100));
+    // After ETR stops, show decoder health rather than inactive grey.
+    // The decoder continues running independently of ETR monitoring — if a
+    // recent analyse_result exists for this lane, the decoder is still alive
+    // and should stay visually green (or amber/red if degraded), not go grey.
+    // Grey is reserved for lanes where the decoder itself has also stopped.
+    const lastAnalyseResult = sorted.filter(
+      (e) => e.category === 'analyse_result' && e.ts <= timeEnd
+    ).pop();
+    const postStopColour = lastAnalyseResult
+      ? laneTintForSeverity(lastAnalyseResult.severity || 'ok')
+      : INACTIVE_ETR;
     parts.push(`${laneTintForSeverity(currentSeverity)} ${stopX}%`);
-    parts.push(`${INACTIVE_ETR} ${stopX}%`);
-    parts.push(`${INACTIVE_ETR} 100%`);
+    parts.push(`${postStopColour} ${stopX}%`);
+    parts.push(`${postStopColour} 100%`);
   } else {
     parts.push(`${laneTintForSeverity(currentSeverity)} 100%`);
   }
