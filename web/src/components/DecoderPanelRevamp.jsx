@@ -1436,11 +1436,9 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         {selectedResult?.thumbnailUrl ? (
                           <div style={{ width: "100%", aspectRatio: "16/9", background: "#02050a", borderRadius: 2, overflow: "hidden" }}>
                             <img
-                              key={selectedResult.thumbnailUrl}
                               src={selectedResult.thumbnailUrl}
                               alt="Confidence monitor"
                               style={{ width: "100%", height: "100%", display: "block", objectFit: "contain" }}
-                              onError={(e) => { e.target.style.display = "none"; }}
                             />
                           </div>
                         ) : (
