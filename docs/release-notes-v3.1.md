@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.134 / backend 3.2.28)
+Date: 2026-04-08 (latest: web 3.1.135 / backend 3.2.28)
+
+## v3.1.135 — 2026-04-08
+
+### Fix: Fullscreen multiview audio bar count no longer flips between probes
+
+- ffprobe inconsistently returns 2 or 8 channels between probe cycles; `pairCount` in `FullscreenThumbTile` was recomputed from raw probe data each render, causing the bar count to flip between 1 pair and 4 pairs on the same stream.
+- **Fix:** Added a `pairCountLatch` that only increases — once 4 pairs are seen they remain visible even when a subsequent probe returns only 2 channels.
+- **Operator impact:** Audio bars in fullscreen multiview are stable and consistent.
 
 ## v3.1.134 — 2026-04-08
 

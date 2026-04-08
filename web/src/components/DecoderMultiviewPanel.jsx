@@ -524,7 +524,14 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   // This ensures all 4 audio PIDs show meter slots even when only the primary
   // stream is probed (2 measured channels → 1 real pair, 3 dark placeholders).
   const measuredPairs = channels.length > 0 ? Math.ceil(channels.length / 2) : 0;
-  const pairCount = Math.max(measuredPairs, audioEsCount);
+  const rawPairCount = Math.max(measuredPairs, audioEsCount);
+  // Latch the highest pair count seen — ffprobe inconsistently returns 2 or 8
+  // channels between probes; without a latch the bar count flips every cycle.
+  const [pairCountLatch, setPairCountLatch] = useState(0);
+  useEffect(() => {
+    if (rawPairCount > pairCountLatch) setPairCountLatch(rawPairCount);
+  }, [rawPairCount, pairCountLatch]);
+  const pairCount = Math.max(rawPairCount, pairCountLatch);
 
   const pairs = [];
   for (let i = 0; i < pairCount; i++) {
