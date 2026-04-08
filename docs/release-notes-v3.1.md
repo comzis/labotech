@@ -1,6 +1,38 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.139 / backend 3.2.30)
+Date: 2026-04-08 (latest: web 3.1.141 / backend 3.2.32)
+
+## v3.2.32 / v3.1.141 — 2026-04-08
+
+### Fix: ETR290 lifecycle correctness (Cursor peer-review findings)
+
+- **Orphan watchdog pattern** — `_isManagedEtrMonitorId` now matches any `etr-*` ID (was `/^etr-(decoder|analyser)-/i`). Auto-started monitors (`etr-<analyserID>`) were previously invisible to the watchdog and could remain as orphans after a crash.
+- **Compliance endpoint stopped state** — `overallStatus` now returns `'stopped'` when `isRunning=false`, preventing a dashboard from showing green compliance for a non-running monitor.
+- **Events API response bounding** — `GET /api/events` now accepts `?limit=<n>` (default 500, max 2000). Prevents unbounded payloads on busy deployments.
+- **ETR restore robustness** — `linkedAnalyserId` is now stored explicitly in `state.json`. Restore no longer depends solely on the `etr-<id>` naming convention; non-standard ETR IDs restore correctly via the explicit link.
+- **Tests** — 24 new tests covering: watchdog ID matching, compliance status (stopped/ok/p1-alarm), events filtering (id/type/limit/since), and state-persistence `linkedAnalyserId` round-trip. Suite: 267/267.
+
+## v3.2.31 / v3.1.140 — 2026-04-08
+
+### Feat: ETR290 auto-start, auto-stop, auto-restore + per-stream compliance API
+
+**ETR auto-start with decoder**
+- ETR290 monitor (`etr-<id>`) is now created automatically when a decoder starts (`POST /api/analyse/start`). No separate UI action required — consistent with professional broadcast analyser behaviour.
+- For SRT streams the relay is instantiated synchronously inside `startContinuous()`, so `getRelayUrl()` returns the correct UDP loopback URL immediately at ETR creation time.
+- ETR auto-stops synchronously when the decoder is stopped (`DELETE /api/analyse/:id`) — before the orphan watchdog would clean it up, ensuring saveState() captures a clean snapshot.
+
+**ETR idempotent start**
+- `POST /api/etr290/start` now returns `200` with current state if the monitor already exists (was `409`). UI toggles that fire while ETR is already auto-running will succeed gracefully.
+
+**ETR auto-restore on container restart**
+- ETR state is persisted to `config/state.json` alongside decoders. On boot, ETR monitors restore after analysers so the SRT relay is available. The original SRT URL (not the relay UDP URL) is stored — relay URL is re-derived at restore time via `getRelayUrl()`.
+- `setEtrMonitor` link re-established on restore for correct SRT probe cycle suspend/resume.
+
+**Per-stream compliance API**
+- `GET /api/etr290/:id/compliance` — returns per-priority (P1/P2/P3) pass/fail aggregation, per-check alarm status and hit counts, active incidents, and recent alarm list. Suitable for a compliance dashboard or automated reporting.
+- `GET /api/events?id=<streamId>&type=<eventType>` — event log now supports `id` and `type` query filters (cumulative AND logic) in addition to the existing `since` filter. Enables per-stream ETR alarm history queries.
+
+**Operator impact:** Enable ETR once per stream on initial commissioning — it starts automatically with the decoder on every subsequent restart.
 
 ## v3.1.139 — 2026-04-08
 

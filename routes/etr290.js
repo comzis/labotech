@@ -52,7 +52,9 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
   router.post('/start', (req, res) => {
     const { id, url, nicName, profileName } = req.body;
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
-    if (etr290monitors.has(id)) return res.status(409).json({ error: `ETR290 monitor ${id} already exists` });
+    // Idempotent: ETR monitors auto-start with their decoder, so a UI toggle
+    // hitting this endpoint while the monitor is already running should succeed.
+    if (etr290monitors.has(id)) return res.status(200).json(etr290monitors.get(id).toJSON());
 
     // SRT single-listener guard: ETR cannot connect directly to an SRT source
     // that already has a relay or thumbnail holding the caller slot.
@@ -150,6 +152,52 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
     } catch (err) {
       res.status(400).json({ error: err.message || 'Invalid ETR config' });
     }
+  });
+
+  // GET /etr290/:id/compliance
+  // Per-stream ETR 290 compliance summary: per-priority pass/fail aggregation,
+  // active incidents, and recent alarm history. Suitable for a compliance dashboard.
+  router.get('/:id/compliance', (req, res) => {
+    const mon = etr290monitors.get(req.params.id);
+    if (!mon) return res.status(404).json({ error: 'Monitor not found' });
+    const status = mon.toJSON();
+    const CHECKS = ETR290Analyser.CHECKS || {};
+
+    // Build per-priority summary from live check statuses.
+    const priorities = {};
+    for (const [priority, checks] of Object.entries(CHECKS)) {
+      const checkDetails = checks.map((c) => ({
+        id:     c.id,
+        label:  c.label,
+        status: status.status?.[c.id] || 'ok',
+        count:  status.counts?.[c.id] || 0,
+      }));
+      const alarmingCount = checkDetails.filter((c) => c.status === 'error').length;
+      priorities[priority] = {
+        total:    checks.length,
+        alarming: alarmingCount,
+        status:   alarmingCount > 0 ? 'alarm' : 'ok',
+        checks:   checkDetails,
+      };
+    }
+
+    // Overall worst-case status — stopped takes precedence over alarm state
+    // so a dashboard never shows green compliance for a non-running monitor.
+    const overallStatus = !status.isRunning ? 'stopped'
+      : priorities.p1?.alarming > 0 ? 'p1-alarm'
+      : priorities.p2?.alarming > 0 ? 'p2-alarm'
+      : priorities.p3?.alarming > 0 ? 'p3-alarm'
+      : 'ok';
+
+    res.json({
+      id:              req.params.id,
+      isRunning:       status.isRunning,
+      profileName:     status.config?.profileName || null,
+      overallStatus,
+      priorities,
+      activeIncidents: status.activeIncidents  || [],
+      recentAlarms:    status.recentAlarms     || [],
+    });
   });
 
   // GET /etr290/:id
