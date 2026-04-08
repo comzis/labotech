@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.137 / backend 3.2.29)
+Date: 2026-04-08 (latest: web 3.1.138 / backend 3.2.30)
+
+## v3.2.30 / v3.1.138 — 2026-04-08
+
+### Feat: `THUMBNAIL_KEYFRAME_ONLY` toggle — I-frame clean vs near-live operator choice
+
+- `THUMBNAIL_KEYFRAME_ONLY=true` (default): `select=key,fps=${THUMBNAIL_FPS}` — I-frames only, every JPEG clean and artefact-free. Rate = `min(keyframe_rate, THUMBNAIL_FPS)` (~0.5fps on 2s-GOP).
+- `THUMBNAIL_KEYFRAME_ONLY=false`: `fps=${THUMBNAIL_FPS}` all frames — near-live regardless of GOP, may show B/P artefacts on some encoders.
+- Applied to both `PersistentThumbnailCapture` (RTP/UDP) and SRT relay. Documented in `.env.example`.
+- **Operator guidance:** `true` for MCR image quality; `false` for near-live on low-latency short-GOP SRT feeds.
 
 ## v3.2.29 / v3.1.137 — 2026-04-08
 

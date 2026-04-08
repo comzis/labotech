@@ -29,13 +29,18 @@ const _thumbPendingById = new Map(); // safeStreamId -> Promise<string>
 
 const THUMBNAIL_DIR      = path.join(__dirname, '..', 'logs', 'thumbnails');
 const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
-// Target thumbnail frame rate for PersistentThumbnailCapture (near-live mode).
-// All decoded frames are used (keyframe-only mode removed) so the actual rate
-// is min(THUMBNAIL_FPS, stream_frame_rate). Capped at 25 to avoid CPU waste.
+// Target thumbnail frame rate for PersistentThumbnailCapture.
+// Effective rate = min(THUMBNAIL_FPS, source_keyframe_rate) when THUMBNAIL_KEYFRAME_ONLY=true,
+// or min(THUMBNAIL_FPS, source_frame_rate) when false. Capped at 25 to avoid CPU waste.
 const _envThumbFps = parseFloat(process.env.THUMBNAIL_FPS);
 const THUMBNAIL_FPS = Number.isFinite(_envThumbFps) && _envThumbFps > 0
   ? Math.min(25, _envThumbFps)
   : 5;
+// THUMBNAIL_KEYFRAME_ONLY=true (default): capture only I-frames — clean artefact-free images,
+// rate limited by source GOP (0.5fps on 2s-GOP broadcast streams).
+// THUMBNAIL_KEYFRAME_ONLY=false: capture all decoded frames — near-live refresh at THUMBNAIL_FPS
+// regardless of GOP, at the cost of occasional inter-frame artefacts on B/P frames.
+const THUMBNAIL_KEYFRAME_ONLY = process.env.THUMBNAIL_KEYFRAME_ONLY !== 'false';
 const THUMBNAIL_QUALITY_PROFILE = String(process.env.THUMBNAIL_QUALITY_PROFILE || 'high').trim().toLowerCase();
 const TS_INPUT_FIFO_SIZE = Number.isFinite(parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
   ? Math.max(1, parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
@@ -218,12 +223,17 @@ class PersistentThumbnailCapture extends EventEmitter {
     const src = this._buildSrc();
 
     // Near-live thumbnail mode: all decoded frames are passed to the fps filter.
-    // select=key was removed — it limited output to one frame per GOP (0.5fps on a
-    // 2s-GOP broadcast stream) regardless of THUMBNAIL_FPS. Full decode is required
-    // for sub-GOP frame rates. mjpeg re-encodes any fully decoded frame cleanly.
+    // THUMBNAIL_KEYFRAME_ONLY=true (default): select=key ensures every JPEG is from a
+    // clean I-frame — no inter-frame artefacts. Rate = min(keyframe_rate, THUMBNAIL_FPS).
+    // THUMBNAIL_KEYFRAME_ONLY=false: all decoded frames — near-live at THUMBNAIL_FPS
+    // regardless of GOP, may include B/P frame artefacts on some encoders.
+    // NOTE: -skip_frame nokey is NOT used — it breaks HEVC decoder initialisation
+    // by skipping frames that carry VPS/SPS/PPS context. select=key in the vf
+    // chain correctly filters after full decode, avoiding this problem.
     // format=yuv420p: mjpeg encoder has no 10-bit pixel format support; yuv422p10le
     // input (HEVC 4:2:2 Rext) must be explicitly downconverted before the encoder.
     const vf = [
+      THUMBNAIL_KEYFRAME_ONLY ? 'select=key' : null,
       `fps=${THUMBNAIL_FPS}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
