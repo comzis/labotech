@@ -525,6 +525,9 @@ function toLogEntry(msg) {
   } else if (msg.type === 'analyse_result') {
     // Routine probe result every 5s — not an alarm event
     return null;
+  } else if (msg.type === 'thumbnail_frame') {
+    // High-frequency thumbnail telemetry — never persist/show in Alarm Log
+    return null;
   } else if (msg.type === 'etr290_incident_started' || msg.type === 'etr290_incident_updated') {
     status = 'alarm';
     title = `ETR incident ${msg.type.endsWith('started') ? 'started' : 'updated'} - ${msg.label || msg.checkId || 'check'}`;
