@@ -48,14 +48,37 @@ function _analyserConfig(a) {
   };
 }
 
+function _etrConfig(m, analysers) {
+  // Store the original source URL (SRT or RTP/UDP), not the effective relay UDP URL.
+  // On restore the SRT relay redirect is re-derived from the running analyser.
+  let sourceUrl = m.url;
+  if (/^etr-/i.test(m.id) && analysers) {
+    const linked = analysers.get(m.id.slice(4));
+    if (linked && linked.url) sourceUrl = linked.url;
+  }
+  return {
+    id:          m.id,
+    url:         sourceUrl,
+    nicName:     m.nicName              || null,
+    profileName: m._config?.profileName || null,
+    config: m._config ? {
+      includePids:     [...(m._config.includePids  || [])],
+      excludePids:     [...(m._config.excludePids  || [])],
+      allowUnknownPid:  m._config.allowUnknownPid,
+      thresholds:      { ...(m._config.thresholds || {}) },
+    } : {},
+  };
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-function save(streams, transcoders, forwarders, analysers) {
+function save(streams, transcoders, forwarders, analysers, etr290monitors) {
   const state = {
-    streams:     [...streams.values()]    .filter(e => e.isRunning).map(_encoderConfig),
-    transcoders: [...transcoders.values()].filter(t => t.isRunning).map(_transcoderConfig),
-    forwarders:  [...forwarders.values()] .filter(f => f.isRunning).map(_forwarderConfig),
-    analysers:   analysers ? [...analysers.values()].filter(a => a.isRunning).map(_analyserConfig) : [],
+    streams:        [...streams.values()]      .filter(e => e.isRunning).map(_encoderConfig),
+    transcoders:    [...transcoders.values()]  .filter(t => t.isRunning).map(_transcoderConfig),
+    forwarders:     [...forwarders.values()]   .filter(f => f.isRunning).map(_forwarderConfig),
+    analysers:      analysers      ? [...analysers.values()]     .filter(a => a.isRunning).map(_analyserConfig)                : [],
+    etr290monitors: etr290monitors ? [...etr290monitors.values()].filter(m => m.isRunning).map(m => _etrConfig(m, analysers)) : [],
   };
   try {
     fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));

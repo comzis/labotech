@@ -1,6 +1,28 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.139 / backend 3.2.30)
+Date: 2026-04-08 (latest: web 3.1.140 / backend 3.2.31)
+
+## v3.2.31 / v3.1.140 — 2026-04-08
+
+### Feat: ETR290 auto-start, auto-stop, auto-restore + per-stream compliance API
+
+**ETR auto-start with decoder**
+- ETR290 monitor (`etr-<id>`) is now created automatically when a decoder starts (`POST /api/analyse/start`). No separate UI action required — consistent with professional broadcast analyser behaviour.
+- For SRT streams the relay is instantiated synchronously inside `startContinuous()`, so `getRelayUrl()` returns the correct UDP loopback URL immediately at ETR creation time.
+- ETR auto-stops synchronously when the decoder is stopped (`DELETE /api/analyse/:id`) — before the orphan watchdog would clean it up, ensuring saveState() captures a clean snapshot.
+
+**ETR idempotent start**
+- `POST /api/etr290/start` now returns `200` with current state if the monitor already exists (was `409`). UI toggles that fire while ETR is already auto-running will succeed gracefully.
+
+**ETR auto-restore on container restart**
+- ETR state is persisted to `config/state.json` alongside decoders. On boot, ETR monitors restore after analysers so the SRT relay is available. The original SRT URL (not the relay UDP URL) is stored — relay URL is re-derived at restore time via `getRelayUrl()`.
+- `setEtrMonitor` link re-established on restore for correct SRT probe cycle suspend/resume.
+
+**Per-stream compliance API**
+- `GET /api/etr290/:id/compliance` — returns per-priority (P1/P2/P3) pass/fail aggregation, per-check alarm status and hit counts, active incidents, and recent alarm list. Suitable for a compliance dashboard or automated reporting.
+- `GET /api/events?id=<streamId>&type=<eventType>` — event log now supports `id` and `type` query filters (cumulative AND logic) in addition to the existing `since` filter. Enables per-stream ETR alarm history queries.
+
+**Operator impact:** Enable ETR once per stream on initial commissioning — it starts automatically with the decoder on every subsequent restart.
 
 ## v3.1.139 — 2026-04-08
 

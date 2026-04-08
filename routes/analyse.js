@@ -8,7 +8,7 @@ const TSAnalyser = require('../src/ts-analyser');
 const { THUMBNAIL_DIR, sanitizeStreamId } = require('../src/monitoring');
 
 
-module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null) {
+module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null, etr290monitors = null) {
   const router = express.Router();
 
   function broadcast(msg) {
@@ -17,6 +17,47 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
     wss.clients.forEach(c => {
       if (c.readyState === WebSocket.OPEN) c.send(data);
     });
+  }
+
+  // Auto-start an ETR290 monitor linked to a decoder.
+  // Called after analyser.startContinuous() so the SRT relay is already
+  // instantiated and getRelayUrl() returns a non-null URL synchronously.
+  function _autoStartEtr(id, analyser, url) {
+    if (!etr290monitors) return;
+    const etrId = `etr-${id}`;
+    if (etr290monitors.has(etrId)) return; // already running (e.g. restored from state)
+    try {
+      const ETR290Analyser = require('../src/etr290-analyser');
+      const etrUrl = url.startsWith('srt://')
+        ? (analyser.getRelayUrl() || url)
+        : url;
+      const mon = new ETR290Analyser({ id: etrId, url: etrUrl });
+      mon.on('etr290',            status   => broadcast({ type: 'etr290_status',           id: etrId, ...status   }));
+      mon.on('alarm',             alarm    => broadcast({ type: 'etr290_alarm',             id: etrId, ...alarm    }));
+      mon.on('incident_started',  incident => broadcast({ type: 'etr290_incident_started',  id: etrId, ...incident }));
+      mon.on('incident_updated',  incident => broadcast({ type: 'etr290_incident_updated',  id: etrId, ...incident }));
+      mon.on('incident_cleared',  incident => broadcast({ type: 'etr290_incident_cleared',  id: etrId, ...incident }));
+      mon.on('error',             err      => broadcast({ type: 'error',                    id: etrId, message: err.message }));
+      mon.on('stopped',           ()       => broadcast({ type: 'etr290_stopped',           id: etrId }));
+      if (typeof analyser.setEtrMonitor === 'function') analyser.setEtrMonitor(mon);
+      const startDelay = typeof analyser.getEtrStartDelay === 'function' ? analyser.getEtrStartDelay() : 0;
+      mon.start(startDelay);
+      etr290monitors.set(etrId, mon);
+    } catch (err) {
+      console.error(`[analyse] Failed to auto-start ETR monitor for ${id}:`, err.message);
+    }
+  }
+
+  // Stop the linked ETR monitor when a decoder is removed.
+  function _autoStopEtr(id, analyser) {
+    if (!etr290monitors) return;
+    const etrId = `etr-${id}`;
+    const mon = etr290monitors.get(etrId);
+    if (mon) {
+      mon.stop();
+      etr290monitors.delete(etrId);
+    }
+    if (analyser && typeof analyser.clearEtrMonitor === 'function') analyser.clearEtrMonitor();
   }
 
   // GET /analyse?url=...  (one-shot probe)
@@ -50,6 +91,11 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
 
     analyser.startContinuous();
     analysers.set(id, analyser);
+
+    // Auto-start ETR290 monitor — relay is synchronously instantiated by startContinuous()
+    // for SRT streams so getRelayUrl() is available immediately.
+    _autoStartEtr(id, analyser, url);
+
     if (saveState) saveState();
     broadcast({ type: 'analyse_started', id, message: `${id} analyser started` });
     res.status(201).json(analyser.toJSON());
@@ -67,6 +113,11 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
     const id = req.params.id;
     const a = analysers.get(id);
     if (!a) return res.status(404).json({ error: 'Analyser not found' });
+
+    // Stop linked ETR monitor before stopping the analyser — avoids the orphan
+    // watchdog race and ensures clean state snapshot in saveState().
+    _autoStopEtr(id, a);
+
     a.stop();
     analysers.delete(id);
     // Remove stale thumbnail so a ghost JPEG cannot persist across restarts
