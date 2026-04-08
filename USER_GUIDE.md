@@ -1,6 +1,6 @@
 # Labotech User Guide
 
-**Broadcast Encoder & Stream Management System**
+**DVB-IP Stream Processor & Management System**
 
 ---
 
@@ -23,7 +23,7 @@
 
 ## 1. System Overview
 
-Labotech manages broadcast-grade SRT encoding, 1080p→1080i transcoding, multicast forwarding, and MPEG-TS stream analysis from a single web interface.
+Labotech manages broadcast-grade SRT encapsulation, 1080p↔1080i conversion, multicast forwarding, and MPEG-TS stream analysis from a single web interface.
 
 **Network layout:**
 
@@ -50,8 +50,35 @@ Copy and configure the environment file:
 
 ```bash
 cp .env.example .env
-# .env has production defaults (API_HOST=10.67.18.29, API_PORT=4000); adjust only if your management IP differs
+# Edit .env for your deployment before first start.
 ```
+
+For local frontend development, also create a web env file:
+
+```bash
+cp web/.env.example web/.env
+# Edit web/.env credentials/metadata as needed for local dev.
+```
+
+### 2.1 Environment variables quick reference
+
+Root `.env` (backend/runtime):
+
+- **Required:** `API_HOST`, `API_PORT`, `MANAGEMENT_NIC`, `MULTICAST_NIC`, `FORWARD_MULTICAST_SUBNET`
+- **Security-sensitive:** `SRT_PASSPHRASE`, `VITE_ADMIN_PASS`, `VITE_OPS_PASS` (never commit real values)
+- **Common optional:** `LABOTECH_RELEASE`, `MONITORING_POLICY_PROFILE`, `THUMBNAIL_INTERVAL_SEC`
+- **Advanced optional:** ETR tuning (`ETR290_*`), input/probe tuning (`TS_INPUT_*`, `TSDUCK_MONITOR_INTERVAL_MS`), event-log tuning (`EVENT_LOG_*`)
+
+Frontend `web/.env` (Vite build-time):
+
+- `VITE_ADMIN_PASS`, `VITE_OPS_PASS`
+- `VITE_APP_VERSION`, `VITE_RELEASE_VERSION`, `VITE_BUILD_TIME_UTC`
+- `VITE_THUMB_INTERVAL_MS`
+
+Notes:
+
+- `VITE_*` variables are bundled into frontend assets at build time.
+- Keep real passwords only in local/server `.env` files; do not commit secrets.
 
 ---
 
