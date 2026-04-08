@@ -119,15 +119,18 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
       return res.status(409).json({ error: `Analyser ${id} already exists` });
     }
 
-    // URL-level dedupe: avoid spawning duplicate probe/thumbnail/sniffer workers
-    // for the same source when callers generate new IDs for repeated starts.
+    // URL-level dedupe: if the same source is already monitored under a
+    // different ID, perform a controlled handover to the requested ID.
+    // This keeps worker dedupe guarantees while preserving UI expectations
+    // that the requested tile/decoder ID becomes active.
     const existingByUrl = _findAnalyserByUrl(url);
     if (existingByUrl && existingByUrl.analyser && existingByUrl.analyser.isRunning) {
-      return res.status(200).json({
-        ...existingByUrl.analyser.toJSON(),
-        reused: true,
-        message: `Source URL already monitored by ${existingByUrl.id}`,
-      });
+      const oldId = existingByUrl.id;
+      const oldAnalyser = existingByUrl.analyser;
+      _autoStopEtr(oldId, oldAnalyser);
+      oldAnalyser.stop();
+      analysers.delete(oldId);
+      broadcast({ type: 'analyse_stopped', id: oldId, message: `${oldId} analyser replaced by ${id} for shared source URL` });
     }
 
     const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined, thumbnailClient: thumbnailClient || undefined });
