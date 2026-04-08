@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.149 / backend 3.2.35)
+Date: 2026-04-08 (latest: web 3.1.150 / backend 3.2.36)
+
+## v3.2.36 / v3.1.150 — 2026-04-08
+
+### Fix: multiview decoder tile add regression with URL dedupe enabled
+
+- **Issue** — adding a decoder tile could fail to appear when the source URL matched an existing active analyser with a different ID.
+- **Cause** — start route returned the existing analyser object (`reused`) instead of activating the requested ID, breaking UI expectations for tile identity.
+- **Fix** — `POST /analyse/start` now performs controlled handover for same-URL collisions: stop old analyser + linked ETR monitor, then start the requested ID.
+- **Operator impact** — decoder tile add behavior is restored while keeping one-analyser-per-source worker dedupe protection.
 
 ## v3.2.35 / v3.1.149 — 2026-04-08
 
