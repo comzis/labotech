@@ -817,14 +817,14 @@ describe('TSAnalyser', () => {
   describe('_getNicName()', () => {
     afterEach(() => {
       jest.resetModules();
-      jest.dontMock('../config/multicast.json');
+      jest.unmock('../config/multicast.json');
     });
 
     test('returns eno2 as default when config/multicast.json is missing', () => {
       jest.resetModules();
       jest.doMock('../config/multicast.json', () => {
         throw new Error('ENOENT');
-      });
+      }, { virtual: true });
       const TSA = require('../src/ts-analyser');
       TSA._resetNicNameCache();
       expect(TSA._getNicName()).toBe('eno2');
@@ -840,7 +840,7 @@ describe('TSAnalyser', () => {
 
     test('falls back to eno2 when nic field absent from config', () => {
       jest.resetModules();
-      jest.doMock('../config/multicast.json', () => ({ subnet: '239.0.0.0/8' }));
+      jest.doMock('../config/multicast.json', () => ({ subnet: '239.0.0.0/8' }), { virtual: true });
       const TSA = require('../src/ts-analyser');
       TSA._resetNicNameCache();
       expect(TSA._getNicName()).toBe('eno2');
