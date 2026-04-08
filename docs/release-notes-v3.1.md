@@ -1,6 +1,25 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.141 / backend 3.2.32)
+Date: 2026-04-08 (latest: web 3.1.143 / backend 3.2.32)
+
+## v3.1.143 — 2026-04-08
+
+### UI: Add auto-start notice to ETR 290 Alarm Configuration section
+
+Added a one-line subtitle — "ETR analysis starts automatically when a decoder is provisioned." — below the section header so operators understand why no Enable button is present.
+
+## v3.1.142 — 2026-04-08
+
+### UI: Remove redundant ETR enable controls from Decoder tab
+
+ETR290 analysis now starts automatically with every decoder — the manual "Enable ETR" button and "Auto-enable ETR when starting a decoder" checkbox are no longer needed.
+
+- Removed **"▶ Enable ETR / ● RUNNING"** button from the ETR 290 Alarm Configuration section.
+- Removed **"Auto-enable ETR when starting a decoder"** checkbox from the Advanced section.
+- Removed `enableEtrOnProvision` state and all associated provisioning logic (`startEtrForSelected`, ETR branch in `startRows`, ETR count in provision summary).
+- Grid in the ETR controls row reduced from `1fr auto auto` to `1fr auto` (decoder selector + Stop button only).
+- **Stop** button and Apply Config button remain fully functional for operator use.
+- No change to backend behaviour.
 
 ## v3.2.32 / v3.1.141 — 2026-04-08
 
