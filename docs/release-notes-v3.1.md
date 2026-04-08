@@ -1,6 +1,20 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.143 / backend 3.2.32)
+Date: 2026-04-08 (latest: web 3.1.144 / backend 3.2.32)
+
+## v3.1.144 — 2026-04-08
+
+### Feat: ETR per-decoder alarm log + catalog picker in TS Analyser
+
+**ETR alarm log (Decoder tab)**
+- A compact scrollable alarm log now appears inside the ETR 290 Alarm Configuration section when a decoder with ETR events is selected.
+- Shows up to 20 most recent events for the selected decoder (polling every 10 s via `GET /api/events?id=etr-<id>&limit=30`).
+- Each row: UTC time · priority badge (P1/P2/P3 colour-coded) · check label.
+
+**Stream catalog picker (TS Analyser tab)**
+- The stream catalog dropdown (same as Decoder tab) is now available above the monitor selector in the TS Analyser.
+- Selecting a stream from the catalog fills the Host/IP A and Port A fields and sets the transport mode (RTP/SRT/UDP) automatically.
+- Catalog loads once on mount from `GET /api/multiview/catalog`; hidden when catalog is empty.
 
 ## v3.1.143 — 2026-04-08
 

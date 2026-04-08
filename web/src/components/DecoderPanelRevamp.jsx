@@ -549,6 +549,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [selectedProfileName, setSelectedProfileName] = useState("");
   const [allowUnknownPid, setAllowUnknownPid] = useState(true);
   const [etrActionNote, setEtrActionNote] = useState(null);
+  const [etrLog, setEtrLog] = useState([]);
   const [thresholds, setThresholds] = useState(() =>
     ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: String(RECOMMENDED_THRESHOLDS[c.id] || 1) }), {})
   );
@@ -596,6 +597,20 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   useEffect(() => {
     getMonitoringPolicy().then(setPolicyData).catch(() => {});
   }, []);
+
+  // Poll ETR event log for the selected decoder every 10 s.
+  useEffect(() => {
+    if (!selectedId) { setEtrLog([]); return; }
+    const load = () => {
+      fetch(`/api/events?id=etr-${selectedId}&limit=30`)
+        .then((r) => r.json())
+        .then((d) => setEtrLog(Array.isArray(d) ? d : []))
+        .catch(() => {});
+    };
+    load();
+    const t = setInterval(load, 10000);
+    return () => clearInterval(t);
+  }, [selectedId]);
 
   useEffect(() => {
     fetch('/api/multiview/catalog').then(r => r.json()).then(d => setCatalog(d.streams || [])).catch(() => {});
@@ -1437,6 +1452,30 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       ■ Stop
                     </button>
                   </div>
+                  {/* ── Recent alarm log ───────────────────────────────── */}
+                  {etrLog.length > 0 && (
+                    <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 3, overflow: "hidden" }}>
+                      <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", padding: "4px 8px", borderBottom: `1px solid ${C.border}` }}>
+                        Recent alarms — {selectedId}
+                      </div>
+                      <div style={{ maxHeight: 140, overflowY: "auto" }}>
+                        {etrLog.slice(0, 20).map((e, i) => {
+                          const p = String(e.priority || "p3").toLowerCase();
+                          const pColor = p === "p1" ? C.err : p === "p2" ? C.warn : C.info;
+                          const timeStr = e.time ? new Date(e.time).toISOString().slice(11, 19) : "—";
+                          const label = e.label || e.checkId || e.type || "alarm";
+                          return (
+                            <div key={i} style={{ display: "grid", gridTemplateColumns: "56px 28px 1fr", gap: 6, padding: "3px 8px", borderBottom: `1px solid ${C.border}`, alignItems: "center" }}>
+                              <span style={{ fontSize: 9, color: C.muted, fontFamily: "'Courier New',monospace" }}>{timeStr}</span>
+                              <span style={{ fontSize: 8, fontWeight: 700, color: pColor, border: `1px solid ${pColor}66`, borderRadius: 2, padding: "0 3px", textAlign: "center", textTransform: "uppercase" }}>{p.toUpperCase()}</span>
+                              <span style={{ fontSize: 9, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
                   {/* ── Alert priority toggles ──────────────────────────── */}
                   <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 3, padding: "8px 10px" }}>
                     <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Alert priorities — click to enable / disable</div>
