@@ -86,7 +86,7 @@ function getHealthPayload() {
 
 function createApp(wss) {
   const app = express();
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
 
   // Serve built frontend
   const webDist = path.join(__dirname, '..', 'web', 'dist');
@@ -298,7 +298,7 @@ function start() {
   const wss = new WebSocket.Server({ server });
 
   // Rebuild app with wss injected
-  app.use(express.json());
+  app.use(express.json({ limit: '2mb' }));
 
   const webDist = path.join(__dirname, '..', 'web', 'dist');
   app.use(express.static(webDist));

@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.129 / backend 3.2.26)
+Date: 2026-04-08 (latest: web 3.1.129 / backend 3.2.27)
+
+## v3.2.27 — 2026-04-08
+
+### Fix: Catalog import fails for files over 100 KB
+
+- `express.json()` default body size limit is 100 KB. The catalog import sends raw file content encoded inside a JSON body, which can easily exceed this for catalogs with hundreds of streams.
+- **Fix:** Raised `express.json` limit to `2mb` in both app instances in `src/api.js`.
+- **Operator impact:** JSON and CSV catalog uploads no longer fail with an HTML error response.
 
 ## v3.2.26 — 2026-04-08
 
