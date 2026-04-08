@@ -77,6 +77,7 @@ function extractPidEvidence(selected) {
 
 export default function EventLogPanel({ events = [], onClear = () => {}, onClearGhost = () => {} }) {
   const [severityFilter, setSeverityFilter] = useState('all');
+  const [instanceFilter, setInstanceFilter] = useState('all');
   const [query, setQuery] = useState('');
   const [selectedRowKey, setSelectedRowKey] = useState(null);
 
@@ -127,11 +128,22 @@ export default function EventLogPanel({ events = [], onClear = () => {}, onClear
     toast.success(`Exported ${events.length} event(s) as CSV`, { duration: 2500 });
   };
 
+  const instanceOptions = useMemo(() => {
+    const ids = Array.from(new Set(events.map((e) => String(e?.id || 'system'))));
+    ids.sort((a, b) => {
+      if (a === 'system') return -1;
+      if (b === 'system') return 1;
+      return a.localeCompare(b);
+    });
+    return ids;
+  }, [events]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     return [...events]
       .reverse()
       .filter((e) => severityFilter === 'all' || e.severity === severityFilter)
+      .filter((e) => instanceFilter === 'all' || String(e.id || 'system') === instanceFilter)
       .filter((e) => {
         if (!q) return true;
         return (
@@ -146,7 +158,7 @@ export default function EventLogPanel({ events = [], onClear = () => {}, onClear
         ...e,
         __key: e.key || `${e.when || 'na'}-${e.id || 'system'}-${idx}`,
       }));
-  }, [events, severityFilter, query]);
+  }, [events, severityFilter, instanceFilter, query]);
   const selected = useMemo(() => rows.find((r) => r.__key === selectedRowKey) || null, [rows, selectedRowKey]);
   const pidEvidence = useMemo(() => extractPidEvidence(selected), [selected]);
 
@@ -183,7 +195,31 @@ export default function EventLogPanel({ events = [], onClear = () => {}, onClear
               </button>
             ))}
 
-            <div style={{ marginLeft: 'auto', minWidth: 260 }}>
+            <div style={{ marginLeft: 'auto', minWidth: 220 }}>
+              <select
+                value={instanceFilter}
+                onChange={(e) => setInstanceFilter(e.target.value)}
+                style={{
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  background: C.input,
+                  border: `1px solid ${C.border}`,
+                  borderRadius: 2,
+                  color: C.text,
+                  padding: '5px 8px',
+                  fontSize: 11,
+                  fontFamily: "'Courier New',monospace",
+                  outline: 'none',
+                }}
+              >
+                <option value="all">All instances</option>
+                {instanceOptions.map((id) => (
+                  <option key={id} value={id}>{id}</option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ minWidth: 260 }}>
               <Input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}

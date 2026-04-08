@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.153 / backend 3.2.37)
+Date: 2026-04-08 (latest: web 3.1.154 / backend 3.2.37)
+
+## v3.1.154 — 2026-04-08
+
+### Enhancement: Alarm Log instance dropdown filter
+
+- Added an **Instance** dropdown in Alarm Log to filter rows by decoder/ETR/system ID without typing.
+- Dropdown options are auto-derived from current event IDs and kept in sync with the active log set.
+- Existing severity and free-text filters continue to work together with the new instance filter.
 
 ## v3.1.153 — 2026-04-08
 
