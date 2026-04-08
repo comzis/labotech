@@ -12,10 +12,10 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 
 ## Agent A Status
 
-- Current task: thumbnail near-live + fullscreen multiview fixes — PR #99 open, awaiting merge
-- Active branch: `feat/iframe-thumbnail-capture`
-- Last known focus: thumbnail pipeline (monitoring.js, srt-relay.js, ts-analyser.js, DecoderMultiviewPanel.jsx, DecoderPanelRevamp.jsx)
-- Notes: large batch of PRs merged today (#88–#99). See merge log below. PR #99 pending Cursor review before merge.
+- Current task: idle — all PRs from this session merged
+- Active branch: none
+- Last known focus: ETR290 lifecycle (auto-start/stop/restore), fullscreen thumbnail prefetch, compliance API
+- Notes: session closed cleanly at backend 3.2.32 / web 3.1.141
 
 ## Agent B Status
 
@@ -42,9 +42,14 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 - PR #96 merged: fullscreen audio meters — audioSnapshot latch + pairCountLatch
 - PR #97 merged: fullscreen instant load — explicit grid row sizing, 8-col breakpoints
 - PR #98 merged: SRT relay thumbnail near-live — fps filter + poll rate match THUMBNAIL_FPS
-- PR #99 open: I-frame-only thumbnail capture (select=key,fps=THUMBNAIL_FPS) — awaiting Cursor review
+- PR #99 merged: I-frame-only thumbnail capture (THUMBNAIL_KEYFRAME_ONLY toggle)
+- PR #100 merged: fullscreen multiview thumbnail prefetch layer (instant first-entry)
+- PR #101 closed: superseded by PR #102
+- PR #102 merged: ETR290 auto-start/stop/restore + compliance API + event log filtering + 24 new tests (267/267)
 
 ## Notes
 
 - Keep this file updated at the end of each multi-step agent session.
 - If two agents must touch the same file, record intent here before editing.
+- Deploy sequence: `git pull` → `docker compose -f docker-compose.dev.yml build labotech` → `docker compose -f docker-compose.dev.yml up -d`
+- Server `.env` needs: `THUMBNAIL_FPS=5`, `THUMBNAIL_KEYFRAME_ONLY=true`
