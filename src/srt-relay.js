@@ -142,15 +142,17 @@ class SRTRelay extends EventEmitter {
     ];
 
     // Output 2 — JPEG thumbnail (only when thumbPath is configured).
-    // thumbnail=100 buffers 100 frames and picks the sharpest one — at 25 fps
-    // that is ~1 JPEG every 4 s. Integrated here (not a separate process) because
-    // this ffmpeg has SPS/PPS from the initial SRT connection; separate processes
-    // joining the UDP loopback mid-stream fail H.264 decode without those headers.
+    // Uses fps=THUMBNAIL_FPS (default 5) on all decoded frames — same rate as
+    // PersistentThumbnailCapture used for RTP/UDP. The thumbnail=N "sharpest frame"
+    // filter was removed: it buffered ~4s worth of frames before emitting, making
+    // near-live refresh impossible regardless of THUMBNAIL_FPS.
+    // -update 1: overwrite the same file on every frame (rolling thumbnail).
+    // format=yuv420p: mjpeg has no 10-bit support; required for HEVC 4:2:2 sources.
     if (this.thumbPath) {
+      const thumbFps = Math.min(25, Math.max(0.1, parseFloat(process.env.THUMBNAIL_FPS) || 5));
       args.push(
         '-map', '0:v:0',
-        '-vf', 'thumbnail=100,scale=480:-2',
-        '-vsync', 'vfr',
+        '-vf', `fps=${thumbFps},scale=480:-2,format=yuv420p`,
         '-update', '1',
         '-f', 'image2',
         '-q:v', '3',
