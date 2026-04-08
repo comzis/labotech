@@ -548,7 +548,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
   const [profileDescription, setProfileDescription] = useState("Broadcast baseline profile");
   const [selectedProfileName, setSelectedProfileName] = useState("");
   const [allowUnknownPid, setAllowUnknownPid] = useState(true);
-  const [enableEtrOnProvision, setEnableEtrOnProvision] = useState(false);
   const [etrActionNote, setEtrActionNote] = useState(null);
   const [thresholds, setThresholds] = useState(() =>
     ETR_CHECK_FIELDS.reduce((acc, c) => ({ ...acc, [c.id]: String(RECOMMENDED_THRESHOLDS[c.id] || 1) }), {})
@@ -773,13 +772,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     : !selectedId
       ? "Select a running decoder to stop."
       : "";
-  const enableEtrHint = busy
-    ? "Decoder operation in progress..."
-    : !selectedId
-      ? "Select a decoder first."
-      : !selectedDecoderUrl
-        ? "Decoder URL is still syncing. You can press Enable ETR and it will retry API resolution."
-        : "";
   const applyEtrHint = busy
     ? "Decoder operation in progress..."
     : !selectedId
@@ -846,8 +838,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     const runStamp = Date.now();
     const started = [];
     const failed = [];
-    const etrStarted = [];
-    const etrFailed = [];
     setEtrActionNote(null);
     const usedIds = new Set([...(activeIds || [])]);
     const planned = plansToStart.map((row) => {
@@ -867,24 +857,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
         return { id, started: false, error: err?.message || "Provision failed" };
       }
 
-      if (!enableEtrOnProvision) {
-        return { id, started: true, etrStarted: false, etrError: null };
-      }
-
-      try {
-        await etr.start(`etr-${id}`, row.url, captureNic || undefined, {
-          profileName: selectedProfileName || undefined,
-          config: etrConfig,
-        });
-        return { id, started: true, etrStarted: true, etrError: null };
-      } catch (etrErr) {
-        return {
-          id,
-          started: true,
-          etrStarted: false,
-          etrError: `ETR attach warning: ${etrErr?.message || "failed"}`,
-        };
-      }
+      return { id, started: true };
     };
 
     for (let i = 0; i < planned.length; i += BATCH_START_CONCURRENCY) {
@@ -897,8 +870,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
           return;
         }
         started.push(r.id);
-        if (r.etrStarted) etrStarted.push(r.id);
-        if (r.etrError) etrFailed.push({ id: r.id, message: r.etrError });
       });
       // Small inter-batch gap smooths ffprobe/thumbnail burst pressure.
       if (i + BATCH_START_CONCURRENCY < planned.length) {
@@ -910,7 +881,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
       await refreshActives();
       await etr.refreshActives();
     } catch (_) {}
-    setProvisionSummary({ started, failed: [...failed, ...etrFailed], etrStarted, at: Date.now() });
+    setProvisionSummary({ started, failed, at: Date.now() });
   };
 
   const startDecoder = async () => {
@@ -933,62 +904,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
     try {
       await stop(selectedId);
       try { await refreshActives(); } catch (_) {}
-    } finally { setBusy(false); }
-  };
-
-  const startEtrForSelected = async () => {
-    if (!selectedId) {
-      setEtrActionNote({ type: "warn", text: "Select a decoder first." });
-      return;
-    }
-    if (busy) return;
-    if (selectedEtrExists) {
-      setBusy(true);
-      try {
-        await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
-        await etr.refreshActives();
-        setEtrActionNote({ type: "info", text: `ETR already running for ${selectedId}. Config updated.` });
-      } finally { setBusy(false); }
-      return;
-    }
-    setBusy(true);
-    try {
-      let attachUrl = selectedDecoderUrl;
-      if (!attachUrl) {
-        // Running analysers can exist before first analyse_result websocket payload.
-        // Resolve URL from API directly so ETR enable action is not blocked by UI timing.
-        try {
-          const analyser = await getAnalyser(selectedId);
-          attachUrl = analyser?.url || "";
-        } catch (_) {
-          attachUrl = "";
-        }
-      }
-      if (!attachUrl) {
-        setEtrActionNote({ type: "warn", text: "Decoder URL not available yet. Keep decoder running and retry Enable ETR." });
-        return;
-      }
-      await etr.start(selectedEtrMonitorId, attachUrl, captureNic || undefined, {
-        profileName: selectedProfileName || undefined,
-        config: etrConfig,
-      });
-      await etr.refreshActives();
-      setEtrActionNote({ type: "ok", text: `ETR enabled for ${selectedId}.` });
-    } catch (err) {
-      const msg = err?.message || "Failed to start ETR monitor.";
-      if (String(msg).toLowerCase().includes("already exists")) {
-        try {
-          await etr.updateConfig(selectedEtrMonitorId, etrConfig, selectedProfileName || null);
-          await etr.refreshActives();
-          setEtrActionNote({ type: "info", text: `ETR already existed for ${selectedId}. Config updated.` });
-          return;
-        } catch (cfgErr) {
-          setEtrActionNote({ type: "err", text: cfgErr?.message || "ETR exists but config update failed." });
-          return;
-        }
-      }
-      setEtrActionNote({ type: "err", text: msg });
-      toast.error(msg, { duration: 8000 });
     } finally { setBusy(false); }
   };
 
@@ -1372,11 +1287,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                 <div style={{ fontSize: 10, color: C.muted }}>
                   Started: <span style={{ color: C.ok }}>{provisionSummary.started.length}</span> · Failed:{" "}
                   <span style={{ color: C.err }}>{provisionSummary.failed.length}</span>
-                  {provisionSummary.etrStarted?.length ? (
-                    <>
-                      {" "}· ETR: <span style={{ color: C.info }}>{provisionSummary.etrStarted.length}</span>
-                    </>
-                  ) : null}
                 </div>
               )}
               {error && <div style={{ fontSize: 10, color: C.err }}>Decoder analyser error: {error}</div>}
@@ -1506,9 +1416,10 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                     : <Badge label="NOT RUNNING" color={C.muted} small />}
                 />
                 <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: 10 }}>
+                  <div style={{ fontSize: 9, color: C.muted }}>ETR analysis starts automatically when a decoder is provisioned.</div>
 
                   {/* ── Decoder selector + ETR controls ────────────────── */}
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 6, alignItems: "center" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 6, alignItems: "center" }}>
                     <Field label="Monitor decoder">
                       <select
                         value={selectedId}
@@ -1519,15 +1430,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                         {activeIds.map((id) => <option key={id} value={id}>{id}</option>)}
                       </select>
                     </Field>
-    <button onClick={startEtrForSelected} disabled={!selectedId || busy}
-                      style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700,
-                        cursor: selectedId && !busy ? "pointer" : "not-allowed",
-                        opacity: busy ? 0.4 : 1,
-                        border: `1px solid ${selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.border}`,
-                        color: selectedId && !busy ? (selectedEtrExists ? C.ok : C.info) : C.muted,
-                        background: selectedEtrExists ? `${C.ok}10` : "transparent" }}>
-                      {busy ? "…" : selectedEtrExists ? "● RUNNING" : "▶ Enable ETR"}
-                    </button>
                     <button onClick={stopEtrForSelected} disabled={!selectedEtrExists || busy}
                       style={{ height: 30, marginTop: 16, padding: "0 12px", borderRadius: 2, fontSize: 10, fontWeight: 700, cursor: selectedEtrExists && !busy ? "pointer" : "not-allowed", opacity: busy ? 0.5 : 1,
                         border: `1px solid ${selectedEtrExists && !busy ? C.err : C.border}`,
@@ -1535,15 +1437,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       ■ Stop
                     </button>
                   </div>
-                  {(enableEtrHint || (!selectedEtrExists && !busy ? "No running ETR monitor for selected decoder." : "")) && (
-                    <div style={{ display: "grid", gap: 2, fontSize: 9, color: C.muted, marginTop: -2 }}>
-                      {(enableEtrHint || "No running ETR monitor for selected decoder.") ? (
-                        <div>{enableEtrHint || "No running ETR monitor for selected decoder."}</div>
-                      ) : null}
-                      {applyEtrHint ? <div>{applyEtrHint}</div> : null}
-                    </div>
-                  )}
-
                   {/* ── Alert priority toggles ──────────────────────────── */}
                   <div style={{ background: C.dim, border: `1px solid ${C.border}`, borderRadius: 3, padding: "8px 10px" }}>
                     <div style={{ fontSize: 8, color: C.muted, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 6 }}>Alert priorities — click to enable / disable</div>
@@ -1643,7 +1536,7 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                   >
                     {busy ? "APPLYING…" : "↻  APPLY CONFIG TO RUNNING MONITOR"}
                   </button>
-                  {applyEtrHint && !enableEtrHint && <div style={{ fontSize: 9, color: C.muted }}>{applyEtrHint}</div>}
+                  {applyEtrHint && <div style={{ fontSize: 9, color: C.muted }}>{applyEtrHint}</div>}
 
                   {etrActionNote && (
                     <div style={{ fontSize: 10, padding: "4px 8px", borderRadius: 2, background: C.dim,
@@ -1693,10 +1586,6 @@ export default function DecoderPanel({ lastMessage, selectedDecoderRequest }) {
                       <label style={{ display: "flex", alignItems: "center", gap: 6, color: allowUnknownPid ? C.ok : C.warn, fontSize: 10 }}>
                         <input type="checkbox" checked={allowUnknownPid} onChange={(e) => setAllowUnknownPid(e.target.checked)} style={{ accentColor: C.ok }} />
                         Allow alarms without PID evidence
-                      </label>
-                      <label style={{ display: "flex", alignItems: "center", gap: 6, color: enableEtrOnProvision ? C.ok : C.muted, fontSize: 10 }}>
-                        <input type="checkbox" checked={enableEtrOnProvision} onChange={(e) => setEnableEtrOnProvision(e.target.checked)} style={{ accentColor: C.ok }} />
-                        Auto-enable ETR when starting a decoder
                       </label>
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                         <Field label="Load profile">
