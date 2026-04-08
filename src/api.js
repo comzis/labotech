@@ -31,6 +31,15 @@ let _lastCpuSample = null;
 let _etrOrphanWatchdog = null;
 let _thumbnailClient = null;
 let _analyserUrlDedupWatchdog = null;
+const _dedupStats = {
+  duplicateAutoStopped: 0,
+  staleAutoStopped: 0,
+  alertsRaised: 0,
+  lastActionAt: null,
+  windowStartedAt: Date.now(),
+  windowAutoHeals: 0,
+  startCooldownUntilByUrl: new Map(),
+};
 
 
 function _sampleCpuPercent() {
@@ -79,6 +88,14 @@ function getHealthPayload() {
       memoryTotalMB: Math.round(totalMem / (1024 * 1024)),
       processRssMB: Math.round(process.memoryUsage().rss / (1024 * 1024)),
       heapUsedMB: Math.round(process.memoryUsage().heapUsed / (1024 * 1024)),
+      analyserDedup: {
+        duplicateAutoStopped: _dedupStats.duplicateAutoStopped,
+        staleAutoStopped: _dedupStats.staleAutoStopped,
+        alertsRaised: _dedupStats.alertsRaised,
+        windowAutoHeals: _dedupStats.windowAutoHeals,
+        windowStartedAt: _dedupStats.windowStartedAt,
+        lastActionAt: _dedupStats.lastActionAt,
+      },
     },
     tooling: getToolingPreflightSnapshot(),
     monitoringPolicy: getMonitoringPolicySummary(),
@@ -214,8 +231,16 @@ function startAnalyserUrlDedupWatchdog(broadcast) {
   if (_analyserUrlDedupWatchdog) return;
   if (String(process.env.ANALYSER_URL_DEDUP_GUARD || 'true').toLowerCase() === 'false') return;
   const checkEveryMs = Math.max(2000, parseInt(process.env.ANALYSER_URL_DEDUP_CHECK_MS || '10000', 10) || 10000);
+  const alertWindowMs = Math.max(10000, parseInt(process.env.ANALYSER_URL_DEDUP_ALERT_WINDOW_MS || '60000', 10) || 60000);
+  const alertThreshold = Math.max(1, parseInt(process.env.ANALYSER_URL_DEDUP_ALERT_THRESHOLD || '5', 10) || 5);
 
   _analyserUrlDedupWatchdog = setInterval(() => {
+    const now = Date.now();
+    if ((now - _dedupStats.windowStartedAt) >= alertWindowMs) {
+      _dedupStats.windowStartedAt = now;
+      _dedupStats.windowAutoHeals = 0;
+    }
+
     const keepByUrl = new Map();
     const staleIds = [];
     const duplicateIds = [];
@@ -239,14 +264,21 @@ function startAnalyserUrlDedupWatchdog(broadcast) {
         try { analyser.stop(); } catch (_) {}
       }
       analysers.delete(id);
+      _dedupStats.staleAutoStopped += 1;
+      _dedupStats.windowAutoHeals += 1;
+      _dedupStats.lastActionAt = Date.now();
     }
 
     for (const id of duplicateIds) {
       const analyser = analysers.get(id);
+      const dedupeUrl = analyser ? _normaliseAnalyserUrl(analyser.url) : '';
       if (analyser) {
         try { analyser.stop(); } catch (_) {}
       }
       analysers.delete(id);
+      _dedupStats.duplicateAutoStopped += 1;
+      _dedupStats.windowAutoHeals += 1;
+      _dedupStats.lastActionAt = Date.now();
 
       const etrId = `etr-${id}`;
       const mon = etr290monitors.get(etrId);
@@ -265,6 +297,23 @@ function startAnalyserUrlDedupWatchdog(broadcast) {
       });
       broadcast({ type: 'analyse_stopped', id, message: `${id} auto-stopped by URL dedupe watchdog` });
       console.log(`[health] Auto-stopped duplicate analyser ${id} due to URL collision`);
+
+      const cooldownMs = Math.max(10000, parseInt(process.env.ANALYSER_URL_RESTART_COOLDOWN_MS || '45000', 10) || 45000);
+      if (dedupeUrl) _dedupStats.startCooldownUntilByUrl.set(dedupeUrl, Date.now() + cooldownMs);
+    }
+
+    if (_dedupStats.windowAutoHeals >= alertThreshold) {
+      _dedupStats.alertsRaised += 1;
+      broadcast({
+        type: 'health_alarm',
+        id: 'runtime',
+        severity: 'critical',
+        source: 'analyser-url-dedup-watchdog',
+        message: `High auto-heal activity: ${_dedupStats.windowAutoHeals} actions in ${Math.round(alertWindowMs / 1000)}s`,
+        ts: Date.now(),
+      });
+      _dedupStats.windowStartedAt = Date.now();
+      _dedupStats.windowAutoHeals = 0;
     }
 
     saveState();
@@ -486,6 +535,20 @@ function start() {
   app.use('/encap',     require('../routes/encap')());
   app.use('/transcode', require('../routes/transcode')(transcoders, wss, saveState, broadcast));
   app.use('/multicast', require('../routes/multicast')(forwarders, wss, saveState, broadcast));
+  app.use((req, res, next) => {
+    if (req.method !== 'POST' || req.path !== '/analyse/start') return next();
+    const url = req.body && req.body.url ? _normaliseAnalyserUrl(req.body.url) : '';
+    if (!url) return next();
+    const until = _dedupStats.startCooldownUntilByUrl.get(url) || 0;
+    if (until > Date.now()) {
+      return res.status(429).json({
+        error: 'Source URL temporarily in cooldown after duplicate auto-heal',
+        retryAfterMs: until - Date.now(),
+      });
+    }
+    if (until > 0 && until <= Date.now()) _dedupStats.startCooldownUntilByUrl.delete(url);
+    return next();
+  });
   app.use('/analyse',   require('../routes/analyse')(analysers, wss, broadcast, saveState, _thumbnailClient, etr290monitors));
   app.use('/etr290',    require('../routes/etr290')(etr290monitors, wss, broadcast, analysers));
   app.use('/pipeline',  require('../routes/pipelines')(streams, transcoders, forwarders, wss, saveState, broadcast));

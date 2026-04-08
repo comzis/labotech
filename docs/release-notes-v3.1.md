@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.148 / backend 3.2.34)
+Date: 2026-04-08 (latest: web 3.1.149 / backend 3.2.35)
+
+## v3.2.35 / v3.1.149 — 2026-04-08
+
+### Enhancement: dedupe guard telemetry, cooldown, and burst alarm
+
+- **Health visibility** — `/health` now includes `telemetry.analyserDedup` counters (`duplicateAutoStopped`, `staleAutoStopped`, `alertsRaised`, window stats, last action timestamp).
+- **Auto-heal burst alarm** — URL dedupe watchdog raises `health_alarm` critical if auto-heals exceed threshold in a sliding window (`ANALYSER_URL_DEDUP_ALERT_WINDOW_MS`, `ANALYSER_URL_DEDUP_ALERT_THRESHOLD`).
+- **Restart cooldown** — after duplicate collision cleanup, the URL is temporarily rate-limited on `POST /analyse/start` (`429` with `retryAfterMs`) via `ANALYSER_URL_RESTART_COOLDOWN_MS`.
+- **Operator impact** — faster detection of abnormal retry loops, fewer self-induced respawn storms, and clearer runtime observability.
 
 ## v3.2.34 / v3.1.148 — 2026-04-08
 
