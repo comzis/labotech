@@ -4,13 +4,12 @@ Date: 2026-04-08 (latest: web 3.1.138 / backend 3.2.30)
 
 ## v3.2.30 / v3.1.138 — 2026-04-08
 
-### Feat: I-frame-only thumbnail capture — broadcast-standard clean images
+### Feat: `THUMBNAIL_KEYFRAME_ONLY` toggle — I-frame clean vs near-live operator choice
 
-- Thumbnail capture now uses `select=key,fps=${THUMBNAIL_FPS}` in both `PersistentThumbnailCapture` (RTP/UDP) and the SRT relay.
-- `select=key` ensures every captured JPEG comes from a complete keyframe (IDR for H.264/H.265, I-frame for MPEG-2) — no inter-frame prediction artefacts, no block noise. Broadcast monitoring standard.
-- `fps=${THUMBNAIL_FPS}` caps the rate for low-latency encoders with short GOPs.
-- Effective refresh rate: `min(keyframe_rate, THUMBNAIL_FPS)`. On a 2s-GOP stream at 25fps = 0.5fps; on a 200ms-GOP low-latency encoder = up to 5fps.
-- **Operator impact:** Confidence monitor and multiview tiles always display clean, full-frame images regardless of source codec or GOP structure.
+- `THUMBNAIL_KEYFRAME_ONLY=true` (default): `select=key,fps=${THUMBNAIL_FPS}` — I-frames only, every JPEG clean and artefact-free. Rate = `min(keyframe_rate, THUMBNAIL_FPS)` (~0.5fps on 2s-GOP).
+- `THUMBNAIL_KEYFRAME_ONLY=false`: `fps=${THUMBNAIL_FPS}` all frames — near-live regardless of GOP, may show B/P artefacts on some encoders.
+- Applied to both `PersistentThumbnailCapture` (RTP/UDP) and SRT relay. Documented in `.env.example`.
+- **Operator guidance:** `true` for MCR image quality; `false` for near-live on low-latency short-GOP SRT feeds.
 
 ## v3.2.29 / v3.1.137 — 2026-04-08
 

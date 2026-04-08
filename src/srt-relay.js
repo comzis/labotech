@@ -142,17 +142,19 @@ class SRTRelay extends EventEmitter {
     ];
 
     // Output 2 — JPEG thumbnail (only when thumbPath is configured).
-    // select=key: captures only I-frames (IDR/keyframes) — clean, artefact-free
-    // images with no inter-frame prediction. fps=THUMBNAIL_FPS caps the output
-    // rate for low-latency encoders with short GOPs. On a 2s-GOP broadcast stream
-    // effective rate = min(0.5fps, THUMBNAIL_FPS).
+    // THUMBNAIL_KEYFRAME_ONLY=true (default): select=key,fps=N — clean I-frames only.
+    // THUMBNAIL_KEYFRAME_ONLY=false: fps=N on all frames — near-live regardless of GOP.
     // -update 1: overwrite the same file on every frame (rolling thumbnail).
     // format=yuv420p: mjpeg has no 10-bit support; required for HEVC 4:2:2 sources.
     if (this.thumbPath) {
-      const thumbFps = Math.min(25, Math.max(0.1, parseFloat(process.env.THUMBNAIL_FPS) || 5));
+      const thumbFps   = Math.min(25, Math.max(0.1, parseFloat(process.env.THUMBNAIL_FPS) || 5));
+      const keyOnly    = process.env.THUMBNAIL_KEYFRAME_ONLY !== 'false';
+      const thumbVf    = keyOnly
+        ? `select=key,fps=${thumbFps},scale=480:-2,format=yuv420p`
+        : `fps=${thumbFps},scale=480:-2,format=yuv420p`;
       args.push(
         '-map', '0:v:0',
-        '-vf', `select=key,fps=${thumbFps},scale=480:-2,format=yuv420p`,
+        '-vf', thumbVf,
         '-update', '1',
         '-f', 'image2',
         '-q:v', '3',
