@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.152 / backend 3.2.37)
+Date: 2026-04-08 (latest: web 3.1.153 / backend 3.2.37)
+
+## v3.1.153 — 2026-04-08
+
+### Fix: multiview UTC header now tracks server time
+
+- **Issue** — fullscreen multiview UTC clock could be incorrect when the operator workstation clock drifted from server time.
+- **Cause** — UI used browser `Date.now()` directly for UTC header rendering.
+- **Fix** — multiview now computes a server-time offset from incoming WebSocket `time` fields and renders UTC using server-referenced time.
+- **Operator impact** — UTC readout in multiview aligns with backend event timestamps.
 
 ## v3.1.152 — 2026-04-08
 
