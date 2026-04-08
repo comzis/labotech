@@ -4,6 +4,21 @@ Agent B (Cursor) release notes. Agent A release notes are in `docs/release-notes
 
 ---
 
+## v3.2.25 — 2026-04-08
+
+### test(ts-analyser): keep NIC config tests valid after OSS config cleanup
+
+**What changed:**
+- Updated `test/ts-analyser.test.js` `_getNicName()` mocks to use virtual module mocking for `../config/multicast.json`.
+- Replaced mock cleanup from `jest.dontMock()` to `jest.unmock()` for compatibility with the current Jest resolver behavior.
+
+**Why:**
+- Open-source cleanup removed tracked local config files, and tests that mocked `config/multicast.json` without a virtual module flag began failing in CI/local runs.
+
+**Operator impact:**
+- No runtime behavior change.
+- Backend test suite remains green on the open-source baseline (`243/243` tests passing).
+
 ## v3.2.1 — 2026-03-25
 
 ### fix(live-view): show stopped markers as thin duration lines
