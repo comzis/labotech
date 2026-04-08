@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.151 / backend 3.2.37)
+Date: 2026-04-08 (latest: web 3.1.152 / backend 3.2.37)
+
+## v3.1.152 — 2026-04-08
+
+### Fix: suppress `thumbnail_frame` in frontend Alarm Log mapper
+
+- **Issue** — operators could still see `info` rows derived from `thumbnail_frame` in Alarm Log even though backend excluded it from persisted `/api/events`.
+- **Cause** — `toLogEntry()` in `web/src/App.jsx` did not explicitly filter `thumbnail_frame` from live WebSocket messages.
+- **Fix** — added a hard return `null` path for `msg.type === 'thumbnail_frame'` in the frontend log mapper.
+- **Operator impact** — Alarm Log now stays focused on actionable alarms/lifecycle events only; thumbnail telemetry remains live for tile updates.
 
 ## v3.2.37 / v3.1.151 — 2026-04-08
 
