@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.133 / backend 3.2.28)
+Date: 2026-04-08 (latest: web 3.1.134 / backend 3.2.28)
+
+## v3.1.134 — 2026-04-08
+
+### Fix: Fullscreen multiview tiles load thumbnails immediately on entry
+
+- `FullscreenThumbTile` reset `displaySrc` to `null` on every `thumbUrl` change, blanking the tile on entry and on each refresh until the next `onLoad` fired.
+- **Fix:** Removed the reset effect — `displaySrc` is now only updated via `onLoad`, so the last good frame persists until a new one arrives.
+- **Operator impact:** Opening fullscreen multiview now shows thumbnails immediately instead of "Awaiting Frame" on all tiles.
 
 ## v3.2.28 / v3.1.133 — 2026-04-08
 

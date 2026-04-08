@@ -538,7 +538,6 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
 
   const [displaySrc, setDisplaySrc] = useState(null);
-  useEffect(() => { setDisplaySrc(null); }, [thumbUrl]);
 
   return (
     <div style={{
