@@ -2,13 +2,16 @@
 
 const express = require('express');
 
+const EVENTS_LIMIT_DEFAULT = 500;
+const EVENTS_LIMIT_MAX     = 2000;
+
 module.exports = function(eventLog) {
   const router = express.Router();
 
-  // GET /events[?since=<ms>][&id=<streamId>][&type=<eventType>]
-  // All filters are cumulative (AND logic).
+  // GET /events[?since=<ms>][&id=<streamId>][&type=<eventType>][&limit=<n>]
+  // All filters are cumulative (AND logic). limit caps result count (default 500, max 2000).
   router.get('/', (req, res) => {
-    const { since, id, type } = req.query;
+    const { since, id, type, limit } = req.query;
     let events = eventLog.list();
 
     if (since) {
@@ -22,6 +25,11 @@ module.exports = function(eventLog) {
     }
     if (id)   events = events.filter((e) => e.id   === id);
     if (type) events = events.filter((e) => e.type === type);
+
+    const limitN = limit
+      ? Math.min(Math.max(1, parseInt(limit, 10) || EVENTS_LIMIT_DEFAULT), EVENTS_LIMIT_MAX)
+      : EVENTS_LIMIT_DEFAULT;
+    if (events.length > limitN) events = events.slice(0, limitN);
 
     res.json(events);
   });

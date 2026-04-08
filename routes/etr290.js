@@ -181,8 +181,10 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
       };
     }
 
-    // Overall worst-case priority level.
-    const overallStatus = priorities.p1?.alarming > 0 ? 'p1-alarm'
+    // Overall worst-case status — stopped takes precedence over alarm state
+    // so a dashboard never shows green compliance for a non-running monitor.
+    const overallStatus = !status.isRunning ? 'stopped'
+      : priorities.p1?.alarming > 0 ? 'p1-alarm'
       : priorities.p2?.alarming > 0 ? 'p2-alarm'
       : priorities.p3?.alarming > 0 ? 'p3-alarm'
       : 'ok';

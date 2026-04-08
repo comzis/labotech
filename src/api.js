@@ -127,8 +127,9 @@ function saveState() {
 }
 
 function _isManagedEtrMonitorId(id) {
-  const v = String(id || '');
-  return /^etr-(decoder|analyser)-/i.test(v);
+  // Any etr-* monitor is lifecycle-managed — auto-start creates etr-<analyserID>
+  // which may not match the legacy etr-(decoder|analyser)-* pattern.
+  return /^etr-/i.test(String(id || ''));
 }
 
 function _linkedAnalyserIdFromEtrId(id) {
@@ -301,7 +302,10 @@ async function restoreState(broadcast, thumbnailClient) {
     try {
       let effectiveUrl = cfg.url;
       if (cfg.url && cfg.url.startsWith('srt://')) {
-        const linkedId = /^etr-/i.test(cfg.id) ? cfg.id.slice(4) : null;
+        // Prefer explicit linkedAnalyserId stored at save time; fall back to
+        // etr-<id> convention for entries saved before this field was added.
+        const linkedId = cfg.linkedAnalyserId
+          || (/^etr-/i.test(cfg.id) ? cfg.id.slice(4) : null);
         const linkedAnalyser = linkedId ? analysers.get(linkedId) : null;
         const relayUrl = linkedAnalyser && typeof linkedAnalyser.getRelayUrl === 'function'
           ? linkedAnalyser.getRelayUrl()
@@ -326,8 +330,10 @@ async function restoreState(broadcast, thumbnailClient) {
       mon.on('incident_cleared',  incident => broadcast({ type: 'etr290_incident_cleared',  id: cfg.id, ...incident }));
       mon.on('error',             err      => broadcast({ type: 'error',                    id: cfg.id, message: err.message }));
       mon.on('stopped',           ()       => broadcast({ type: 'etr290_stopped',           id: cfg.id }));
-      if (/^etr-/i.test(cfg.id)) {
-        const linkedAnalyser = analysers.get(cfg.id.slice(4));
+      const relinkId = cfg.linkedAnalyserId
+        || (/^etr-/i.test(cfg.id) ? cfg.id.slice(4) : null);
+      if (relinkId) {
+        const linkedAnalyser = analysers.get(relinkId);
         if (linkedAnalyser && typeof linkedAnalyser.setEtrMonitor === 'function') {
           linkedAnalyser.setEtrMonitor(mon);
         }

@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.140 / backend 3.2.31)
+Date: 2026-04-08 (latest: web 3.1.141 / backend 3.2.32)
+
+## v3.2.32 / v3.1.141 — 2026-04-08
+
+### Fix: ETR290 lifecycle correctness (Cursor peer-review findings)
+
+- **Orphan watchdog pattern** — `_isManagedEtrMonitorId` now matches any `etr-*` ID (was `/^etr-(decoder|analyser)-/i`). Auto-started monitors (`etr-<analyserID>`) were previously invisible to the watchdog and could remain as orphans after a crash.
+- **Compliance endpoint stopped state** — `overallStatus` now returns `'stopped'` when `isRunning=false`, preventing a dashboard from showing green compliance for a non-running monitor.
+- **Events API response bounding** — `GET /api/events` now accepts `?limit=<n>` (default 500, max 2000). Prevents unbounded payloads on busy deployments.
+- **ETR restore robustness** — `linkedAnalyserId` is now stored explicitly in `state.json`. Restore no longer depends solely on the `etr-<id>` naming convention; non-standard ETR IDs restore correctly via the explicit link.
+- **Tests** — 24 new tests covering: watchdog ID matching, compliance status (stopped/ok/p1-alarm), events filtering (id/type/limit/since), and state-persistence `linkedAnalyserId` round-trip. Suite: 267/267.
 
 ## v3.2.31 / v3.1.140 — 2026-04-08
 

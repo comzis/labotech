@@ -51,16 +51,24 @@ function _analyserConfig(a) {
 function _etrConfig(m, analysers) {
   // Store the original source URL (SRT or RTP/UDP), not the effective relay UDP URL.
   // On restore the SRT relay redirect is re-derived from the running analyser.
+  // linkedAnalyserId is stored explicitly so restore does not depend on the etr-<id>
+  // naming convention — supports manually named ETR monitors and future ID changes.
   let sourceUrl = m.url;
+  let linkedAnalyserId = null;
   if (/^etr-/i.test(m.id) && analysers) {
-    const linked = analysers.get(m.id.slice(4));
-    if (linked && linked.url) sourceUrl = linked.url;
+    const candidateId = m.id.slice(4);
+    const linked = analysers.get(candidateId);
+    if (linked) {
+      linkedAnalyserId = candidateId;
+      if (linked.url) sourceUrl = linked.url;
+    }
   }
   return {
-    id:          m.id,
-    url:         sourceUrl,
-    nicName:     m.nicName              || null,
-    profileName: m._config?.profileName || null,
+    id:               m.id,
+    url:              sourceUrl,
+    linkedAnalyserId: linkedAnalyserId,
+    nicName:          m.nicName              || null,
+    profileName:      m._config?.profileName || null,
     config: m._config ? {
       includePids:     [...(m._config.includePids  || [])],
       excludePids:     [...(m._config.excludePids  || [])],
