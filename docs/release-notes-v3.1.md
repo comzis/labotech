@@ -1,6 +1,16 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.136 / backend 3.2.28)
+Date: 2026-04-08 (latest: web 3.1.137 / backend 3.2.29)
+
+## v3.2.29 / v3.1.137 — 2026-04-08
+
+### Fix: SRT thumbnails now near-live — relay ffmpeg and poll rate match THUMBNAIL_FPS
+
+- SRT streams use a relay ffmpeg process for thumbnails. Its output used `thumbnail=100` (buffers 100 frames, picks sharpest) — ~4s per frame at 25fps — making near-live refresh impossible even with `THUMBNAIL_FPS=5`.
+- `pollRelayThumb` polled every hardcoded 2000ms — a further bottleneck.
+- **Fix 1:** Relay ffmpeg output switched to `fps=${THUMBNAIL_FPS},scale=480:-2,format=yuv420p` matching `PersistentThumbnailCapture`. Removed `thumbnail=N`.
+- **Fix 2:** `pollRelayThumb` interval set to `1000/THUMBNAIL_FPS` ms so mtime checks keep pace with new frames.
+- **Operator impact:** SRT stream thumbnails now refresh at the same near-live rate as RTP/UDP streams. All protocols consistent at `THUMBNAIL_FPS`.
 
 ## v3.1.136 — 2026-04-08
 

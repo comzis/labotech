@@ -2910,8 +2910,10 @@ class TSAnalyser extends EventEmitter {
       // second ffmpeg output branch (select=eq(pict_type\,I),thumbnail=1,scale=480:-2).
       // No separate capture process is needed — and none should run, because the
       // relay UDP port is unicast and only one reader can bind at a time.
-      // This poller just watches the file mtime and updates _lastThumbnailUrl when
-      // the relay writes a new frame (once per GOP ≈ every 2–10 s).
+      // This poller watches the file mtime and pushes thumbnail URL updates to WS
+      // clients without waiting for the next full probe cycle.
+      // Poll interval matches THUMBNAIL_FPS so near-live refresh is possible.
+      const _thumbPollMs = Math.round(1000 / Math.min(25, Math.max(0.1, parseFloat(process.env.THUMBNAIL_FPS) || 5)));
       const _thumbFilePath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
       const pollRelayThumb = () => {
         if (!this.isRunning) return;
@@ -2933,7 +2935,7 @@ class TSAnalyser extends EventEmitter {
         } catch (_) {
           // File not yet written — relay may still be connecting. Retry silently.
         }
-        this._thumbnailTimer = setTimeout(pollRelayThumb, 2000);
+        this._thumbnailTimer = setTimeout(pollRelayThumb, _thumbPollMs);
       };
       this._thumbnailTimer = setTimeout(pollRelayThumb, 1000);
     } else {
