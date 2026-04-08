@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import useTSAnalysis from "../hooks/useTSAnalysis";
 import useETR290 from "../hooks/useETR290";
 import { resolveTransportBitrate } from "../utils/transportBitrate";
@@ -173,6 +173,21 @@ function buildProbeUrl({ mode, host, port, latency, passphrase }) {
   if (params.length) url += `?${params.join("&")}`;
   return url;
 }
+
+function deriveCatalogCategory(name) {
+  const n = String(name || '').toUpperCase();
+  if (n.startsWith('GV_IPDEC'))  return 'GV IP Decoders';
+  if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
+  if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
+  if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_BMCAST')) return 'GV Blue Multicast';
+  if (n.startsWith('LK_BMCAST')) return 'LK Blue Multicast';
+  if (n.startsWith('GV_RX'))     return 'GV Receivers';
+  if (n.startsWith('LK_RX'))     return 'LK Receivers';
+  if (n.endsWith('_OLD'))        return 'Legacy';
+  return 'Other';
+}
+const CAT_ORDER = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','LK Blue Multicast','Other','Legacy'];
 
 function countPids(result) {
   if (!result) return 0;
@@ -644,6 +659,17 @@ export default function TSAnalyser({ lastMessage }) {
     };
   }, [arrivalRows]);
 
+  useEffect(() => {
+    fetch('/api/multiview/catalog').then((r) => r.json()).then((d) => setCatalog(d.streams || [])).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!showCatalog) return;
+    const handler = (e) => { if (catalogRef.current && !catalogRef.current.contains(e.target)) setShowCatalog(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCatalog]);
+
   const makeMonitorId = (base = "analyser") => {
     const clean = String(base || "")
       .trim()
@@ -728,6 +754,11 @@ export default function TSAnalyser({ lastMessage }) {
     setActionNote({ type: "ok", text: "All monitors stopped." });
   };
 
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
+
   const [applyConfigStatus, setApplyConfigStatus] = useState(null); // null | 'ok' | 'err'
   const handleApplyEtrConfig = async () => {
     const cfg = buildEtrConfig();
@@ -787,6 +818,65 @@ export default function TSAnalyser({ lastMessage }) {
         <button type="button" onClick={handleStopSelected} disabled={!activeId} style={{ height: 28, borderRadius: 3, border: `1px solid ${activeId ? C.err : C.border}`, color: activeId ? C.err : C.muted, background: "transparent" }}>Stop Selected</button>
         <button type="button" onClick={handleStopAll} disabled={monitoredIds.length === 0} style={{ height: 28, borderRadius: 3, border: `1px solid ${monitoredIds.length ? C.warn : C.border}`, color: monitoredIds.length ? C.warn : C.muted, background: "transparent" }}>Stop All</button>
       </form>
+
+      {catalog.length > 0 && (
+        <div ref={catalogRef} style={{ position: 'relative', marginBottom: 6 }}>
+          <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+            <span style={{ position: 'absolute', left: 8, fontSize: 10, color: C.muted, pointerEvents: 'none' }}>⊞</span>
+            <input
+              type="text"
+              value={catalogSearch}
+              onChange={(e) => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
+              onFocus={() => setShowCatalog(true)}
+              placeholder="Select from stream catalog…"
+              style={{ width: '100%', boxSizing: 'border-box', padding: '5px 8px 5px 26px', background: C.panel, border: `1px solid ${C.border}`, borderRadius: 3, color: C.text, fontSize: 11, fontFamily: "'Courier New', monospace", height: 28, outline: 'none' }}
+            />
+          </div>
+          {showCatalog && (() => {
+            const q = catalogSearch.toLowerCase();
+            const filtered = q.length >= 1 ? catalog.filter((s) => s.name.toLowerCase().includes(q) || s.ip.includes(q)) : catalog;
+            const grouped = {};
+            filtered.forEach((s) => {
+              const cat = deriveCatalogCategory(s.name);
+              if (!grouped[cat]) grouped[cat] = [];
+              grouped[cat].push(s);
+            });
+            const cats = CAT_ORDER.filter((cat) => grouped[cat]);
+            if (!cats.length) return null;
+            return (
+              <div style={{ position: 'absolute', left: 0, right: 0, zIndex: 50, marginTop: 2, background: '#0d1117', border: `1px solid ${C.borderHi}`, borderRadius: 3, boxShadow: '0 8px 24px rgba(0,0,0,0.7)', maxHeight: 280, overflowY: 'auto' }}>
+                {cats.map((cat) => (
+                  <div key={cat}>
+                    <div style={{ padding: '4px 10px', fontSize: 9, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#3a6a9a', background: '#0d1117', borderBottom: '1px solid rgba(40,90,160,0.2)', position: 'sticky', top: 0 }}>
+                      {cat} ({grouped[cat].length})
+                    </div>
+                    {grouped[cat].map((s) => (
+                      <button
+                        key={s.ip + ':' + s.port}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          setHost(s.ip);
+                          setPort(String(s.port));
+                          if (s.mode && ['rtp', 'srt', 'udp'].includes(s.mode)) setMode(s.mode);
+                          setShowCatalog(false);
+                          setCatalogSearch('');
+                        }}
+                        style={{ width: '100%', textAlign: 'left', padding: '5px 10px', display: 'flex', alignItems: 'center', gap: 10, background: 'transparent', border: 'none', cursor: 'pointer' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span style={{ fontSize: 10, fontFamily: "'Courier New',monospace", color: C.text, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                        <span style={{ fontSize: 9, fontFamily: "'Courier New',monospace", color: '#3a6a9a', flexShrink: 0 }}>{s.ip}:{s.port}</span>
+                        {s.mode && <span style={{ fontSize: 8, color: C.muted, flexShrink: 0, textTransform: 'uppercase', letterSpacing: '0.08em' }}>{s.mode}</span>}
+                      </button>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            );
+          })()}
+        </div>
+      )}
 
       <div style={{ display: "grid", gridTemplateColumns: "200px 1fr", gap: 6, marginBottom: 8 }}>
         <select value={activeId} onChange={(e) => setActiveId(e.target.value)} style={{ background: C.panel, color: C.text, border: `1px solid ${C.border}`, borderRadius: 3, height: 28, padding: "0 8px" }}>
