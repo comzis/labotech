@@ -11,6 +11,35 @@ const { THUMBNAIL_DIR, sanitizeStreamId } = require('../src/monitoring');
 module.exports = function(analysers, wss, broadcastFn = null, saveState = null, thumbnailClient = null, etr290monitors = null) {
   const router = express.Router();
 
+  function _normaliseAnalyserUrl(raw) {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    try {
+      const u = new URL(value);
+      const params = Array.from(u.searchParams.entries()).sort(([ak, av], [bk, bv]) => {
+        if (ak === bk) return av.localeCompare(bv);
+        return ak.localeCompare(bk);
+      });
+      u.search = '';
+      for (const [k, v] of params) u.searchParams.append(k, v);
+      u.protocol = String(u.protocol || '').toLowerCase();
+      u.hostname = String(u.hostname || '').toLowerCase();
+      return u.toString();
+    } catch (_) {
+      return value;
+    }
+  }
+
+  function _findAnalyserByUrl(url) {
+    const key = _normaliseAnalyserUrl(url);
+    if (!key) return null;
+    for (const [id, analyser] of analysers.entries()) {
+      if (!analyser) continue;
+      if (_normaliseAnalyserUrl(analyser.url) === key) return { id, analyser };
+    }
+    return null;
+  }
+
   function broadcast(msg) {
     if (typeof broadcastFn === 'function') return broadcastFn(msg);
     const data = JSON.stringify(msg);
@@ -82,7 +111,24 @@ module.exports = function(analysers, wss, broadcastFn = null, saveState = null, 
   router.post('/start', (req, res) => {
     const { id, url, interval, nicName } = req.body;
     if (!id || !url) return res.status(400).json({ error: 'id and url are required' });
-    if (analysers.has(id)) return res.status(409).json({ error: `Analyser ${id} already exists` });
+    if (analysers.has(id)) {
+      const existing = analysers.get(id);
+      if (existing && _normaliseAnalyserUrl(existing.url) === _normaliseAnalyserUrl(url)) {
+        return res.status(200).json({ ...existing.toJSON(), reused: true, message: `Analyser ${id} already active for this source URL` });
+      }
+      return res.status(409).json({ error: `Analyser ${id} already exists` });
+    }
+
+    // URL-level dedupe: avoid spawning duplicate probe/thumbnail/sniffer workers
+    // for the same source when callers generate new IDs for repeated starts.
+    const existingByUrl = _findAnalyserByUrl(url);
+    if (existingByUrl && existingByUrl.analyser && existingByUrl.analyser.isRunning) {
+      return res.status(200).json({
+        ...existingByUrl.analyser.toJSON(),
+        reused: true,
+        message: `Source URL already monitored by ${existingByUrl.id}`,
+      });
+    }
 
     const analyser = new TSAnalyser({ id, url, interval, nicName: nicName || undefined, thumbnailClient: thumbnailClient || undefined });
 

@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.147 / backend 3.2.33)
+Date: 2026-04-08 (latest: web 3.1.148 / backend 3.2.34)
+
+## v3.2.34 / v3.1.148 — 2026-04-08
+
+### Fix: automatic duplicate analyser containment (no-operator recovery)
+
+- **URL-level start dedupe** — `POST /api/analyse/start` now reuses the existing analyser when a source URL is already monitored, preventing duplicate `tshark`/`tsp`/thumbnail workers from spawning under new IDs.
+- **Runtime watchdog** — added an analyser URL dedupe guard in `src/api.js` that auto-stops duplicate/stale analysers and linked `etr-<id>` monitors, then persists clean state.
+- **Ops tuning defaults documented** — `.env.example` now includes `NODE_OPTIONS=--max-old-space-size=6144` plus `ANALYSER_URL_DEDUP_GUARD` / `ANALYSER_URL_DEDUP_CHECK_MS` controls.
+- **Operator impact** — duplicate worker storms self-heal automatically; manual container recreate should no longer be required for this failure mode.
 
 ## v3.1.147 — 2026-04-08
 
