@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.129 / backend 3.2.27)
+Date: 2026-04-08 (latest: web 3.1.132 / backend 3.2.27)
+
+## v3.1.132 — 2026-04-08
+
+### Fix: Confidence monitor thumbnail no longer flashes on refresh
+
+- `key={thumbnailUrl}` on the `<img>` in `DecoderPanelRevamp.jsx` caused React to unmount and remount the element on every URL change, producing a visible black flash between frames.
+- **Fix:** Removed the `key` prop — the browser now updates `src` in place, displaying the previous frame until the new one is fully loaded. Matches the multiview tile behaviour.
+- **Operator impact:** Confidence monitor thumbnail updates smoothly with no flash.
 
 ## v3.2.27 — 2026-04-08
 
