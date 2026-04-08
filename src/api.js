@@ -30,6 +30,7 @@ const etr290monitors = new Map(); // id → ETR290Analyser
 let _lastCpuSample = null;
 let _etrOrphanWatchdog = null;
 let _thumbnailClient = null;
+let _analyserUrlDedupWatchdog = null;
 
 
 function _sampleCpuPercent() {
@@ -138,6 +139,25 @@ function _linkedAnalyserIdFromEtrId(id) {
   return v.slice(4) || null;
 }
 
+function _normaliseAnalyserUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const u = new URL(value);
+    const params = Array.from(u.searchParams.entries()).sort(([ak, av], [bk, bv]) => {
+      if (ak === bk) return av.localeCompare(bv);
+      return ak.localeCompare(bk);
+    });
+    u.search = '';
+    for (const [k, v] of params) u.searchParams.append(k, v);
+    u.protocol = String(u.protocol || '').toLowerCase();
+    u.hostname = String(u.hostname || '').toLowerCase();
+    return u.toString();
+  } catch (_) {
+    return value;
+  }
+}
+
 function startEtrOrphanWatchdog() {
   if (_etrOrphanWatchdog) return;
   const graceMs = Math.max(5000, parseInt(process.env.ETR_ORPHAN_GRACE_MS || '15000', 10) || 15000);
@@ -188,6 +208,69 @@ function startEtrOrphanWatchdog() {
     }
   }, checkEveryMs);
   if (typeof _etrOrphanWatchdog.unref === 'function') _etrOrphanWatchdog.unref();
+}
+
+function startAnalyserUrlDedupWatchdog(broadcast) {
+  if (_analyserUrlDedupWatchdog) return;
+  if (String(process.env.ANALYSER_URL_DEDUP_GUARD || 'true').toLowerCase() === 'false') return;
+  const checkEveryMs = Math.max(2000, parseInt(process.env.ANALYSER_URL_DEDUP_CHECK_MS || '10000', 10) || 10000);
+
+  _analyserUrlDedupWatchdog = setInterval(() => {
+    const keepByUrl = new Map();
+    const staleIds = [];
+    const duplicateIds = [];
+
+    for (const [id, analyser] of analysers.entries()) {
+      if (!analyser || !analyser.isRunning) {
+        staleIds.push(id);
+        continue;
+      }
+      const key = _normaliseAnalyserUrl(analyser.url);
+      if (!key) continue;
+      if (!keepByUrl.has(key)) keepByUrl.set(key, id);
+      else duplicateIds.push(id);
+    }
+
+    if (staleIds.length === 0 && duplicateIds.length === 0) return;
+
+    for (const id of staleIds) {
+      const analyser = analysers.get(id);
+      if (analyser) {
+        try { analyser.stop(); } catch (_) {}
+      }
+      analysers.delete(id);
+    }
+
+    for (const id of duplicateIds) {
+      const analyser = analysers.get(id);
+      if (analyser) {
+        try { analyser.stop(); } catch (_) {}
+      }
+      analysers.delete(id);
+
+      const etrId = `etr-${id}`;
+      const mon = etr290monitors.get(etrId);
+      if (mon) {
+        try { mon.stop(); } catch (_) {}
+        etr290monitors.delete(etrId);
+      }
+
+      broadcast({
+        type: 'health_alarm',
+        id,
+        severity: 'warning',
+        source: 'analyser-url-dedup-watchdog',
+        message: `Auto-stopped duplicate analyser for URL collision: ${id}`,
+        ts: Date.now(),
+      });
+      broadcast({ type: 'analyse_stopped', id, message: `${id} auto-stopped by URL dedupe watchdog` });
+      console.log(`[health] Auto-stopped duplicate analyser ${id} due to URL collision`);
+    }
+
+    saveState();
+  }, checkEveryMs);
+
+  if (typeof _analyserUrlDedupWatchdog.unref === 'function') _analyserUrlDedupWatchdog.unref();
 }
 
 // ─── Restore persisted engines after boot ────────────────────────────────────
@@ -433,6 +516,7 @@ function start() {
     console.log(`Labotech API listening on http://${API_HOST}:${API_PORT}`);
     startToolingPreflightAutoRefresh();
     startEtrOrphanWatchdog();
+    startAnalyserUrlDedupWatchdog(broadcast);
     // Restore engines after a short delay to let the event loop settle
     setTimeout(() => restoreState(broadcast, _thumbnailClient), 2000);
 
