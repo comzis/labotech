@@ -46,6 +46,12 @@ Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 complian
 
 ## Quick Start
 
+Primary operations references:
+
+- `docs/server-optimisation-ubuntu.md` (Ubuntu runtime optimization and incident handling)
+- `docs/ops-scripts-reference.md` (script catalog and deploy/recovery commands)
+- `docs/day1-monitoring-checklist.md` (first-24h stability checklist)
+
 ### 1. Host setup (run once as root)
 
 ```bash
