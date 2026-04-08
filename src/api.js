@@ -340,6 +340,7 @@ async function restoreState(broadcast, thumbnailClient) {
       }
       mon.start(0); // relay already running — no start delay needed
       etr290monitors.set(cfg.id, mon);
+      broadcast({ type: 'etr290_started', id: cfg.id, url: effectiveUrl, restored: true, time: new Date().toISOString() });
       console.log(`[state] Restored ETR290 monitor: ${cfg.id}`);
     } catch (err) {
       console.error(`[state] Failed to restore ETR290 monitor ${cfg.id}:`, err.message);
@@ -365,9 +366,10 @@ function start() {
   // Message types that are routine telemetry/heartbeats — high-frequency, not alarm events.
   // These are broadcast to WebSocket clients but NOT persisted to the event log.
   const TELEMETRY_TYPES = new Set([
-    'etr290_status',  // heartbeat every 1s per ETR monitor
-    'analyse_result', // probe result every 5s per decoder
-    'stats',          // encoder stats heartbeat
+    'etr290_status',   // heartbeat every 1s per ETR monitor
+    'analyse_result',  // probe result every 5s per decoder
+    'stats',           // encoder stats heartbeat
+    'thumbnail_frame', // high-frequency per-decoder thumbnail updates
   ]);
 
   function broadcast(msg) {
