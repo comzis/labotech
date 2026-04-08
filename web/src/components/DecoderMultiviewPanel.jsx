@@ -694,7 +694,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [host, setHost] = useState('');
   const [port, setPort] = useState('');
   const [decoderId, setDecoderId] = useState('');
-  const [interval, setInterval] = useState('5000');
+  const [interval, setProbeInterval] = useState('5000');
   const [latency, setLatency] = useState('2000');
   const [passphrase, setPassphrase] = useState('');
   const [nowMs, setNowMs] = useState(Date.now());
@@ -746,7 +746,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
         if (parsed?.host != null) setHost(String(parsed.host));
         if (parsed?.port != null) setPort(String(parsed.port));
         if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
-        if (parsed?.interval != null) setInterval(String(parsed.interval));
+        if (parsed?.interval != null) setProbeInterval(String(parsed.interval));
         if (parsed?.latency != null) setLatency(String(parsed.latency));
         if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
         if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
@@ -870,10 +870,10 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   }, [refreshActives]);
 
   useEffect(() => {
-    const t = setInterval(() => {
+    const t = window.setInterval(() => {
       refreshActives();
     }, MULTIVIEW_REFRESH_MS);
-    return () => clearInterval(t);
+    return () => window.clearInterval(t);
   }, [refreshActives]);
 
   // Mount-phase rapid retry: when active analysers exist but resultsById is still
@@ -907,8 +907,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   }, [lastMessage]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now() + serverClockOffsetMsRef.current), MULTIVIEW_CLOCK_TICK_MS);
-    return () => clearInterval(timer);
+    const timer = window.setInterval(() => setNowMs(Date.now() + serverClockOffsetMsRef.current), MULTIVIEW_CLOCK_TICK_MS);
+    return () => window.clearInterval(timer);
   }, []);
 
   // Sync isFullscreen with browser fullscreen state (ESC exits natively)
@@ -923,8 +923,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   useEffect(() => {
     if (!isFullscreen) return;
     setFsNowMs(Date.now() + serverClockOffsetMsRef.current);
-    const t = setInterval(() => setFsNowMs(Date.now() + serverClockOffsetMsRef.current), 1000);
-    return () => clearInterval(t);
+    const t = window.setInterval(() => setFsNowMs(Date.now() + serverClockOffsetMsRef.current), 1000);
+    return () => window.clearInterval(t);
   }, [isFullscreen]);
 
   // Request browser fullscreen when overlay is mounted and visible
