@@ -76,6 +76,60 @@ module.exports = function (analysers, saveState, broadcast) {
     }
   });
 
+  // POST /api/multiview/catalog — upload a stream catalog (JSON or CSV)
+  // JSON: bare array [...] or wrapped { "streams": [...] }
+  // CSV:  name,ip,port,mode  (header row required)
+  router.post('/catalog', (req, res) => {
+    try {
+      const { format, data } = req.body;
+      if (!data) return res.status(400).json({ error: 'No data provided' });
+
+      let streams;
+
+      if (format === 'csv') {
+        const lines = data.split('\n').map((l) => l.trim()).filter(Boolean);
+        if (lines.length < 2) return res.status(400).json({ error: 'CSV must have a header row and at least one data row' });
+        const headers = lines[0].split(',').map((h) => h.trim().toLowerCase());
+        const nameIdx = headers.indexOf('name');
+        const ipIdx   = headers.indexOf('ip');
+        const portIdx = headers.indexOf('port');
+        const modeIdx = headers.indexOf('mode');
+        if (nameIdx === -1 || ipIdx === -1 || portIdx === -1) {
+          return res.status(400).json({ error: 'CSV must have columns: name, ip, port (mode optional)' });
+        }
+        streams = lines.slice(1).map((line) => {
+          const cols = line.split(',').map((v) => v.trim());
+          return {
+            name: cols[nameIdx] || '',
+            ip:   cols[ipIdx]   || '',
+            port: cols[portIdx] || '',
+            mode: modeIdx !== -1 && cols[modeIdx] ? cols[modeIdx] : 'rtp',
+          };
+        });
+      } else {
+        // JSON — accept bare array or { streams: [...] }
+        const parsed = typeof data === 'string' ? JSON.parse(data) : data;
+        streams = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.streams) ? parsed.streams : null);
+        if (!streams) return res.status(400).json({ error: 'JSON must be an array or { "streams": [...] }' });
+      }
+
+      // Validate: require name, ip, port; normalise mode
+      const valid = streams.filter((s) => s && s.name && s.ip && s.port).map((s) => ({
+        name: String(s.name).slice(0, 128),
+        ip:   String(s.ip).slice(0, 64),
+        port: String(s.port).slice(0, 8),
+        mode: ['rtp', 'udp', 'srt'].includes(String(s.mode)) ? String(s.mode) : 'rtp',
+      }));
+
+      if (valid.length === 0) return res.status(400).json({ error: 'No valid stream entries found (each entry needs name, ip, port)' });
+
+      fs.writeFileSync(CATALOG_FILE, JSON.stringify({ streams: valid }, null, 2), 'utf8');
+      return res.json({ ok: true, count: valid.length });
+    } catch (err) {
+      return res.status(400).json({ error: err.message });
+    }
+  });
+
   // GET /api/multiview/panels — return stored panel stream registry
   router.get('/panels', (req, res) => {
     try {
