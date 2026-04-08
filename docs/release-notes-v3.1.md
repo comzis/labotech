@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.143 / backend 3.2.32)
+Date: 2026-04-08 (latest: web 3.1.144 / backend 3.2.33)
+
+## v3.2.33 / v3.1.144 — 2026-04-08
+
+### Fix: Suppress thumbnail_frame from event log; emit etr290_started
+
+- **`thumbnail_frame` excluded from event log** — added to `TELEMETRY_TYPES` in `src/api.js`. These fire on every frame capture (up to 5/s per decoder) and were flooding the Event Log tab with noise.
+- **`etr290_started` event broadcast** — all three ETR start paths (auto-start with decoder, manual `POST /etr290/start`, restore from state) now emit `{ type: 'etr290_started', id, url, time }`. Restore path also carries `restored: true`.
+- **Frontend** — `App.jsx` event formatter handles `etr290_started` with status `started` and title "ETR monitor started" / "ETR monitor restored". Event now appears in the Event Log tab alongside ETR alarm entries.
 
 ## v3.1.143 — 2026-04-08
 

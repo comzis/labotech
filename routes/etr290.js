@@ -126,6 +126,7 @@ module.exports = function (etr290monitors, wss, broadcastFn = null, analysers = 
 
     mon.start(startDelay);
     etr290monitors.set(id, mon);
+    broadcast({ type: 'etr290_started', id, url: effectiveUrl, time: new Date().toISOString() });
     res.status(201).json(mon.toJSON());
   });
 

@@ -500,6 +500,10 @@ function toLogEntry(msg) {
     status = 'stopped';
     title = msg.type === 'analyse_stopped' ? 'Analyser stopped' : 'Instance stopped';
     details = msg.message || `${id} stopped`;
+  } else if (msg.type === 'etr290_started') {
+    status = 'started';
+    title = msg.restored ? 'ETR monitor restored' : 'ETR monitor started';
+    details = `${id} ETR 290 monitor started`;
   } else if (msg.type === 'etr290_stopped') {
     status = 'stopped';
     title = 'ETR monitor stopped';
