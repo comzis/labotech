@@ -5,7 +5,7 @@ import StatusDot from './StatusDot';
 import BentoCard from './ui/BentoCard';
 import { Field } from './ui/MatrixField';
 import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
-import { exportMultiviewConfig, importMultiviewConfig } from '../api';
+import { exportMultiviewConfig, importMultiviewConfig, uploadCatalog } from '../api';
 const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v3';
 const DEFAULT_PANEL_ID = 'panel-default';
 const DEFAULT_PANEL_NAME = 'BES';
@@ -678,6 +678,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const addTileCatalogRef = useRef(null);
   const importFileRef = useRef(null);
   const configImportFileRef = useRef(null);
+  const catalogImportFileRef = useRef(null);
   const fullscreenRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   // Debounce timer for server-side panel sync
@@ -1072,6 +1073,45 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     reader.readAsText(file);
   }, [refreshActives]);
 
+  // Export stream catalog as JSON download.
+  const handleExportCatalog = useCallback(async () => {
+    try {
+      const res = await fetch('/api/multiview/catalog');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stream-catalog-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Catalog export failed: ${err.message}`);
+    }
+  }, []);
+
+  // Import stream catalog from a JSON or CSV file.
+  const handleImportCatalog = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const isCsv = file.name.toLowerCase().endsWith('.csv');
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const raw = ev.target?.result || '';
+        const result = await uploadCatalog(isCsv ? 'csv' : 'json', raw);
+        // Refresh the in-memory catalog so the picker reflects the new entries.
+        const updated = await fetch('/api/multiview/catalog').then((r) => r.json());
+        setCatalog(Array.isArray(updated.streams) ? updated.streams : []);
+        alert(`Catalog imported: ${result.count} streams loaded.`);
+      } catch (err) {
+        alert(`Catalog import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
   // Close add-tile modal on Escape
   useEffect(() => {
     if (!addTileOpen) return;
@@ -1267,6 +1307,32 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
                 Export
               </button>
             )}
+            {/* Stream catalog import / export */}
+            <input
+              ref={catalogImportFileRef}
+              type="file"
+              accept=".json,.csv"
+              className="hidden"
+              onChange={handleImportCatalog}
+            />
+            <button
+              onClick={handleExportCatalog}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#6ee7b7', borderColor: 'rgba(52,211,153,0.4)', background: 'rgba(16,185,129,0.10)' }}
+              title="Export stream catalog as JSON"
+            >
+              <Download className="w-3 h-3" />
+              Catalog
+            </button>
+            <button
+              onClick={() => catalogImportFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#6ee7b7', borderColor: 'rgba(52,211,153,0.4)', background: 'rgba(16,185,129,0.10)' }}
+              title="Import stream catalog — accepts JSON or CSV (name,ip,port,mode)"
+            >
+              <Upload className="w-3 h-3" />
+              Catalog
+            </button>
             {/* Full workstation config export / import */}
             <input
               ref={configImportFileRef}

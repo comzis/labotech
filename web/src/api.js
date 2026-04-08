@@ -94,3 +94,6 @@ export const setMonitoringProfile = (profile) => request('PUT', '/monitoring-pol
 // Multiview config export / import
 export const exportMultiviewConfig = () => request('GET', '/api/multiview/export');
 export const importMultiviewConfig = (bundle) => request('POST', '/api/multiview/import', bundle);
+
+// Stream catalog upload (JSON or CSV)
+export const uploadCatalog = (format, data) => request('POST', '/api/multiview/catalog', { format, data });
