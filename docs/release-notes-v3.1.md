@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.138 / backend 3.2.30)
+Date: 2026-04-08 (latest: web 3.1.139 / backend 3.2.30)
+
+## v3.1.139 — 2026-04-08
+
+### Fix: Fullscreen multiview — thumbnails appear instantly on first entry
+
+- Browsers allow ~6 concurrent HTTP connections per host. Opening fullscreen with 24+ tiles caused all tile `<img>` elements to mount simultaneously, queuing image requests into sequential batches. First fullscreen entry was visibly slow (several seconds) even though all thumbnails existed on disk.
+- **Fix:** A hidden prefetch layer (`visibility:hidden`, 1×1 px, `pointer-events:none`) is always rendered outside fullscreen. It contains one `<img>` per active decoder using the same thumbnail URL the fullscreen tiles use. The browser fetches and caches each image continuously. When fullscreen opens, all tiles hit cache and appear immediately.
+- `display:none` suppresses image fetching — the layer uses `visibility:hidden` + `overflow:hidden` to remain invisible while still triggering HTTP cache population.
+- **Operator impact:** Fullscreen multiview now opens with thumbnails immediately visible on first entry, not just on subsequent opens.
 
 ## v3.2.30 / v3.1.138 — 2026-04-08
 

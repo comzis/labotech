@@ -1862,6 +1862,21 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       </div>
     )}
 
+    {/* Hidden prefetch layer — keeps browser HTTP cache warm so fullscreen tiles appear instantly.
+        One invisible 1×1 img per decoder; same URL the fullscreen tiles will use.
+        display:none would suppress fetching, so we use visibility:hidden + overflow:hidden instead. */}
+    {!isFullscreen && (
+      <div
+        aria-hidden="true"
+        style={{ position: 'fixed', top: 0, left: 0, width: 1, height: 1, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' }}
+      >
+        {visibleIds.map((id) => {
+          const url = resultsById[id]?.thumbnailUrl;
+          return url ? <img key={id} src={url} alt="" width={1} height={1} /> : null;
+        })}
+      </div>
+    )}
+
     {/* ── Professional MCR-style fullscreen multiview overlay ── */}
     {isFullscreen && (() => {
       const d = new Date(fsNowMs);
