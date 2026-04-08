@@ -1969,7 +1969,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
           {/* Tile grid — fills remaining height, all tiles sized to fit viewport instantly */}
           {(() => {
             const cols = fsColumns(visibleIds.length);
-            const rows = fsRows(visibleIds.length, cols);
+            const rows = Math.max(1, fsRows(visibleIds.length, cols));
             // Header is 40px + 2px border. Subtract gap/padding (1px each side = 2px total).
             // Each row height = (100vh - 42px - gaps) / rowCount, capped to maintain 16:9.
             const rowH = `calc((100vh - 42px - ${rows + 1}px) / ${rows})`;
