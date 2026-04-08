@@ -537,9 +537,6 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const meanDb = result?.audioLevels?.meanDb;
   const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
 
-  const [displaySrc, setDisplaySrc] = useState(null);
-  useEffect(() => { setDisplaySrc(null); }, [thumbUrl]);
-
   return (
     <div style={{
       display: 'flex', flexDirection: 'column',
@@ -552,14 +549,14 @@ function FullscreenThumbTile({ id, result, nowMs }) {
       {/* Content row: thumbnail | audio meters */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
 
-        {/* Thumbnail */}
+        {/* Thumbnail — src updated in place (no key prop) so browser holds the
+            previous frame while the next one loads. No displaySrc indirection
+            needed: the browser natively defers the swap until load completes. */}
         <div style={{ flex: 1, position: 'relative', background: '#060606', minWidth: 0, overflow: 'hidden' }}>
-          {(displaySrc || thumbUrl) ? (
+          {thumbUrl ? (
             <img
-              src={displaySrc || thumbUrl}
+              src={thumbUrl}
               alt={svc}
-              onLoad={(e) => setDisplaySrc(e.currentTarget.src)}
-              onError={() => {}}
               style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
             />
           ) : (
