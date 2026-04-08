@@ -461,11 +461,19 @@ function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMod
 
 // Fullscreen grid — columns by tile count to maximise thumb area
 function fsColumns(count) {
-  if (count <= 1) return 1;
-  if (count <= 4) return 2;
-  if (count <= 9) return 3;
+  if (count <= 1)  return 1;
+  if (count <= 4)  return 2;
+  if (count <= 9)  return 3;
   if (count <= 16) return 4;
-  return 5;
+  if (count <= 25) return 5;
+  if (count <= 36) return 6;
+  if (count <= 49) return 7;
+  return 8;
+}
+
+// Row count given columns and tile count (ceiling division)
+function fsRows(count, cols) {
+  return Math.ceil(count / cols);
 }
 
 // 2px-wide vertical VU bar (fills bottom-up) — MCR meter style
@@ -563,8 +571,7 @@ function FullscreenThumbTile({ id, result, nowMs }) {
       background: '#030405',
       border: '1px solid #080808',
       borderTop: `1px solid ${statusColor}55`,
-      overflow: 'hidden', minWidth: 0,
-      aspectRatio: '16 / 9',
+      overflow: 'hidden', minWidth: 0, minHeight: 0,
     }}>
       {/* Content row: thumbnail | audio meters */}
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -1959,13 +1966,19 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
             </div>
           </div>
 
-          {/* Tile grid — fills remaining height */}
+          {/* Tile grid — fills remaining height, all tiles sized to fit viewport instantly */}
+          {(() => {
+            const cols = fsColumns(visibleIds.length);
+            const rows = Math.max(1, fsRows(visibleIds.length, cols));
+            // Header is 40px + 2px border. Subtract gap/padding (1px each side = 2px total).
+            // Each row height = (100vh - 42px - gaps) / rowCount, capped to maintain 16:9.
+            const rowH = `calc((100vh - 42px - ${rows + 1}px) / ${rows})`;
+            return (
           <div style={{
             flex: 1,
             display: 'grid',
-            gridTemplateColumns: `repeat(${fsColumns(visibleIds.length)}, 1fr)`,
-            gridAutoRows: 'auto',
-            alignContent: 'center',
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, ${rowH})`,
             overflow: 'hidden',
             gap: '1px',
             padding: '1px',
@@ -1980,6 +1993,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
               />
             ))}
           </div>
+            );
+          })()}
 
         </div>
       );

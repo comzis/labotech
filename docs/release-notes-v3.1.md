@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.135 / backend 3.2.28)
+Date: 2026-04-08 (latest: web 3.1.136 / backend 3.2.28)
+
+## v3.1.136 — 2026-04-08
+
+### Fix: Fullscreen multiview loads instantly — explicit row sizing, extended column breakpoints
+
+- `gridAutoRows: 'auto'` with `aspectRatio: 16/9` per tile caused the browser to reflow the entire grid after layout, making fullscreen slow to appear and tiles black or zero-height when tile count exceeded 16.
+- **Fix:** Grid rows are now explicitly sized to `calc((100vh - 42px - gaps) / rowCount)` — all tiles fill the viewport in one layout pass with no reflow. `aspectRatio` removed from tile; `minHeight: 0` added so flex children shrink correctly.
+- **Fix:** Column breakpoints extended to 36 (6 cols), 49 (7 cols), 64+ (8 cols) — previously capped at 5 columns which clipped tiles off-screen for large deployments.
+- **Operator impact:** Fullscreen multiview opens immediately at any decoder count. Supports up to 64 tiles in an 8×8 grid.
 
 ## v3.1.135 — 2026-04-08
 
