@@ -1,6 +1,14 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-06 (latest: web 3.1.129 / backend 3.2.24)
+Date: 2026-04-08 (latest: web 3.1.129 / backend 3.2.26)
+
+## v3.2.26 — 2026-04-08
+
+### Chore: Simplify Docker env file — use `.env` directly
+
+- `docker-compose.yml` previously required a separate `docker-env.txt` file (a copy of `.env`) to inject runtime environment variables into both containers. This caused confusion on fresh deploys and after `git reset --hard` which removed gitignored files.
+- **Change:** Both service `env_file` entries now point to `.env`. `docker-env.txt` removed from `.gitignore`.
+- **Operator impact:** Only `.env` is needed on the server — no need to maintain a separate `docker-env.txt`.
 
 ## v3.1.129 — 2026-04-06
 
