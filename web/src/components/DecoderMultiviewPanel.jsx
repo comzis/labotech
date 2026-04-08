@@ -584,6 +584,9 @@ function FullscreenThumbTile({ id, result, nowMs }) {
             <img
               src={thumbUrl}
               alt={svc}
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
               style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
             />
           ) : (
@@ -1875,7 +1878,18 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
     >
       {visibleIds.map((id) => {
         const url = resultsById[id]?.thumbnailUrl;
-        return url ? <img key={id} src={url} alt="" width={1} height={1} /> : null;
+        return url ? (
+          <img
+            key={id}
+            src={url}
+            alt=""
+            width={1}
+            height={1}
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
+          />
+        ) : null;
       })}
     </div>
 

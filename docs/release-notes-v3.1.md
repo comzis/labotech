@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.146 / backend 3.2.33)
+Date: 2026-04-08 (latest: web 3.1.147 / backend 3.2.33)
+
+## v3.1.147 — 2026-04-08
+
+### Fix: Restore instant fullscreen thumbnail warmup
+
+- **Issue** — fullscreen multiview could regress to slow first paint on some browsers even with hidden prefetch images present.
+- **Cause** — browser heuristics may still deprioritize hidden/offscreen image requests unless explicitly marked as eager/high-priority.
+- **Fix** — fullscreen tile images and hidden prefetch-layer images now use eager/high-priority fetch hints.
+- **Operator impact** — first fullscreen entry returns to near-instant thumbnail visibility with warmed cache behavior.
 
 ## v3.1.146 — 2026-04-08
 
