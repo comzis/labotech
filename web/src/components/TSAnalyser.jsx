@@ -292,6 +292,10 @@ export default function TSAnalyser({ lastMessage }) {
     pts_error: 1, cat_error: 1, nit_error: 1, sdt_error: 1, eit_error: 1,
     rst_error: 1, tdt_error: 1, empty_buf: 1,
   });
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
 
   const {
     result,
@@ -753,11 +757,6 @@ export default function TSAnalyser({ lastMessage }) {
     setActiveIdB("");
     setActionNote({ type: "ok", text: "All monitors stopped." });
   };
-
-  const [catalog, setCatalog] = useState([]);
-  const [catalogSearch, setCatalogSearch] = useState('');
-  const [showCatalog, setShowCatalog] = useState(false);
-  const catalogRef = useRef(null);
 
   const [applyConfigStatus, setApplyConfigStatus] = useState(null); // null | 'ok' | 'err'
   const handleApplyEtrConfig = async () => {
