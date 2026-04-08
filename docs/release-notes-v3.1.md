@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.134 / backend 3.2.28)
+Date: 2026-04-08 (latest: web 3.1.135 / backend 3.2.28)
+
+## v3.1.135 — 2026-04-08
+
+### Fix: Fullscreen multiview audio meters stable and persistent — broadcast standard
+
+- ffprobe inconsistently returns 2 or 8 channels between probe cycles. `FullscreenThumbTile` had no audio data latch, causing two separate issues: (1) bar count flipping between 1 and 4 pairs every cycle, (2) meters going dark on probes that returned only the primary stereo pair.
+- **Fix 1:** `audioSnapshot` latch holds the last known channel data; `displayChannels` falls back to the snapshot when the current probe returns fewer channels — meters stay live between probes, matching the standard tile behaviour.
+- **Fix 2:** `pairCountLatch` only increases — once 4 pairs are seen the layout remains stable at 4 pairs.
+- **Operator impact:** Fullscreen multiview audio meters are continuously live and structurally stable — consistent with broadcast monitoring standards.
 
 ## v3.1.134 — 2026-04-08
 

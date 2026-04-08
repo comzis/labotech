@@ -513,7 +513,23 @@ function FullscreenThumbTile({ id, result, nowMs }) {
 
   const rate = resolveTransportBitrate(result);
   const thumbUrl = result?.thumbnailUrl || null;
-  const channels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
+  const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
+  const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
+
+  // Audio snapshot: hold last known channel data so meters stay live between
+  // probes that return fewer channels. Broadcast standard — meters must never
+  // go dark mid-programme due to a probe returning only the primary stereo pair.
+  const [audioSnapshot, setAudioSnapshot] = useState(null);
+  useEffect(() => {
+    if (currentChannels.length > 0 || Number.isFinite(currentMeanDb)) {
+      setAudioSnapshot({
+        channels: currentChannels.length > 0 ? currentChannels : [],
+        meanDb:   currentMeanDb,
+      });
+    }
+  }, [currentChannels, currentMeanDb]);
+  const displayChannels = currentChannels.length > 0 ? currentChannels : (audioSnapshot?.channels || []);
+  const meanDb = Number.isFinite(currentMeanDb) ? currentMeanDb : (audioSnapshot?.meanDb ?? null);
 
   // Count audio ESes from PMT, filtering null-PID entries — ffprobe emits each ES
   // twice: once inside the program list (with PID) and once in the global stream
@@ -521,20 +537,24 @@ function FullscreenThumbTile({ id, result, nowMs }) {
   const audioEsCount = (result?.programs || []).reduce((acc, p) =>
     acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
   // Show whichever is larger: measured channel pairs OR PMT ES count.
-  // This ensures all 4 audio PIDs show meter slots even when only the primary
-  // stream is probed (2 measured channels → 1 real pair, 3 dark placeholders).
-  const measuredPairs = channels.length > 0 ? Math.ceil(channels.length / 2) : 0;
-  const pairCount = Math.max(measuredPairs, audioEsCount);
+  const measuredPairs = displayChannels.length > 0 ? Math.ceil(displayChannels.length / 2) : 0;
+  const rawPairCount = Math.max(measuredPairs, audioEsCount);
+  // Latch the highest pair count seen — ffprobe inconsistently reports 2 or 8
+  // channels between probes; without a latch the bar count flips every cycle.
+  const [pairCountLatch, setPairCountLatch] = useState(0);
+  useEffect(() => {
+    if (rawPairCount > pairCountLatch) setPairCountLatch(rawPairCount);
+  }, [rawPairCount, pairCountLatch]);
+  const pairCount = Math.max(rawPairCount, pairCountLatch);
 
   const pairs = [];
   for (let i = 0; i < pairCount; i++) {
     pairs.push({
-      left:  channels[i * 2]     || null,
-      right: channels[i * 2 + 1] || null,
+      left:  displayChannels[i * 2]     || null,
+      right: displayChannels[i * 2 + 1] || null,
       num:   i + 1,
     });
   }
-  const meanDb = result?.audioLevels?.meanDb;
   const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
 
   return (
