@@ -727,6 +727,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const catalogImportFileRef = useRef(null);
   const fullscreenRef = useRef(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const serverClockOffsetMsRef = useRef(0);
   // Debounce timer for server-side panel sync
   const serverSyncTimerRef = useRef(null);
 
@@ -899,7 +900,14 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   }, [lastMessage, onWsResult]);
 
   useEffect(() => {
-    const timer = setInterval(() => setNowMs(Date.now()), MULTIVIEW_CLOCK_TICK_MS);
+    if (!lastMessage || !lastMessage.time) return;
+    const serverTs = new Date(lastMessage.time).getTime();
+    if (!Number.isFinite(serverTs)) return;
+    serverClockOffsetMsRef.current = serverTs - Date.now();
+  }, [lastMessage]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setNowMs(Date.now() + serverClockOffsetMsRef.current), MULTIVIEW_CLOCK_TICK_MS);
     return () => clearInterval(timer);
   }, []);
 
@@ -914,8 +922,8 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
   const [fsNowMs, setFsNowMs] = useState(Date.now());
   useEffect(() => {
     if (!isFullscreen) return;
-    setFsNowMs(Date.now());
-    const t = setInterval(() => setFsNowMs(Date.now()), 1000);
+    setFsNowMs(Date.now() + serverClockOffsetMsRef.current);
+    const t = setInterval(() => setFsNowMs(Date.now() + serverClockOffsetMsRef.current), 1000);
     return () => clearInterval(t);
   }, [isFullscreen]);
 
