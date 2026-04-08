@@ -7,14 +7,14 @@ This runbook validates end-to-end multicast forwarding and TS probing in product
 - API is reachable on `http://<YOUR_SERVER_IP>:4000`
 - Docker/system service is healthy (`/health` returns `status: ok`)
 - You have a known-live RTP source URL (example used below):
-  - `rtp://239.100.29.49:6501`
+  - `rtp://<source-multicast-ip>:<source-port>`
 
 ## 6-command workflow
 
 1) **Start test forwarder**
 
 ```bash
-curl -sS -X POST "http://<YOUR_SERVER_IP>:4000/multicast/forward" -H "Content-Type: application/json" -d '{"id":"fwd-smoke-1","sourceUrl":"rtp://239.100.29.49:6501","destIp":"239.100.25.29","destPort":6501,"engineerApproved":true}'
+curl -sS -X POST "http://<YOUR_SERVER_IP>:4000/multicast/forward" -H "Content-Type: application/json" -d '{"id":"fwd-smoke-1","sourceUrl":"rtp://<source-multicast-ip>:<source-port>","destIp":"<multicast-forward-ip>","destPort":6501,"engineerApproved":true}'
 ```
 
 2) **Confirm forwarder is active**
@@ -26,7 +26,7 @@ curl -sS "http://<YOUR_SERVER_IP>:4000/multicast/forward"
 3) **Run analyser probe against forwarded destination**
 
 ```bash
-curl -sS "http://<YOUR_SERVER_IP>:4000/analyse?url=rtp://239.100.25.29:6501"
+curl -sS "http://<YOUR_SERVER_IP>:4000/analyse?url=rtp://<multicast-forward-ip>:6501"
 ```
 
 4) **Stop test forwarder**

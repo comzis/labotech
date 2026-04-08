@@ -210,7 +210,7 @@ Stop transcoder.
 
 ## Multicast Forward
 
-Re-outputs any input stream as RTP/UDP multicast on eno2 (`239.100.25.0/26`).
+Re-outputs any input stream as RTP/UDP multicast on `<multicast-nic>` (`<multicast-forward-subnet>`).
 
 ### `GET /multicast/config`
 
@@ -219,9 +219,9 @@ Returns the active multicast configuration.
 **Response `200`**
 ```json
 {
-  "nic":     "eno2",
-  "subnet":  "239.100.25.0/26",
-  "address": "239.100.25.29",
+  "nic":     "<multicast-nic>",
+  "subnet":  "<multicast-forward-subnet>",
+  "address": "<multicast-forward-ip>",
   "ttl":     10
 }
 ```
@@ -238,7 +238,7 @@ List all active forwarders.
 
 Start a multicast forwarder.
 
-> **Engineer approval required.** Only one forwarder allowed simultaneously. Destination must be `239.100.25.29`.
+> **Engineer approval required.** Only one forwarder allowed simultaneously. Destination must match `<multicast-forward-ip>` (or configured policy if pinning is disabled).
 
 **Request body**
 
@@ -246,9 +246,9 @@ Start a multicast forwarder.
 |---|---|---|---|
 | `id` | string | ✓ | Unique forwarder ID |
 | `sourceUrl` | string | ✓ | Input URL (`udp://`, `rtp://`, `srt://`) |
-| `destIp` | string | ✓ | Must be `239.100.25.29` |
+| `destIp` | string | ✓ | Must match allowed multicast policy (default pinned to `<multicast-forward-ip>`) |
 | `destPort` | number | | Destination port (default 1234) |
-| `nic` | string | | Output NIC (default `eno2`) |
+| `nic` | string | | Output NIC (default `<multicast-nic>`) |
 | `ttl` | number | | Multicast TTL (default 10) |
 | `engineerApproved` | boolean | ✓ | Must be `true` — safety interlock |
 
@@ -289,7 +289,7 @@ With `?url=...`: run a **one-shot probe** on the given URL and return immediatel
 **One-shot probe response `200`**
 ```json
 {
-  "url": "rtp://239.100.25.29:6501",
+  "url": "rtp://<multicast-forward-ip>:6501",
   "bitrate": 18157000,
   "programs": [ ... ],
   "streams": [ ... ],
@@ -310,7 +310,7 @@ Start continuous monitoring for a decoder.
 | `id` | string | ✓ | Unique analyser ID (conventionally matches the decoder ID) |
 | `url` | string | ✓ | Source URL (`srt://`, `rtp://`, `udp://`) |
 | `interval` | number | | Probe interval in ms (default: policy-driven, ~30–60 s) |
-| `nicName` | string | | NIC for IAT sniffer (default: `eno2`) |
+| `nicName` | string | | NIC for IAT sniffer (default: `<multicast-nic>`) |
 
 > **SRT sources:** The relay starts automatically. `effectiveUrl` switches to `udp://127.0.0.1:PORT` (djb2-hashed from the SRT URL, range 5500–5599). All internal consumers use the relay's UDP copy — no slot contention.
 
@@ -392,7 +392,7 @@ Start ETR 290 monitoring.
 |---|---|---|---|
 | `id` | string | ✓ | Monitor ID. Convention: `etr-<analyserID>` so the orphan watchdog can auto-stop when the decoder stops |
 | `url` | string | ✓ | Source URL. SRT is redirected to relay if available; returns 422 if relay not ready |
-| `nicName` | string | | NIC name for capture (default `eno2`) |
+| `nicName` | string | | NIC name for capture (default `<multicast-nic>`) |
 | `profileName` | string | | Apply a saved profile as base config |
 | `config` | object | | Threshold overrides merged on top of profile |
 
@@ -448,7 +448,7 @@ Creates a linked 3-stage pipeline: SRT encapsulator → transcoder (optional) �
 | `srtHost` | string | ✓ | SRT output host |
 | `srtPort` | number | ✓ | SRT output port |
 | `transcodePreset` | string | | Interlace preset; omit to skip transcoding |
-| `multicastDestIp` | string | | Multicast destination (must be `239.100.25.29`) |
+| `multicastDestIp` | string | | Multicast destination (must match allowed policy, default `<multicast-forward-ip>`) |
 | `multicastPort` | number | | Multicast port |
 | `enableForward` | boolean | | Must be `true` to activate multicast stage |
 | `engineerApproved` | boolean | | Required when `enableForward=true` |
@@ -643,9 +643,9 @@ Key env vars that affect API behaviour:
 |---|---|---|
 | `API_HOST` | `<YOUR_SERVER_IP>` | Bind address — never change to `0.0.0.0` |
 | `API_PORT` | `4000` | Listen port |
-| `MULTICAST_NIC` | `eno2` | Multicast output NIC |
-| `FORWARD_MULTICAST_SUBNET` | `239.100.25.0/26` | Allowed multicast subnet |
-| `FORWARD_MULTICAST_IP` | `239.100.25.29` | Pinned multicast destination |
+| `MULTICAST_NIC` | `<multicast-nic>` | Multicast output NIC |
+| `FORWARD_MULTICAST_SUBNET` | `<multicast-forward-subnet>` | Allowed multicast subnet |
+| `FORWARD_MULTICAST_IP` | `<multicast-forward-ip>` | Pinned multicast destination |
 | `MULTICAST_TTL` | `10` | Multicast TTL |
 | `RESTORE_STREAMS_ON_BOOT` | `false` | Auto-restore encapsulators on container start |
 | `RESTORE_TRANSCODERS_ON_BOOT` | `false` | Auto-restore transcoders on container start |
