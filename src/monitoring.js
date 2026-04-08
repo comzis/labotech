@@ -29,6 +29,13 @@ const _thumbPendingById = new Map(); // safeStreamId -> Promise<string>
 
 const THUMBNAIL_DIR      = path.join(__dirname, '..', 'logs', 'thumbnails');
 const THUMBNAIL_INTERVAL = parseInt(process.env.THUMBNAIL_INTERVAL_SEC) || 5;
+// Target thumbnail frame rate for PersistentThumbnailCapture (near-live mode).
+// All decoded frames are used (keyframe-only mode removed) so the actual rate
+// is min(THUMBNAIL_FPS, stream_frame_rate). Capped at 25 to avoid CPU waste.
+const _envThumbFps = parseFloat(process.env.THUMBNAIL_FPS);
+const THUMBNAIL_FPS = Number.isFinite(_envThumbFps) && _envThumbFps > 0
+  ? Math.min(25, _envThumbFps)
+  : 5;
 const THUMBNAIL_QUALITY_PROFILE = String(process.env.THUMBNAIL_QUALITY_PROFILE || 'high').trim().toLowerCase();
 const TS_INPUT_FIFO_SIZE = Number.isFinite(parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
   ? Math.max(1, parseInt(process.env.TS_INPUT_FIFO_SIZE, 10))
@@ -123,7 +130,7 @@ class PersistentThumbnailCapture extends EventEmitter {
     super();
     this._streamId  = streamId;
     this._inputUrl  = inputUrl;
-    this._intervalSec = Math.max(1, intervalSec || THUMBNAIL_INTERVAL);
+    this._intervalSec = intervalSec || THUMBNAIL_INTERVAL;
     this._running   = false;
     this._proc      = null;
     this._restartTimer = null;
@@ -210,19 +217,14 @@ class PersistentThumbnailCapture extends EventEmitter {
     const analyzeDurUs = isSrt ? String((latencyMs + 3000) * 1000) : '2000000';
     const src = this._buildSrc();
 
-    // select=key passes only key frames (IDR for H.264/H.265, I-frame for MPEG-2).
-    // Preferred over select=eq(pict_type,I) because the HEVC decoder does not always
-    // set the pict_type AVFrame field — particularly for Main 4:2:2 Range Extensions
-    // (yuv422p10le) where pict_type may remain AV_PICTURE_TYPE_NONE throughout.
-    // The key_frame flag is set reliably by all decoders.
+    // Near-live thumbnail mode: all decoded frames are passed to the fps filter.
+    // select=key was removed — it limited output to one frame per GOP (0.5fps on a
+    // 2s-GOP broadcast stream) regardless of THUMBNAIL_FPS. Full decode is required
+    // for sub-GOP frame rates. mjpeg re-encodes any fully decoded frame cleanly.
     // format=yuv420p: mjpeg encoder has no 10-bit pixel format support; yuv422p10le
     // input (HEVC 4:2:2 Rext) must be explicitly downconverted before the encoder.
-    // NOTE: do NOT add setpts here — resetting timestamps would compress all I-frame
-    // PTS values to near-zero, causing fps=1/N to treat stream-seconds as
-    // microseconds and produce essentially no output after the first frame.
     const vf = [
-      'select=key',
-      `fps=1/${this._intervalSec}`,
+      `fps=${THUMBNAIL_FPS}`,
       `scale=${capture.width}:trunc(${capture.width}/dar/2)*2:flags=${capture.scaler}`,
       capture.denoise || null,
       'format=yuv420p',

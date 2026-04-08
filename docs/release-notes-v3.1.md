@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.132 / backend 3.2.27)
+Date: 2026-04-08 (latest: web 3.1.133 / backend 3.2.28)
+
+## v3.2.28 / v3.1.133 — 2026-04-08
+
+### Feat: Near-live thumbnails — `THUMBNAIL_FPS` env var, keyframe-only mode removed
+
+- `select=key` limited thumbnail output to one frame per GOP (0.5 fps on a 2s-GOP broadcast stream) regardless of interval setting. Removed.
+- New `THUMBNAIL_FPS` env var (default `5`, max `25`) sets the target frame rate for `PersistentThumbnailCapture`. The ffmpeg filter is now `fps=N` on all decoded frames.
+- `THUMBNAIL_INTERVAL_SEC` and its `Math.max(1,…)` floor are retained for the legacy one-shot capture path but are no longer used by the persistent capture worker.
+- **Operator impact:** Set `THUMBNAIL_FPS=5` (default) or higher in `.env` for near-live thumbnails in both the confidence monitor and multiview tiles. CPU cost scales linearly with stream count × fps — the Xeon Gold 5120 handles 10 streams at 10 fps comfortably.
 
 ## v3.1.132 — 2026-04-08
 
