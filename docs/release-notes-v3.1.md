@@ -1,6 +1,15 @@
 # Labotech v3.1 Release Notes
 
-Date: 2026-04-08 (latest: web 3.1.155 / backend 3.2.37)
+Date: 2026-04-12 (latest: web 3.1.156 / backend 3.2.37)
+
+## v3.1.156 — 2026-04-12
+
+### Fix: multiview decoder start opens two tiles instead of one
+
+- **Issue** — starting a decoder from the multiview panel (Add Tile or Create) produced two tiles for the same source.
+- **Cause** — PR #117 removed the dedup guard (`if decoderIds.includes(id) return p`) from the `setPanels` call in both `handleAddTile` and `handleCreate`. A race condition between the auto-seed `useEffect([activeIds])` and the handler's own `setPanels` was already adding the ID once; without the guard, the handler added it a second time. The same PR also changed `visibleIds` to be derived from `decoderIds` (needed for same-source aliases), which made the pre-existing duplicate visible as an actual second tile.
+- **Fix** — restored the dedup guard in the new-decoder path of both handlers. The alias path (same-URL `existingId`) and the `visibleIds` computation are unchanged.
+- **Operator impact** — starting a decoder now always produces exactly one tile.
 
 ## v3.1.155 — 2026-04-08
 

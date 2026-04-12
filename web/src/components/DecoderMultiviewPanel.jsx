@@ -1218,6 +1218,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       await startContinuous(id, url, 5000);
       setPanels((prev) => prev.map((p) => {
         if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
         return { ...p, decoderIds: [...(p.decoderIds || []), id] };
       }));
       setAddTileOpen(false);
@@ -1249,6 +1250,7 @@ export default function DecoderMultiviewPanel({ lastMessage }) {
       await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
       setPanels((prev) => prev.map((p) => {
         if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
         return { ...p, decoderIds: [...(p.decoderIds || []), id] };
       }));
       setOpenCreate(false);
