@@ -496,7 +496,7 @@ export default function TranscodePanel({ lastMessage }) {
                 <div className="grid grid-cols-2 gap-4">
                   <Field
                     label={form.outputMode === 'srt' ? 'SRT Target Host *' : 'Destination IP *'}
-                    placeholder={form.outputMode === 'srt' ? '10.67.18.29' : '239.100.25.29'}
+                    placeholder={form.outputMode === 'srt' ? '192.168.1.10' : '239.100.25.29'}
                     value={form.host}
                     onChange={v => set('host', v)}
                     required

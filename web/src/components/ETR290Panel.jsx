@@ -509,7 +509,7 @@ export default function ETR290Panel({ lastMessage }) {
                 label={probeMode === 'udp' || probeMode === 'rtp' ? 'Multicast / Unicast IP *' : 'Host *'}
                 value={host}
                 onChange={setHost}
-                placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.29' : '10.67.18.29'}
+                placeholder={probeMode === 'udp' || probeMode === 'rtp' ? '239.100.25.29' : '192.168.1.10'}
                 required={!activeId}
               />
             </div>
@@ -525,7 +525,7 @@ export default function ETR290Panel({ lastMessage }) {
           )}
           {(probeMode === 'udp' || probeMode === 'rtp') && (
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Input Bind IP (eno2 IP)" value={bindIp} onChange={setBindIp} placeholder="10.67.18.29 (optional)" />
+              <Field label="Input Bind IP (eno2 IP)" value={bindIp} onChange={setBindIp} placeholder="192.168.1.10 (optional)" />
               <Field
                 label="Capture NIC (optional)"
                 value={captureNic}

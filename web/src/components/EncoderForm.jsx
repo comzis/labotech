@@ -179,7 +179,7 @@ export default function EncoderForm({ onStarted }) {
                     <Field label="Input Source URL *" value={form.input} onChange={v => set('input', v)} required placeholder="Example: rtp://239.100.25.29:6501" />
                   </div>
                 )}
-                <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Example: 10.67.18.29" />
+                <Field label="Input Bind IP (optional)" value={form.inputLocalAddr} onChange={v => set('inputLocalAddr', v)} placeholder="Example: 192.168.1.10" />
 
                 {/* Target host + port — common to all modes */}
                 <Field
@@ -203,7 +203,7 @@ export default function EncoderForm({ onStarted }) {
                   ]} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="Example: eno2 or 10.67.18.29" />
+                  <Field label="Adapter / Bind IP" value={form.adapter} onChange={v => set('adapter', v)} placeholder="Example: eno2 or 192.168.1.10" />
                   <Field label="Stream ID" value={form.streamId} onChange={v => set('streamId', v)} placeholder="Example: channel-alpha" />
                 </div>
               </div>

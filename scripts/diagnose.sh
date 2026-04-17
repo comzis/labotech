@@ -4,7 +4,7 @@
 
 SINCE="${1:-30 min ago}"
 PORT="${LABOTECH_PORT:-4000}"
-API="${LABOTECH_HOST:-10.67.18.29}:${PORT}"
+API="${LABOTECH_HOST:-localhost}:${PORT}"
 
 echo ""
 echo "=== Process ==="
