@@ -1,15 +1,15 @@
 # LABOTECH
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-243%20passed-brightgreen)](#testing)
-[![Version](https://img.shields.io/badge/version-3.2.25-blue)](docs/release-notes-v3.2.md)
+[![Tests](https://img.shields.io/badge/tests-267%20passed-brightgreen)](#testing)
+[![Version](https://img.shields.io/badge/version-3.2.37-blue)](docs/release-notes-v3.2.md)
 [![Node](https://img.shields.io/badge/node-20-green)](https://nodejs.org)
 [![TSDuck](https://img.shields.io/badge/ETR290-TSDuck-orange)](https://tsduck.io)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://docker.com)
 
-**v3.2.25 / web 3.1.129**
+**v3.2.37 / web 3.1.156**
 
-Professional DVB-IP stream processor for broadcast MCR operations on HPE DL360 / Ubuntu Server.
+Professional DVB-IP stream processor for broadcast MCR operations.
 Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 compliance, decoder multiview monitoring, and 1080p↔1080i interlace conversion.
 
 > **Not an encoder.** Labotech is an encapsulator, analyser, and multiview platform.
@@ -17,11 +17,23 @@ Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 complian
 
 ---
 
+## Supported Platforms
+
+| | Support level |
+|---|---|
+| **Ubuntu 22.04 LTS / 24.04 LTS** (x86_64) | ✅ Officially supported — CI and production validated |
+| Other Debian-based Linux (x86_64) | ⚠️ Best effort — community supported |
+| Other Linux distributions | ⚠️ Best effort — may require manual dependency adjustment |
+| macOS / Windows | ❌ Not supported |
+
+**Runtime requirements:** Docker + Compose v2 plugin, FFmpeg, TSDuck (`tsanalyze`), optional `tshark`/`tcpdump` for IAT capture. See `scripts/setup-host.sh` for the full install.
+
 ## Hardware Target
 
 | Component | Detail |
 |---|---|
-| Server | HPE DL360, Ubuntu Server |
+| Server | x86_64 Linux server with `network_mode: host` Docker support (validated on HPE DL360) |
+| OS | Ubuntu Server LTS (22.04 or 24.04) |
 | Management NIC | `<management-nic>` → `$API_HOST` → Web UI + API port `4000` |
 | Multicast NIC | `<multicast-nic>` → no IP → all `239.0.0.0/8` traffic |
 | Multicast subnet | `<multicast-forward-subnet>` (default address `<multicast-forward-ip>`) |
