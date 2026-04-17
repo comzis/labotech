@@ -12,7 +12,7 @@ APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$APP_DIR"
 
 TARGET_REF="${1:-origin/main}"
-API_HOST="${API_HOST:-10.67.18.29}"
+API_HOST="${API_HOST:-localhost}"
 API_PORT="${API_PORT:-4000}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"
 COMPOSE_BIN=""

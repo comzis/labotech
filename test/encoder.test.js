@@ -408,8 +408,8 @@ describe('SRTEncoder', () => {
     });
 
     test('UDP mode: includes localaddr when set', () => {
-      const enc2 = new SRTEncoder({ ...base, outputMode: 'udp', localAddr: '10.67.18.30' });
-      expect(mainUrl(enc2.buildFFmpegArgs())).toContain('localaddr=10.67.18.30');
+      const enc2 = new SRTEncoder({ ...base, outputMode: 'udp', localAddr: '203.0.113.10' });
+      expect(mainUrl(enc2.buildFFmpegArgs())).toContain('localaddr=203.0.113.10');
     });
 
     test('RTP mode: uses -f rtp_mpegts with rtp:// URL', () => {

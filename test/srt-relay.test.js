@@ -28,7 +28,7 @@ afterEach(() => {
   jest.useRealTimers();
 });
 
-const BASE_URL = 'srt://185.148.228.45:40065?latency=4000&passphrase=TESTKEY&pbkeylen=256';
+const BASE_URL = 'srt://203.0.113.10:40065?latency=4000&passphrase=TESTKEY&pbkeylen=256';
 
 // ── Group 1: Constructor ────────────────────────────────────────────────────
 describe('SRTRelay — constructor', () => {
@@ -258,10 +258,10 @@ describe('SRTRelay — error handling', () => {
 describe('SRTRelay — port allocation', () => {
   test('different URLs get different ports (spot check)', () => {
     const urls = [
-      'srt://185.148.228.45:40065',
-      'srt://185.148.228.45:40066',
-      'srt://10.67.18.29:5000',
-      'srt://10.67.18.29:5001',
+      'srt://203.0.113.10:40065',
+      'srt://203.0.113.10:40066',
+      'srt://203.0.113.11:5000',
+      'srt://203.0.113.11:5001',
       'srt://192.168.1.1:9000',
     ];
     const ports = urls.map(SRTRelay.hashPort);

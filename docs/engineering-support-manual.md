@@ -1416,7 +1416,7 @@ Paste the full SRT connection string provided by the gateway directly into the *
 | Latency | `tsbpddelay=...` (ms) |
 | Mode | switched to SRT automatically |
 
-Example string: `srt://185.148.228.45:40002?mode=caller&passphrase=CF95BE5316EC&tsbpddelay=4000&pbkeylen=32`
+Example string: `srt://203.0.113.10:40002?mode=caller&passphrase=EXAMPLE_PASSPHRASE&tsbpddelay=4000&pbkeylen=32`
 
 **Option B — Manual entry**
 
@@ -1664,7 +1664,7 @@ Peer rejected connection — id SRT
 Peer rejected connection — id decoder-1773832144703
 ```
 
-Multiple decoder IDs (from different sessions, persisted in `config/state.json`) were all attempting to connect to `185.148.228.45:40065` simultaneously on every container restart.
+Multiple decoder IDs (from different sessions, persisted in `config/state.json`) were all attempting to connect to `203.0.113.10:40065` simultaneously on every container restart.
 
 **Root causes**
 

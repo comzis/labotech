@@ -829,7 +829,7 @@ Landing page LABOTECH hero now uses the same font, weight, colour (`#7b879a`), a
 
 **Landing page** — "LABOTECH" now renders in Bebas Neue (72 px, broadcast-grade condensed font used in MCR signage and lower thirds). Sub-label changed from "Secure operator access / Control Room Access" to "Operator Access". Removes generic security-portal language in favour of terse professional MCR wording.
 
-**SRT URI smart-paste** — pasting an `srt://` URI into the Host / IP field of Decoder Provisioning now auto-extracts and populates: host, port, passphrase, pbkeylen, and latency (from `tsbpddelay`). Mode is automatically switched to SRT. Field label updated to hint at the feature. Example: pasting `srt://185.148.228.45:40002?mode=caller&passphrase=CF95BE5316EC&tsbpddelay=4000&pbkeylen=32` fills all fields in one action.
+**SRT URI smart-paste** — pasting an `srt://` URI into the Host / IP field of Decoder Provisioning now auto-extracts and populates: host, port, passphrase, pbkeylen, and latency (from `tsbpddelay`). Mode is automatically switched to SRT. Field label updated to hint at the feature. Example: pasting `srt://203.0.113.10:40002?mode=caller&passphrase=EXAMPLE_PASSPHRASE&tsbpddelay=4000&pbkeylen=32` fills all fields in one action.
 
 **Operator impact:** Significant reduction in manual entry when provisioning SRT streams from gateway-provided connection strings.
 

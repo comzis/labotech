@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-API_HOST="${1:-10.67.18.29}"
+API_HOST="${1:-localhost}"
 API_PORT="${2:-4000}"
 SERVICE="${3:-labotech}"
 HEALTH_URL="http://${API_HOST}:${API_PORT}/health"

@@ -22,7 +22,7 @@ const ENDPOINTS = [
   ep({ id: "streams-list", domain: "Streams", method: "GET", path: "/streams", desc: "List active stream instances." }),
   ep({
     id: "streams-create", domain: "Streams", method: "POST", path: "/streams", desc: "Create and start a stream.",
-    body: { id: "stream-1", input: "srt://0.0.0.0:4200?mode=listener", host: "10.67.18.29", port: 9999, videoBitrate: "8M", audioBitrate: "192k", videoCodec: "libx264", audioCodec: "aac" },
+    body: { id: "stream-1", input: "srt://0.0.0.0:4200?mode=listener", host: "192.168.1.10", port: 9999, videoBitrate: "8M", audioBitrate: "192k", videoCodec: "libx264", audioCodec: "aac" },
   }),
   ep({ id: "streams-get", domain: "Streams", method: "GET", path: "/streams/:id", desc: "Read stream details by ID.", pathParams: ["id"], pathDefaults: { id: "stream-1" } }),
   ep({ id: "streams-delete", domain: "Streams", method: "DELETE", path: "/streams/:id", desc: "Stop and remove a stream.", pathParams: ["id"], pathDefaults: { id: "stream-1" } }),
@@ -32,7 +32,7 @@ const ENDPOINTS = [
   ep({ id: "transcode-list", domain: "Transcode", method: "GET", path: "/transcode", desc: "List active transcoders." }),
   ep({
     id: "transcode-create", domain: "Transcode", method: "POST", path: "/transcode", desc: "Create a transcoder.",
-    body: { id: "tc-1", input: "srt://10.67.18.29:4200", transcodePreset: "pal", host: "10.67.18.29", port: 9999 },
+    body: { id: "tc-1", input: "srt://192.168.1.10:4200", transcodePreset: "pal", host: "192.168.1.10", port: 9999 },
   }),
   ep({ id: "transcode-get", domain: "Transcode", method: "GET", path: "/transcode/:id", desc: "Read transcoder details.", pathParams: ["id"], pathDefaults: { id: "tc-1" } }),
   ep({ id: "transcode-delete", domain: "Transcode", method: "DELETE", path: "/transcode/:id", desc: "Stop and remove a transcoder.", pathParams: ["id"], pathDefaults: { id: "tc-1" } }),
@@ -41,14 +41,14 @@ const ENDPOINTS = [
   ep({ id: "multicast-list", domain: "Multicast", method: "GET", path: "/multicast/forward", desc: "List active forwarders." }),
   ep({
     id: "multicast-create", domain: "Multicast", method: "POST", path: "/multicast/forward", desc: "Create a forwarder (239.100.25.0/26).",
-    body: { id: "fwd-1", sourceUrl: "srt://10.67.18.29:9999", destIp: "239.100.25.30", destPort: 5000, nic: "eno2", ttl: 16 },
+    body: { id: "fwd-1", sourceUrl: "srt://192.168.1.10:9999", destIp: "239.100.25.30", destPort: 5000, nic: "eno2", ttl: 16 },
   }),
   ep({ id: "multicast-get", domain: "Multicast", method: "GET", path: "/multicast/forward/:id", desc: "Read one forwarder by ID.", pathParams: ["id"], pathDefaults: { id: "fwd-1" } }),
   ep({ id: "multicast-delete", domain: "Multicast", method: "DELETE", path: "/multicast/forward/:id", desc: "Stop and remove a forwarder.", pathParams: ["id"], pathDefaults: { id: "fwd-1" } }),
 
-  ep({ id: "analyse-probe", domain: "Analyse", method: "GET", path: "/analyse", desc: "One-shot analysis (with ?url).", queryParams: ["url"], queryDefaults: { url: "srt://10.67.18.29:9999" } }),
+  ep({ id: "analyse-probe", domain: "Analyse", method: "GET", path: "/analyse", desc: "One-shot analysis (with ?url).", queryParams: ["url"], queryDefaults: { url: "srt://192.168.1.10:9999" } }),
   ep({ id: "analyse-list", domain: "Analyse", method: "GET", path: "/analyse", desc: "List active analysers (without ?url)." }),
-  ep({ id: "analyse-start", domain: "Analyse", method: "POST", path: "/analyse/start", desc: "Start continuous TS monitoring.", body: { id: "an-1", url: "srt://10.67.18.29:9999", interval: 5000 } }),
+  ep({ id: "analyse-start", domain: "Analyse", method: "POST", path: "/analyse/start", desc: "Start continuous TS monitoring.", body: { id: "an-1", url: "srt://192.168.1.10:9999", interval: 5000 } }),
   ep({ id: "analyse-get", domain: "Analyse", method: "GET", path: "/analyse/:id", desc: "Read analyser by ID.", pathParams: ["id"], pathDefaults: { id: "an-1" } }),
   ep({ id: "analyse-delete", domain: "Analyse", method: "DELETE", path: "/analyse/:id", desc: "Stop analyser.", pathParams: ["id"], pathDefaults: { id: "an-1" } }),
 
@@ -61,7 +61,7 @@ const ENDPOINTS = [
   ep({ id: "etr290-profiles-delete", domain: "ETR290", method: "DELETE", path: "/etr290/profiles/:name", desc: "Delete ETR profile by name.", pathParams: ["name"], pathDefaults: { name: "strict-p1" } }),
   ep({
     id: "etr290-start", domain: "ETR290", method: "POST", path: "/etr290/start", desc: "Start ETR monitor.",
-    body: { id: "etr-1", url: "srt://10.67.18.29:9999" },
+    body: { id: "etr-1", url: "srt://192.168.1.10:9999" },
   }),
   ep({ id: "etr290-get", domain: "ETR290", method: "GET", path: "/etr290/:id", desc: "Read ETR monitor status.", pathParams: ["id"], pathDefaults: { id: "etr-1" } }),
   ep({
@@ -73,7 +73,7 @@ const ENDPOINTS = [
 
   ep({
     id: "pipeline-create", domain: "Pipeline", method: "POST", path: "/pipeline", desc: "Create ingest -> transcode -> forward pipeline atomically.",
-    body: { id: "pl-1", input: "srt://0.0.0.0:4200?mode=listener", srtHost: "10.67.18.29", srtPort: 9999, transcodePreset: "pal", enableForward: false, multicastDestIp: "239.100.25.30", multicastPort: 5000 },
+    body: { id: "pl-1", input: "srt://0.0.0.0:4200?mode=listener", srtHost: "192.168.1.10", srtPort: 9999, transcodePreset: "pal", enableForward: false, multicastDestIp: "239.100.25.30", multicastPort: 5000 },
   }),
 
   ep({ id: "events-get", domain: "Events", method: "GET", path: "/api/events", desc: "Read runtime event log backlog." }),
