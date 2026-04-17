@@ -14,8 +14,8 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 
 - Current task: idle — all PRs from this session merged
 - Active branch: none
-- Last known focus: ETR290 lifecycle (auto-start/stop/restore), fullscreen thumbnail prefetch, compliance API
-- Notes: session closed cleanly at backend 3.2.32 / web 3.1.141
+- Last known focus: ETR alarm log (Decoder tab), catalog picker (TS Analyser), thumbnail_frame event suppression, etr290_started event, README Supported Platforms
+- Notes: session closed cleanly at backend 3.2.37 / web 3.1.156
 
 ## Agent B Status
 
@@ -48,6 +48,10 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 - PR #101 closed: superseded by PR #102
 - PR #102 merged: ETR290 auto-start/stop/restore + compliance API + event log filtering + 24 new tests (267/267)
 - PR #111 merged: analyser URL dedupe + runtime auto-heal watchdog (duplicate worker containment)
+- PR #104 merged: remove manual ETR enable controls (ETR auto-starts with decoder — web 3.1.143)
+- PR #105 merged: ETR per-decoder alarm log (Decoder tab) + catalog picker (TS Analyser tab)
+- PR #106 merged: suppress thumbnail_frame from event log; emit etr290_started on all start paths
+- PR #123 merged: README Supported Platforms section + hardware wording softened for OSS
 
 ## Notes
 
