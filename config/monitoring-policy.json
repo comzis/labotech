@@ -1,0 +1,39 @@
+{
+  "profile": "broadcast-balanced-v1",
+  "probeCadence": {
+    "baseIntervalMs": 5000,
+    "heavyProbeEvery": 3,
+    "heavyProbeIntervalMs": 15000,
+    "minLoopDelayMs": 250,
+    "startupJitterMaxMs": 2000
+  },
+  "bitrate": {
+    "stabilityWindowMs": 10000,
+    "warnDeltaPct": 3,
+    "criticalDeltaPct": 6
+  },
+  "health": {
+    "scoreWarning": 65,
+    "scoreOk": 85,
+    "lossWarnPct": 0.1,
+    "lossCriticalPct": 1,
+    "jitterWarnMs": 5,
+    "jitterCriticalMs": 15,
+    "iatP95WarnMs": 50,
+    "iatP95CriticalMs": 150,
+    "tsDiscWarnCount": 1,
+    "tsDiscCriticalCount": 3,
+    "ccWarnCount": 1,
+    "ccCriticalCount": 3,
+    "dolbyEMissingPenalty": 10,
+    "dolbyEDecodeFailurePenalty": 18
+  },
+  "smpte20227": {
+    "minSamples": 50,
+    "maxLossPct": 0,
+    "maxGapEvents": 0,
+    "maxDuplicateEvents": 0,
+    "maxReorderedEvents": 0,
+    "requireNicCapture": true
+  }
+}

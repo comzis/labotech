@@ -1,0 +1,13 @@
+{
+  "extraKnownMarketplaces": {
+    "labotech-local": {
+      "source": {
+        "source": "directory",
+        "path": "/Users/comzis/GitHub/LaboTech/.claude/marketplace"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "labotech-broadcast@labotech-local": true
+  }
+}

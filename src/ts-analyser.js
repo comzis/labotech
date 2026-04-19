@@ -1,0 +1,3142 @@
+// Labotech — Open Source Broadcast Stream Monitor
+// Copyright (c) 2026 Milorad Stevanovic
+// MIT Licence — github.com/comzis/labotech
+
+'use strict';
+
+const { EventEmitter } = require('events');
+const { spawn } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const { captureThumbnail, THUMBNAIL_DIR, sanitizeStreamId, PersistentThumbnailCapture, parseSrtLatency } = require('./monitoring');
+const IATSniffer = require('./iat-sniffer');
+const TSDuckMonitor = require('./tsduck-monitor');
+const DolbyEAdapter = require('./dolbye-adapter');
+const { getMonitoringPolicy, PROFILES } = require('./monitoring-policy');
+const { isSltAvailable } = require('./tooling-preflight');
+const SRTRelay = require('./srt-relay');
+let _multicastConfig = null;
+
+// Module-level semaphore: cap simultaneous heavy probes to prevent thundering
+// herd when many analysers are started in batch.  Each heavy probe spawns
+// ffprobe + tsanalyze + up to 4 sub-processes; without a cap, 9 decoders
+// starting simultaneously saturate CPU/multicast-join slots and produce false
+// "0 PIDs / 0 services / 0 bitrate" inconclusive results that trigger alarms.
+// Configurable via TS_HEAVY_PROBE_MAX_CONCURRENT env (default 3).
+const _HEAVY_PROBE_MAX = Math.max(1, _envNumberEarly('TS_HEAVY_PROBE_MAX_CONCURRENT', 3));
+const _heavyProbeQueue = [];
+let _heavyProbeActive = 0;
+
+function _envNumberEarly(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _acquireHeavyProbeSlot() {
+  return new Promise((resolve) => {
+    const tryAcquire = () => {
+      if (_heavyProbeActive < _HEAVY_PROBE_MAX) {
+        _heavyProbeActive++;
+        resolve();
+      } else {
+        _heavyProbeQueue.push(tryAcquire);
+      }
+    };
+    tryAcquire();
+  });
+}
+
+function _releaseHeavyProbeSlot() {
+  _heavyProbeActive = Math.max(0, _heavyProbeActive - 1);
+  if (_heavyProbeQueue.length > 0) {
+    const next = _heavyProbeQueue.shift();
+    next();
+  }
+}
+
+function _envNumber(name, fallback) {
+  const raw = process.env[name];
+  if (raw == null || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function _getPolicySnapshot() {
+  return getMonitoringPolicy();
+}
+const AUDIO_LEVEL_HOLD_MS = Math.max(1000, Math.floor(_envNumber('AUDIO_LEVEL_HOLD_MS', 15000)));
+const LIVE_INPUT_HINTS = {
+  // Conservative defaults avoid ENOMEM on constrained hosts.
+  fifoSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_FIFO_SIZE', 524288))),
+  timeoutUs: Math.max(1, Math.floor(_envNumber('TS_INPUT_TIMEOUT_US', 7000000))),
+  reorderQueueSize: Math.max(1, Math.floor(_envNumber('TS_INPUT_REORDER_QUEUE_SIZE', 256))),
+};
+function _getNicName() {
+  if (_multicastConfig) return _multicastConfig.nic || 'eno2';
+  try {
+    _multicastConfig = require('../config/multicast.json');
+    return _multicastConfig.nic || 'eno2';
+  } catch (_) {
+    return 'eno2';
+  }
+}
+
+class TSAnalyser extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    const policy = _getPolicySnapshot();
+    this.id = options.id || `analyser-${Date.now()}`;
+    this.url = options.url;
+    this.interval = options.interval || policy?.probeCadence?.baseIntervalMs || 5000; // ms between continuous probes
+    this.monitoringPolicy = policy;
+
+    this._timer = null;
+    this._thumbnailTimer = null;
+    this._lastThumbnailUrl = null;
+    this._thumbnailCapturing = false;
+    this.isRunning = false;
+    this.lastResult = null;
+    this._continuousProbeCount = 0;
+    this._etrMonitor = null; // set via setEtrMonitor() when an ETR290Analyser is linked
+    this._lastThumbnailAt = 0;
+    this._nextHeavyProbeAt = 0;
+    this._nextProbeAt = 0;
+    this.nicName = options.nicName || _getNicName();
+    this._iatSniffer = null;
+    this._tsduckMonitor = null;
+    // Alarm hysteresis: require HYSTERESIS_N consecutive warning-or-worse probes before
+    // escalating to 'warning'. 'critical' escalates immediately (already gated by higher
+    // thresholds). 'ok' recovers immediately to clear alarms without delay.
+    this._healthHysteresis = { warnCount: 0, critCount: 0, okCount: 0, lastReported: 'ok' };
+    // Startup grace: hold 'ok' for the first STARTUP_GRACE_N continuous probes so that
+    // SRT connection establishment, key negotiation, IAT estimator warm-up, and initial
+    // ffprobe PSI lock do not produce false CRITICAL hits in the live-view timeline.
+    // SRT streams get a longer grace (8 probes ≈ 40s) than UDP/RTP (4 probes ≈ 20s).
+    this._startupGraceRemaining = null;  // lazily initialised on first continuous probe
+    // CC rolling window: last 3 heavy-probe CC counts for RTP/UDP average scoring.
+    // Smooths out per-probe ffprobe join artefacts (1–10 errors on reconnect) so
+    // that only persistent CC error rates breach the threshold.
+    this._ccRollingWindow = [];
+    // Lifetime CC error accumulator — never reset between probe cycles.
+    // Provides monotonically increasing total for cross-cycle detection of
+    // persistent low-rate CC errors that never breach the per-cycle floor.
+    this._ccTotal = 0;
+    this._ccHeavyCount = 0; // heavy CC probe cycles completed
+    this._relay        = null;        // SRTRelay instance (srt:// sources only)
+    this._effectiveUrl = this.url;    // UDP relay URL for srt://, or this.url for others
+    this._lastRelaySrtStats = null;   // latest parsed srt-live-transmit JSON stats from relay
+    this._relayProbeRunning = false;  // true while sequential relay probes hold the UDP port
+    // Optional out-of-process thumbnail worker client (Phase 2).
+    // When provided, thumbnail management is delegated to the worker process
+    // instead of running PersistentThumbnailCapture in the API process.
+    this._thumbnailClient = options.thumbnailClient || null;
+  }
+
+  probe(options = {}) {
+    const isContinuous = Boolean(options.continuous);
+    if (isContinuous) {
+      this._continuousProbeCount += 1;
+      // Initialise startup grace on first continuous probe.
+      if (this._startupGraceRemaining === null) {
+        const isSrt = this.url && String(this.url).startsWith('srt://');
+        this._startupGraceRemaining = isSrt ? 8 : 4;
+      }
+    }
+    const runHeavyProbe = this._shouldRunHeavyProbe(isContinuous, Date.now());
+    // In continuous mode thumbnails are managed by a separate timer (startContinuous).
+    // For one-shot probes only, capture synchronously here.
+    const runThumbnailCapture = !isContinuous;
+
+    return new Promise((resolve, reject) => {
+      const runFfprobeJson = (probeUrl, extraArgs = []) => new Promise((resolveProbe, rejectProbe) => {
+        const args = [
+          '-v', 'quiet',
+          '-analyzeduration', '7000000',
+          '-probesize', '7000000',
+          ...extraArgs,
+          '-print_format', 'json',
+          '-show_programs',
+          '-show_streams',
+          '-show_format',
+          probeUrl,
+        ];
+        const proc = spawn('ffprobe', args);
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', d => { stdout += d.toString(); });
+        proc.stderr.on('data', d => { stderr += d.toString(); });
+        proc.on('error', (err) => {
+          rejectProbe(new Error(`ffprobe spawn failed: ${err && err.message ? err.message : 'unknown error'}`));
+        });
+        proc.on('exit', (code) => {
+          if (code !== 0) {
+            return rejectProbe(new Error(`ffprobe exited ${code}: ${stderr.trim()}`));
+          }
+          const out = String(stdout || '').trim();
+          if (!out) {
+            return rejectProbe(new Error(`ffprobe returned empty probe payload (no input packets observed during probe window)${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+          }
+          try {
+            const raw = JSON.parse(out);
+            return resolveProbe(raw);
+          } catch (_) {
+            return rejectProbe(new Error(`ffprobe returned invalid JSON payload${stderr && stderr.trim() ? `: ${stderr.trim()}` : ''}`));
+          }
+        });
+      });
+
+      (async () => {
+        try {
+          const primaryUrl = this._withLiveInputHints(this._effectiveUrl);
+          let raw = null;
+          try {
+            raw = await runFfprobeJson(primaryUrl);
+          } catch (primaryErr) {
+            if (this._isLiveInputHintMemoryError(primaryErr)) {
+              // Host cannot allocate hinted UDP buffers; retry without hints.
+              raw = await runFfprobeJson(this._effectiveUrl);
+            } else {
+              // RTP multicast feeds often need UDP/mpegts probing for one-shot ffprobe.
+              if (!this._isRtpUrl(this._effectiveUrl)) throw primaryErr;
+              const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this._effectiveUrl) || '');
+              if (!udpUrl) throw primaryErr;
+              try {
+                raw = await runFfprobeJson(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+              } catch (fallbackErr) {
+                if (this._isLiveInputHintMemoryError(fallbackErr)) {
+                  const plainUdp = this._rtpToUdpUrl(this._effectiveUrl) || '';
+                  raw = await runFfprobeJson(plainUdp, ['-fflags', '+discardcorrupt', '-f', 'mpegts']);
+                } else {
+                  throw new Error(`${primaryErr.message} | RTP UDP fallback failed: ${fallbackErr.message}`);
+                }
+              }
+            }
+          }
+
+          let result = this.parseStructure(raw);
+          // Some RTP/TS sources omit ids for all or part of program streams.
+          // Always attempt PID backfill from ffmpeg banner lines and patch any gaps.
+          const pidProbe = await this._probeStreamPidsFromFfmpeg();
+          result = this._applyPidMap(result, pidProbe || {});
+          result = this._applyFallbackPidRows(result, pidProbe.rows || []);
+          // Acquire a heavy-probe slot before spawning the sub-process burst.
+          // This serialises the expensive ffprobe+tsanalyze launches across all
+          // concurrent analysers, preventing the thundering-herd problem when
+          // multiple decoders are started simultaneously.
+          if (runHeavyProbe) await _acquireHeavyProbeSlot();
+
+          // When a relay is active, all probes read from local UDP — no SRT slot
+          // contention. Only suspend/sequential-mode when running direct SRT (no relay).
+          const isSrtDirect = runHeavyProbe && this.url && this.url.startsWith('srt://') && !this._relay;
+          // Suspend thumbnail for the duration of sequential SRT heavy probes so only
+          // one caller occupies the SRT slot at a time.
+          // Note: isSrtDirect requires !this._relay. In practice the SRT relay is
+          // always active (created above), so isSrtHeavy is never true in the current
+          // architecture.  Kept as a safety net for the hypothetical no-relay path.
+          const isSrtHeavy  = isSrtDirect && (this._thumbnailClient || this._persistentThumb);
+          if (isSrtHeavy) {
+            const srtLatMs = parseSrtLatency(this.url);
+            // Budget covers all sequential probes: each ~(latency+20s), 6 probes max
+            const suspendMs = srtLatMs + 70000;
+            if (this._thumbnailClient) this._thumbnailClient.suspend(this.id, suspendMs);
+            else if (this._persistentThumb) this._persistentThumb.suspend(suspendMs);
+            if (this._tsduckMonitor) this._tsduckMonitor.suspend();
+            if (this._etrMonitor) this._etrMonitor.suspend(suspendMs + 5000);
+            await new Promise(r => setTimeout(r, 600));
+          }
+
+          let heavyProbeResults;
+          // Small settle between sequential SRT probes: gives the SRT source time
+          // to reset its accept state after a caller disconnects before the next
+          // caller connects.  Not needed for relay/UDP but retained for direct SRT.
+          const _srtSettle = () => new Promise(r => setTimeout(r, 1000));
+          // Relay-backed SRT outputs loopback UDP unicast to the probe port.
+          // Unicast UDP does NOT duplicate packets to multiple readers the way
+          // multicast does — parallel probes split the packet stream, starving
+          // each other and making bitrate measurement unreliable (falls back to
+          // codec metadata "STREAMS" at ~0.38 Mb/s instead of the real rate).
+          // Run sequentially on the probe port, same as direct SRT, but without
+          // the inter-probe settle delay (no SRT reconnect cooldown needed for UDP).
+          const isRelayBacked = runHeavyProbe && Boolean(this._relay);
+          try {
+            if (isSrtDirect) {
+              // Sequential: one SRT connection at a time (slot contention).
+              const tsduck    = await (runHeavyProbe ? this._probeTSDuck()                  : Promise.resolve(null));
+              await _srtSettle();
+              const transport = await (runHeavyProbe ? this._probeTransportBitrateBps()     : Promise.resolve(null));
+              await _srtSettle();
+              const srtLink   = await (runHeavyProbe ? this._probeSrtLinkStats()            : Promise.resolve(null));
+              await _srtSettle();
+              const audio     = await this._probeAudioLevels();
+              await _srtSettle();
+              const tsDisc    = await (runHeavyProbe ? this._probeTimestampDiscontinuities(): Promise.resolve(null));
+              await _srtSettle();
+              const cc        = await (runHeavyProbe ? this._probeContinuityCounterErrors() : Promise.resolve(null));
+              await _srtSettle();
+              const dolby     = await (runHeavyProbe ? this._probeDolbyE()                  : Promise.resolve(null));
+              heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
+            } else if (isRelayBacked) {
+              // Sequential: relay probe port is loopback unicast — no packet duplication.
+              // No inter-probe settle needed (UDP bind/release is instant).
+              // Flag tells the thumbnail timer to back off while the port is held.
+              this._relayProbeRunning = true;
+              const tsduck    = await this._probeTSDuck();
+              const transport = await this._probeTransportBitrateBps();
+              const srtLink   = await this._probeSrtLinkStats(); // uses relay stats line, not UDP
+              const audio     = await this._probeAudioLevels();
+              const tsDisc    = await this._probeTimestampDiscontinuities();
+              const cc        = await this._probeContinuityCounterErrors();
+              const dolby     = await this._probeDolbyE();
+              heavyProbeResults = [tsduck, transport, srtLink, audio, tsDisc, cc, dolby];
+            } else if (Boolean(this._relay)) {
+              // Light-cycle relay path: audio probe still binds the loopback
+              // unicast UDP port — run it sequentially with the flag set so the
+              // thumbnail timer backs off rather than competing for the port.
+              this._relayProbeRunning = true;
+              const audio = await this._probeAudioLevels();
+              heavyProbeResults = [null, null, null, audio, null, null, null];
+            } else {
+              // RTP/UDP multicast: parallel is fine — multicast duplicates to all readers.
+              heavyProbeResults = await Promise.all([
+                runHeavyProbe ? this._probeTSDuck()                   : Promise.resolve(null),
+                runHeavyProbe ? this._probeTransportBitrateBps()      : Promise.resolve(null),
+                Promise.resolve(null), // srtLink — SRT-only, skip for RTP/UDP
+                this._probeAudioLevels(),
+                runHeavyProbe ? this._probeTimestampDiscontinuities() : Promise.resolve(null),
+                runHeavyProbe ? this._probeContinuityCounterErrors()  : Promise.resolve(null),
+                runHeavyProbe ? this._probeDolbyE()                   : Promise.resolve(null),
+              ]);
+            }
+          } finally {
+            this._relayProbeRunning = false;
+            if (runHeavyProbe) _releaseHeavyProbeSlot();
+            if (isSrtHeavy) {
+              // Brief settle delay: SRT sources may have a 1–2s reconnect cooldown after
+              // the last probe connection closed.  Avoid immediate rejection of the thumbnail.
+              setTimeout(() => {
+                if (this._thumbnailClient) this._thumbnailClient.resume(this.id);
+                else if (this._persistentThumb) this._persistentThumb.resume();
+                if (this._tsduckMonitor) this._tsduckMonitor.resume();
+                if (this._etrMonitor) this._etrMonitor.resume();
+              }, 1500);
+            }
+          }
+          const [tsduckProbe, transportProbe, srtLinkProbe, audioLevels, tsDiscontinuityProbe, ccProbe, dolbyEProbe] = heavyProbeResults;
+          const nicMetrics = this._iatSniffer && this._iatSniffer.isRunning
+            ? this._iatSniffer.getMetrics()
+            : null;
+          result = this._applyTSDuckData(result, tsduckProbe?.data || null, nicMetrics);
+          result.dvb.smpte20227 = this._buildSmpte20227Assessment(result);
+          result.dvb.probeDiagnostics = {
+            ...(result.dvb.probeDiagnostics || {}),
+            scheduler: this._schedulerDiagnostics(runHeavyProbe),
+            tsduck: {
+              attempted: runHeavyProbe,
+              available: tsduckProbe?.available === true,
+              ok: tsduckProbe?.ok === true,
+              used: result?.dvb?.bitrateSource === 'tsduck',
+              error: tsduckProbe?.error || null,
+            },
+            iatSniffer: {
+              attempted: Boolean(this._iatSniffer),
+              captureMethod: nicMetrics?.captureMethod ?? (this._iatSniffer?.captureMethod || 'unavailable'),
+              sampleCount: nicMetrics?.sampleCount ?? 0,
+              error: this._iatSniffer?.lastError || null,
+            },
+            timestampDiscontinuity: {
+              attempted: runHeavyProbe,
+              ok: tsDiscontinuityProbe ? tsDiscontinuityProbe.ok === true : null,
+              error: tsDiscontinuityProbe?.error || null,
+            },
+            continuityCounter: {
+              attempted: runHeavyProbe,
+              ok: ccProbe ? ccProbe.ok === true : null,
+              error: ccProbe?.error || null,
+            },
+            dolbyE: {
+              attempted: runHeavyProbe,
+              enabled: DolbyEAdapter.isEnabled(),
+              configured: DolbyEAdapter.isConfigured(),
+              ok: dolbyEProbe ? dolbyEProbe.ok === true : null,
+              error: dolbyEProbe?.error || null,
+            },
+          };
+          result.dvb.timestampDiscontinuity = tsDiscontinuityProbe?.data || {
+            count: 0,
+            pcrDiscontinuity: 0,
+            ptsDiscontinuity: 0,
+            dtsDiscontinuity: 0,
+            nonMonotonousDts: 0,
+            lastMessages: [],
+          };
+          // On heavy cycles use the fresh probe result.
+          // On light cycles (ccProbe === null) carry forward the last known result
+          // so health assessment does not silently score CC as 0 between heavy cycles.
+          if (ccProbe !== null) {
+            const ccData = ccProbe?.data || {
+              count: 0, pidScopedCount: 0, genericCount: 0, lastMessages: [],
+            };
+            // Update rolling window (last 3 heavy-probe counts) for RTP/UDP averaging.
+            this._ccRollingWindow.push(ccData.count);
+            if (this._ccRollingWindow.length > 3) this._ccRollingWindow.shift();
+            this._ccTotal += ccData.count;
+            this._ccHeavyCount += 1;
+            result.dvb.continuityCounterErrors = {
+              ...ccData,
+              rollingAvg: this._ccRollingWindow.length > 0
+                ? Math.round(this._ccRollingWindow.reduce((s, v) => s + v, 0) / this._ccRollingWindow.length)
+                : ccData.count,
+              heavyCycles: this._ccRollingWindow.length,
+              ccTotal: this._ccTotal,
+              ccHeavyCount: this._ccHeavyCount,
+            };
+          } else {
+            result.dvb.continuityCounterErrors = this.lastResult?.dvb?.continuityCounterErrors || {
+              count: 0, pidScopedCount: 0, genericCount: 0, lastMessages: [],
+              rollingAvg: 0, heavyCycles: 0,
+            };
+          }
+          result.dvb.dolbyE = dolbyEProbe || {
+            available: false,
+            ok: false,
+            detected: false,
+            decoded: false,
+            frameCount: null,
+            programConfig: null,
+            error: null,
+          };
+          const measuredBitrateBps = Number(transportProbe && transportProbe.bitrateBps);
+          if (Number.isFinite(measuredBitrateBps) && measuredBitrateBps > 0) {
+            result.dvb.measuredBitrateBps = measuredBitrateBps;
+            // tsduck is preferred when available, otherwise use measured remux bitrate.
+            if (!result.dvb.bitrateBps || result.dvb.bitrateSource !== 'tsduck') {
+              result.dvb.bitrateBps = measuredBitrateBps;
+              result.dvb.bitrateSource = 'measured';
+            }
+          }
+          if (srtLinkProbe) {
+            result.dvb.srtStats = srtLinkProbe;
+          } else if (transportProbe && transportProbe.srtStats) {
+            result.dvb.srtStats = transportProbe.srtStats;
+          } else if (this.lastResult?.dvb?.srtStats) {
+            // Keep last known libsrt counters between heavy probe intervals.
+            result.dvb.srtStats = this.lastResult.dvb.srtStats;
+          }
+          // When transport-level probes are skipped, avoid jumping back to low-confidence
+          // container/stream-derived values in CBR operational views.
+          if (
+            !runHeavyProbe &&
+            this.lastResult?.dvb?.bitrateBps > 0 &&
+            ['format', 'streams'].includes(String(result.dvb.bitrateSource || '').toLowerCase()) &&
+            ['tsduck', 'measured'].includes(String(this.lastResult?.dvb?.bitrateSource || '').toLowerCase())
+          ) {
+            result.dvb.bitrateBps = this.lastResult.dvb.bitrateBps;
+            result.dvb.bitrateSource = this.lastResult.dvb.bitrateSource;
+            result.dvb.bitrateHeldFromPrevious = true;
+          }
+
+          // Carry forward per-stream metadata from the last result.
+          //
+          // Two categories of fields need carrying:
+          //   1. Bitrate — ffprobe reports N/A for live MPEG-TS; tsduck provides
+          //      PCR-derived values but only on heavy probe cycles.
+          //   2. Structural fields (codec profile/level, resolution, fps, color
+          //      metadata, channel layout) — occasionally missing in a specific
+          //      ffprobe invocation if the stream header wasn't fully parsed.
+          //      Hold last known values so the UI never shows spurious blanks.
+          if (this.lastResult) {
+            // Structural fields to carry when current value is null/empty.
+            const STRUCT_FIELDS = [
+              'width', 'height', 'fps', 'fieldOrder', 'scanType',
+              'pixFmt', 'colorSpace', 'colorTrc', 'colorPrimaries', 'colorRange',
+              'profile', 'level',
+              'sampleRate', 'channels', 'channelLayout',
+            ];
+            const lastByPid = new Map();
+            const collectLast = (streams) => {
+              for (const s of streams || []) {
+                if (s.pid != null) lastByPid.set(s.pid, s);
+              }
+            };
+            (this.lastResult.programs || []).forEach((p) => collectLast(p.streams));
+            collectLast(this.lastResult.orphanStreams);
+
+            if (lastByPid.size > 0) {
+              const holdFields = (s) => {
+                if (s.pid == null || !lastByPid.has(s.pid)) return s;
+                const prev = lastByPid.get(s.pid);
+                const patch = {};
+                // Bitrate: carry when null/zero (tsduck-derived value from heavy cycle)
+                if ((s.bitrate == null || s.bitrate === 0) && Number(prev.bitrate) > 0) {
+                  patch.bitrate = Number(prev.bitrate);
+                }
+                // Structural fields: carry when null
+                for (const f of STRUCT_FIELDS) {
+                  if (s[f] == null && prev[f] != null) patch[f] = prev[f];
+                }
+                return Object.keys(patch).length ? { ...s, ...patch } : s;
+              };
+              result.programs = (result.programs || []).map((prog) => ({
+                ...prog, streams: (prog.streams || []).map(holdFields),
+              }));
+              result.orphanStreams = (result.orphanStreams || []).map(holdFields);
+            }
+          }
+          const hasFreshAudioLevels = Boolean(
+            audioLevels && (
+              (Array.isArray(audioLevels.channels) && audioLevels.channels.length > 0) ||
+              Number.isFinite(Number(audioLevels.meanDb)) ||
+              Number.isFinite(Number(audioLevels.maxDb))
+            )
+          );
+          if (hasFreshAudioLevels) {
+            result.audioLevels = audioLevels;
+          } else {
+            const lastAudio = this.lastResult?.audioLevels || null;
+            const lastProbeTime = Number(this.lastResult?.probeTime || 0);
+            const ageMs = lastProbeTime > 0 ? (Date.now() - lastProbeTime) : Number.POSITIVE_INFINITY;
+            if (lastAudio && ageMs <= AUDIO_LEVEL_HOLD_MS) {
+              // Keep last valid meter sample briefly to avoid VU bar blink/drop
+              // on occasional astats probe misses under load.
+              result.audioLevels = lastAudio;
+              result.dvb.probeDiagnostics = {
+                ...(result.dvb.probeDiagnostics || {}),
+                audioLevels: {
+                  attempted: true,
+                  heldFromPrevious: true,
+                  holdMs: AUDIO_LEVEL_HOLD_MS,
+                  ageMs,
+                },
+              };
+            } else {
+              result.audioLevels = audioLevels;
+            }
+          }
+          if (runThumbnailCapture) {
+            // One-shot probe: capture synchronously so the caller gets a fresh frame.
+            try {
+              await captureThumbnail(this.id, this._effectiveUrl);
+              result.thumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+              this._lastThumbnailUrl = result.thumbnailUrl;
+            } catch (err) {
+              if (this._lastThumbnailUrl) {
+                result.thumbnailUrl = this._lastThumbnailUrl;
+              } else if (this.lastResult?.thumbnailUrl) {
+                result.thumbnailUrl = this.lastResult.thumbnailUrl;
+              } else {
+                const cachedUrl = this._resolveCachedThumbnailUrl();
+                if (cachedUrl) result.thumbnailUrl = cachedUrl;
+              }
+              result.dvb.probeDiagnostics = {
+                ...(result.dvb.probeDiagnostics || {}),
+                thumbnail: {
+                  attempted: true,
+                  ok: false,
+                  error: err && err.message ? err.message : 'thumbnail capture failed',
+                },
+              };
+            }
+          } else {
+            // Continuous mode: thumbnails are captured by the independent timer.
+            // Just attach the most recently completed thumbnail URL.
+            if (this._lastThumbnailUrl) {
+              result.thumbnailUrl = this._lastThumbnailUrl;
+            } else if (this.lastResult?.thumbnailUrl) {
+              result.thumbnailUrl = this.lastResult.thumbnailUrl;
+            } else {
+              const cachedUrl = this._resolveCachedThumbnailUrl();
+              if (cachedUrl) result.thumbnailUrl = cachedUrl;
+            }
+          }
+          result = this._normalizeAndSortResult(result);
+          result.dvb.monitoringPolicy = this._monitoringPolicySummary();
+          result = this._attachHealthAssessment(result);
+          this.lastResult = result;
+          this.emit('result', result);
+          resolve(result);
+        } catch (e) {
+          reject(e);
+        }
+      })();
+
+    });
+  }
+
+  parseStructure(raw) {
+    const globalByIndex = new Map((raw.streams || []).map((s) => [s.index, s]));
+    const programs = (raw.programs || []).map(prog => ({
+      programId: prog.program_id,
+      pmtPid: prog.pmt_pid,
+      pcrPid: prog.pcr_pid,
+      // ffprobe uses 'service_name' for DVB-SI SDT entries; some streams expose 'title' or 'name'.
+      name: (prog.tags && (prog.tags['service_name'] || prog.tags['SERVICE_NAME'] || prog.tags['title'] || prog.tags['name'])) || null,
+      provider: (prog.tags && (prog.tags['service_provider'] || prog.tags['SERVICE_PROVIDER'] || prog.tags['service_provider_name'])) || null,
+      // ffprobe program-level stream objects can omit PID/id fields depending on input.
+      // Merge carefully with global stream entry by index so empty program values do not
+      // clobber valid global PID metadata.
+      streams: (prog.streams || []).map((s) => this._mapStream(this._mergeStreamInfo(globalByIndex.get(s.index), s))),
+    }));
+
+    // Streams not in any program
+    const programStreamIds = new Set(
+      programs.flatMap(p => p.streams.map(s => s.index))
+    );
+    const orphanStreams = (raw.streams || [])
+      .filter(s => !programStreamIds.has(s.index))
+      .map(s => this._mapStream(s));
+
+    const allStreams = programs.flatMap(p => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter(s => s.pid != null).length;
+    const serviceCount = programs.length;
+    const videoCount = allStreams.filter(s => s.codecType === 'video').length;
+    const audioCount = allStreams.filter(s => s.codecType === 'audio').length;
+    const dataCount = allStreams.filter(s => s.codecType === 'data').length;
+    const streamBitrateBps = allStreams.reduce((acc, s) => acc + (s.bitrate || 0), 0);
+    const formatBitrateBps = raw?.format?.bit_rate ? parseInt(raw.format.bit_rate, 10) : null;
+    // Prefer container/transport bitrate when available (closer to on-wire TS rate),
+    // then fall back to summed elementary stream bitrates.
+    const hasFormatRate = formatBitrateBps && Number.isFinite(formatBitrateBps) && formatBitrateBps > 0;
+    const bitrateBps = hasFormatRate ? formatBitrateBps : streamBitrateBps;
+    const bitrateSource = hasFormatRate ? 'format' : 'streams';
+
+    return {
+      url: this.url,
+      probeTime: Date.now(),
+      programs,
+      orphanStreams,
+      audioLevels: null,
+      dvb: {
+        standard: 'ISO/IEC 13818-1 MPEG-TS + ETSI EN 300 468 DVB-SI',
+        patPid: 0,
+        serviceCount,
+        pidCount,
+        streamBreakdown: { video: videoCount, audio: audioCount, data: dataCount },
+        bitrateBps,
+        bitrateSource,
+        streamBitrateBps,
+        formatBitrateBps,
+        services: programs.map(p => ({
+          serviceId: p.programId,
+          serviceName: p.name,
+          serviceProvider: p.provider,
+          pmtPid: p.pmtPid,
+          pcrPid: p.pcrPid,
+        })),
+      },
+    };
+  }
+
+  _probeAudioLevels() {
+    return new Promise((resolve) => {
+      // astats WITHOUT metadata=1 prints a channel summary to stderr on exit.
+      // metadata=1 stores stats as frame AVDictionary entries which are never
+      // printed to stderr with -f null, so the old approach always returned null.
+
+      // Determine how many audio ESes the stream carries using the last known
+      // PMT state (one probe cycle behind — acceptable; stream structure is
+      // stable).  With multiple ESes we must amerge them into one N-channel
+      // stream so astats reports every pair.  Without this, FFmpeg's default
+      // stream selection picks only the first audio ES and all other pairs
+      // show dark placeholders in the multiview meters.
+      // Exclude S302M ESes — they carry SMPTE 337M data bursts (Dolby E etc.) and
+      // appear as constant near-full-scale PCM to amerge, producing spurious VU bars.
+      const audioEsCount = (this.lastResult?.programs || []).reduce((acc, p) =>
+        acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null && !s.s302m).length, 0);
+      const mergeInputs = Math.min(Math.max(audioEsCount, 1), 8);
+
+      // Build args: if >1 audio ES, amerge all streams into one multi-channel
+      // stream so astats sees all channels in a single pass.
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
+      let args;
+      if (mergeInputs > 1) {
+        // amerge all audio ESes into one N-channel stream, then astats.
+        // astats MUST be inside filter_complex — mixing -filter_complex output
+        // with a separate -af causes FFmpeg to reject the graph and produce no
+        // channel stats, so we embed astats at the end of the chain.
+        const amergeInputs = Array.from({ length: mergeInputs }, (_, i) => `[0:a:${i}]`).join('');
+        const filterComplex = `${amergeInputs}amerge=inputs=${mergeInputs},astats=reset=1[aout]`;
+        args = [
+          '-hide_banner', '-nostats', '-loglevel', 'info',
+          '-t', '2.0',
+          '-i', inputUrl,
+          '-filter_complex', filterComplex,
+          '-map', '[aout]',
+          '-f', 'null', '-',
+        ];
+      } else {
+        args = [
+          '-hide_banner', '-nostats', '-loglevel', 'info',
+          '-t', '2.0',
+          '-i', inputUrl,
+          '-vn',
+          '-af', 'astats=reset=1',
+          '-f', 'null', '-',
+        ];
+      }
+
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 6000);
+
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        // astats summary format (FFmpeg 4.x–7.x):
+        //   "[Parsed_astats_0 @ 0x...] Channel: 1"
+        //   "[Parsed_astats_0 @ 0x...]   Peak level dB: -20.00"
+        //   "[Parsed_astats_0 @ 0x...]   RMS level dB: -26.00"
+        //   "[Parsed_astats_0 @ 0x...] Overall:"
+        const channelPeak = {};
+        const channelRms = {};
+        let currentCh = null;
+        for (const line of stderr.split('\n')) {
+          // "Channel: N" — 1-indexed, convert to 0-indexed
+          const chM = line.match(/Channel:\s*(\d+)/i);
+          if (chM) { currentCh = parseInt(chM[1], 10) - 1; continue; }
+          // "Overall:" resets channel tracking
+          if (/Overall:/i.test(line)) { currentCh = null; continue; }
+          if (currentCh == null) continue;
+          const peakM = line.match(/Peak level dB:\s*(-?[\d.]+|inf|-inf)/i);
+          if (peakM) {
+            const raw = peakM[1].toLowerCase();
+            const val = raw === '-inf' ? -90 : raw === 'inf' ? 0 : parseFloat(raw);
+            if (Number.isFinite(val)) channelPeak[currentCh] = val;
+          }
+          const rmsM = line.match(/RMS level dB:\s*(-?[\d.]+|inf|-inf)/i);
+          if (rmsM) {
+            const raw = rmsM[1].toLowerCase();
+            const val = raw === '-inf' ? -90 : raw === 'inf' ? 0 : parseFloat(raw);
+            if (Number.isFinite(val)) channelRms[currentCh] = val;
+          }
+        }
+        const channels = [...new Set([...Object.keys(channelPeak), ...Object.keys(channelRms)])]
+          .map(Number).sort((a, b) => a - b);
+        if (channels.length === 0) {
+          // Fallback: volumedetect aggregate (older FFmpeg or streams without astats support)
+          const mean = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/i);
+          const max  = stderr.match(/max_volume:\s*(-?[\d.]+)\s*dB/i);
+          if (!mean && !max) return resolve(null);
+          return resolve({
+            meanDb: mean ? parseFloat(mean[1]) : null,
+            maxDb:  max  ? parseFloat(max[1])  : null,
+            channels: [],
+          });
+        }
+        // With amerge, channels are laid out as:
+        //   0=ES0L  1=ES0R  2=ES1L  3=ES1R  4=ES2L  5=ES2R  ...
+        // Label each as "P1L", "P1R", "P2L", ... so the frontend can render
+        // correct pair numbers in the VU bar tooltips / aria labels.
+        const channelData = channels.map((ch) => {
+          const pair = Math.floor(ch / 2) + 1;
+          const side = ch % 2 === 0 ? 'L' : 'R';
+          const label = mergeInputs > 1 ? `P${pair}${side}` : (ch === 0 ? 'L' : ch === 1 ? 'R' : `Ch${ch + 1}`);
+          return {
+            ch,
+            label,
+            peakDb: channelPeak[ch] ?? null,
+            rmsDb:  channelRms[ch]  ?? null,
+          };
+        });
+        const allRms  = channelData.map((c) => c.rmsDb).filter((v) => v != null && Number.isFinite(v));
+        const allPeak = channelData.map((c) => c.peakDb).filter((v) => v != null && Number.isFinite(v));
+        resolve({
+          meanDb:   allRms.length  > 0 ? allRms.reduce((s, v) => s + v, 0) / allRms.length : null,
+          maxDb:    allPeak.length > 0 ? Math.max(...allPeak) : null,
+          channels: channelData,
+        });
+      });
+    });
+  }
+
+  _probeTransportBitrateBps() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
+      // SRT streams: use verbose log level so libsrt stats appear in stderr.
+      // For all other protocols use error-only to keep stderr clean.
+      const isSrt = String(inputUrl).startsWith('srt://');
+      // For SRT the latency window must fill before data flows — derive capture
+      // duration and analyze window from the URL's latency parameter.
+      const srtLatencyMs   = isSrt ? parseSrtLatency(this.url) : 0;
+      const analyzeDurUs   = isSrt ? String((srtLatencyMs + 2000) * 1000) : '1000000';
+      // Relay: loopback UDP unicast — no latency fill needed; use short capture.
+      const captureSec     = isSrt ? ((srtLatencyMs / 1000) + 5.0).toFixed(1) : (this._relay ? '2.0' : '3.0');
+      const killTimerMs    = isSrt ? (srtLatencyMs + 20000) : 12000;
+      const args = [
+        '-hide_banner',
+        '-loglevel', isSrt ? 'verbose' : 'error',
+        '-fflags', '+discardcorrupt+genpts',
+        '-analyzeduration', analyzeDurUs,
+        '-probesize', '2000000',
+        '-progress', 'pipe:2',
+        '-t', captureSec,
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'mpegts',
+        '-y',
+        '/dev/null',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, killTimerMs);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', () => {
+        clearTimeout(timeout);
+        resolve(null);
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        let totalSize = 0;
+        let outTimeUs = 0;
+        let progressKbps = 0;   // bitrate= line from -progress (kbits/s)
+        for (const line of stderr.split('\n')) {
+          const eq = line.indexOf('=');
+          if (eq < 0) continue;
+          const k = line.slice(0, eq).trim();
+          const v = line.slice(eq + 1).trim();
+          if (k === 'total_size')  totalSize    = parseInt(v, 10)   || totalSize;
+          // out_time_us is always in microseconds (all FFmpeg versions).
+          // out_time_ms was microseconds in old FFmpeg but is milliseconds in ≥5.x.
+          // Prefer out_time_us; only fall back to out_time_ms when out_time_us was never set.
+          if (k === 'out_time_us') { const n = parseInt(v, 10); if (n > 0) outTimeUs = n; }
+          if (k === 'out_time_ms' && outTimeUs === 0) { const n = parseInt(v, 10); if (n > 0) outTimeUs = n; }
+          if (k === 'bitrate') {
+            // "bitrate=21234.6kbits/s"  or  "bitrate=N/A"
+            const m = v.match(/([\d.]+)\s*kbits/i);
+            if (m) progressKbps = parseFloat(m[1]) || progressKbps;
+          }
+        }
+
+        let bitrateBps = null;
+        // Primary: size/time calculation (most accurate for MPEG-TS remux)
+        if (totalSize > 0 && outTimeUs > 0) {
+          const seconds = outTimeUs / 1e6;
+          if (Number.isFinite(seconds) && seconds > 0) {
+            const bps = Math.round((totalSize * 8) / seconds);
+            if (Number.isFinite(bps) && bps > 0) bitrateBps = bps;
+          }
+        }
+        // Fallback: bitrate= field reported directly by FFmpeg
+        if (progressKbps > 0) bitrateBps = Math.round(progressKbps * 1000);
+
+        // For relay-backed SRT the transport probe runs on UDP (no libsrt output).
+        // ffmpeg 5.x / Debian 12 does not emit periodic libsrt stats lines so
+        // _lastRelaySrtStats is effectively always null — synthesise a minimal
+        // srtStats object from the measured bitrate so the SRT Transport panel
+        // shows RATE. RTT/bandwidth/loss remain "—" (genuinely unavailable).
+        let srtStats = this._relay
+          ? (this._lastRelaySrtStats ? this._extractSrtStatsFromLog(this._lastRelaySrtStats) : null)
+          : this._extractSrtStatsFromLog(stderr);
+        if (this._relay && !srtStats && bitrateBps) {
+          srtStats = { rateMbps: parseFloat((bitrateBps / 1e6).toFixed(3)) };
+        }
+        if (bitrateBps || srtStats) {
+          return resolve({
+            bitrateBps: bitrateBps || null,
+            srtStats: srtStats || null,
+          });
+        }
+        resolve(null);
+      });
+    });
+  }
+
+  // Parse a srt-live-transmit JSON stats object (as emitted via -pf json) into
+  // the normalised srtStats shape consumed by the SRT Transport panel.
+  _parseSltStats(obj) {
+    if (!obj) return null;
+    const recv = obj.recv || {};
+    const link = obj.link || {};
+    const srt = {};
+    const rttMs      = Number(link.rtt);
+    const bwMbps     = Number(link.bandwidth);
+    const rateMbps   = Number(recv.mbitRate);
+    const pktTotal   = Number(recv.packets);
+    const pktLost    = Number(recv.packetsLost);
+    const pktDropped = Number(recv.packetsDropped);
+    const pktRetrans = Number(recv.packetsRetransmitted);
+    const pktNak     = Number(recv.naksSent);
+    const pktAck     = Number(recv.acksSent);
+    if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
+    if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
+    if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
+    if (Number.isFinite(pktTotal))   srt.pktTotal   = pktTotal;
+    if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
+    if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
+    if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+    if (Number.isFinite(pktNak))     srt.pktNak     = pktNak;
+    if (Number.isFinite(pktAck))     srt.pktAck     = pktAck;
+    if (pktTotal > 0 && Number.isFinite(pktLost)) {
+      srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+    }
+    if (pktTotal > 0 && Number.isFinite(pktRetrans)) {
+      srt.retransRatio = parseFloat(((pktRetrans / pktTotal) * 100).toFixed(3));
+    }
+    return Object.keys(srt).length > 0 ? srt : null;
+  }
+
+  _extractSrtStatsFromLog(stderr) {
+    if (!stderr) return null;
+
+    // ffmpeg emits libsrt statistics on lines containing SRT-specific field names.
+    // We MUST restrict parsing to those lines only — the full stderr also contains
+    // ffmpeg -progress pipe:2 output (bitrate=, total_size=, speed=, etc.) whose
+    // field names overlap with our broad fallback patterns.  Example false matches:
+    //   "rate"   → bitrate=0.0kbits/s  (progress output, rate is a substring)
+    //   "total"  → total_size=N        (progress output)
+    //   "bw"     → (any line containing "bw")
+    // By filtering to libsrt stat lines first, we eliminate all false positives.
+    // libsrt dumps stats as space-separated key=value pairs on lines that contain
+    // at least one unambiguous libsrt-only field (msRTT=, mbpsRecvRate=, mbpsBandwidth=).
+    // libsrt periodic stats (statsintvl=N) → key=value: msRTT=X mbpsRecvRate=Y
+    // ffmpeg verbose log            → key:value: msRTT:X mbpsBandwidth:Y
+    // Accept both separator styles so the pipeline works regardless of which layer fires.
+    const srtStatLines = String(stderr)
+      .split('\n')
+      .filter(l => /msRTT[:=]|mbpsRecvRate[:=]|mbpsSendRate[:=]|mbpsBandwidth[:=]/i.test(l))
+      .join('\n');
+
+    // No genuine libsrt output found — return null so the UI shows "AWAITING" not false zeros.
+    if (!srtStatLines) return null;
+
+    const last = (rx) => {
+      // matchAll requires a global regex; ensure g flag is set regardless of caller.
+      const grx = rx.global ? rx : new RegExp(rx.source, rx.flags + 'g');
+      const matches = Array.from(srtStatLines.matchAll(grx));
+      if (!matches.length) return null;
+      return matches[matches.length - 1][1];
+    };
+    const num = (v) => {
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const srt = {};
+
+    // All patterns use exact libsrt field names as emitted by ffmpeg's libsrt.c.
+    // No short fallback aliases — those caused false matches against ffmpeg progress output.
+    // Two log sources, two separator styles:
+    //   libsrt periodic stats (statsintvl=N): key=value  — msRTT=18.500 mbpsRecvRate=21.234
+    //   ffmpeg verbose log:                   key: value — msRTT: 18.500 mbpsRecvRate: 21.234
+    // SEP uses [:=]\s* so both formats are captured (space after colon is optional).
+    const SEP = '[:=]\\s*';
+    const f   = (name, fp = '([\\d.]+)') => new RegExp(`\\b${name}${SEP}${fp}`, 'i');
+    const fi  = (name)                    => new RegExp(`\\b${name}${SEP}(\\d+)`, 'i');
+    const rateMbps   = num(last(f('mbpsRecvRate'))) ?? num(last(f('mbpsSendRate')));
+    const bwMbps     = num(last(f('mbpsBandwidth')));
+    const maxBwMbps  = num(last(f('mbpsMaxBW')));
+    const rttMs      = num(last(f('msRTT')));
+    const pktTotal   = num(last(fi('pktRecvTotal'))) ?? num(last(fi('pktRecv')));
+    const pktRetrans = num(last(fi('pktRetransTotal'))) ?? num(last(fi('pktRcvRetrans'))) ?? num(last(fi('pktRetrans')));
+    const pktLost    = num(last(fi('pktRcvLossTotal'))) ?? num(last(fi('pktRcvLoss'))) ?? num(last(fi('pktSndLoss')));
+    // pktRcvDrop / pktSndDrop: non-zero = latency window too short (per Haivision SRT spec)
+    const pktRcvDrop = num(last(fi('pktRcvDrop')));
+    const pktSndDrop = num(last(fi('pktSndDrop')));
+    // pktRcvBelated: arrived after latency deadline — early warning before drops
+    const pktRcvBelated        = num(last(fi('pktRcvBelated')));
+    const pktRcvAvgBelatedTime = num(last(f('pktRcvAvgBelatedTime')));
+    // Buffer headroom: remaining receive buffer capacity
+    const byteAvailRcvBuf = num(last(fi('byteAvailRcvBuf')));
+    const msRcvBuf        = num(last(f('msRcvBuf')));
+    // Flow window
+    const pktFlowWindow   = num(last(fi('pktFlowWindow')));
+    const pktNak     = num(last(fi('pktSentNAKTotal'))) ?? num(last(fi('pktSentNAK'))) ?? num(last(fi('pktRecvNAK')));
+    const pktAck     = num(last(fi('pktSentACKTotal'))) ?? num(last(fi('pktSentACK'))) ?? num(last(fi('pktRecvACK')));
+
+    if (rateMbps   != null) srt.rateMbps   = rateMbps;
+    if (bwMbps     != null) srt.bwMbps     = bwMbps;
+    if (maxBwMbps  != null) srt.maxBwMbps  = maxBwMbps;
+    if (rttMs      != null) srt.rttMs      = rttMs;
+    if (pktTotal   != null) srt.pktTotal   = pktTotal;
+    if (pktRetrans != null) srt.pktRetrans = pktRetrans;
+    if (pktLost    != null) srt.pktLost    = pktLost;
+    if (pktRcvDrop != null) srt.pktRcvDrop = pktRcvDrop;
+    if (pktSndDrop != null) srt.pktSndDrop = pktSndDrop;
+    if (pktRcvBelated        != null) srt.pktRcvBelated        = pktRcvBelated;
+    if (pktRcvAvgBelatedTime != null) srt.pktRcvAvgBelatedTime = pktRcvAvgBelatedTime;
+    if (byteAvailRcvBuf != null) srt.byteAvailRcvBuf = byteAvailRcvBuf;
+    if (msRcvBuf        != null) srt.msRcvBuf         = msRcvBuf;
+    if (pktFlowWindow   != null) srt.pktFlowWindow     = pktFlowWindow;
+    if (pktNak != null) srt.pktNak = pktNak;
+    if (pktAck != null) srt.pktAck = pktAck;
+
+    if (srt.pktTotal > 0 && srt.pktLost != null) {
+      srt.lossPercent = parseFloat(((srt.pktLost / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Retransmit ratio per Haivision SRT spec: >5% = warning, >25% = critical
+    if (srt.pktTotal > 0 && srt.pktRetrans != null) {
+      srt.retransRatio = parseFloat(((srt.pktRetrans / srt.pktTotal) * 100).toFixed(3));
+    }
+    // Aggregate drop count
+    if (pktRcvDrop != null || pktSndDrop != null) {
+      srt.pktDropped = (srt.pktRcvDrop || 0) + (srt.pktSndDrop || 0);
+    }
+    return Object.keys(srt).length > 0 ? srt : null;
+  }
+
+  _probeTimestampDiscontinuities() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-fflags', '+discardcorrupt+genpts',
+        '-err_detect', '+crccheck+careful',
+        '-analyzeduration', '2000000',
+        '-probesize', '3000000',
+        '-t', '2.5',
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'null',
+        '-',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 8000);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'timestamp discontinuity probe failed',
+        });
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const lines = String(stderr || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const patterns = {
+          pcrDiscontinuity: /pcr.*discontinu/i,
+          ptsDiscontinuity: /pts.*discontinu|timestamp.*discontinu/i,
+          dtsDiscontinuity: /dts.*discontinu/i,
+          nonMonotonousDts: /non.?monoton(?:ic|ous).*dts/i,
+        };
+        const counts = {
+          pcrDiscontinuity: 0,
+          ptsDiscontinuity: 0,
+          dtsDiscontinuity: 0,
+          nonMonotonousDts: 0,
+        };
+        const matches = [];
+        for (const line of lines) {
+          let matched = false;
+          for (const [key, rx] of Object.entries(patterns)) {
+            if (rx.test(line)) {
+              counts[key] += 1;
+              matched = true;
+            }
+          }
+          if (matched) matches.push(line.slice(0, 220));
+        }
+        const total = Object.values(counts).reduce((a, b) => a + b, 0);
+        resolve({
+          ok: true,
+          data: {
+            count: total,
+            ...counts,
+            lastMessages: matches.slice(-6),
+          },
+          error: null,
+        });
+      });
+    });
+  }
+
+  _probeContinuityCounterErrors() {
+    return new Promise((resolve) => {
+      const inputUrl = this._withLiveInputHints(this._effectiveUrl);
+      const args = [
+        '-hide_banner',
+        '-loglevel', 'warning',
+        '-fflags', '+discardcorrupt+genpts',
+        '-err_detect', '+crccheck+careful',
+        '-analyzeduration', '2000000',
+        '-probesize', '3000000',
+        '-t', '2.5',
+        '-i', inputUrl,
+        '-map', '0',
+        '-c', 'copy',
+        '-f', 'null',
+        '-',
+      ];
+      const proc = spawn('ffmpeg', args);
+      let stderr = '';
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 8000);
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'continuity counter probe failed',
+        });
+      });
+      proc.on('exit', () => {
+        clearTimeout(timeout);
+        const lines = String(stderr || '')
+          .split('\n')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        const pidScopedRx = /\bcontinuity(?:\s+counter)?.*(?:check failed|error|mismatch|discontinuity).*\bpid\b/i;
+        const genericRx = /\bcontinuity(?:\s+counter)?.*(?:check failed|error|mismatch|discontinuity)|\bcc\b.*error/i;
+        let pidScopedCount = 0;
+        let genericCount = 0;
+        const matches = [];
+        for (const line of lines) {
+          if (pidScopedRx.test(line)) {
+            pidScopedCount += 1;
+            matches.push(line.slice(0, 220));
+            continue;
+          }
+          if (genericRx.test(line)) {
+            genericCount += 1;
+            matches.push(line.slice(0, 220));
+          }
+        }
+        resolve({
+          ok: true,
+          data: {
+            count: pidScopedCount + genericCount,
+            pidScopedCount,
+            genericCount,
+            lastMessages: matches.slice(-6),
+          },
+          error: null,
+        });
+      });
+    });
+  }
+
+  _probeDolbyE() {
+    return DolbyEAdapter.probe(this._effectiveUrl)
+      .catch((err) => ({
+        available: DolbyEAdapter.isConfigured(),
+        ok: false,
+        detected: false,
+        decoded: false,
+        frameCount: null,
+        programConfig: null,
+        error: err && err.message ? err.message : 'Dolby E probe failed',
+      }));
+  }
+
+  // Run srt-live-transmit for (latency + 2s) and parse its JSON stats output.
+  // This is the only reliable way to get RTT, loss, NAK, retransmit for SRT RX —
+  // ffmpeg/ffprobe verbose log does not expose libsrt stats in a parseable format
+  // on ffmpeg 5.x / Debian Bookworm.
+  // Note: relay-backed streams (this._relay set) skip this probe — the relay's
+  // ffmpeg holds the only caller slot and senders typically reject a second connection.
+  _probeSrtLinkStats() {
+    return new Promise((resolve) => {
+      if (!isSltAvailable() || !this.url || !this.url.startsWith('srt://')) return resolve(null);
+      if (this._relay) return resolve(null);
+      const latencyMs = parseSrtLatency(this.url);
+      const runMs = latencyMs + 3000; // wait for latency buffer fill + 1 stat sample
+      const inputUrl = this._withLiveInputHints(this.url); // adds adapter=MANAGEMENT_IP
+      const proc = spawn('srt-live-transmit', ['-s', '1000', '-pf', 'json', inputUrl, 'file:///dev/null']);
+      let lastStats = null;
+      const timer = setTimeout(() => { try { proc.kill('SIGTERM'); } catch (_) {} }, runMs);
+      proc.stdout.on('data', (d) => {
+        for (const line of d.toString().split('\n')) {
+          const t = line.trim();
+          if (!t) continue;
+          try {
+            const obj = JSON.parse(t);
+            if (obj && (obj.recv || obj.link)) lastStats = obj;
+          } catch (_) {}
+        }
+      });
+      proc.on('error', () => { clearTimeout(timer); resolve(null); });
+      proc.on('close', () => {
+        clearTimeout(timer);
+        if (!lastStats) return resolve(null);
+        const recv = lastStats.recv || {};
+        const link = lastStats.link || {};
+        const srt = {};
+        const rttMs    = Number(link.rtt);
+        const bwMbps   = Number(link.bandwidth);
+        const rateMbps = Number(recv.mbitRate);
+        const pktTotal   = Number(recv.packets);
+        const pktLost    = Number(recv.packetsLost);
+        const pktDropped = Number(recv.packetsDropped);
+        const pktRetrans = Number(recv.packetsRetransmitted);
+        const pktNak     = Number(recv.naksSent);
+        const pktAck     = Number(recv.acksSent);
+        if (Number.isFinite(rttMs))      srt.rttMs      = rttMs;
+        if (Number.isFinite(bwMbps))     srt.bwMbps     = bwMbps;
+        if (Number.isFinite(rateMbps))   srt.rateMbps   = rateMbps;
+        if (Number.isFinite(pktTotal))   srt.pktTotal   = pktTotal;
+        if (Number.isFinite(pktLost))    srt.pktLost    = pktLost;
+        if (Number.isFinite(pktDropped)) srt.pktDropped = pktDropped;
+        if (Number.isFinite(pktRetrans)) srt.pktRetrans = pktRetrans;
+        if (Number.isFinite(pktNak))     srt.pktNak     = pktNak;
+        if (Number.isFinite(pktAck))     srt.pktAck     = pktAck;
+        if (pktTotal > 0 && Number.isFinite(pktLost)) {
+          srt.lossPercent = parseFloat(((pktLost / pktTotal) * 100).toFixed(2));
+        }
+        if (pktTotal > 0 && Number.isFinite(pktRetrans)) {
+          srt.retransRatio = parseFloat(((pktRetrans / pktTotal) * 100).toFixed(3));
+        }
+        resolve(Object.keys(srt).length > 0 ? srt : null);
+      });
+    });
+  }
+
+  _probeTSDuck() {
+    return new Promise((resolve) => {
+      const args = this._buildTSDuckArgs();
+      const proc = spawn('tsanalyze', args);
+      let stdout = '';
+      let stderr = '';
+      // Relay streams use loopback UDP unicast — reduce kill timer to free the
+      // port sooner so the next sequential probe can bind without delay.
+      const timeout = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, this._relay ? 5000 : 9000);
+
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('error', (err) => {
+        clearTimeout(timeout);
+        resolve({
+          available: false,
+          ok: false,
+          data: null,
+          error: err && err.message ? err.message : 'tsanalyze unavailable',
+        });
+      });
+      proc.on('exit', (code) => {
+        clearTimeout(timeout);
+        // tsanalyze writes its JSON report to stdout when terminated by SIGTERM
+        // (our kill timer), but exits with a non-zero code.  Attempt to parse
+        // stdout whenever it has content — do not gate on exit code alone.
+        const trimmed = stdout.trim();
+        if (!trimmed) {
+          return resolve({
+            available: true,
+            ok: false,
+            data: null,
+            error: stderr.trim() || `tsanalyze exited ${code} with no output`,
+          });
+        }
+        try {
+          const raw = JSON.parse(trimmed);
+          const bitrateBps = this._extractTSDuckBitrateBps(raw);
+          const services = this._extractTSDuckServices(raw);
+          const pids = this._extractTSDuckPidRows(raw);
+          const siIntervalsSec = this._extractTSDuckSIIntervalsSec(raw);
+          const arrivalMetrics = this._extractTSDuckArrivalMetrics(raw);
+          const pcrMetrics = this._extractTSDuckPcrMetrics(raw);
+          const unreferencedPids = this._extractUnreferencedPids(raw);
+          resolve({
+            available: true,
+            ok: true,
+            data: {
+              bitrateBps,
+              services,
+              pids,
+              siIntervalsSec,
+              arrivalMetrics,
+              pcrMetrics,
+              unreferencedPids,
+              stderr: stderr.trim() || null,
+            },
+            error: null,
+          });
+        } catch (_) {
+          resolve({
+            available: true,
+            ok: false,
+            data: null,
+            error: `tsanalyze exited ${code}; invalid JSON (${trimmed.length} bytes)`,
+          });
+        }
+      });
+    });
+  }
+
+  _buildTSDuckArgs() {
+    // '--input-timeout' is not supported on all TSDuck versions installed in
+    // production.  The probe is already wrapped in a hard kill-timer, so we
+    // rely on that rather than a TSDuck-level flag to bound execution time.
+    return ['--json', this._effectiveUrl];
+  }
+
+  _mapStream(s) {
+    const normalizedPid = this._normalizePid(s.id);
+    // PID 0x0000 is PAT and never a valid elementary stream PID.
+    // Keep it null here so downstream PID reconciliation can backfill
+    // the actual ES PID from TSduck/ffprobe cross-reference.
+    const pid = normalizedPid === 0 ? null : normalizedPid;
+    let streamType = null;
+    if (s.codec_tag_string && /^0x[0-9a-f]+$/i.test(s.codec_tag_string)) {
+      streamType = s.codec_tag_string;
+    }
+
+    return {
+      index: s.index,
+      codecType: s.codec_type,
+      codecName: s.codec_name,
+      pid,
+      pidHex: pid != null ? `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}` : null,
+      streamType,
+      width: s.width || null,
+      height: s.height || null,
+      fps: this._parseFrameRate(s.avg_frame_rate || s.r_frame_rate),
+      bitrate: this._parseBitrate(s.bit_rate),
+      sampleRate: s.sample_rate || null,
+      channels: s.channels || null,
+      language: s.tags && s.tags['language'] || null,
+      fieldOrder: s.field_order || null,
+      scanType: this._scanTypeFromFieldOrder(s.field_order),
+      pixFmt: s.pix_fmt || null,
+      colorSpace: s.color_space || null,
+      colorTrc: s.color_transfer || null,
+      colorPrimaries: s.color_primaries || null,
+      colorRange: s.color_range || null,          // 'tv' (limited) | 'pc' (full)
+      profile: s.profile || null,                 // e.g. 'High', 'Main 10'
+      level: s.level != null ? Number(s.level) : null, // integer: 40=4.0, 41=4.1, 50=5.0
+      channelLayout: s.channel_layout || null,    // audio: 'stereo','5.1','7.1' etc.
+      bitsPerSample: Number(s.bits_per_raw_sample) || Number(s.bits_per_sample) || null,
+      s302m: (() => {
+        // SMPTE 302M (AES3 PCM audio in MPEG-TS) detection.
+        // ffprobe reports codec_name 's302m' for correctly identified streams.
+        // Fallback: PCM codec on stream_type 0x06/0x82/0x83 (private/AES3 types).
+        const stNum = streamType != null ? Number(streamType) : null;
+        const isS302m = s.codec_name === 's302m' ||
+          (s.codec_type === 'audio' &&
+           s.codec_name && /^pcm_s(16|20|24|32)(be|le)$/.test(s.codec_name) &&
+           (stNum === 0x06 || stNum === 0x82 || stNum === 0x83));
+        if (!isS302m) return null;
+        const ch = Number(s.channels) || null;
+        const bitDepth = Number(s.bits_per_raw_sample) || Number(s.bits_per_sample) || null;
+        const sr = Number(s.sample_rate) || 48000;
+        const pairCount = ch ? Math.round(ch / 2) : null;
+        // Theoretical raw PCM bitrate (bps): sr × bitDepth × channels
+        // Actual MPEG-TS bitrate is slightly higher due to PES/TS overhead.
+        const theoreticalBps = (ch && bitDepth) ? (sr * bitDepth * ch) : null;
+        // Channel map: S302M assigns stereo pairs sequentially from Ch 1.
+        const pairs = pairCount ? Array.from({ length: pairCount }, (_, i) => ({
+          pair: i + 1,
+          ch: [i * 2 + 1, i * 2 + 2],
+        })) : null;
+        return { bitDepth, pairCount, channels: ch, sampleRate: sr, theoreticalBps, pairs };
+      })(),
+    };
+  }
+
+  _normalizePid(rawId) {
+    if (rawId === undefined || rawId === null) return null;
+    if (typeof rawId === 'number' && Number.isFinite(rawId)) return rawId;
+    const str = String(rawId).trim();
+    if (!str) return null;
+    // ffprobe can return IDs like "0x100", "256", or occasionally hex without 0x.
+    const hexMatch = str.match(/0x([0-9a-f]+)/i);
+    if (hexMatch) return parseInt(hexMatch[1], 16);
+    if (/^0x[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    if (/^[0-9]+$/.test(str)) return parseInt(str, 10);
+    if (/^[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    // Handles forms like "256[0x100]" or "pid=0x0100".
+    const decMatch = str.match(/(^|[^\d])(\d{2,5})(?!\d)/);
+    if (decMatch) return parseInt(decMatch[2], 10);
+    return null;
+  }
+
+  _parseBitrate(raw) {
+    if (raw === undefined || raw === null) return null;
+    const str = String(raw).trim();
+    if (!str || str.toUpperCase() === 'N/A') return null;
+    if (/^\d+$/.test(str)) return parseInt(str, 10);
+    const n = parseInt(str.replace(/[^\d]/g, ''), 10);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  _parseFrameRate(raw) {
+    if (raw === undefined || raw === null) return null;
+    const str = String(raw).trim();
+    if (!str || str.toUpperCase() === 'N/A') return null;
+    if (/^\d+(\.\d+)?$/.test(str)) return Number(str);
+    const frac = str.match(/^(\d+)\s*\/\s*(\d+)$/);
+    if (frac) {
+      const num = Number(frac[1]);
+      const den = Number(frac[2]);
+      if (Number.isFinite(num) && Number.isFinite(den) && den > 0) {
+        return num / den;
+      }
+    }
+    return null;
+  }
+
+  _scanTypeFromFieldOrder(fieldOrder) {
+    if (!fieldOrder) return null;
+    const f = String(fieldOrder).toLowerCase();
+    if (f === 'progressive') return 'progressive';
+    if (f.includes('tt') || f.includes('tb') || f.includes('top')) return 'interlaced_tff';
+    if (f.includes('bb') || f.includes('bt') || f.includes('bottom')) return 'interlaced_bff';
+    if (f.includes('interlac')) return 'interlaced';
+    return null;
+  }
+
+  _mergeStreamInfo(globalStream, programStream) {
+    const g = globalStream || {};
+    const p = programStream || {};
+    const merged = { ...g, ...p };
+
+    // Global stream analysis is authoritative for codec identification.
+    // Program PMT entries can contain stale/incomplete codec_type that overrides
+    // the correctly-analyzed global value, causing e.g. video showing on audio PIDs.
+    if (g.codec_type) merged.codec_type = g.codec_type;
+    if (g.codec_name) merged.codec_name = g.codec_name;
+
+    const pPid = this._normalizePid(p.id);
+    const gPid = this._normalizePid(g.id);
+    merged.id = pPid != null ? p.id : (gPid != null ? g.id : (p.id ?? g.id ?? null));
+
+    const pBitrate = this._parseBitrate(p.bit_rate);
+    const gBitrate = this._parseBitrate(g.bit_rate);
+    merged.bit_rate = pBitrate != null ? p.bit_rate : (gBitrate != null ? g.bit_rate : (p.bit_rate ?? g.bit_rate ?? null));
+
+    return merged;
+  }
+
+  _applyTSDuckData(result, tsduckData, nicMetrics = null) {
+    if (!result) return result;
+    const next = {
+      ...result,
+      programs: [...(result.programs || [])],
+      orphanStreams: [...(result.orphanStreams || [])],
+      dvb: { ...(result.dvb || {}) },
+    };
+
+    if (tsduckData && tsduckData.bitrateBps && tsduckData.bitrateBps > 0) {
+      next.dvb.tsduckBitrateBps = tsduckData.bitrateBps;
+      next.dvb.bitrateBps = tsduckData.bitrateBps;
+      next.dvb.bitrateSource = 'tsduck';
+    }
+
+    if (tsduckData && Array.isArray(tsduckData.services) && tsduckData.services.length > 0) {
+      const byId = new Map((next.dvb.services || []).map((s) => [s.serviceId, s]));
+      for (const svc of tsduckData.services) {
+        const prev = byId.get(svc.serviceId) || {};
+        byId.set(svc.serviceId, {
+          serviceId: svc.serviceId ?? prev.serviceId ?? null,
+          serviceName: svc.serviceName || prev.serviceName || null,
+          serviceProvider: svc.serviceProvider || prev.serviceProvider || null,
+          pmtPid: svc.pmtPid ?? prev.pmtPid ?? null,
+          pcrPid: svc.pcrPid ?? prev.pcrPid ?? null,
+        });
+      }
+      const mergedServices = [...byId.values()];
+      next.dvb.services = mergedServices;
+      next.dvb.serviceCount = mergedServices.length;
+    }
+
+    if (tsduckData && Array.isArray(tsduckData.pids) && tsduckData.pids.length > 0) {
+      // tsanalyze reports accurate PCR-derived per-PID bitrates. ffprobe identifies
+      // PIDs correctly but reports bit_rate=N/A for live MPEG-TS streams. Backfill
+      // tsduck bitrate onto existing streams that ffprobe left with null bitrate.
+      const tsduckBitrateByPid = new Map();
+      for (const row of tsduckData.pids) {
+        if (row && row.pid != null && row.pid > 0 && Number(row.bitrate) > 0) {
+          tsduckBitrateByPid.set(row.pid, Number(row.bitrate));
+        }
+      }
+      if (tsduckBitrateByPid.size > 0) {
+        next.programs = next.programs.map((prog) => ({
+          ...prog,
+          streams: (prog.streams || []).map((s) => {
+            if ((s.bitrate == null || s.bitrate === 0) && s.pid != null && tsduckBitrateByPid.has(s.pid)) {
+              return { ...s, bitrate: tsduckBitrateByPid.get(s.pid) };
+            }
+            return s;
+          }),
+        }));
+        next.orphanStreams = (next.orphanStreams || []).map((s) => {
+          if ((s.bitrate == null || s.bitrate === 0) && s.pid != null && tsduckBitrateByPid.has(s.pid)) {
+            return { ...s, bitrate: tsduckBitrateByPid.get(s.pid) };
+          }
+          return s;
+        });
+      }
+
+      const allExisting = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
+      const existingPidSet = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
+      const available = tsduckData.pids.filter((r) => r && r.pid != null && r.pid > 0 && !existingPidSet.has(r.pid));
+
+      // Unambiguous 1:1 PID merge: when ffprobe consistently reports null/0 PID for a
+      // program stream (e.g. certain encoders output id=0 for video), but TSDuck cleanly
+      // identifies exactly one PID of the same codec family, patch the existing stream
+      // rather than adding an orphan.  Only activates for 1:1 matches — ambiguous cases
+      // (multiple null-PID streams of the same type) fall through to the orphan path.
+      const _TS_VIDEO_ST = new Set([0x01, 0x02, 0x10, 0x1b, 0x1c, 0x24, 0x27, 0xd1]);
+      const _TS_AUDIO_ST = new Set([0x03, 0x04, 0x06, 0x0f, 0x11, 0x81, 0x82, 0x83, 0x84, 0x85, 0x87]);
+      const _inferCT = (row) => {
+        if (row.codecType) return row.codecType;
+        if (!row.streamType) return 'data';
+        const rawSt = String(row.streamType);
+        const st = /^0x/i.test(rawSt)
+          ? parseInt(rawSt.slice(2), 16)
+          : (parseInt(rawSt, 10) || parseInt(rawSt, 16) || 0);
+        return _TS_VIDEO_ST.has(st) ? 'video' : _TS_AUDIO_ST.has(st) ? 'audio' : 'data';
+      };
+
+      const nullPidByType = new Map();
+      for (const prog of next.programs) {
+        for (const s of (prog.streams || [])) {
+          if (s.pid != null) continue;
+          const ct = s.codecType || 'unknown';
+          if (!nullPidByType.has(ct)) nullPidByType.set(ct, []);
+          nullPidByType.get(ct).push(s);
+        }
+      }
+
+      const mergedPids = new Set();
+      if (nullPidByType.size > 0 && available.length > 0) {
+        const availByType = new Map();
+        for (const row of available) {
+          const ct = _inferCT(row);
+          if (!availByType.has(ct)) availByType.set(ct, []);
+          availByType.get(ct).push(row);
+        }
+        for (const [codecType, nullStreams] of nullPidByType) {
+          const candidates = availByType.get(codecType) || [];
+          if (nullStreams.length !== 1 || candidates.length !== 1) continue;
+          const targetRef = nullStreams[0];
+          const source = candidates[0];
+          const pid = source.pid;
+          const pidHex = `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`;
+          next.programs = next.programs.map((prog) => ({
+            ...prog,
+            streams: (prog.streams || []).map((s) =>
+              s === targetRef
+                ? {
+                    ...s,
+                    pid,
+                    pidHex,
+                    bitrate: (s.bitrate == null || s.bitrate === 0) && Number(source.bitrate) > 0 ? Number(source.bitrate) : s.bitrate,
+                    streamType: s.streamType || source.streamType || null,
+                  }
+                : s
+            ),
+          }));
+          mergedPids.add(pid);
+          existingPidSet.add(pid);
+          console.log(`[ts-analyser] TSDuck 1:1 PID merge: ${codecType} null-PID stream → PID ${pid} (0x${pid.toString(16).toUpperCase().padStart(4, '0')})`);
+        }
+      }
+
+      // Only append TSDuck PID rows that weren't merged above.
+      // Avoid "guess-assign" by codec type for ambiguous multi-stream cases — that
+      // heuristic can mis-bind streams between probe cycles under unstable feeds.
+      for (const row of available) {
+        if (mergedPids.has(row.pid)) continue;
+        if (existingPidSet.has(row.pid)) continue;
+        existingPidSet.add(row.pid);
+        next.orphanStreams.push({
+          index: `tsduck-${row.pid}`,
+          codecType: _inferCT(row),
+          codecName: row.codecName || 'unknown',
+          pid: row.pid,
+          pidHex: `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`,
+          streamType: row.streamType || null,
+          width: null,
+          height: null,
+          fps: null,
+          bitrate: row.bitrate || null,
+          sampleRate: null,
+          channels: null,
+          language: row.language || null,
+          colorSpace: null,
+          colorTrc: null,
+          colorPrimaries: null,
+          bitsPerSample: null,
+          s302m: null,
+        });
+      }
+    }
+
+    const allStreams = next.programs.flatMap((p) => p.streams || []).concat(next.orphanStreams || []);
+    next.dvb.pidCount = allStreams.filter((s) => s.pid != null).length;
+    next.dvb.streamBreakdown = {
+      video: allStreams.filter((s) => s.codecType === 'video').length,
+      audio: allStreams.filter((s) => s.codecType === 'audio').length,
+      data: allStreams.filter((s) => s.codecType === 'data').length,
+    };
+    if (tsduckData && tsduckData.siIntervalsSec) {
+      const si = tsduckData.siIntervalsSec;
+      const compliance = {
+        nit: si.nit != null ? si.nit <= 10 : null,
+        sdt: si.sdt != null ? si.sdt <= 2 : null,
+        eitPf: si.eitPf != null ? si.eitPf <= 2 : null,
+        tdt: si.tdt != null ? si.tdt <= 30 : null,
+      };
+      next.dvb.si = { intervalsSec: si, compliance };
+    }
+    // PCR analysis (ETR 290 Priority 2)
+    if (tsduckData && tsduckData.pcrMetrics) {
+      next.dvb.pcrMetrics = tsduckData.pcrMetrics;
+    }
+    // Unreferenced PIDs (ETR 290 Priority 3)
+    if (tsduckData && Array.isArray(tsduckData.unreferencedPids) && tsduckData.unreferencedPids.length > 0) {
+      next.dvb.unreferencedPids = tsduckData.unreferencedPids;
+    }
+    if (nicMetrics && nicMetrics.sampleCount > 0) {
+      next.dvb.arrival = {
+        iatMs: nicMetrics.iatMs,
+        jitterMs: nicMetrics.jitterMs,
+        packetLossPct: nicMetrics.packetLossPct,
+        captureMethod: nicMetrics.captureMethod,
+        sampleCount: nicMetrics.sampleCount,
+        rtpDrops: Number.isFinite(nicMetrics.rtpDrops) ? nicMetrics.rtpDrops : null,
+        rtpOutOfOrder: Number.isFinite(nicMetrics.rtpOutOfOrder) ? nicMetrics.rtpOutOfOrder : null,
+        network: nicMetrics.network || null,
+        rtpSequence: nicMetrics.rtpSequence || null,
+      };
+    } else if (tsduckData && tsduckData.arrivalMetrics) {
+      next.dvb.arrival = {
+        ...tsduckData.arrivalMetrics,
+        captureMethod: 'tsduck',
+      };
+    }
+    return next;
+  }
+
+  _extractTSDuckBitrateBps(raw) {
+    const candidates = [];
+    const push = (v, score = 1) => {
+      const bps = this._parseBitrateValue(v);
+      if (bps && Number.isFinite(bps) && bps > 0) candidates.push({ bps, score });
+    };
+
+    const walk = (obj, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        obj.forEach((v, i) => walk(v, `${path}[${i}]`));
+        return;
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        const key = String(k).toLowerCase();
+        const p = `${path}.${key}`;
+        if (key.includes('bitrate')) {
+          let score = 1;
+          if (/(transport|overall|total|global|ts)/i.test(key) || /(transport|overall|total|global|\.ts\.)/i.test(p)) {
+            score = 3;
+          } else if (/(service|program|pid|stream)/i.test(p)) {
+            score = 0;
+          }
+          if (score > 0) push(v, score);
+        }
+        walk(v, p);
+      }
+    };
+    walk(raw, 'root');
+    if (candidates.length === 0) return null;
+    candidates.sort((a, b) => (b.score - a.score) || (b.bps - a.bps));
+    return candidates[0].bps;
+  }
+
+  _extractTSDuckServices(raw) {
+    const out = [];
+    const walk = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        obj.forEach(walk);
+        return;
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        if (Array.isArray(v) && /services?/i.test(k)) {
+          for (const svc of v) {
+            if (!svc || typeof svc !== 'object') continue;
+            const serviceId = this._parseInteger(svc.service_id ?? svc.serviceId ?? svc.id ?? svc.sid);
+            if (serviceId == null) continue;
+            out.push({
+              serviceId,
+              serviceName: svc.service_name || svc.serviceName || svc.name || null,
+              serviceProvider: svc.service_provider || svc.provider || null,
+              pmtPid: this._parseInteger(svc.pmt_pid ?? svc.pmtPid),
+              pcrPid: this._parseInteger(svc.pcr_pid ?? svc.pcrPid),
+            });
+          }
+        } else {
+          walk(v);
+        }
+      }
+    };
+    walk(raw);
+    return out;
+  }
+
+  _extractTSDuckPidRows(raw) {
+    // Collect ALL candidate entries, then dedup keeping the best one per PID.
+    // "First-encounter wins" breaks when tsanalyze JSON nests PID references inside
+    // service/PMT objects (no bitrate there) before the main pid-list entries (which
+    // do have bitrate). By collecting all and merging, we always surface the bitrate.
+    const candidates = new Map(); // pid → best entry
+    const walk = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        obj.forEach(walk);
+        return;
+      }
+      const maybePid = this._parseInteger(obj.pid ?? obj.PID ?? obj.id);
+      if (maybePid != null && maybePid > 0 && maybePid <= 8191) {
+        const bitrate = this._parseBitrateValue(
+          obj.bitrate ?? obj.bitrate_bps ?? obj.bit_rate ?? obj.bandwidth
+        );
+        const entry = {
+          pid: maybePid,
+          streamType: obj.stream_type || obj.streamType || obj.type || null,
+          codecType: obj.codec_type || obj.codecType || null,
+          codecName: obj.codec_name || obj.codecName || null,
+          language: obj.language || obj.lang || null,
+          bitrate,
+          s302m: null, // populated from ffprobe _mapStream() via _applyTSDuckData merge
+        };
+        const prev = candidates.get(maybePid);
+        // Prefer entries that have more information — bitrate > stream type > anything.
+        const score = (e) => (e.bitrate > 0 ? 4 : 0) + (e.streamType ? 2 : 0) + (e.codecType ? 1 : 0);
+        if (!prev || score(entry) > score(prev)) {
+          candidates.set(maybePid, entry);
+        }
+      }
+      Object.values(obj).forEach(walk);
+    };
+    walk(raw);
+    return Array.from(candidates.values());
+  }
+
+  _extractTSDuckSIIntervalsSec(raw) {
+    const out = { nit: null, sdt: null, eitPf: null, tdt: null };
+    const unitToSec = (v, unitHint = '') => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+      if (!Number.isFinite(n) || n <= 0) return null;
+      const u = String(unitHint || '').toLowerCase();
+      if (u.includes('ms') || u.includes('msec') || u.includes('millisecond')) return n / 1000;
+      if (u.includes('us') || u.includes('micro')) return n / 1e6;
+      return n;
+    };
+    const visitObj = (obj, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        obj.forEach((v, i) => visitObj(v, `${path}[${i}]`));
+        return;
+      }
+      const keys = Object.keys(obj);
+      for (const k of keys) {
+        const v = obj[k];
+        const key = String(k).toLowerCase();
+        const p = `${path}.${key}`;
+        if (typeof v === 'number' || typeof v === 'string') {
+          const isInterval = /(interval|period|repetition|cycle)/i.test(key) || /(interval|period|repetition|cycle)/i.test(p);
+          if (!isInterval) continue;
+          let unitHint = key;
+          if (obj.unit) unitHint += ` ${obj.unit}`;
+          if (obj.units) unitHint += ` ${obj.units}`;
+          if (obj.time_unit) unitHint += ` ${obj.time_unit}`;
+          const sec = unitToSec(v, unitHint);
+          if (sec == null) continue;
+          if ((/nit/i.test(p) || /nit/i.test(key)) && out.nit == null) out.nit = sec;
+          if ((/sdt/i.test(p) || /sdt/i.test(key)) && out.sdt == null) out.sdt = sec;
+          if ((/eit/i.test(p) || /eit/i.test(key)) && (/pf|present|following/i.test(p) || /pf/i.test(key)) && out.eitPf == null) out.eitPf = sec;
+          if ((/tdt/i.test(p) || /tdt/i.test(key)) && out.tdt == null) out.tdt = sec;
+        } else {
+          visitObj(v, p);
+        }
+      }
+    };
+    visitObj(raw, 'root');
+    if (out.nit == null && out.sdt == null && out.eitPf == null && out.tdt == null) return null;
+    return out;
+  }
+
+  _extractTSDuckArrivalMetrics(raw) {
+    const metrics = {
+      iatMs: { min: null, max: null, avg: null, p95: null },
+      jitterMs: null,
+      packetLossPct: null,
+    };
+    const setIfNull = (container, key, value) => {
+      if (container[key] == null && value != null && Number.isFinite(value)) container[key] = value;
+    };
+    const parseNumber = (v) => {
+      if (v == null) return null;
+      if (typeof v === 'number' && Number.isFinite(v)) return v;
+      const m = String(v).match(/-?[\d.]+/);
+      if (!m) return null;
+      const n = parseFloat(m[0]);
+      return Number.isFinite(n) ? n : null;
+    };
+    const maybeMs = (v, unitHint = '') => {
+      const n = parseNumber(v);
+      if (n == null) return null;
+      const u = String(unitHint || '').toLowerCase();
+      if (u.includes('us') || u.includes('micro')) return n / 1000;
+      if (u.includes('s') && !u.includes('ms')) return n * 1000;
+      return n;
+    };
+    const visit = (obj, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) {
+        obj.forEach((v, i) => visit(v, `${path}[${i}]`));
+        return;
+      }
+      for (const [k, v] of Object.entries(obj)) {
+        const key = String(k).toLowerCase();
+        const p = `${path}.${key}`;
+        if (typeof v === 'number' || typeof v === 'string') {
+          const unitHint = `${key} ${obj.unit || ''} ${obj.units || ''} ${obj.time_unit || ''}`;
+          if (/jitter/.test(key) || /jitter/.test(p)) setIfNull(metrics, 'jitterMs', maybeMs(v, unitHint));
+          if (/packet.*loss/.test(key) || /loss.*pct/.test(key) || /loss/.test(p)) setIfNull(metrics, 'packetLossPct', parseNumber(v));
+          if (/(iat|inter.?packet.?arrival)/.test(key) || /(iat|inter.?packet.?arrival)/.test(p)) {
+            if (/min/.test(key) || /\.min/.test(p)) setIfNull(metrics.iatMs, 'min', maybeMs(v, unitHint));
+            else if (/max/.test(key) || /\.max/.test(p)) setIfNull(metrics.iatMs, 'max', maybeMs(v, unitHint));
+            else if (/p95|95/.test(key) || /p95|95/.test(p)) setIfNull(metrics.iatMs, 'p95', maybeMs(v, unitHint));
+            else if (/avg|mean/.test(key) || /avg|mean/.test(p)) setIfNull(metrics.iatMs, 'avg', maybeMs(v, unitHint));
+          }
+        } else {
+          visit(v, p);
+        }
+      }
+    };
+    visit(raw, 'root');
+    const hasIat = Object.values(metrics.iatMs).some((v) => v != null);
+    if (!hasIat && metrics.jitterMs == null && metrics.packetLossPct == null) return null;
+    return metrics;
+  }
+
+  _extractTSDuckPcrMetrics(raw) {
+    // Extract PCR analysis from tsanalyze JSON. TSDuck reports PCR repetition and
+    // accuracy per PID. ETR 290 P2 thresholds: repetition ≤ 40ms, accuracy ≤ 0.5ms.
+    const metrics = {
+      repetitionMaxMs: null,
+      repetitionMeanMs: null,
+      accuracyMaxMs: null,
+      discontinuityCount: 0,
+      discontIndicatorErrors: 0,
+      crcErrors: 0,
+    };
+    const parseN = (v) => {
+      if (v == null) return null;
+      const n = typeof v === 'number' ? v : parseFloat(String(v).replace(',', '.'));
+      return Number.isFinite(n) ? n : null;
+    };
+    const setMax = (key, v) => {
+      const n = parseN(v);
+      if (n == null) return;
+      if (metrics[key] == null || n > metrics[key]) metrics[key] = n;
+    };
+    const addCount = (key, v) => {
+      const n = parseN(v);
+      if (n != null && n > 0) metrics[key] += Math.round(n);
+    };
+
+    const visit = (obj, path = '') => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach((v, i) => visit(v, `${path}[${i}]`)); return; }
+      for (const [k, v] of Object.entries(obj)) {
+        const key = k.toLowerCase();
+        // PCR repetition (ETR 290 P2.1: PCR must repeat every ≤40ms)
+        if (/pcr.*(repetition|interval).*(max|maximum)/i.test(key) || /pcr.*(repetition|interval).*(max|maximum)/i.test(path + '.' + key)) {
+          setMax('repetitionMaxMs', v);
+        }
+        if (/pcr.*(repetition|interval).*(mean|avg|average)/i.test(key)) {
+          const n = parseN(v); if (n != null && (metrics.repetitionMeanMs == null || n > metrics.repetitionMeanMs)) metrics.repetitionMeanMs = n;
+        }
+        // PCR accuracy (ETR 290 P2.2: accuracy ≤ 500ns = 0.0005ms; practical threshold ≤ 0.5ms)
+        if (/pcr.*accuracy.*(max|maximum)/i.test(key)) {
+          setMax('accuracyMaxMs', v);
+        }
+        // PCR discontinuity indicator errors (ETR 290 P2.4)
+        if (/pcr.*(discontinu|discon).*(count|error)/i.test(key) || /discon.*indicator.*error/i.test(key)) {
+          addCount('discontIndicatorErrors', v);
+        }
+        // CRC errors on PSI sections (ETR 290 P2.2)
+        if (/crc.*(error|invalid|bad)/i.test(key) || /(invalid|bad).*crc/i.test(key) || key === 'crc_error_count' || key === 'invalid_sections') {
+          addCount('crcErrors', v);
+        }
+        if (typeof v === 'object') visit(v, `${path}.${key}`);
+      }
+    };
+    visit(raw, 'root');
+    const hasData = metrics.repetitionMaxMs != null || metrics.accuracyMaxMs != null
+      || metrics.discontIndicatorErrors > 0 || metrics.crcErrors > 0;
+    return hasData ? metrics : null;
+  }
+
+  _extractUnreferencedPids(raw) {
+    // Detect PIDs present in the TS but not referenced by any PMT (ETR 290 P3.5).
+    // TSDuck may tag these as "unreferenced" in its JSON output.
+    const unreferenced = [];
+    const visit = (obj) => {
+      if (!obj || typeof obj !== 'object') return;
+      if (Array.isArray(obj)) { obj.forEach(visit); return; }
+      // TSDuck may use "unreferenced" or "is_unreferenced" flags on PID entries
+      const isUnref = obj.unreferenced === true || obj.is_unreferenced === true
+        || String(obj.type || '').toLowerCase() === 'unreferenced'
+        || String(obj.referenced || '').toLowerCase() === 'false';
+      const pid = obj.pid ?? obj.id ?? obj.PID;
+      if (isUnref && pid != null) {
+        const pidNum = typeof pid === 'number' ? pid : parseInt(String(pid).replace(/0x/i, ''), 16);
+        if (Number.isFinite(pidNum) && pidNum > 0 && pidNum <= 8191) {
+          unreferenced.push(pidNum);
+        }
+      }
+      Object.values(obj).forEach(visit);
+    };
+    visit(raw);
+    return [...new Set(unreferenced)]; // deduplicate
+  }
+
+  _parseBitrateValue(raw) {
+    if (raw == null) return null;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return raw > 1000 ? Math.round(raw) : null;
+    const str = String(raw).trim();
+    if (!str || /^n\/a$/i.test(str)) return null;
+    const m = str.match(/([\d.]+)\s*([kmg]?)(?:bits?\/s|bps)?/i);
+    if (!m) return null;
+    const n = parseFloat(m[1]);
+    if (!Number.isFinite(n) || n <= 0) return null;
+    const unit = (m[2] || '').toLowerCase();
+    let mult = 1;
+    if (unit === 'k') mult = 1e3;
+    if (unit === 'm') mult = 1e6;
+    if (unit === 'g') mult = 1e9;
+    return Math.round(n * mult);
+  }
+
+  _parseInteger(raw) {
+    if (raw === undefined || raw === null) return null;
+    if (typeof raw === 'number' && Number.isFinite(raw)) return Math.trunc(raw);
+    const str = String(raw).trim();
+    if (!str) return null;
+    if (/^0x[0-9a-f]+$/i.test(str)) return parseInt(str, 16);
+    if (/^\d+$/.test(str)) return parseInt(str, 10);
+    const m = str.match(/0x([0-9a-f]+)/i);
+    if (m) return parseInt(m[1], 16);
+    const d = str.match(/\d+/);
+    return d ? parseInt(d[0], 10) : null;
+  }
+
+  _probeStreamPidsFromFfmpeg() {
+    // Single consolidated PID probe path:
+    // 1) ffprobe on original URL
+    // 2) for RTP only, fallback ffprobe on equivalent UDP with forced mpegts demux
+    // Then return both pid-by-index map and parsed stream rows for row-level backfill.
+    const tryFfprobeStreams = (url, extraArgs = []) => new Promise((resolve) => {
+      const args = [
+        '-v', 'quiet',
+        '-analyzeduration', '5000000',
+        '-probesize', '5000000',
+        ...extraArgs,
+        '-print_format', 'json',
+        '-show_streams',
+        url,
+      ];
+      const proc = spawn('ffprobe', args);
+      let stdout = '';
+      const killTimer = setTimeout(() => {
+        try { proc.kill('SIGTERM'); } catch (_) {}
+      }, 9000);
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.on('error', () => { clearTimeout(killTimer); resolve([]); });
+      proc.on('exit', () => {
+        clearTimeout(killTimer);
+        try {
+          const parsed = JSON.parse(stdout);
+          const rows = (parsed.streams || [])
+            .map((s) => this._mapStream(s))
+            .filter((s) => s && s.pid != null);
+          return resolve(rows);
+        } catch (_) {
+          return resolve([]);
+        }
+      });
+    });
+
+    const primaryUrl = this._withLiveInputHints(this._effectiveUrl);
+    return tryFfprobeStreams(primaryUrl).then((rows) => {
+      if (rows.length > 0) return this._buildPidProbeResult(rows);
+      if (this._isRtpUrl(this._effectiveUrl)) {
+        const udpUrl = this._withLiveInputHints(this._rtpToUdpUrl(this._effectiveUrl) || '');
+        if (udpUrl) {
+          return tryFfprobeStreams(udpUrl, ['-fflags', '+discardcorrupt', '-f', 'mpegts'])
+            .then((udpRows) => this._buildPidProbeResult(udpRows));
+        }
+      }
+      return this._buildPidProbeResult([]);
+    });
+  }
+
+  _buildPidProbeResult(rows) {
+    const cleanRows = Array.isArray(rows) ? rows.filter((r) => r && r.pid != null) : [];
+    const pidByIndex = {};
+    const rowByIndex = {};
+    cleanRows.forEach((r) => {
+      if (typeof r.index === 'number' && r.pid != null) {
+        pidByIndex[r.index] = r.pid;
+        rowByIndex[r.index] = r;
+      }
+    });
+    return { pidByIndex, rowByIndex, rows: cleanRows };
+  }
+
+  _applyPidMap(result, pidProbe) {
+    if (!result || !pidProbe || typeof pidProbe !== 'object') return result;
+    const hasWrappedProbe = Object.prototype.hasOwnProperty.call(pidProbe, 'pidByIndex');
+    const pidMap = hasWrappedProbe ? (pidProbe.pidByIndex || {}) : pidProbe;
+    const rowByIndex = hasWrappedProbe ? (pidProbe.rowByIndex || {}) : {};
+    if (Object.keys(pidMap).length === 0) return result;
+    const sameCodecFamily = (a, b) => {
+      const ta = String(a || '').toLowerCase();
+      const tb = String(b || '').toLowerCase();
+      if (!ta || !tb) return true;
+      return ta === tb;
+    };
+    const patchStream = (s) => {
+      if (!s) return s;
+      if (s.pid != null) return s;
+      const pid = pidMap[s.index];
+      if (pid == null) return s;
+      const ref = rowByIndex[s.index] || null;
+      // Prevent PID shuffling: only trust index mapping when stream family matches.
+      if (ref && !sameCodecFamily(s.codecType, ref.codecType)) return s;
+      return {
+        ...s,
+        pid,
+        pidHex: `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`,
+      };
+    };
+    const programs = (result.programs || []).map((p) => ({
+      ...p,
+      streams: (p.streams || []).map(patchStream),
+    }));
+    const orphanStreams = (result.orphanStreams || []).map(patchStream);
+    const streamIndexes = new Set(
+      programs.flatMap((p) => (p.streams || []).map((s) => s.index)).concat(orphanStreams.map((s) => s.index))
+    );
+    for (const [rawIdx, rawPid] of Object.entries(pidMap)) {
+      const idx = parseInt(rawIdx, 10);
+      const pid = Number(rawPid);
+      if (!Number.isFinite(idx) || !Number.isFinite(pid)) continue;
+      if (streamIndexes.has(idx)) continue;
+      orphanStreams.push({
+        index: idx,
+        codecType: 'data',
+        codecName: 'unknown',
+        pid,
+        pidHex: `0x${Number(pid).toString(16).toUpperCase().padStart(4, '0')}`,
+        streamType: null,
+        width: null,
+        height: null,
+        fps: null,
+        bitrate: null,
+        sampleRate: null,
+        channels: null,
+        language: null,
+        colorSpace: null,
+        colorTrc: null,
+        colorPrimaries: null,
+      });
+    }
+    const allStreams = programs.flatMap(p => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter(s => s.pid != null).length;
+    return {
+      ...result,
+      programs,
+      orphanStreams,
+      dvb: {
+        ...(result.dvb || {}),
+        pidCount,
+      },
+    };
+  }
+
+  _applyFallbackPidRows(result, fallbackRows) {
+    if (!result || !Array.isArray(fallbackRows) || fallbackRows.length === 0) return result;
+    const programs = (result.programs || []).map((p) => ({ ...p, streams: [...(p.streams || [])] }));
+    const orphanStreams = [...(result.orphanStreams || [])];
+    const allExisting = programs.flatMap((p) => p.streams).concat(orphanStreams);
+    const used = new Set(allExisting.map((s) => s.pid).filter((v) => v != null));
+    const candidates = fallbackRows.filter((r) => r && r.pid != null && r.pid > 0 && !used.has(r.pid));
+    // Keep fallback rows non-destructive: append verified PID rows instead of
+    // rebinding unknown streams with codec-based heuristics.
+    for (const row of candidates) {
+      if (used.has(row.pid)) continue;
+      used.add(row.pid);
+      orphanStreams.push({
+        index: typeof row.index === 'number' ? row.index : `fallback-${row.pid}`,
+        codecType: row.codecType || 'data',
+        codecName: row.codecName || 'unknown',
+        pid: row.pid,
+        pidHex: row.pidHex || `0x${Number(row.pid).toString(16).toUpperCase().padStart(4, '0')}`,
+        streamType: row.streamType || null,
+        width: null,
+        height: null,
+        fps: null,
+        bitrate: row.bitrate || null,
+        sampleRate: null,
+        channels: null,
+        language: row.language || null,
+        colorSpace: null,
+        colorTrc: null,
+        colorPrimaries: null,
+      });
+    }
+    const allStreams = programs.flatMap((p) => p.streams).concat(orphanStreams);
+    const pidCount = allStreams.filter((s) => s.pid != null).length;
+    return {
+      ...result,
+      programs,
+      orphanStreams,
+      dvb: {
+        ...(result.dvb || {}),
+        pidCount,
+      },
+    };
+  }
+
+  _normalizeAndSortResult(result) {
+    if (!result) return result;
+    const typeOrder = { video: 0, audio: 1, subtitle: 2, data: 3, unknown: 9 };
+    const normType = (v) => {
+      const t = String(v || '').toLowerCase();
+      if (!t) return 'unknown';
+      if (t === 'video' || t === 'audio' || t === 'data' || t === 'subtitle') return t;
+      return 'unknown';
+    };
+    const pidNum = (s) => (Number.isFinite(Number(s?.pid)) ? Number(s.pid) : Number.POSITIVE_INFINITY);
+    const cmpStream = (a, b) => {
+      const ta = typeOrder[normType(a?.codecType)] ?? 9;
+      const tb = typeOrder[normType(b?.codecType)] ?? 9;
+      if (ta !== tb) return ta - tb;
+      const pa = pidNum(a);
+      const pb = pidNum(b);
+      if (pa !== pb) return pa - pb;
+      const ca = String(a?.codecName || '').toLowerCase();
+      const cb = String(b?.codecName || '').toLowerCase();
+      if (ca !== cb) return ca.localeCompare(cb);
+      const ia = Number.isFinite(Number(a?.index)) ? Number(a.index) : Number.POSITIVE_INFINITY;
+      const ib = Number.isFinite(Number(b?.index)) ? Number(b.index) : Number.POSITIVE_INFINITY;
+      return ia - ib;
+    };
+    const dedupeAndSort = (rows) => {
+      const map = new Map();
+      (rows || []).forEach((s) => {
+        if (!s) return;
+        const t = normType(s.codecType);
+        const pidKey = Number.isFinite(Number(s.pid))
+          ? String(Number(s.pid))
+          : String(s.pidHex || `idx-${s.index ?? 'na'}`).toUpperCase();
+        const codecKey = String(s.codecName || '').toLowerCase();
+        const key = `${pidKey}|${t}|${codecKey}`;
+        if (!map.has(key)) map.set(key, { ...s, codecType: t });
+      });
+      return Array.from(map.values()).sort(cmpStream);
+    };
+
+    const programs = [...(result.programs || [])]
+      .map((p) => ({
+        ...p,
+        streams: dedupeAndSort(p.streams || []),
+      }))
+      .sort((a, b) => {
+        const pa = Number.isFinite(Number(a?.programId)) ? Number(a.programId) : Number.POSITIVE_INFINITY;
+        const pb = Number.isFinite(Number(b?.programId)) ? Number(b.programId) : Number.POSITIVE_INFINITY;
+        if (pa !== pb) return pa - pb;
+        return String(a?.name || '').localeCompare(String(b?.name || ''));
+      });
+    const orphanStreams = dedupeAndSort(result.orphanStreams || []);
+    return {
+      ...result,
+      programs,
+      orphanStreams,
+    };
+  }
+
+  _withLiveInputHints(url) {
+    if (!url) return url;
+    // SRT — bind caller socket to the management NIC so ffprobe routes via the
+    // correct interface, not a secondary NIC with no IP. Set MANAGEMENT_IP env var.
+    if (url.startsWith('srt://')) {
+      const sep = url.includes('?') ? '&' : '?';
+      return `${url}${sep}adapter=${process.env.MANAGEMENT_IP || '0.0.0.0'}`;
+    }
+    if (!(url.startsWith('udp://') || url.startsWith('rtp://'))) return url;
+    const sep = url.includes('?') ? '&' : '?';
+    return `${url}${sep}fifo_size=${LIVE_INPUT_HINTS.fifoSize}&overrun_nonfatal=1&timeout=${LIVE_INPUT_HINTS.timeoutUs}&reorder_queue_size=${LIVE_INPUT_HINTS.reorderQueueSize}`;
+  }
+
+  _isLiveInputHintMemoryError(err) {
+    const msg = String((err && err.message) || '').toLowerCase();
+    return msg.includes('cannot allocate memory') || msg.includes('enomem');
+  }
+
+  _isRtpUrl(url) {
+    return typeof url === 'string' && url.startsWith('rtp://');
+  }
+
+  _rtpToUdpUrl(url) {
+    if (!this._isRtpUrl(url)) return null;
+    try {
+      const parsed = new URL(url);
+      const host = parsed.hostname;
+      const port = parsed.port;
+      if (!host || !port) return null;
+      return `udp://${host}:${port}`;
+    } catch (_) {
+      const m = String(url).match(/^rtp:\/\/([^/:?#]+):(\d+)/i);
+      if (!m) return null;
+      return `udp://${m[1]}:${m[2]}`;
+    }
+  }
+
+  _resolveCachedThumbnailUrl() {
+    try {
+      const p = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      if (!fs.existsSync(p)) return null;
+      return `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  _monitoringPolicySummary() {
+    const policy = this.monitoringPolicy || _getPolicySnapshot();
+    return {
+      profile: policy?.profile || 'broadcast-balanced-v1',
+      profileMeta: policy?.profileMeta || null,
+      source: policy?.source || 'defaults',
+      probeCadence: policy?.probeCadence || null,
+      bitrate: policy?.bitrate || null,
+      loadedAt: policy?.loadedAt || null,
+    };
+  }
+
+  _cadencePolicy() {
+    const probeCadence = this.monitoringPolicy?.probeCadence || {};
+    const baseIntervalMs = Math.max(500, Number(probeCadence.baseIntervalMs || this.interval || 5000));
+    const heavyProbeEvery = Math.max(1, Math.floor(Number(probeCadence.heavyProbeEvery || 3)));
+    const heavyProbeIntervalMs = Math.max(
+      baseIntervalMs,
+      Number(probeCadence.heavyProbeIntervalMs || (baseIntervalMs * heavyProbeEvery))
+    );
+    const minLoopDelayMs = Math.max(150, Number(probeCadence.minLoopDelayMs || 250));
+    const startupJitterMaxMs = Math.max(0, Number(probeCadence.startupJitterMaxMs || 2000));
+    return {
+      baseIntervalMs,
+      heavyProbeEvery,
+      heavyProbeIntervalMs,
+      minLoopDelayMs,
+      startupJitterMaxMs,
+    };
+  }
+
+  _shouldRunHeavyProbe(isContinuous, nowTs) {
+    if (!isContinuous) return true;
+    const cadence = this._cadencePolicy();
+    if (!Number.isFinite(this._nextHeavyProbeAt) || this._nextHeavyProbeAt <= 0) {
+      this._nextHeavyProbeAt = nowTs;
+    }
+    if (nowTs >= this._nextHeavyProbeAt) {
+      this._nextHeavyProbeAt = nowTs + cadence.heavyProbeIntervalMs;
+      return true;
+    }
+    return false;
+  }
+
+  // Return the effective probe interval for the NEXT schedule tick, adjusted for
+  // the current alarm state.  Alarm streams probe more aggressively so recovery
+  // or escalation is detected within one or two cycles rather than waiting for
+  // the full base interval.
+  //
+  //  ok       → baseIntervalMs                 (no change)
+  //  warning  → baseIntervalMs × 0.5  (min 1 s)
+  //  critical → baseIntervalMs × 0.25 (min 1 s)
+  //
+  // The 1 s floor prevents probe storms when baseIntervalMs is very small, and
+  // the global heavy-probe semaphore caps parallel load regardless.
+  _effectiveProbeIntervalMs(cadence) {
+    const severity = this.lastResult?.severity;
+    const base = cadence.baseIntervalMs;
+    const floor = Math.max(1000, cadence.minLoopDelayMs * 4);
+    if (severity === 'critical') return Math.max(floor, Math.floor(base * 0.25));
+    if (severity === 'warning')  return Math.max(floor, Math.floor(base * 0.5));
+    return base;
+  }
+
+  _schedulerDiagnostics(runHeavyProbe) {
+    const cadence = this._cadencePolicy();
+    const effectiveIntervalMs = this._effectiveProbeIntervalMs(cadence);
+    return {
+      cadence,
+      runHeavyProbe,
+      effectiveIntervalMs,
+      priorityBoost: effectiveIntervalMs < cadence.baseIntervalMs
+        ? (this.lastResult?.severity || 'none')
+        : null,
+      nextHeavyProbeAt: Number.isFinite(this._nextHeavyProbeAt) ? this._nextHeavyProbeAt : null,
+      nextProbeAt: Number.isFinite(this._nextProbeAt) ? this._nextProbeAt : null,
+    };
+  }
+
+  _healthThresholds() {
+    const base = (this.monitoringPolicy && this.monitoringPolicy.health) || _getPolicySnapshot().health;
+    // SRT streams: ARQ retransmission windows produce higher IAT/jitter than
+    // UDP multicast. Automatically take the more generous of the active profile
+    // vs srt-contribution thresholds for those two metrics so normal ARQ
+    // activity does not score as critical.  All other metrics (CC, loss,
+    // tsDisc) use the active profile unchanged.
+    if (this.url && this.url.startsWith('srt://')) {
+      return {
+        ...base,
+        iatP95CriticalMs: Math.max(base.iatP95CriticalMs, 400),
+        iatP95WarnMs:     Math.max(base.iatP95WarnMs,     120),
+        jitterCriticalMs: Math.max(base.jitterCriticalMs,  40),
+        jitterWarnMs:     Math.max(base.jitterWarnMs,      10),
+      };
+    }
+    // RTP/UDP multicast: ffprobe always joins mid-stream and produces 1–10 CC
+    // errors while syncing to the first keyframe.  Apply broadcast-balanced-v1
+    // CC + tsDisc floor (ccWarnCount≥3, ccCriticalCount≥8) so those join
+    // artefacts never trigger false alarms on clean multicast sources.
+    if (this._isRtpUrl(this.url) || (this.url && this.url.startsWith('udp://'))) {
+      const balanced = (PROFILES['broadcast-balanced-v1'] && PROFILES['broadcast-balanced-v1'].health) || {};
+      return {
+        ...base,
+        ccWarnCount:          Math.max(base.ccWarnCount      || 0, balanced.ccWarnCount      || 3),
+        ccCriticalCount:      Math.max(base.ccCriticalCount  || 0, balanced.ccCriticalCount  || 8),
+        tsDiscWarnCount:      Math.max(base.tsDiscWarnCount  || 0, balanced.tsDiscWarnCount  || 3),
+        tsDiscCriticalCount:  Math.max(base.tsDiscCriticalCount || 0, balanced.tsDiscCriticalCount || 8),
+      };
+    }
+    return base;
+  }
+
+  _smpteThresholds() {
+    return (this.monitoringPolicy && this.monitoringPolicy.smpte20227) || _getPolicySnapshot().smpte20227;
+  }
+
+  _computeBitrateStability(result) {
+    const currentBps = Number(result?.dvb?.bitrateBps || 0);
+    const previousBps = Number(this.lastResult?.dvb?.bitrateBps || 0);
+    if (!Number.isFinite(currentBps) || currentBps <= 0 || !Number.isFinite(previousBps) || previousBps <= 0) {
+      return { checked: false, deltaPct: null, state: 'insufficient_data' };
+    }
+    const deltaPct = Math.abs(((currentBps - previousBps) / previousBps) * 100);
+    const bitratePolicy = this.monitoringPolicy?.bitrate || {};
+    const warnDeltaPct = Number(bitratePolicy.warnDeltaPct || 3);
+    const criticalDeltaPct = Number(bitratePolicy.criticalDeltaPct || 6);
+    let state = 'stable';
+    if (deltaPct >= criticalDeltaPct) state = 'critical';
+    else if (deltaPct >= warnDeltaPct) state = 'warning';
+    return {
+      checked: true,
+      deltaPct: Number(deltaPct.toFixed(2)),
+      warnDeltaPct,
+      criticalDeltaPct,
+      currentBps,
+      previousBps,
+      state,
+    };
+  }
+
+  _buildSmpte20227Assessment(result) {
+    const smpteThresholds = this._smpteThresholds();
+    const arrival = result?.dvb?.arrival || null;
+    const seq = arrival?.rtpSequence || null;
+    const packetLossPct = Number(arrival?.packetLossPct);
+    const sampleCount = Number(arrival?.sampleCount || 0);
+    const captureMethod = String(arrival?.captureMethod || '').toLowerCase();
+    const isRtpInput = this._isRtpUrl(this.url);
+
+    const assessment = {
+      standard: 'SMPTE ST 2022-7',
+      checked: false,
+      compliant: null,
+      state: isRtpInput ? 'insufficient_data' : 'not_applicable',
+      reason: isRtpInput ? 'RTP sequence evidence unavailable' : 'Input is not RTP',
+      metrics: {
+        sampleCount: Number.isFinite(sampleCount) ? sampleCount : 0,
+        packetLossPct: Number.isFinite(packetLossPct) ? packetLossPct : null,
+        seqObserved: Boolean(seq?.observed),
+        gapEvents: Number(seq?.gapEvents || 0),
+        duplicateEvents: Number(seq?.duplicateEvents || 0),
+        reorderedEvents: Number(seq?.reorderedEvents || 0),
+        lastSeq: Number.isFinite(Number(seq?.lastSeq)) ? Number(seq.lastSeq) : null,
+        captureMethod: arrival?.captureMethod || null,
+      },
+      thresholds: {
+        minSamples: smpteThresholds.minSamples,
+        maxLossPct: smpteThresholds.maxLossPct,
+        maxGapEvents: smpteThresholds.maxGapEvents,
+        maxDuplicateEvents: smpteThresholds.maxDuplicateEvents,
+        maxReorderedEvents: smpteThresholds.maxReorderedEvents,
+        requireNicCapture: smpteThresholds.requireNicCapture,
+      },
+    };
+
+    if (!isRtpInput) return assessment;
+    if (!seq || !seq.observed) return assessment;
+    if (smpteThresholds.requireNicCapture && captureMethod !== 'tshark') {
+      return {
+        ...assessment,
+        checked: true,
+        compliant: null,
+        state: 'insufficient_data',
+        reason: 'NIC RTP-sequence capture not available (tshark required)',
+      };
+    }
+    if (!Number.isFinite(sampleCount) || sampleCount < smpteThresholds.minSamples) {
+      return {
+        ...assessment,
+        checked: true,
+        compliant: null,
+        state: 'insufficient_data',
+        reason: `Insufficient RTP sample window (${sampleCount || 0} < ${smpteThresholds.minSamples})`,
+      };
+    }
+
+    const loss = Number.isFinite(packetLossPct) ? packetLossPct : 0;
+    const gapEvents = Number(seq.gapEvents || 0);
+    const duplicateEvents = Number(seq.duplicateEvents || 0);
+    const reorderedEvents = Number(seq.reorderedEvents || 0);
+    const compliant = (
+      loss <= smpteThresholds.maxLossPct &&
+      gapEvents <= smpteThresholds.maxGapEvents &&
+      duplicateEvents <= smpteThresholds.maxDuplicateEvents &&
+      reorderedEvents <= smpteThresholds.maxReorderedEvents
+    );
+
+    return {
+      ...assessment,
+      checked: true,
+      compliant,
+      state: compliant ? 'compliant' : 'non_compliant',
+      reason: compliant
+        ? 'RTP sequence continuity and loss are within 2022-7 consolidation thresholds'
+        : 'RTP sequence/loss exceed 2022-7 consolidation thresholds',
+    };
+  }
+
+  _attachHealthAssessment(result) {
+    if (!result || !result.dvb) return result;
+    const assessment = this._buildHealthAssessment(result);
+
+    // Inconclusive probe guard: if a heavy probe returns 0 PIDs, 0 services AND
+    // 0 bitrate simultaneously, ffprobe did not capture any valid PSI data —
+    // the probe joined the multicast stream after a PAT/PMT cycle and the 2-second
+    // analyse window expired before the next one arrived.  This is a probe-timing
+    // artifact, not a signal fault.  Scoring it drives the health score below 65
+    // (no bitrate 16pts + no services 14pts + no PIDs 14pts = 44pts penalty = 56/100)
+    // which immediately escalates to critical even though 8 other decoders on the
+    // same source are clean.  This guard now covers both heavy and light probes —
+    // a light probe with zero data causes identical false criticals without it.
+    // In this case, hold the last reported value and do not update hysteresis state.
+    const dvbResult = result.dvb || {};
+    const isHeavyProbe = Boolean(dvbResult.probeDiagnostics?.scheduler?.runHeavyProbe);
+    const bitrateBps = Number(dvbResult.bitrateBps || 0);
+    const serviceCount = Number(dvbResult.serviceCount || 0);
+    const pidCount = Number(dvbResult.pidCount || 0);
+    // Inconclusive probe: all three key metrics are zero — the probe window was too short
+    // to capture any valid PSI/bitrate data (probe join timing artefact, not a signal fault).
+    // Applies to BOTH heavy and light probes: a light probe that returns zero data would
+    // score 100-16-14-14-12-6 = 38 (critical) even on a healthy stream, filling hysteresis
+    // counters and triggering a false alarm after just two consecutive short-window probes.
+    const isInconclusiveProbe = bitrateBps <= 0 && serviceCount <= 0 && pidCount <= 0;
+
+    // Hysteresis: suppress transient warnings (multicast mid-stream join artifacts).
+    // Rules:
+    //   inconclusive probe → hold last reported, do not update counts
+    //   critical → requires 3 consecutive critical probes to escalate
+    //              (extra gate vs. HYSTERESIS_N guards against single-cycle PSI miss
+    //              or brief CC burst at probe join triggering a false critical)
+    //   warning  → escalate only after HYSTERESIS_N consecutive warning/worse probes
+    //   ok       → recover immediately to clear alarms without delay
+    const HYSTERESIS_N = 2;
+    const CRIT_HYSTERESIS_N = 3;
+    const OK_HYSTERESIS_N = 2;
+    const raw = assessment.severity;
+    const h = this._healthHysteresis;
+
+    // Startup grace: hold 'ok' and burn down the counter without touching hysteresis.
+    if (this._startupGraceRemaining !== null && this._startupGraceRemaining > 0) {
+      this._startupGraceRemaining -= 1;
+      h.lastReported = 'ok';
+      return { ...result, dvb: { ...result.dvb, health: { ...assessment, severity: 'ok', startupGrace: true, hysteresis: { raw, warnCount: 0, critCount: 0, okCount: 0 } } } };
+    }
+
+    if (isInconclusiveProbe) {
+      // Do not advance hysteresis counters; report last known value.
+    } else if (raw === 'critical') {
+      h.critCount++;
+      h.warnCount = 0;
+      h.okCount = 0;
+    } else if (raw === 'warning') {
+      h.warnCount++;
+      h.critCount = 0;
+      h.okCount = 0;
+    } else {
+      h.okCount++;
+      h.warnCount = 0;
+      h.critCount = 0;
+    }
+
+    let reported;
+    if (h.critCount >= CRIT_HYSTERESIS_N) {
+      reported = 'critical';
+    } else if (h.warnCount >= HYSTERESIS_N) {
+      reported = 'warning';
+    } else if (h.lastReported !== 'ok' && h.okCount < OK_HYSTERESIS_N) {
+      // Hold-down: keep previous alarm until N consecutive OK probes confirm recovery.
+      reported = h.lastReported;
+    } else {
+      reported = 'ok';
+    }
+
+    const prevReported = h.lastReported;
+    h.lastReported = reported;
+
+    // Emit health_alarm on severity transitions so the event log can show them.
+    // Onset (ok→warning, ok→critical, warning→critical) and clear (warning/critical→ok).
+    if (reported !== prevReported) {
+      const reasons = assessment.reasons || [];
+      if (reported === 'critical' || reported === 'warning') {
+        setImmediate(() => this.emit('health_alarm', {
+          severity: reported,
+          prevSeverity: prevReported,
+          score: assessment.score,
+          reasons,
+        }));
+      } else if (reported === 'ok' && (prevReported === 'critical' || prevReported === 'warning')) {
+        setImmediate(() => this.emit('health_alarm', {
+          severity: 'ok',
+          prevSeverity: prevReported,
+          score: assessment.score,
+          reasons: [],
+        }));
+      }
+    }
+
+    return {
+      ...result,
+      dvb: {
+        ...result.dvb,
+        health: { ...assessment, severity: reported, hysteresis: { raw, warnCount: h.warnCount, critCount: h.critCount, okCount: h.okCount } },
+      },
+    };
+  }
+
+  _buildHealthAssessment(result) {
+    const healthThresholds = this._healthThresholds();
+    const dvb = result?.dvb || {};
+    const audio = result?.audioLevels || null;
+    const dolbyRequiredWhenDetected = String(process.env.DOLBYE_REQUIRED_WHEN_DETECTED || 'false').toLowerCase() === 'true';
+    const scoreParts = [];
+    const reasons = [];
+    const pushPenalty = (points, reason) => {
+      scoreParts.push({ type: 'penalty', points: Math.max(0, points), reason });
+      if (reason) reasons.push(reason);
+    };
+    const pushBonus = (points) => {
+      scoreParts.push({ type: 'bonus', points: Math.max(0, points), reason: null });
+    };
+
+    const source = String(dvb.bitrateSource || '').toLowerCase();
+    const sourceConfidenceMap = {
+      tsduck: 1.0,
+      measured: 0.85,
+      format: 0.65,
+      streams: 0.55,
+    };
+    const sourceConfidence = sourceConfidenceMap[source] || 0.4;
+    if (source === 'tsduck') pushBonus(2);
+    if (source === 'measured') pushBonus(1);
+    if (source === 'format') pushPenalty(8, 'Bitrate derived from container metadata only');
+    if (source === 'streams') pushPenalty(10, 'Bitrate estimated from elementary streams only');
+    if (!source) pushPenalty(12, 'Bitrate source unavailable');
+
+    const bitrateBps = Number(dvb.bitrateBps || 0);
+    if (!Number.isFinite(bitrateBps) || bitrateBps <= 0) {
+      pushPenalty(16, 'No reliable transport bitrate detected');
+    }
+
+    const serviceCount = Number(dvb.serviceCount || 0);
+    const pidCount = Number(dvb.pidCount || 0);
+    if (serviceCount <= 0) pushPenalty(14, 'No DVB services detected');
+    if (pidCount <= 0) pushPenalty(14, 'No PID inventory detected');
+    if (pidCount > 0 && serviceCount > 0 && pidCount < (serviceCount * 2)) {
+      pushPenalty(6, 'Low PID/service ratio suggests partial PSI/ES visibility');
+    }
+
+    const siCompliance = dvb?.si?.compliance || null;
+    if (siCompliance) {
+      if (siCompliance.nit === false) pushPenalty(8, 'NIT repetition out of DVB target');
+      if (siCompliance.sdt === false) pushPenalty(8, 'SDT repetition out of DVB target');
+      if (siCompliance.eitPf === false) pushPenalty(8, 'EIT p/f repetition out of DVB target');
+      if (siCompliance.tdt === false) pushPenalty(6, 'TDT repetition out of DVB target');
+    }
+
+    const arrival = dvb.arrival || null;
+    if (arrival) {
+      const lossPct = Number(arrival.packetLossPct);
+      if (Number.isFinite(lossPct)) {
+        if (lossPct >= healthThresholds.lossCriticalPct) pushPenalty(28, `Packet loss ${lossPct}% exceeds critical threshold`);
+        else if (lossPct > healthThresholds.lossWarnPct) pushPenalty(12, `Packet loss ${lossPct}% exceeds warning threshold`);
+      }
+      const jitterMs = Number(arrival.jitterMs);
+      if (Number.isFinite(jitterMs)) {
+        if (jitterMs >= healthThresholds.jitterCriticalMs) pushPenalty(20, `Jitter ${jitterMs} ms exceeds critical threshold`);
+        else if (jitterMs >= healthThresholds.jitterWarnMs) pushPenalty(8, `Jitter ${jitterMs} ms exceeds warning threshold`);
+      }
+      const iatP95 = Number(arrival?.iatMs?.p95);
+      if (Number.isFinite(iatP95)) {
+        if (iatP95 >= healthThresholds.iatP95CriticalMs) pushPenalty(18, `IAT p95 ${iatP95} ms exceeds critical threshold`);
+        else if (iatP95 >= healthThresholds.iatP95WarnMs) pushPenalty(8, `IAT p95 ${iatP95} ms exceeds warning threshold`);
+      }
+      const captureMethod = String(arrival.captureMethod || '').toLowerCase();
+      if (captureMethod !== 'tshark' && captureMethod !== 'tcpdump') {
+        pushPenalty(4, 'Arrival telemetry is analyser-derived, not NIC-captured');
+      }
+    } else {
+      pushPenalty(6, 'Arrival telemetry unavailable');
+    }
+
+    const meanDb = Number(audio?.meanDb);
+    if (Number.isFinite(meanDb)) {
+      if (meanDb > -6) pushPenalty(8, `Audio mean level ${meanDb.toFixed(1)} dBFS indicates clipping risk`);
+      if (meanDb < -50) pushPenalty(6, `Audio mean level ${meanDb.toFixed(1)} dBFS indicates near-silence`);
+    }
+
+    const tsDisc = dvb.timestampDiscontinuity || null;
+    const tsDiscCount = Number(tsDisc?.count || 0);
+    if (Number.isFinite(tsDiscCount) && tsDiscCount >= healthThresholds.tsDiscCriticalCount) {
+      pushPenalty(24, `Timestamp discontinuities ${tsDiscCount} exceed critical threshold`);
+    } else if (Number.isFinite(tsDiscCount) && tsDiscCount >= healthThresholds.tsDiscWarnCount) {
+      pushPenalty(10, `Timestamp discontinuities ${tsDiscCount} exceed warning threshold`);
+    }
+
+    const cc = dvb.continuityCounterErrors || null;
+    // For RTP/UDP: use the rolling average (last 3 heavy probes) rather than the
+    // single-cycle count.  This smooths out the 1–10 CC errors that ffprobe always
+    // produces on multicast join without masking genuine persistent CC error rates.
+    // For SRT and light cycles (rollingAvg absent): use per-cycle count as before.
+    const isRtpUdp = this._isRtpUrl(this.url) || (this.url && this.url.startsWith('udp://'));
+    const ccCount = isRtpUdp && cc && Number.isFinite(cc.rollingAvg)
+      ? cc.rollingAvg
+      : Number(cc?.count || 0);
+    if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccCriticalCount) {
+      pushPenalty(24, `CC errors ${ccCount} (3-probe avg) exceed critical threshold`);
+    } else if (Number.isFinite(ccCount) && ccCount >= healthThresholds.ccWarnCount) {
+      pushPenalty(10, `CC errors ${ccCount} (3-probe avg) exceed warning threshold`);
+    }
+
+    // PCR analysis (ETR 290 Priority 2) — from TSDuck
+    const pcrMetrics = dvb.pcrMetrics || null;
+    if (pcrMetrics) {
+      // ETR 290 §5.2.1: PCR repetition must be ≤ 40ms
+      if (pcrMetrics.repetitionMaxMs != null && pcrMetrics.repetitionMaxMs > 40) {
+        pushPenalty(
+          pcrMetrics.repetitionMaxMs > 100 ? 20 : 10,
+          `PCR repetition ${pcrMetrics.repetitionMaxMs.toFixed(0)}ms exceeds 40ms ETR 290 P2 limit`
+        );
+      }
+      // ETR 290 §5.2.2: PCR accuracy — practical threshold 10ms for IP networks
+      if (pcrMetrics.accuracyMaxMs != null && pcrMetrics.accuracyMaxMs > 10) {
+        pushPenalty(
+          pcrMetrics.accuracyMaxMs > 50 ? 16 : 8,
+          `PCR accuracy error ${pcrMetrics.accuracyMaxMs.toFixed(1)}ms`
+        );
+      }
+      // ETR 290 §5.2.4: PCR discontinuity indicator errors
+      if (pcrMetrics.discontIndicatorErrors > 0) {
+        pushPenalty(12, `PCR discontinuity indicator errors: ${pcrMetrics.discontIndicatorErrors}`);
+      }
+      // ETR 290 §5.2.2: PSI section CRC errors
+      if (pcrMetrics.crcErrors > 0) {
+        pushPenalty(pcrMetrics.crcErrors >= 3 ? 20 : 10, `PSI section CRC errors: ${pcrMetrics.crcErrors}`);
+      }
+    }
+
+    // Unreferenced PIDs (ETR 290 Priority 3)
+    const unreferencedPids = dvb.unreferencedPids || null;
+    if (Array.isArray(unreferencedPids) && unreferencedPids.length > 0) {
+      pushPenalty(6, `Unreferenced PIDs in TS: ${unreferencedPids.slice(0, 4).join(', ')}${unreferencedPids.length > 4 ? ` +${unreferencedPids.length - 4} more` : ''}`);
+    }
+
+    // Lifetime CC accumulator check — catches persistent low-rate errors below per-cycle floor
+    const ccCumul = dvb.continuityCounterErrors?.ccTotal ?? this._ccTotal;
+    const ccCumulCycles = dvb.continuityCounterErrors?.ccHeavyCount ?? this._ccHeavyCount;
+    if (ccCumulCycles >= 5 && ccCumul > 0) {
+      const avgPerCycle = ccCumul / ccCumulCycles;
+      // Only flag if the lifetime average is above 1 per cycle AND above the per-cycle warn threshold
+      if (avgPerCycle >= 1 && avgPerCycle >= (healthThresholds.ccWarnCount || 1)) {
+        pushPenalty(8, `CC errors: ${ccCumul} total over ${ccCumulCycles} probes (avg ${avgPerCycle.toFixed(1)}/cycle)`);
+      }
+    }
+
+    const smpte20227 = dvb.smpte20227 || null;
+    if (smpte20227?.checked === true && smpte20227?.state === 'non_compliant') {
+      pushPenalty(18, `SMPTE ST 2022-7 non-compliant: ${smpte20227.reason || 'RTP sequence/loss out of bounds'}`);
+    }
+    // insufficient_data means NIC capture is not providing RTP sequence evidence —
+    // a normal operating condition, not a fault. No penalty.
+
+    const dolbyE = dvb.dolbyE || null;
+    const dolbyEnabled = DolbyEAdapter.isEnabled();
+    const dolbyDetected = Boolean(dolbyE?.detected);
+    const dolbyDecoded = Boolean(dolbyE?.decoded);
+    const dolbyAvailable = Boolean(dolbyE?.available);
+    if (dolbyEnabled && dolbyDetected) {
+      if (dolbyRequiredWhenDetected && !dolbyAvailable) {
+        pushPenalty(healthThresholds.dolbyEMissingPenalty, 'Dolby E detected but external decoder is unavailable');
+      } else if (!dolbyDecoded) {
+        pushPenalty(healthThresholds.dolbyEDecodeFailurePenalty, 'Dolby E detected but decode failed');
+      } else {
+        pushBonus(2);
+      }
+    }
+
+    const bitrateStability = this._computeBitrateStability(result);
+    // Only score bitrate drift when source is tsduck (continuous long-window measurement).
+    // ffprobe-derived 'measured' bitrate varies naturally 10-65% between 2.5s probe windows
+    // due to sampling variance — applying drift thresholds here causes constant false alarms.
+    if (bitrateStability.checked && source === 'tsduck') {
+      if (bitrateStability.state === 'critical') {
+        pushPenalty(10, `Bitrate drift ${bitrateStability.deltaPct}% exceeds critical envelope`);
+      } else if (bitrateStability.state === 'warning') {
+        pushPenalty(4, `Bitrate drift ${bitrateStability.deltaPct}% exceeds warning envelope`);
+      }
+    }
+
+    // SRT link health — Haivision SRT spec + broadcast contribution link thresholds
+    // Applied only when SRT stats are present in the probe result.
+    const srtStats = result.srtStats || dvb.srtStats || null;
+    if (srtStats && this.url && this.url.startsWith('srt://')) {
+      const srtLatencyMs = parseSrtLatency(this.url);
+      // Drops (pktRcvDrop / pktSndDrop): non-zero means latency window too short.
+      // Per Haivision spec this is the most critical SRT indicator — the link cannot
+      // deliver reliable broadcast quality without increasing SRTO_LATENCY or fixing RTT.
+      const rcvDrop = Number(srtStats.pktRcvDrop || 0);
+      const sndDrop = Number(srtStats.pktSndDrop || 0);
+      if (rcvDrop > 0) pushPenalty(30, `SRT receiver drop ${rcvDrop} pkt — latency window too short for link RTT`);
+      if (sndDrop > 0) pushPenalty(30, `SRT sender drop ${sndDrop} pkt — sender could not retransmit within latency window`);
+
+      // Belated packets: arrived after deadline — early warning before drops occur
+      const belated = Number(srtStats.pktRcvBelated || 0);
+      if (belated > 0) pushPenalty(12, `SRT ${belated} pkt arrived after latency deadline (pktRcvBelated) — consider increasing latency`);
+
+      // RTT vs latency ratio: per SRT spec, RTT > SRTO_LATENCY/2 means retransmits
+      // may not complete before the receiver deadline.  RTT > SRTO_LATENCY = impossible.
+      const rttMs = Number(srtStats.rttMs || 0);
+      if (rttMs > 0 && srtLatencyMs > 0) {
+        if (rttMs >= srtLatencyMs) {
+          pushPenalty(25, `SRT RTT ${rttMs}ms ≥ latency ${srtLatencyMs}ms — ARQ cannot recover lost packets`);
+        } else if (rttMs > srtLatencyMs / 2) {
+          pushPenalty(10, `SRT RTT ${rttMs}ms > latency/2 (${srtLatencyMs / 2}ms) — retransmits may miss receiver deadline`);
+        }
+      }
+
+      // Retransmit ratio: per Haivision spec >5% = link congestion, >25% = critical
+      const retransRatio = Number(srtStats.retransRatio || 0);
+      if (retransRatio > 25) {
+        pushPenalty(20, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds critical threshold (25%)`);
+      } else if (retransRatio > 5) {
+        pushPenalty(8, `SRT retransmit ratio ${retransRatio.toFixed(1)}% exceeds warning threshold (5%)`);
+      }
+    }
+
+    let score = 100;
+    for (const part of scoreParts) {
+      if (part.type === 'penalty') score -= part.points;
+      if (part.type === 'bonus') score += part.points;
+    }
+    score = Math.max(0, Math.min(100, Math.round(score)));
+    const severity = score >= healthThresholds.scoreOk
+      ? 'ok'
+      : score >= healthThresholds.scoreWarning
+        ? 'warning'
+        : 'critical';
+
+    return {
+      score,
+      severity,
+      reasons: reasons.slice(0, 8),
+      sourceConfidence: Number(sourceConfidence.toFixed(2)),
+      bitrateSource: source || null,
+      timestampDiscontinuityCount: Number.isFinite(tsDiscCount) ? tsDiscCount : 0,
+      continuityCounterErrorCount: Number.isFinite(ccCount) ? ccCount : 0,
+      smpte20227: {
+        checked: Boolean(smpte20227?.checked),
+        compliant: smpte20227?.compliant == null ? null : Boolean(smpte20227.compliant),
+        state: smpte20227?.state || null,
+      },
+      dolbyE: {
+        enabled: dolbyEnabled,
+        requiredWhenDetected: dolbyRequiredWhenDetected,
+        detected: dolbyDetected,
+        decoded: dolbyDecoded,
+      },
+      bitrateStability,
+      thresholds: {
+        scoreWarning: healthThresholds.scoreWarning,
+        scoreOk: healthThresholds.scoreOk,
+        lossWarnPct: healthThresholds.lossWarnPct,
+        lossCriticalPct: healthThresholds.lossCriticalPct,
+        jitterWarnMs: healthThresholds.jitterWarnMs,
+        jitterCriticalMs: healthThresholds.jitterCriticalMs,
+        iatP95WarnMs: healthThresholds.iatP95WarnMs,
+        iatP95CriticalMs: healthThresholds.iatP95CriticalMs,
+        tsDiscWarnCount: healthThresholds.tsDiscWarnCount,
+        tsDiscCriticalCount: healthThresholds.tsDiscCriticalCount,
+        ccWarnCount: healthThresholds.ccWarnCount,
+        ccCriticalCount: healthThresholds.ccCriticalCount,
+        dolbyEMissingPenalty: healthThresholds.dolbyEMissingPenalty,
+        dolbyEDecodeFailurePenalty: healthThresholds.dolbyEDecodeFailurePenalty,
+      },
+      assessedAt: Date.now(),
+    };
+  }
+
+  startContinuous() {
+    if (this.isRunning) return;
+    this.isRunning = true;
+    this.monitoringPolicy = _getPolicySnapshot();
+    const cadence = this._cadencePolicy();
+    this.interval = cadence.baseIntervalMs;
+    this._nextHeavyProbeAt = 0;
+    this._nextProbeAt = 0;
+    if (!this._iatSniffer) {
+      this._iatSniffer = new IATSniffer({ id: `${this.id}-iat`, url: this.url, nicName: this.nicName });
+      // Safety net: absorb any 'error' events so Node.js doesn't throw them as
+      // uncaught exceptions. IATSniffer failures are non-fatal; probe() reads lastError.
+      this._iatSniffer.on('error', (err) => {
+        this.emit('info', { message: `IAT sniffer unavailable: ${err.message}` });
+      });
+      this._iatSniffer.start();
+    }
+
+    // ── TSDuckMonitor — PCR + SI table sampler ─────────────────────────────────
+    // Runs periodic tsp samples using confirmed-available plugins (pcrverify,
+    // tables, bitrate_monitor).  Does NOT use monitor/etr290 (absent on host).
+    // PCR/bitrate metrics are merged into lastResult between probe cycles.
+    if (!this._tsduckMonitor) {
+      const tsduckIntervalMs = parseInt(process.env.TSDUCK_MONITOR_INTERVAL_MS, 10) || 10000;
+      this._tsduckMonitor = new TSDuckMonitor({
+        id: `${this.id}-tsduck`,
+        url:  this._effectiveUrl,
+        intervalMs:     tsduckIntervalMs,
+        sampleWindowMs: Math.floor(tsduckIntervalMs * 0.5),
+      });
+      this._tsduckMonitor.on('pcr', (data) => this._onTsduckPcr(data));
+      this._tsduckMonitor.on('si',  (data) => this._onTsduckSi(data));
+      this._tsduckMonitor.on('bitrate', (data) => this._onTsduckBitrate(data));
+      this._tsduckMonitor.on('alarm',   (data) => this._onTsduckAlarm(data));
+      this._tsduckMonitor.on('error',   (err)  => {
+        this.emit('info', { message: `TSDuckMonitor: ${err.message}` });
+      });
+      this._tsduckMonitor.start();
+    }
+
+    // ── SRT Relay ──────────────────────────────────────────────────────────
+    // For srt:// sources: launch one long-lived relay that holds the single
+    // SRT caller slot and re-outputs as local UDP. All probes and the
+    // thumbnail then read from the unlimited-reader UDP copy.
+    if (this.url && this.url.startsWith('srt://') && !this._relay) {
+      const _relayThumbPath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      this._relay = new SRTRelay({ srtUrl: this.url, id: `${this.id}-relay`, thumbPath: _relayThumbPath });
+      this._effectiveUrl = this._relay.localUrl;
+      this._relay.on('error', (err) => {
+        this.emit('info', { message: `SRT relay error: ${err.message}` });
+      });
+      this._relay.on('ready', ({ localUrl }) => {
+        console.log(`[relay:${this.id}] ready — stream flowing on ${localUrl}`);
+        this.emit('info', { message: `SRT relay ready → ${localUrl}` });
+      });
+      this._relay.on('srt_stats_line', (line) => {
+        this._lastRelaySrtStats = line;
+      });
+      this._relay.start();
+    }
+
+    // ── Thumbnail capture ──────────────────────────────────────────────────────
+    const thumbIntervalSec = Math.max(1, parseInt(process.env.THUMBNAIL_INTERVAL_SEC, 10) || 5);
+    const thumbIntervalMs  = thumbIntervalSec * 1000;
+    const phaseSeed = String(this.id || '');
+    const phaseHash = phaseSeed.split('').reduce((acc, ch) => ((acc * 31) + ch.charCodeAt(0)) >>> 0, 0);
+    const jitterWindowMs = Math.min(
+      Math.max(200, Math.floor(cadence.baseIntervalMs * 0.6)),
+      cadence.startupJitterMaxMs
+    );
+    const probeStartJitterMs = jitterWindowMs > 0 ? (phaseHash % jitterWindowMs) : 0;
+    const thumbStartJitterMs = thumbIntervalMs > 0 ? (phaseHash % Math.min(thumbIntervalMs, 1500)) : 0;
+
+    if (this._thumbnailTimer) { clearTimeout(this._thumbnailTimer); this._thumbnailTimer = null; }
+    if (this._persistentThumb) { this._persistentThumb.stop(); this._persistentThumb = null; }
+
+    if (this._thumbnailClient && !this._relay) {
+      // Out-of-process worker: RTP/UDP multicast only in practice.
+      // SRT sources always have this._relay set (relay block above), so they never
+      // reach this branch — relay-backed SRT falls through to the persistent path below.
+      // PersistentThumbnailCapture runs in the worker process, keeping ffmpeg CPU
+      // load isolated from the API process and benefiting from worker-level crash
+      // isolation and automatic restart.
+      // Hash-based jitter preserves thundering-herd spreading across decoders.
+      this._thumbnailTimer = setTimeout(() => {
+        this._thumbnailTimer = null;
+        if (this.isRunning && this._thumbnailClient) {
+          this._thumbnailClient.start(this.id, this._effectiveUrl, thumbIntervalSec);
+        }
+      }, thumbStartJitterMs);
+    } else if (this._relay) {
+      // Relay-backed SRT: the relay's own ffmpeg writes thumbnails to disk via a
+      // second ffmpeg output branch (select=eq(pict_type\,I),thumbnail=1,scale=480:-2).
+      // No separate capture process is needed — and none should run, because the
+      // relay UDP port is unicast and only one reader can bind at a time.
+      // This poller watches the file mtime and pushes thumbnail URL updates to WS
+      // clients without waiting for the next full probe cycle.
+      // Poll interval matches THUMBNAIL_FPS so near-live refresh is possible.
+      const _thumbPollMs = Math.round(1000 / Math.min(25, Math.max(0.1, parseFloat(process.env.THUMBNAIL_FPS) || 5)));
+      const _thumbFilePath = path.join(THUMBNAIL_DIR, `${sanitizeStreamId(this.id)}.jpg`);
+      const pollRelayThumb = () => {
+        if (!this.isRunning) return;
+        try {
+          const stat = fs.statSync(_thumbFilePath);
+          if (stat.mtimeMs > this._lastThumbnailAt) {
+            this._lastThumbnailAt = stat.mtimeMs;
+            this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Math.round(stat.mtimeMs)}`;
+            // Push the new thumbnail URL to live WS clients without waiting for the
+            // next full probe cycle. Also persist it in lastResult so refreshActives()
+            // restores it correctly after a tab switch.
+            // Seed lastResult with a minimal object if no probe has run yet — the
+            // full result will be overwritten on the next probe cycle.
+            this.lastResult = this.lastResult
+              ? { ...this.lastResult, thumbnailUrl: this._lastThumbnailUrl }
+              : { id: this.id, thumbnailUrl: this._lastThumbnailUrl };
+            this.emit('result', { ...this.lastResult });
+          }
+        } catch (_) {
+          // File not yet written — relay may still be connecting. Retry silently.
+        }
+        this._thumbnailTimer = setTimeout(pollRelayThumb, _thumbPollMs);
+      };
+      this._thumbnailTimer = setTimeout(pollRelayThumb, 1000);
+    } else {
+      // RTP/UDP without worker: one-shot timer loop.
+      const doCapture = async () => {
+        this._thumbnailTimer = null;
+        if (!this.isRunning) return;
+        try {
+          await captureThumbnail(this.id, this._effectiveUrl);
+          this._lastThumbnailUrl = `/logs/thumbnails/${sanitizeStreamId(this.id)}.jpg?t=${Date.now()}`;
+        } catch (err) {
+          const msg = (err && err.message) || '';
+          console.error(`[thumb:${this.id}] capture failed: ${msg}`);
+        }
+        if (this.isRunning) {
+          this._thumbnailTimer = setTimeout(doCapture, thumbIntervalMs);
+        }
+      };
+      this._thumbnailTimer = setTimeout(doCapture, thumbStartJitterMs);
+    }
+
+    const run = async () => {
+      const scheduledAt = Number.isFinite(this._nextProbeAt) && this._nextProbeAt > 0 ? this._nextProbeAt : Date.now();
+      try {
+        await this.probe({ continuous: true });
+      } catch (err) {
+        // Suppress probe errors during SRT relay restart window — ffprobe reads an
+        // empty UDP loopback while the relay's ffmpeg is restarting. Not a real signal loss.
+        if (this._relay && !this._relay.isReady()) return;
+        this.emit('error', err);
+      }
+      if (this.isRunning) {
+        const now = Date.now();
+        // Use severity-aware interval: alarm streams probe more frequently so
+        // recovery or escalation is caught within 1–2 cycles rather than waiting
+        // for the full base interval (see _effectiveProbeIntervalMs).
+        const effectiveInterval = this._effectiveProbeIntervalMs(cadence);
+        const targetNextAt = scheduledAt + effectiveInterval;
+        this._nextProbeAt = Math.max(targetNextAt, now + cadence.minLoopDelayMs);
+        const delay = Math.max(cadence.minLoopDelayMs, this._nextProbeAt - now);
+        this._timer = setTimeout(run, delay);
+      }
+    };
+
+    if (this._timer) clearTimeout(this._timer);
+    this._nextProbeAt = Date.now() + probeStartJitterMs;
+    this._timer = setTimeout(run, probeStartJitterMs);
+    this.emit('started', { id: this.id });
+    return this;
+  }
+
+  /**
+   * Link an ETR290Analyser that shares the same SRT source URL.
+   * TSAnalyser will suspend/resume it in lockstep with the thumbnail capture
+   * during heavy SRT probe cycles so only one caller occupies the SRT slot.
+   */
+  setEtrMonitor(mon) {
+    this._etrMonitor = mon || null;
+  }
+
+  clearEtrMonitor() {
+    this._etrMonitor = null;
+  }
+
+  /**
+   * Return the ms ETR should delay its first ffmpeg spawn when starting alongside
+   * this analyser on an SRT stream.  Gives the persistent thumbnail capture time
+   * to win the single SRT caller slot before ETR tries to connect.
+   * Returns 0 for non-SRT streams (no slot contention).
+   */
+  getEtrStartDelay() {
+    // When relay is active, ETR reads from local UDP — no SRT slot delay needed.
+    if (this._relay) return 0;
+    if (!this._relay && this.url && this.url.startsWith('srt://') && (this._thumbnailClient || this._persistentThumb)) {
+      return parseSrtLatency(this.url) + 15000;
+    }
+    return 0;
+  }
+
+  /**
+   * Returns the local UDP relay URL if an SRTRelay is active, or null.
+   * Used by routes/etr290.js to transparently redirect ETR to the UDP copy.
+   */
+  getRelayUrl() {
+    return this._relay ? this._relay.localUrl : null;
+  }
+
+  stop() {
+    this.isRunning = false;
+    this._nextProbeAt = 0;
+    this._nextHeavyProbeAt = 0;
+    if (this._timer) {
+      clearTimeout(this._timer);
+      this._timer = null;
+    }
+    if (this._thumbnailTimer) {
+      clearTimeout(this._thumbnailTimer);
+      this._thumbnailTimer = null;
+    }
+    if (this._persistentThumb) {
+      this._persistentThumb.stop();
+      this._persistentThumb = null;
+    }
+    if (this._thumbnailClient) {
+      this._thumbnailClient.stop(this.id);
+    }
+    if (this._iatSniffer) {
+      this._iatSniffer.stop();
+      this._iatSniffer = null;
+    }
+    if (this._tsduckMonitor) {
+      this._tsduckMonitor.stop();
+      this._tsduckMonitor = null;
+    }
+    if (this._relay) {
+      this._relay.stop();
+      this._relay = null;
+      this._effectiveUrl = this.url;
+      this._lastRelaySrtStats = null;
+    }
+    this.emit('stopped', { id: this.id });
+  }
+
+  // ── TSDuckMonitor event handlers ────────────────────────────────────────────
+
+  // Merge real-time PCR metrics into lastResult so the PCR panel stays live
+  // between heavy probe cycles (which only run every ~15–30 s).
+  _onTsduckPcr(data) {
+    if (!this.lastResult) return;
+    if (!this.lastResult.dvb) this.lastResult.dvb = {};
+    this.lastResult.dvb.pcrMetrics = {
+      repetitionMaxMs:  data.repetitionMaxMs,
+      accuracyMaxMs:    data.accuracyMaxMs,
+      discontIndicatorErrors: data.discontErrors,
+      crcErrors:        data.crcErrors,
+      source:           'tsduck-monitor',
+      ts:               data.ts,
+    };
+  }
+
+  _onTsduckSi(data) {
+    if (!this.lastResult) return;
+    if (!this.lastResult.dvb) this.lastResult.dvb = {};
+    this.lastResult.dvb.siMonitor = { tables: data.tables, ts: data.ts };
+  }
+
+  _onTsduckBitrate(data) {
+    if (!this.lastResult) return;
+    this.lastResult.tsduckBitrateMonitor = { bps: data.bps, ts: data.ts };
+  }
+
+  // Route TSDuckMonitor alarms into the existing ETR 290 alarm infrastructure.
+  // Hysteresis: require CONSECUTIVE_REQUIRED consecutive sample windows with the
+  // same alarm before emitting health_alarm.  A single pcrverify error during
+  // stream join or a transient blip must not immediately page the operator.
+  // The counter resets when the alarm stops firing (elapsed > 2 sample windows).
+  _onTsduckAlarm(alarm) {
+    const CONSECUTIVE_REQUIRED = 2;
+    if (!this._tsduckAlarmState) this._tsduckAlarmState = new Map();
+
+    const monitorInterval = this._tsduckMonitor ? this._tsduckMonitor.intervalMs : 15000;
+    const prev = this._tsduckAlarmState.get(alarm.checkId) || { count: 0, lastTs: 0 };
+    const elapsed = alarm.ts - prev.lastTs;
+    // If the alarm has been absent for >2 sample windows it is not consecutive.
+    const consecutive = elapsed < monitorInterval * 2.5;
+    const newCount = consecutive ? prev.count + 1 : 1;
+    this._tsduckAlarmState.set(alarm.checkId, { count: newCount, lastTs: alarm.ts });
+
+    if (newCount < CONSECUTIVE_REQUIRED) return;
+
+    this.emit('health_alarm', {
+      severity:  alarm.priority === 'p1' ? 'critical' : 'warning',
+      source:    'tsduck-monitor',
+      checkId:   alarm.checkId,
+      message:   alarm.message,
+      ts:        alarm.ts,
+    });
+  }
+
+  toJSON() {
+    // Ensure the REST snapshot always carries a thumbnailUrl when one is available,
+    // even after a backend restart (nodemon) where lastResult is null but the JPEG
+    // file from a previous session still exists on disk.
+    let lastResult = this.lastResult;
+    if (!lastResult?.thumbnailUrl) {
+      const thumbUrl = this._lastThumbnailUrl || this._resolveCachedThumbnailUrl();
+      if (thumbUrl) {
+        lastResult = lastResult
+          ? { ...lastResult, thumbnailUrl: thumbUrl }
+          : { id: this.id, thumbnailUrl: thumbUrl };
+      }
+    }
+    return {
+      id: this.id,
+      url: this.url,
+      isRunning: this.isRunning,
+      lastResult,
+    };
+  }
+}
+
+module.exports = TSAnalyser;
+module.exports._getNicName = _getNicName;
+module.exports._resetNicNameCache = () => { _multicastConfig = null; };

@@ -1,0 +1,27 @@
+node_modules/
+.env
+logs/
+config/state.json
+config/multicast.json
+config/multiview-stream-catalog.json
+*.log
+dist/
+web/dist/
+web/node_modules/
+.DS_Store
+
+# ── REFERENCE ONLY — never commit ─────────────────────────────────────────────
+# This folder contains third-party binaries, SDKs, and proprietary reference
+# material. It is LOCAL ONLY and must NEVER be pushed to any remote repository.
+REREFENCE ONLY/
+"REREFENCE ONLY"/
+REFERENCE ONLY/
+"REFERENCE ONLY"/
+
+# ── Claude Code worktrees — local snapshots; gitlink stubs pointed at macOS paths
+# and broke `git status` / `git diff` on Linux. Keep this tree untracked.
+.claude/worktrees/
+.claude/settings.local.json
+
+# ── PRIVATE — local drafts, emails, handover notes — never commit ─────────────
+private/

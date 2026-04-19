@@ -1,0 +1,46 @@
+{
+  "name": "labotech",
+  "version": "3.2.37",
+  "description": "Professional DVB-IP stream processor — SRT encapsulation, multiview monitoring, and MPEG-TS analysis",
+  "author": "Milorad Stevanovic",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/comzis/labotech"
+  },
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "start:encap": "node src/encapsulator-index.js",
+    "dev:encap": "nodemon src/encapsulator-index.js",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "sync": "node scripts/agent-sync.js",
+    "sync:dry": "node scripts/agent-sync.js --dry-run"
+  },
+  "dependencies": {
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "jest": "^30.3.0",
+    "nodemon": "^3.0.2",
+    "supertest": "^7.2.2"
+  },
+  "overrides": {
+    "test-exclude": "^8.0.0",
+    "glob": "^13.0.6"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "testMatch": [
+      "**/test/**/*.test.js"
+    ],
+    "modulePathIgnorePatterns": [
+      "<rootDir>/.claude/worktrees/",
+      "<rootDir>/node_modules/"
+    ]
+  }
+}

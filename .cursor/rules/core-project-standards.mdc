@@ -1,0 +1,58 @@
+---
+description: Core Labotech standards always applied
+alwaysApply: true
+---
+
+# Labotech Core Standards
+
+**Labotech is a DVB-IP stream processor** (SRT encapsulation, multicast routing,
+MPEG-TS analysis, multiview, ETR 290). It is NOT a broadcast encoder. Never use
+the word "encoder" to describe the product. `SRTEncoder` / `encoder.js` are legacy
+names for the SRT encapsulation engine.
+
+- Keep backend in plain Node.js ES6 with `require()`.
+- Use `child_process.spawn` or `execFile` for process calls; avoid shell string interpolation with untrusted input.
+- Keep API binding aligned with project contract (`API_HOST` management NIC and expected `API_PORT`).
+- Validate multicast destinations against `239.100.25.0/26` before starting any forward/route action.
+- Treat `FORWARD_MULTICAST_IP` as optional strict pinning; default behavior remains subnet-validated forwarding.
+- Preserve event model for runtime classes: emit `started`, `stopped`, `error`, `stats`.
+- Prefer minimal, safe changes over broad refactors unless requested.
+- Do not introduce database/ORM state; runtime state stays in in-memory maps.
+- For multi-stage operations, use fail-safe behavior (validate first, rollback started stages on partial failure).
+- Keep analyzer observability fields stable: `dvb.health`, timestamp discontinuity counters, and CC error counters.
+- Optional Dolby E integration must stay adapter-based, non-fatal when disabled/unavailable, and invoked via `spawn`/`execFile`.
+
+## Null/Zero PID guard — critical pattern
+- `Number(null) === 0` and `Number.isFinite(0) === true` — this is a recurring pitfall.
+- **Always guard with `x != null && Number.isFinite(Number(x))`** before coercing any PID, stream ID, or numeric field that may be null.
+- The backend nulls PID 0 (PAT) in `_mapStream`; the frontend must not re-coerce null back to 0.
+- Apply this guard in: sort comparators, display renderers (`renderPidRef`), row normalisation (`extractPidRows`).
+
+## TSDuck / tsanalyze probe rules
+- Do NOT pass `--input-timeout` to `tsanalyze` — not supported on the production TSDuck version.
+- `tsanalyze` writes its JSON report to stdout on SIGTERM (killed by our 9s timer) but exits non-zero. **Parse stdout whenever it is non-empty**, regardless of exit code. Gating on `code === 0` silently discards all TSDuck bitrate data.
+- The probe kill-timer (9 s) is the only execution bound needed — do not add timeout flags to the tsanalyze command line.
+
+## Thundering herd — batch decoder start
+- When multiple decoders start simultaneously their probe cycles synchronise, saturating CPU and multicast join slots.
+- Mitigations in place: startup jitter (hash-based, 0–4500 ms) + module-level heavy probe semaphore (default 3 concurrent, env: `TS_HEAVY_PROBE_MAX_CONCURRENT`).
+- Do not remove or bypass either mechanism. If changing probe cadence, verify the jitter window stays ≤ `baseIntervalMs`.
+
+## health_alarm events — alarm log only
+- `ts-analyser.js` emits `health_alarm` on hysteresis-gated severity transitions (ok→warning, ok→critical, clear).
+- `health_alarm` is NOT in `TELEMETRY_TYPES` → persisted to event log → visible in EventLogPanel.
+- **`buildEventBlocks()` must filter `e.category !== 'health_alarm'`** — `analyse_result` already drives the lane gradient; a separate health_alarm block creates duplicate tinting.
+
+## No pending/teal on decoder startup
+- `runtime_started` in `decEvtSev()` returns `'ok'` (green) — not `'pending'`.
+- The teal startup period (jitter 0–4.5 s + probe 7 s = up to 12 s) looked like a stall+recovery to MCR operators.
+- Do not reintroduce `'pending'` for startup. First `analyse_result` within one probe cycle confirms or changes colour.
+
+## Timeline seed on page reload
+- `analyse_result` is in `TELEMETRY_TYPES` and is never persisted. After a page reload `firstAnalyseResultTs = Infinity` → entire historical window shows teal/pending.
+- Fix: `seedFromActiveAnalysers` synthesises one `analyse_result` event per active analyser from `lastResult` at `probeTime`. Key: `seed-analyse-${laneId}` (deduplicated on re-seed).
+
+## Ghost null-PID stream entries
+- ffprobe emits the same elementary stream twice: once in the program list (with PID) and once in the global stream list (without PID). Both reach the frontend.
+- In `extractPidRows`: if any row of a given codecType has a real PID, **drop all null-PID rows of that same type**.
+- In sort comparators (`pickPreferredVideoStream`, `audioStreams`): null PID must sort to `Number.POSITIVE_INFINITY`, not `0`.

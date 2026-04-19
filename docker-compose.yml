@@ -1,0 +1,70 @@
+services:
+  labotech:
+    build: .
+    container_name: labotech
+    network_mode: host
+    # Xeon Gold 5120 dual-socket: NUMA node 0 = physical 0-13 + HT siblings 28-41
+    cpus: ${LABOTECH_CPUS:-24.0}
+    cpuset: ${LABOTECH_CPUSET:-0-13,28-41}
+    mem_limit: ${LABOTECH_MEM_LIMIT:-24g}
+    shm_size: ${LABOTECH_SHM_SIZE:-1g}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- \"http://$${API_HOST:-localhost}:$${API_PORT:-4000}/health\" >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  labotech-encapsulator:
+    build: .
+    container_name: labotech-encapsulator
+    network_mode: host
+    command: ["node", "src/encapsulator-index.js"]
+    # NUMA node 1 = physical 14-27 + HT siblings 42-55
+    cpus: ${ENCAPSULATOR_CPUS:-12.0}
+    cpuset: ${ENCAPSULATOR_CPUSET:-14-27,42-55}
+    mem_limit: ${ENCAPSULATOR_MEM_LIMIT:-8g}
+    shm_size: ${ENCAPSULATOR_SHM_SIZE:-512m}
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    volumes:
+      - ./config:/app/config
+      - ./logs:/app/logs
+    env_file:
+      - .env
+    environment:
+      - ENCAPSULATOR_HOST=127.0.0.1
+      - ENCAPSULATOR_PORT=4100
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "3"
+    healthcheck:
+      test: [ "CMD-SHELL", "wget -qO- \"http://127.0.0.1:4100/health\" >/dev/null 2>&1 || exit 1" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3

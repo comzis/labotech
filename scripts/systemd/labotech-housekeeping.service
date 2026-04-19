@@ -1,0 +1,17 @@
+[Unit]
+Description=Labotech housekeeping cleanup
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/env bash -lc 'set -euo pipefail; docker builder prune -af; docker image prune -af; docker container prune -f; journalctl --vacuum-time=14d; apt-get clean'
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

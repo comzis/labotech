@@ -1,0 +1,13 @@
+[
+  {
+    "name": "default",
+    "description": "Baseline ETR 290 profile (all PIDs, threshold 1)",
+    "config": {
+      "includePids": [],
+      "excludePids": [],
+      "allowUnknownPid": true,
+      "thresholds": {}
+    },
+    "updatedAt": "1970-01-01T00:00:00.000Z"
+  }
+]

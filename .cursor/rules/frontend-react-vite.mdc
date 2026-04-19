@@ -1,0 +1,22 @@
+---
+description: React and Vite frontend reliability standards
+globs: "web/src/**/*.{js,jsx}"
+alwaysApply: false
+---
+
+# Frontend Reliability Rules
+
+- Use protocol-safe WebSocket URLs (`wss` under HTTPS).
+- Handle API failures with user-facing feedback; avoid unhandled promise rejections.
+- Avoid unsafe optional chaining patterns that can still call methods on `undefined`.
+- Validate and normalize numeric form values before sending payloads.
+- Keep polling/websocket handlers scoped to active resource IDs when events are broadcast.
+- Maintain consistent API path usage with Vite proxy configuration.
+- For timeline UIs, prefer duration-block representations for persistent incidents over sparse dot-only markers.
+- Keep inspector popups dynamically positioned relative to cursor to avoid obscuring inspected lane content.
+- Keep legend and timeline event styles sourced from shared constants to avoid drift.
+- **Null-to-zero coercion trap**: `Number(null) === 0`; always guard with `x != null &&` before `Number.isFinite(Number(x))` for PIDs, stream IDs, and any numeric field that can be null.
+- **health_alarm must not render lane blocks**: filter `e.category !== 'health_alarm'` in `buildEventBlocks`. The gradient is driven by `analyse_result`; health_alarm is alarm-log-only.
+- **Timeline teal after reload**: seed `analyse_result` events from `analyser.lastResult` in `seedFromActiveAnalysers` so historical windows show real state not pending.
+- **No pending/teal on startup**: `runtime_started` returns `'ok'` (green) immediately in `decEvtSev`. The teal startup period looked like a stall+recovery to operators. First `analyse_result` within one probe cycle confirms or changes colour.
+- **Ghost null-PID streams**: suppress null-PID rows in `extractPidRows` when a same-codecType row with a real PID exists. In all sort comparators, null PID → `Number.POSITIVE_INFINITY` (sorts last, not first as 0).

@@ -1,0 +1,2088 @@
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Monitor, Plus, Pencil, Upload, Download, Search, Maximize2, Minimize2 } from 'lucide-react';
+import useTSAnalysis from '../hooks/useTSAnalysis';
+import StatusDot from './StatusDot';
+import BentoCard from './ui/BentoCard';
+import { Field } from './ui/MatrixField';
+import { resolveTransportBitrate, formatMbps } from '../utils/transportBitrate';
+import { exportMultiviewConfig, importMultiviewConfig, uploadCatalog } from '../api';
+const MULTIVIEW_STATE_KEY = 'labotech:decoder-multiview:state:v3';
+const DEFAULT_PANEL_ID = 'panel-default';
+const DEFAULT_PANEL_NAME = 'BES';
+const DEFAULT_ENGINEER_MODE_LABEL = 'MRC';
+const MULTIVIEW_REFRESH_MS = 5000;   // match probe cadence so stale data is replaced promptly
+const MULTIVIEW_CLOCK_TICK_MS = 3000;
+// After mount, if active analysers have no results yet, retry quickly up to this many times.
+const MOUNT_RETRY_MAX = 6;
+const MOUNT_RETRY_INTERVAL_MS = 2000;
+
+function normalizePanelName(raw) {
+  return String(raw || '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 24);
+}
+
+function normalizePersistedPanelName(raw, fallback) {
+  const normalized = normalizePanelName(raw || fallback);
+  // Session compatibility: migrate legacy default label automatically.
+  if (normalized === 'MCR-WALL-A' || normalized === 'WALL-A') return DEFAULT_PANEL_NAME;
+  return normalized;
+}
+
+function countPids(result) {
+  if (!result) return 0;
+  const programCount = (result.programs || []).reduce((acc, p) => acc + ((p.streams || []).length), 0);
+  return programCount + ((result.orphanStreams || []).length);
+}
+
+// Map dBFS value (-60..0) to bar percentage
+function dbToPercent(db) {
+  if (db == null || !Number.isFinite(db)) return 0;
+  return Math.round(((Math.max(-60, Math.min(0, db)) + 60) / 60) * 100);
+}
+
+// Broadcast-standard meter zone colours
+function meterColor(db) {
+  if (db == null || !Number.isFinite(db)) return '#00dd55';
+  if (db > -9)  return '#ff2233'; // red: clip risk
+  if (db > -18) return '#ffaa00'; // amber: hot
+  return '#00dd55';               // green: nominal
+}
+
+// Single horizontal VU bar: rmsDb = moving bar, peakDb = peak hold marker
+function VuBar({ label, rmsDb, peakDb, showPeak = true }) {
+  const rmsPct  = dbToPercent(rmsDb);
+  const peakPct = dbToPercent(peakDb);
+  const active  = Number.isFinite(rmsDb);
+  const color   = meterColor(rmsDb);
+  const peakColor = meterColor(peakDb);
+  return (
+    <div className="grid items-center gap-1" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
+      <span className="text-[9px] font-mono font-bold" style={{ color: active ? color : '#555' }}>{label}</span>
+      <div style={{ position: 'relative', height: '6px', background: '#0a0a0a', border: '1px solid #1a1a1a', borderRadius: '1px', overflow: 'visible' }}>
+        {/* Zone demarcation ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', left: '50%', top: 0, bottom: 0, width: '1px', background: '#1e1e1e', pointerEvents: 'none' }} />
+        <div style={{ position: 'absolute', left: '85%', top: 0, bottom: 0, width: '1px', background: '#1e1e1e', pointerEvents: 'none' }} />
+        {/* RMS moving bar */}
+        <div style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0,
+          width: `${active ? Math.max(rmsPct, 2) : 8}%`,
+          background: active ? color : '#2a3a4a',
+          boxShadow: active && rmsPct > 5 ? `0 0 5px ${color}88` : 'none',
+          transition: 'width 0.15s linear',
+          overflow: 'hidden',
+          borderRadius: '1px',
+        }} />
+        {/* Peak hold marker */}
+        {showPeak && peakDb != null && (
+          <div style={{
+            position: 'absolute', top: 0, bottom: 0,
+            left: `${Math.min(peakPct, 98)}%`,
+            width: '2px',
+            background: peakColor,
+            boxShadow: `0 0 3px ${peakColor}`,
+          }} />
+        )}
+      </div>
+      <span className="text-[9px] font-mono text-right" style={{ color: active ? color : '#555' }}>
+        {active ? `${rmsDb.toFixed(1)}` : 'n/a'}
+      </span>
+    </div>
+  );
+}
+
+function deriveCategory(name) {
+  const n = String(name || '').toUpperCase();
+  if (n.startsWith('GV_IPDEC'))  return 'GV IP Decoders';
+  if (n.startsWith('LK_IPDEC'))  return 'LK IP Decoders';
+  if (n.startsWith('GV_TS_ENC')) return 'GV Encoders';
+  if (n.startsWith('LK_TS_ENC')) return 'LK Encoders';
+  if (n.startsWith('GV_BMCAST')) return 'GV Blue Multicast';
+  if (n.startsWith('GV_RMCAST')) return 'GV Red Multicast';
+  if (n.startsWith('LK_BMCAST')) return 'LK Blue Multicast';
+  if (n.startsWith('LK_RMCAST')) return 'LK Red Multicast';
+  if (n.startsWith('GV_RX'))     return 'GV Receivers';
+  if (n.startsWith('LK_RX'))     return 'LK Receivers';
+  if (n.endsWith('_OLD'))        return 'Legacy';
+  return 'Other';
+}
+
+// Derive a stable decoder ID from a stream registry entry name.
+// Uses name-based slug so that the same stream can be identified across sessions.
+function deriveStreamDecoderId(stream) {
+  return String(stream.name || stream.ip || 'stream').trim().slice(0, 64);
+}
+
+function parseStreamsCsv(text) {
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  const result = [];
+  const start = (lines[0] || '').toLowerCase().startsWith('name') ? 1 : 0;
+  for (let i = start; i < lines.length; i++) {
+    const parts = lines[i].split(',').map(p => p.trim());
+    if (parts.length < 3) continue;
+    const [name, ip, port, mode] = parts;
+    if (!ip || !port) continue;
+    result.push({ id: `s-${Date.now()}-${i}`, name: name || ip, ip, port, mode: mode || 'rtp' });
+  }
+  return result;
+}
+
+function parseStreamsJson(text) {
+  try {
+    const parsed = JSON.parse(text);
+    const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.streams) ? parsed.streams : []);
+    return arr
+      .filter(s => s && (s.ip || s.address) && s.port)
+      .map((s, i) => ({
+        id: `s-${Date.now()}-${i}`,
+        name: String(s.name || s.label || s.ip || s.address || '').slice(0, 64),
+        ip: String(s.ip || s.address || '').trim(),
+        port: String(s.port).trim(),
+        mode: ['rtp', 'udp', 'srt'].includes(String(s.mode)) ? String(s.mode) : 'rtp',
+      }));
+  } catch (_) {
+    return [];
+  }
+}
+
+function exportStreamsCsv(streams, panelName) {
+  const header = 'name,ip,port,mode';
+  const rows = streams.map(s => [s.name, s.ip, s.port, s.mode || 'rtp'].join(','));
+  const csv = [header, ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `multiview-${panelName || 'panel'}-streams.csv`.toLowerCase().replace(/[^a-z0-9._-]/g, '-');
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
+function buildProbeUrl({ mode, host, port, latency, passphrase }) {
+  if (!host || !port) return '';
+  if (mode === 'udp') return `udp://${host}:${port}`;
+  if (mode === 'rtp') return `rtp://${host}:${port}`;
+  let url = `srt://${host}:${port}`;
+  const params = ['stats=1', 'statsintvl=1'];
+  if (latency) params.push(`latency=${latency}`);
+  if (passphrase) params.push(`passphrase=${passphrase}`);
+  if (params.length) url += `?${params.join('&')}`;
+  return url;
+}
+
+function normaliseProbeUrl(raw) {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const u = new URL(value);
+    const params = Array.from(u.searchParams.entries()).sort(([ak, av], [bk, bv]) => {
+      if (ak === bk) return av.localeCompare(bv);
+      return ak.localeCompare(bk);
+    });
+    u.search = '';
+    for (const [k, v] of params) u.searchParams.append(k, v);
+    u.protocol = String(u.protocol || '').toLowerCase();
+    u.hostname = String(u.hostname || '').toLowerCase();
+    return u.toString();
+  } catch (_) {
+    return value;
+  }
+}
+
+function getMultiviewDisplayName(id) {
+  const raw = String(id || '');
+  const m = raw.match(/^2022-7-consolidated(?:-(\d+))?$/i);
+  if (!m) return raw;
+  return m[1] ? `2022-7 consolidated #${m[1]}` : '2022-7 consolidated';
+}
+
+function Stat({ label, value }) {
+  return (
+    <div
+      className="px-2 py-1.5"
+      style={{ background: '#0d0d0d', border: '1px solid #1e1e1e', borderRadius: '2px', boxShadow: 'inset 0 1px 3px rgba(0,0,0,0.5)' }}
+    >
+      <div className="text-[9px] uppercase tracking-widest engraved mb-0.5">{label}</div>
+      <div className="text-gray-300 font-mono text-[11px]">{value}</div>
+    </div>
+  );
+}
+
+function updateAgeInfo(probeTime, nowMs, engineerMode = true) {
+  if (!probeTime) {
+    return { ageSec: null, label: engineerMode ? 'awaiting telemetry' : 'no sample yet', color: '#777' };
+  }
+  const ageSec = Math.max(0, Math.floor((nowMs - probeTime) / 1000));
+  if (ageSec <= 2) return { ageSec, label: engineerMode ? 'fresh silicon' : 'live', color: '#00dd55' };
+  if (ageSec <= 6) return { ageSec, label: engineerMode ? 'cache warming' : 'delayed', color: '#ffaa00' };
+  return { ageSec, label: engineerMode ? 'radio silence' : 'stale', color: '#ff2233' };
+}
+
+function extractThumbTimestamp(thumbnailUrl) {
+  if (!thumbnailUrl) return null;
+  const m = String(thumbnailUrl).match(/[?&]t=(\d{10,})/);
+  if (!m) return null;
+  const ts = Number(m[1]);
+  return Number.isFinite(ts) ? ts : null;
+}
+
+function DecoderCard({ id, displayName, meta, result, onStop, nowMs, engineerMode, isStopping = false }) {
+  const rawService = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || null;
+  const rawProvider = result?.dvb?.services?.[0]?.serviceProvider || null;
+  // Latch the last known-good service name/provider — same pattern as audioSnapshot —
+  // so the tile never flickers back to "Unknown" between probe cycles.
+  const [svcSnapshot, setSvcSnapshot] = useState(null);
+  useEffect(() => {
+    if (rawService) setSvcSnapshot({ name: rawService, provider: rawProvider });
+  }, [rawService, rawProvider]);
+  const primaryService = rawService || svcSnapshot?.name || 'Unknown';
+  const serviceProvider = rawProvider || svcSnapshot?.provider || null;
+  const transportRate = resolveTransportBitrate(result);
+  // Per-channel audio levels from astats probe
+  const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
+  const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
+  const [audioSnapshot, setAudioSnapshot] = useState(null);
+  useEffect(() => {
+    const hasChannels = currentChannels.length > 0;
+    const hasMean = Number.isFinite(currentMeanDb);
+    if (!hasChannels && !hasMean) return;
+    setAudioSnapshot({
+      channels: hasChannels ? currentChannels : [],
+      meanDb: hasMean ? currentMeanDb : null,
+      maxDb: Number.isFinite(result?.audioLevels?.maxDb) ? result.audioLevels.maxDb : null,
+      atMs: Date.now(),
+    });
+  }, [currentChannels, currentMeanDb, result?.audioLevels?.maxDb]);
+  const displayChannels = currentChannels.length > 0 ? currentChannels : (audioSnapshot?.channels || []);
+  const displayMeanDb = Number.isFinite(currentMeanDb)
+    ? currentMeanDb
+    : (Number.isFinite(audioSnapshot?.meanDb) ? audioSnapshot.meanDb : null);
+  const displayMaxDb = Number.isFinite(result?.audioLevels?.maxDb)
+    ? result.audioLevels.maxDb
+    : (Number.isFinite(audioSnapshot?.maxDb) ? audioSnapshot.maxDb : null);
+  // Peak hold: { ch: number, peakDb: number, heldAt: number }[]
+  const peakHoldRef = useRef({});
+  const PEAK_HOLD_MS = 3000;
+  // Update peak hold on new level data
+  if (displayChannels.length > 0) {
+    const now = Date.now();
+    displayChannels.forEach((ch) => {
+      const key = ch.ch;
+      const existing = peakHoldRef.current[key];
+      const peakDb = ch.peakDb ?? ch.rmsDb;
+      if (peakDb == null) return;
+      if (!existing || peakDb > existing.peakDb || (now - existing.heldAt) > PEAK_HOLD_MS) {
+        peakHoldRef.current[key] = { peakDb, heldAt: now };
+      }
+    });
+  }
+  // Keep the last successfully loaded src so the tile doesn't blank during
+  // the write gap between probe cycles (atomic rename means the old file
+  // stays readable until the new one is ready).
+  const [displaySrc, setDisplaySrc] = useState(null);
+  const [thumbRetry, setThumbRetry] = useState(0);
+  // Keep browser cache-busting tied to backend thumbnail token only.
+  // result.thumbnailUrl already includes ?t=... when a new frame is written.
+  const candidateBaseSrc = result?.thumbnailUrl || null;
+  const candidateSrc = candidateBaseSrc ? `${candidateBaseSrc}&retry=${thumbRetry}` : null;
+
+  // Reset retry budget and force reload when backend publishes a new thumbnail token.
+  useEffect(() => {
+    setThumbRetry(0);
+    setDisplaySrc(null);
+  }, [candidateBaseSrc]);
+
+  // Keep showing the last known-good image even if a newer refresh token fails.
+  const hasThumb = Boolean(displaySrc || candidateSrc);
+  const freshness = updateAgeInfo(result?.probeTime, nowMs, engineerMode);
+  const thumbTs = extractThumbTimestamp(result?.thumbnailUrl);
+  const thumbAgeSec = thumbTs ? Math.max(0, Math.floor((nowMs - thumbTs) / 1000)) : null;
+  const thumbFresh = thumbAgeSec != null ? thumbAgeSec <= 8 : false;
+  const hasTelemetry = Boolean(result?.probeTime);
+  const hasProbeError = !hasTelemetry && Boolean(result?.probeError);
+  const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
+  const isRunning = Boolean(meta?.isRunning);
+  const telemetryFresh = hasTelemetry && staleMs <= 15000;
+  // In engineer mode, downgrade to warning when telemetry goes stale.
+  // In MCR (operator) mode, running = green — no telemetry-freshness penalty so the
+  // badge never flips to amber just because a probe cycle is delayed or MCR was toggled.
+  const signalOk = isRunning && (engineerMode ? (!hasTelemetry || telemetryFresh) : true);
+
+  return (
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{ background: '#111', border: '1px solid #252525', borderRadius: '3px', boxShadow: '0 4px 16px rgba(0,0,0,0.6)', minWidth: 0 }}
+    >
+      {/* Bezel header */}
+      <div
+        className="flex items-center gap-2 px-2.5 py-1.5 shrink-0"
+        style={{ background: 'linear-gradient(180deg, #242424 0%, #1a1a1a 100%)', borderBottom: '1px solid #0a0a0a', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.05)' }}
+      >
+        <StatusDot status={signalOk ? 'live' : 'warning'} pulse={signalOk} />
+        <span className="font-mono text-[10px] text-gray-400 truncate flex-1" title={id}>{displayName || id}</span>
+        <span
+          className="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0"
+          style={signalOk
+            ? { background: 'rgba(0,120,50,0.25)', borderColor: 'rgba(0,221,85,0.35)', color: '#86efac' }
+            : { background: 'rgba(120,80,0,0.25)', borderColor: 'rgba(255,170,0,0.35)', color: '#facc15' }}
+        >
+          {signalOk ? (hasTelemetry ? 'Live' : 'Running') : 'Monitoring'}
+        </span>
+        <button
+          onClick={onStop}
+          disabled={isStopping}
+          className="text-[9px] font-bold uppercase px-2 py-0.5 shrink-0"
+          style={{
+            background: 'rgba(180,30,30,0.3)',
+            border: '1px solid rgba(220,50,50,0.3)',
+            color: '#f87171',
+            borderRadius: '2px',
+            opacity: isStopping ? 0.55 : 1,
+            cursor: isStopping ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {isStopping ? 'Stopping…' : 'Stop'}
+        </button>
+      </div>
+
+      {/* Thumbnail monitor — keep full frame without artificial overlays */}
+      <div
+        className="relative w-full overflow-hidden shrink-0"
+        style={{ aspectRatio: '16/9', background: '#080808', borderBottom: '1px solid #1a1a1a', outline: '2px solid #1a1a1a' }}
+      >
+        {hasThumb ? (
+          <img
+            src={displaySrc || candidateSrc}
+            alt={`${id} thumbnail`}
+            className="absolute inset-0 w-full h-full"
+            style={{ objectFit: 'cover', objectPosition: 'center', display: 'block' }}
+            onLoad={(e) => {
+              const loaded = e?.currentTarget?.currentSrc || e?.currentTarget?.src || null;
+              if (loaded) setDisplaySrc(loaded);
+            }}
+            onError={() => {
+              // Keep last good frame; when none exists, retry a few times for transient file-write gaps.
+              if (displaySrc) return;
+              if (thumbRetry < 3) {
+                setTimeout(() => setThumbRetry((v) => v + 1), 700);
+              }
+            }}
+          />
+        ) : (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <div className="w-3 h-3 rounded-full" style={{ background: '#1a1a1a', boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.8)' }} />
+            <span className="text-[9px] engraved uppercase tracking-widest">Awaiting Frame</span>
+          </div>
+        )}
+      </div>
+
+      {/* Info panel */}
+      <div className="p-2 space-y-1.5" style={{ background: '#141414' }}>
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono engraved"
+            style={{ color: '#8c97aa', whiteSpace: 'normal', wordBreak: 'break-all', lineHeight: 1.2 }}
+          >
+            {meta?.url || result?.url || '-'}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: hasProbeError ? '#ff5555' : freshness.color }}
+          >
+            {hasProbeError
+              ? `probe error: ${String(result.probeError).slice(0, 60)}`
+              : `update age: ${freshness.ageSec == null ? '-' : `${freshness.ageSec}s`} - ${freshness.label}`}
+          </div>
+        )}
+        {engineerMode && (
+          <div
+            className="text-[10px] font-mono uppercase tracking-wider"
+            style={{ color: thumbFresh ? '#00dd55' : '#ffaa00' }}
+          >
+            thumbnail age: {thumbAgeSec == null ? '-' : `${thumbAgeSec}s`}
+          </div>
+        )}
+        <div className="text-[11px] text-gray-300 font-mono" style={{ whiteSpace: 'normal', lineHeight: 1.2 }}>
+          <span className="engraved">SVC </span>{primaryService}
+          {serviceProvider ? <span className="engraved"> · {serviceProvider}</span> : null}
+        </div>
+
+        {/* Audio meters — per-channel L/R with peak hold (EBU-style dBFS scale) */}
+        <div>
+          <div className="flex items-center justify-between text-[10px] mb-1.5">
+            <span className="engraved uppercase tracking-widest">Audio Levels</span>
+            <span className="font-mono text-[9px]" style={{ color: Number.isFinite(displayMeanDb) ? meterColor(displayMeanDb) : '#555' }}>
+              {Number.isFinite(displayMeanDb) ? `${displayMeanDb.toFixed(1)} dBFS` : 'n/a'}
+            </span>
+          </div>
+          {displayChannels.length > 0 ? (
+            <div className="space-y-1">
+              {/* Scale markers */}
+              <div className="grid items-center gap-1 text-[8px] font-mono text-gray-600" style={{ gridTemplateColumns: '16px 1fr 44px' }}>
+                <span />
+                <div style={{ position: 'relative', paddingTop: '1px' }}>
+                  <span style={{ position: 'absolute', left: '50%', transform: 'translateX(-50%)' }}>-18</span>
+                  <span style={{ position: 'absolute', left: '85%', transform: 'translateX(-50%)' }}>-9</span>
+                  <span style={{ position: 'absolute', right: 0 }}>0</span>
+                </div>
+                <span />
+              </div>
+              {displayChannels.map((ch) => {
+                const held = peakHoldRef.current[ch.ch];
+                const heldPeak = held && (Date.now() - held.heldAt) < PEAK_HOLD_MS ? held.peakDb : ch.peakDb;
+                return (
+                  <VuBar
+                    key={ch.ch}
+                    label={ch.label || `Ch${ch.ch + 1}`}
+                    rmsDb={ch.rmsDb}
+                    peakDb={heldPeak}
+                    showPeak
+                  />
+                );
+              })}
+            </div>
+          ) : displayMeanDb != null ? (
+            // Fallback: only aggregate available (mono or older probe)
+            <VuBar label="Mix" rmsDb={displayMeanDb} peakDb={displayMaxDb} showPeak />
+          ) : (
+            <div className="text-[9px] font-mono" style={{ color: '#555' }}>Awaiting audio probe…</div>
+          )}
+        </div>
+
+        {/* Stats — engineer mode only */}
+        {engineerMode && (
+          <>
+            <div className="grid grid-cols-4 gap-1">
+              <Stat label="Programs" value={String(result?.programs?.length || 0)} />
+              <Stat label="PIDs" value={
+                result?.dvb?.streamBreakdown
+                  ? `${result.dvb.streamBreakdown.video ?? 0}V ${result.dvb.streamBreakdown.audio ?? 0}A ${result.dvb.streamBreakdown.data ?? 0}D`
+                  : String(countPids(result))
+              } />
+              <Stat label="TS Rate"  value={formatMbps(transportRate.mbps, 2)} />
+              <Stat label="Last Probe" value={result?.probeTime ? new Date(result.probeTime).toLocaleTimeString() : '-'} />
+            </div>
+            <div className="text-[9px] font-mono" style={{ color: transportRate.trusted ? '#86efac' : '#777' }}>
+              TS source: {transportRate.source.toUpperCase()}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Fullscreen grid — columns by tile count to maximise thumb area
+function fsColumns(count) {
+  if (count <= 1)  return 1;
+  if (count <= 4)  return 2;
+  if (count <= 9)  return 3;
+  if (count <= 16) return 4;
+  if (count <= 25) return 5;
+  if (count <= 36) return 6;
+  if (count <= 49) return 7;
+  return 8;
+}
+
+// Row count given columns and tile count (ceiling division)
+function fsRows(count, cols) {
+  return Math.ceil(count / cols);
+}
+
+// 2px-wide vertical VU bar (fills bottom-up) — MCR meter style
+function FsVuBar({ rmsDb, peakDb }) {
+  const active = rmsDb != null && Number.isFinite(rmsDb);
+  const rmsH  = active ? Math.max(0, ((Math.max(-60, Math.min(0, rmsDb)) + 60) / 60) * 100) : 0;
+  const peakH = (peakDb != null && Number.isFinite(peakDb))
+    ? Math.min(99, Math.max(0, ((Math.max(-60, Math.min(0, peakDb)) + 60) / 60) * 100))
+    : null;
+  const rmsColor  = !active ? '#0c0c0c' : rmsDb > -9 ? '#cc1020' : rmsDb > -18 ? '#b87800' : '#007a28';
+  const peakColor = (peakDb ?? -60) > -9 ? '#cc1020' : (peakDb ?? -60) > -18 ? '#b87800' : '#007a28';
+  return (
+    <div style={{ width: 2, flexShrink: 0, display: 'flex', flexDirection: 'column' }}>
+      <div style={{ flex: 1, position: 'relative', background: '#060606', overflow: 'hidden' }}>
+        {/* Zone ticks at -18 dBFS (50%) and -9 dBFS (85%) */}
+        <div style={{ position: 'absolute', bottom: '50%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.05)' }} />
+        <div style={{ position: 'absolute', bottom: '85%', left: 0, right: 0, height: '1px', background: 'rgba(255,255,255,0.05)' }} />
+        {/* RMS fill */}
+        <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, height: `${rmsH}%`, background: rmsColor, transition: 'height 0.1s linear' }} />
+        {/* Peak hold 1px */}
+        {peakH != null && active && (
+          <div style={{ position: 'absolute', bottom: `${peakH}%`, left: 0, right: 0, height: '1px', background: peakColor }} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Evertz-style fullscreen tile: thumbnail + vertical audio meters, thin label bar below
+function FullscreenThumbTile({ id, result, nowMs }) {
+  const rawSvc = result?.dvb?.services?.[0]?.serviceName || result?.programs?.[0]?.name || null;
+  const [svcLatch, setSvcLatch] = useState(null);
+  useEffect(() => { if (rawSvc) setSvcLatch(rawSvc); }, [rawSvc]);
+  const svc = rawSvc || svcLatch || '—';
+  const hasTelemetry = Boolean(result?.probeTime);
+  const severity = result?.health?.severity;
+  const staleMs = hasTelemetry ? (nowMs - result.probeTime) : Number.POSITIVE_INFINITY;
+  const isStale = staleMs > 20000;
+  const statusColor = !hasTelemetry
+    ? '#444'
+    : isStale       ? '#ffaa00'
+    : severity === 'critical' ? '#ff2233'
+    : severity === 'warning'  ? '#ffaa00'
+    : '#00dd55';
+
+  const rate = resolveTransportBitrate(result);
+  const thumbUrl = result?.thumbnailUrl || null;
+  const currentChannels = Array.isArray(result?.audioLevels?.channels) ? result.audioLevels.channels : [];
+  const currentMeanDb = Number.isFinite(result?.audioLevels?.meanDb) ? result.audioLevels.meanDb : null;
+
+  // Audio snapshot: hold last known channel data so meters stay live between
+  // probes that return fewer channels. Broadcast standard — meters must never
+  // go dark mid-programme due to a probe returning only the primary stereo pair.
+  const [audioSnapshot, setAudioSnapshot] = useState(null);
+  useEffect(() => {
+    if (currentChannels.length > 0 || Number.isFinite(currentMeanDb)) {
+      setAudioSnapshot({
+        channels: currentChannels.length > 0 ? currentChannels : [],
+        meanDb:   currentMeanDb,
+      });
+    }
+  }, [currentChannels, currentMeanDb]);
+  const displayChannels = currentChannels.length > 0 ? currentChannels : (audioSnapshot?.channels || []);
+  const meanDb = Number.isFinite(currentMeanDb) ? currentMeanDb : (audioSnapshot?.meanDb ?? null);
+
+  // Count audio ESes from PMT, filtering null-PID entries — ffprobe emits each ES
+  // twice: once inside the program list (with PID) and once in the global stream
+  // array (without PID). The null-PID ghost must not inflate the pair count.
+  const audioEsCount = (result?.programs || []).reduce((acc, p) =>
+    acc + (p.streams || []).filter((s) => s.codecType === 'audio' && s.pid != null).length, 0);
+  // Show whichever is larger: measured channel pairs OR PMT ES count.
+  const measuredPairs = displayChannels.length > 0 ? Math.ceil(displayChannels.length / 2) : 0;
+  const rawPairCount = Math.max(measuredPairs, audioEsCount);
+  // Latch the highest pair count seen — ffprobe inconsistently reports 2 or 8
+  // channels between probes; without a latch the bar count flips every cycle.
+  const [pairCountLatch, setPairCountLatch] = useState(0);
+  useEffect(() => {
+    if (rawPairCount > pairCountLatch) setPairCountLatch(rawPairCount);
+  }, [rawPairCount, pairCountLatch]);
+  const pairCount = Math.max(rawPairCount, pairCountLatch);
+
+  const pairs = [];
+  for (let i = 0; i < pairCount; i++) {
+    pairs.push({
+      left:  displayChannels[i * 2]     || null,
+      right: displayChannels[i * 2 + 1] || null,
+      num:   i + 1,
+    });
+  }
+  const hasAudio = pairs.length > 0 || (meanDb != null && Number.isFinite(meanDb));
+
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column',
+      background: '#030405',
+      border: '1px solid #080808',
+      borderTop: `1px solid ${statusColor}55`,
+      overflow: 'hidden', minWidth: 0, minHeight: 0,
+    }}>
+      {/* Content row: thumbnail | audio meters */}
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+
+        {/* Thumbnail — src updated in place (no key prop) so browser holds the
+            previous frame while the next one loads. No displaySrc indirection
+            needed: the browser natively defers the swap until load completes. */}
+        <div style={{ flex: 1, position: 'relative', background: '#060606', minWidth: 0, overflow: 'hidden' }}>
+          {thumbUrl ? (
+            <img
+              src={thumbUrl}
+              alt={svc}
+              loading="eager"
+              fetchPriority="high"
+              decoding="async"
+              style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block', background: '#000' }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <span style={{ color: '#161616', fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.15em', textTransform: 'uppercase' }}>
+                AWAITING FRAME
+              </span>
+            </div>
+          )}
+
+          {/* UMD — bottom-left overlay, Labotech cyan style */}
+          <div style={{
+            position: 'absolute', bottom: 0, left: 0,
+            maxWidth: '92%',
+            background: 'linear-gradient(90deg, rgba(0,12,22,0.92) 0%, rgba(0,8,16,0.72) 100%)',
+            display: 'inline-flex', alignItems: 'center',
+            overflow: 'hidden',
+            padding: '2px 8px 2px 6px',
+            gap: 6,
+          }}>
+            {/* Service name — Labotech cyan, monospace */}
+            <span style={{
+              color: '#7ecfdc',
+              fontFamily: "'Courier New', Courier, monospace",
+              fontSize: '10px', fontWeight: 600,
+              letterSpacing: '0.09em', textTransform: 'uppercase',
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}>
+              {svc}
+            </span>
+            {/* Bitrate — dim steel */}
+            {rate.mbps != null && (
+              <span style={{
+                color: '#2d6272',
+                fontFamily: "'Courier New', Courier, monospace",
+                fontSize: '9px', fontWeight: 500,
+                whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums',
+                letterSpacing: '0.05em',
+              }}>
+                {rate.mbps.toFixed(1)} Mb/s
+              </span>
+            )}
+          </div>
+
+          {/* Decoder ID — very dim, bottom-right corner */}
+          <div style={{ position: 'absolute', bottom: 3, right: 4, fontFamily: 'monospace', fontSize: '7px', color: 'rgba(255,255,255,0.18)', letterSpacing: '0.04em', textTransform: 'uppercase', maxWidth: '60%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {id}
+          </div>
+        </div>
+
+        {/* Vertical audio meters panel — fixed 30px for 4 pairs @ 2px bars */}
+        {hasAudio && (
+          <div style={{
+            width: 30,
+            background: '#020305',
+            borderLeft: '1px solid #080808',
+            display: 'flex', flexDirection: 'column',
+            padding: '2px 2px 2px 2px',
+            flexShrink: 0,
+          }}>
+            <div style={{ flex: 1, display: 'flex', gap: '2px', minHeight: 0, alignItems: 'stretch' }}>
+              {pairs.length > 0 ? pairs.map(({ left, right, num }) => (
+                <div key={num} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
+                  <div style={{ flex: 1, display: 'flex', gap: '1px', minHeight: 0 }}>
+                    <FsVuBar rmsDb={left?.rmsDb} peakDb={left?.peakDb ?? left?.rmsDb} />
+                    <FsVuBar rmsDb={right?.rmsDb ?? null} peakDb={right?.peakDb ?? right?.rmsDb ?? null} />
+                  </div>
+                  <div style={{ color: '#141414', fontSize: '4px', fontFamily: 'monospace', lineHeight: 1, flexShrink: 0 }}>{num}</div>
+                </div>
+              )) : (
+                <FsVuBar rmsDb={meanDb} peakDb={meanDb} />
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function DecoderMultiviewPanel({ lastMessage }) {
+  const { activeIds, resultsById, decoderMeta, error, refreshActives, startContinuous, stop, onWsResult } = useTSAnalysis();
+  const [openCreate, setOpenCreate] = useState(false);
+  const [openPanelCommission, setOpenPanelCommission] = useState(false);
+  const [mode, setMode] = useState('rtp');
+  const [host, setHost] = useState('');
+  const [port, setPort] = useState('');
+  const [decoderId, setDecoderId] = useState('');
+  const [interval, setProbeInterval] = useState('5000');
+  const [latency, setLatency] = useState('2000');
+  const [passphrase, setPassphrase] = useState('');
+  const [nowMs, setNowMs] = useState(Date.now());
+  const [engineerMode, setEngineerMode] = useState(false);
+  const [engineerModeLabel, setEngineerModeLabel] = useState(DEFAULT_ENGINEER_MODE_LABEL);
+  const [isEditingEngineerModeLabel, setIsEditingEngineerModeLabel] = useState(false);
+  const [engineerModeLabelDraft, setEngineerModeLabelDraft] = useState(DEFAULT_ENGINEER_MODE_LABEL);
+  const [panels, setPanels] = useState([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [], streams: [] }]);
+  const [activePanelId, setActivePanelId] = useState(DEFAULT_PANEL_ID);
+  const [newPanelName, setNewPanelName] = useState('');
+  const [stoppingIds, setStoppingIds] = useState(new Set());
+  const [addTileOpen, setAddTileOpen] = useState(false);
+  const [addTileHost, setAddTileHost] = useState('');
+  const [addTilePort, setAddTilePort] = useState('');
+  const [addTileDecoderId, setAddTileDecoderId] = useState('');
+  const [addTileMode, setAddTileMode] = useState('rtp');
+  const [addTileLatency, setAddTileLatency] = useState('');
+  const [addTilePassphrase, setAddTilePassphrase] = useState('');
+  const [addTileCatalogSearch, setAddTileCatalogSearch] = useState('');
+  const [addTileShowCatalog, setAddTileShowCatalog] = useState(false);
+  const [addTileError, setAddTileError] = useState(null);
+  const [addTileSubmitting, setAddTileSubmitting] = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [showCatalog, setShowCatalog] = useState(false);
+  const catalogRef = useRef(null);
+  const addTileCatalogRef = useRef(null);
+  const importFileRef = useRef(null);
+  const configImportFileRef = useRef(null);
+  const catalogImportFileRef = useRef(null);
+  const fullscreenRef = useRef(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const serverClockOffsetMsRef = useRef(0);
+  // Debounce timer for server-side panel sync
+  const serverSyncTimerRef = useRef(null);
+
+  // Prevent the persist effect from overwriting localStorage with default state
+  // before the load effect's setState calls have been applied (React mount race).
+  const hydratedRef = useRef(false);
+
+  useEffect(() => {
+    // Step 1: load UI prefs and panel structure from localStorage (fast, offline)
+    try {
+      const raw = localStorage.getItem(MULTIVIEW_STATE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed?.openCreate === 'boolean') setOpenCreate(parsed.openCreate);
+        if (parsed?.mode) setMode(parsed.mode);
+        if (parsed?.host != null) setHost(String(parsed.host));
+        if (parsed?.port != null) setPort(String(parsed.port));
+        if (parsed?.decoderId != null) setDecoderId(String(parsed.decoderId));
+        if (parsed?.interval != null) setProbeInterval(String(parsed.interval));
+        if (parsed?.latency != null) setLatency(String(parsed.latency));
+        if (parsed?.passphrase != null) setPassphrase(String(parsed.passphrase));
+        if (typeof parsed?.engineerMode === 'boolean') setEngineerMode(parsed.engineerMode);
+        if (parsed?.engineerModeLabel != null) {
+          const nextLabel = String(parsed.engineerModeLabel).trim();
+          if (nextLabel) setEngineerModeLabel(nextLabel.slice(0, 32));
+        }
+        if (Array.isArray(parsed?.panels) && parsed.panels.length > 0) {
+          const sanitized = parsed.panels
+            .map((p, idx) => ({
+              id: String(p?.id || `panel-${idx + 1}`),
+              name: normalizePersistedPanelName(p?.name, `PANEL-${idx + 1}`) || `PANEL-${idx + 1}`,
+              // Restore decoderIds — stale entries filtered by auto-seed on server restart
+              decoderIds: Array.isArray(p?.decoderIds) ? p.decoderIds : [],
+              // streams from localStorage as initial fallback until server responds
+              streams: Array.isArray(p?.streams) ? p.streams : [],
+            }))
+            .filter((p) => p.id);
+          if (sanitized.length > 0) setPanels(sanitized);
+        }
+        if (parsed?.activePanelId != null) setActivePanelId(String(parsed.activePanelId));
+      }
+    } catch (_) {}
+
+    // Step 2: fetch authoritative stream registry from server (overrides localStorage for streams)
+    fetch('/api/multiview/panels')
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (!data || !Array.isArray(data.panels) || data.panels.length === 0) return;
+        setPanels((prev) => {
+          // Merge server streams into existing panels by panel id; add new server panels.
+          const byId = {};
+          prev.forEach((p) => { byId[p.id] = p; });
+          data.panels.forEach((sp) => {
+            if (byId[sp.id]) {
+              byId[sp.id] = { ...byId[sp.id], streams: Array.isArray(sp.streams) ? sp.streams : [] };
+            } else {
+              byId[sp.id] = { id: sp.id, name: sp.name, decoderIds: [], streams: Array.isArray(sp.streams) ? sp.streams : [] };
+            }
+          });
+          return Object.values(byId);
+        });
+      })
+      .catch(() => {}) // server offline — localStorage fallback already applied
+      .finally(() => { hydratedRef.current = true; });
+  }, []);
+
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      localStorage.setItem(
+        MULTIVIEW_STATE_KEY,
+        JSON.stringify({ openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, engineerModeLabel, panels, activePanelId })
+      );
+    } catch (_) {}
+
+    // Debounced server sync — only syncs panel structure + streams (not decoderIds)
+    clearTimeout(serverSyncTimerRef.current);
+    serverSyncTimerRef.current = setTimeout(() => {
+      const serverPanels = panels.map((p) => ({ id: p.id, name: p.name, streams: p.streams || [] }));
+      fetch('/api/multiview/panels', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ panels: serverPanels }),
+      }).catch(() => {});
+    }, 800);
+  }, [openCreate, mode, host, port, decoderId, interval, latency, passphrase, engineerMode, engineerModeLabel, panels, activePanelId]);
+
+  const beginEngineerModeLabelEdit = () => {
+    setEngineerModeLabelDraft(engineerModeLabel);
+    setIsEditingEngineerModeLabel(true);
+  };
+
+  const commitEngineerModeLabelEdit = () => {
+    const trimmed = String(engineerModeLabelDraft || '').trim();
+    setEngineerModeLabel(trimmed ? trimmed.slice(0, 32) : DEFAULT_ENGINEER_MODE_LABEL);
+    setIsEditingEngineerModeLabel(false);
+  };
+
+  const cancelEngineerModeLabelEdit = () => {
+    setEngineerModeLabelDraft(engineerModeLabel);
+    setIsEditingEngineerModeLabel(false);
+  };
+
+  // Fetch stream catalog for the host/IP picker
+  useEffect(() => {
+    fetch('/api/multiview/catalog')
+      .then((r) => r.ok ? r.json() : { streams: [] })
+      .then((d) => setCatalog(Array.isArray(d.streams) ? d.streams : []))
+      .catch(() => {});
+  }, []);
+
+  // Close catalog dropdown on outside click
+  useEffect(() => {
+    if (!showCatalog) return;
+    const handler = (e) => {
+      if (catalogRef.current && !catalogRef.current.contains(e.target)) {
+        setShowCatalog(false);
+        setCatalogSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showCatalog]);
+
+  // Close add-tile catalog dropdown on outside click
+  useEffect(() => {
+    if (!addTileShowCatalog) return;
+    const handler = (e) => {
+      if (addTileCatalogRef.current && !addTileCatalogRef.current.contains(e.target)) {
+        setAddTileShowCatalog(false);
+        setAddTileCatalogSearch('');
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [addTileShowCatalog]);
+
+  useEffect(() => {
+    refreshActives();
+  }, [refreshActives]);
+
+  useEffect(() => {
+    const t = window.setInterval(() => {
+      refreshActives();
+    }, MULTIVIEW_REFRESH_MS);
+    return () => window.clearInterval(t);
+  }, [refreshActives]);
+
+  // Mount-phase rapid retry: when active analysers exist but resultsById is still
+  // empty (server probe not yet complete or first WS message hasn't arrived),
+  // re-poll until data appears or retry budget is exhausted.
+  const mountRetryCountRef = React.useRef(0);
+  useEffect(() => {
+    mountRetryCountRef.current = 0;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // reset on mount only
+
+  useEffect(() => {
+    if (activeIds.length === 0) return; // nothing running yet
+    const hasData = activeIds.some((id) => resultsById[id]?.probeTime);
+    if (hasData) { mountRetryCountRef.current = MOUNT_RETRY_MAX; return; } // satisfied
+    if (mountRetryCountRef.current >= MOUNT_RETRY_MAX) return;
+    mountRetryCountRef.current += 1;
+    const t = setTimeout(() => refreshActives(), MOUNT_RETRY_INTERVAL_MS);
+    return () => clearTimeout(t);
+  }, [activeIds, resultsById, refreshActives]);
+
+  useEffect(() => {
+    if (lastMessage) onWsResult(lastMessage);
+  }, [lastMessage, onWsResult]);
+
+  useEffect(() => {
+    if (!lastMessage || !lastMessage.time) return;
+    const serverTs = new Date(lastMessage.time).getTime();
+    if (!Number.isFinite(serverTs)) return;
+    serverClockOffsetMsRef.current = serverTs - Date.now();
+  }, [lastMessage]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now() + serverClockOffsetMsRef.current), MULTIVIEW_CLOCK_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  // Sync isFullscreen with browser fullscreen state (ESC exits natively)
+  useEffect(() => {
+    const handler = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener('fullscreenchange', handler);
+    return () => document.removeEventListener('fullscreenchange', handler);
+  }, []);
+
+  // 1 Hz UTC clock for fullscreen header — only active when fullscreen is open
+  const [fsNowMs, setFsNowMs] = useState(Date.now());
+  useEffect(() => {
+    if (!isFullscreen) return;
+    setFsNowMs(Date.now() + serverClockOffsetMsRef.current);
+    const t = window.setInterval(() => setFsNowMs(Date.now() + serverClockOffsetMsRef.current), 1000);
+    return () => window.clearInterval(t);
+  }, [isFullscreen]);
+
+  // Request browser fullscreen when overlay is mounted and visible
+  useEffect(() => {
+    if (isFullscreen && fullscreenRef.current && !document.fullscreenElement) {
+      fullscreenRef.current.requestFullscreen?.().catch(() => {});
+    }
+  }, [isFullscreen]);
+
+  useEffect(() => {
+    if (panels.length === 0) {
+      setPanels([{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }]);
+      setActivePanelId(DEFAULT_PANEL_ID);
+      return;
+    }
+    if (!panels.some((p) => p.id === activePanelId)) {
+      setActivePanelId(panels[0].id);
+    }
+  }, [panels, activePanelId]);
+
+  useEffect(() => {
+    // Runtime migration: force legacy default labels to BES even when state is already loaded.
+    const hasLegacyName = panels.some((p) => {
+      const n = normalizePanelName(p?.name || '');
+      return n === 'MCR-WALL-A' || n === 'WALL-A';
+    });
+    if (!hasLegacyName) return;
+    setPanels((prev) => prev.map((p) => {
+      const n = normalizePanelName(p?.name || '');
+      if (n === 'MCR-WALL-A' || n === 'WALL-A') return { ...p, name: DEFAULT_PANEL_NAME };
+      return p;
+    }));
+  }, [panels]);
+
+  useEffect(() => {
+    setPanels((prev) => {
+      if (!Array.isArray(prev) || prev.length === 0) return prev;
+      if (activeIds.length === 0) return prev; // no active analysers yet — wait
+      // Prune stale IDs from all panels — ghost processes removed from the server.
+      const cleaned = prev.map((p) => ({
+        ...p,
+        decoderIds: (p.decoderIds || []).filter((id) => activeIds.includes(id)),
+      }));
+      // If nothing is assigned after pruning, seed panel 0 with all active IDs
+      // (first-time load or full server-restart recovery).
+      const anyActive = cleaned.some((p) => p.decoderIds.length > 0);
+      if (anyActive) return cleaned;
+      return cleaned.map((p, idx) => (idx === 0 ? { ...p, decoderIds: [...activeIds] } : p));
+    });
+  }, [activeIds]);
+
+  const probeUrl = buildProbeUrl({ mode, host, port, latency, passphrase });
+  const activePanel = panels.find((p) => p.id === activePanelId) || panels[0] || null;
+  const activeSet = new Set(activeIds);
+  const visibleIds = (activePanel?.decoderIds || []).filter((id) => activeSet.has(id));
+  const normalizedDraftPanelName = normalizePanelName(newPanelName);
+  const panelNameInUse = panels.some((p) => p.name.toUpperCase() === normalizedDraftPanelName);
+  const panelNameValid = normalizedDraftPanelName.length >= 3 && !panelNameInUse;
+
+  const toggleDecoderInActivePanel = (id) => {
+    if (!activePanel) return;
+    setPanels((prev) => prev.map((p) => {
+      if (p.id !== activePanel.id) return p;
+      const has = (p.decoderIds || []).includes(id);
+      const decoderIds = has ? p.decoderIds.filter((x) => x !== id) : [...p.decoderIds, id];
+      return { ...p, decoderIds };
+    }));
+  };
+
+  const createPanel = () => {
+    const name = normalizedDraftPanelName;
+    if (!name || name.length < 3) return;
+    if (panelNameInUse) return;
+    const id = `panel-${Date.now()}`;
+    const panel = { id, name, decoderIds: [], streams: [] };
+    setPanels((prev) => [...prev, panel]);
+    setActivePanelId(id);
+    setNewPanelName('');
+    setOpenPanelCommission(false);
+  };
+
+  const removePanel = (id) => {
+    setPanels((prev) => {
+      const next = prev.filter((p) => p.id !== id);
+      return next.length > 0 ? next : [{ id: DEFAULT_PANEL_ID, name: DEFAULT_PANEL_NAME, decoderIds: [] }];
+    });
+    if (activePanelId === id) {
+      const remaining = panels.filter((p) => p.id !== id);
+      setActivePanelId(remaining[0]?.id || DEFAULT_PANEL_ID);
+    }
+  };
+
+  const addStreamsToActivePanel = useCallback((newStreams) => {
+    if (!activePanel || !newStreams.length) return;
+    setPanels((prev) => prev.map((p) => {
+      if (p.id !== activePanel.id) return p;
+      // Deduplicate by ip+port
+      const existing = new Set((p.streams || []).map((s) => `${s.ip}:${s.port}`));
+      const toAdd = newStreams.filter((s) => !existing.has(`${s.ip}:${s.port}`));
+      return { ...p, streams: [...(p.streams || []), ...toAdd] };
+    }));
+  }, [activePanel]);
+
+  const handleImportFile = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      const text = ev.target?.result || '';
+      const streams = file.name.endsWith('.json') ? parseStreamsJson(text) : parseStreamsCsv(text);
+      addStreamsToActivePanel(streams);
+    };
+    reader.readAsText(file);
+  }, [addStreamsToActivePanel]);
+
+  const handleExportCsv = useCallback(() => {
+    if (!activePanel) return;
+    exportStreamsCsv(activePanel.streams || [], activePanel.name);
+  }, [activePanel]);
+
+  // Export full workstation config (decoders + panels with assignments) as JSON.
+  const handleExportConfig = useCallback(async () => {
+    try {
+      // Server provides running decoders + server-side panel registry.
+      const serverData = await exportMultiviewConfig();
+      // Merge client-side panel→decoder assignments (decoderIds) from React state.
+      // The server only persists streams[]; decoderIds[] live in the browser.
+      const panelMap = {};
+      panels.forEach((p) => { panelMap[p.id] = p.decoderIds || []; });
+      const bundle = {
+        ...serverData,
+        panels: (serverData.panels || []).map((p) => ({
+          ...p,
+          decoderIds: panelMap[p.id] || [],
+        })),
+        // Include any panels that exist in React state but not yet synced to server.
+        _clientPanelIds: panels.map((p) => ({ id: p.id, name: p.name, decoderIds: p.decoderIds || [] })),
+      };
+      const filename = `labotech-multiview-${new Date().toISOString().slice(0, 10)}.json`;
+      const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+    } catch (err) {
+      alert(`Export failed: ${err.message}`);
+    }
+  }, [panels]);
+
+  // Import full workstation config from a previously exported JSON file.
+  const handleImportConfig = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const bundle = JSON.parse(ev.target?.result || '{}');
+        if (bundle.exportVersion !== 1) {
+          alert('This file is not a valid LaboTech multiview config export.');
+          return;
+        }
+        if (!window.confirm(
+          `Import config from ${bundle.exportedAt?.slice(0, 10) || 'unknown date'}?\n\n` +
+          `This will start ${(bundle.decoders || []).length} decoder(s) and restore ${(bundle.panels || []).length} panel(s).\n\n` +
+          `Already-running decoders with the same ID will be skipped.`
+        )) return;
+
+        const result = await importMultiviewConfig(bundle);
+
+        // Restore client-side panel state (including decoderIds assignments).
+        // Prefer _clientPanelIds which has the full decoderIds from the origin workstation.
+        const importedPanels = bundle._clientPanelIds || bundle.panels || [];
+        if (importedPanels.length > 0) {
+          setPanels(importedPanels.map((p) => ({
+            id: String(p.id),
+            name: String(p.name || ''),
+            decoderIds: Array.isArray(p.decoderIds) ? p.decoderIds : [],
+            streams: Array.isArray(p.streams) ? p.streams : [],
+          })));
+          setActivePanelId(importedPanels[0].id);
+        }
+
+        // Refresh to pick up newly started decoders.
+        refreshActives();
+
+        const skipMsgs = (result.errors || []).filter(Boolean);
+        alert(
+          `Import complete.\n` +
+          `Started: ${(result.started || []).length} decoder(s)\n` +
+          (skipMsgs.length ? `Skipped/errors:\n${skipMsgs.join('\n')}` : '')
+        );
+      } catch (err) {
+        alert(`Import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }, [refreshActives]);
+
+  // Export stream catalog as JSON download.
+  const handleExportCatalog = useCallback(async () => {
+    try {
+      const res = await fetch('/api/multiview/catalog');
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stream-catalog-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Catalog export failed: ${err.message}`);
+    }
+  }, []);
+
+  // Import stream catalog from a JSON or CSV file.
+  const handleImportCatalog = useCallback((e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    e.target.value = '';
+    const isCsv = file.name.toLowerCase().endsWith('.csv');
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const raw = ev.target?.result || '';
+        const result = await uploadCatalog(isCsv ? 'csv' : 'json', raw);
+        // Refresh the in-memory catalog so the picker reflects the new entries.
+        const updated = await fetch('/api/multiview/catalog').then((r) => r.json());
+        setCatalog(Array.isArray(updated.streams) ? updated.streams : []);
+        alert(`Catalog imported: ${result.count} streams loaded.`);
+      } catch (err) {
+        alert(`Catalog import failed: ${err.message}`);
+      }
+    };
+    reader.readAsText(file);
+  }, []);
+
+  // Close add-tile modal on Escape
+  useEffect(() => {
+    if (!addTileOpen) return;
+    const onKey = (e) => { if (e.key === 'Escape') setAddTileOpen(false); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [addTileOpen]);
+
+  const resetAddTileForm = () => {
+    setAddTileHost('');
+    setAddTilePort('');
+    setAddTileDecoderId('');
+    setAddTileMode('rtp');
+    setAddTileLatency('');
+    setAddTilePassphrase('');
+    setAddTileCatalogSearch('');
+    setAddTileShowCatalog(false);
+    setAddTileError(null);
+  };
+
+  const handleAddTile = async () => {
+    const h = addTileHost.trim();
+    if (!h) { setAddTileError('Host / IP or SRT URL is required'); return; }
+    let url;
+    if (/^(srt|rtp|udp):\/\//i.test(h)) {
+      url = h;
+    } else {
+      const p = addTilePort.trim();
+      if (!p) { setAddTileError('Port is required'); return; }
+      url = buildProbeUrl({ mode: addTileMode, host: h, port: p, latency: addTileLatency, passphrase: addTilePassphrase });
+    }
+    const id = addTileDecoderId.trim() || `decoder-${Date.now()}`;
+    setAddTileSubmitting(true);
+    setAddTileError(null);
+    try {
+      const targetUrl = normaliseProbeUrl(url);
+      const existingId = Object.values(decoderMeta).find((m) => normaliseProbeUrl(m?.url) === targetUrl)?.id || null;
+      if (existingId) {
+        // Alias tile to the already-running analyser for this source URL.
+        setPanels((prev) => prev.map((p) => {
+          if (p.id !== activePanelId) return p;
+          return { ...p, decoderIds: [...(p.decoderIds || []), existingId] };
+        }));
+        setAddTileOpen(false);
+        resetAddTileForm();
+        refreshActives();
+        return;
+      }
+      await startContinuous(id, url, 5000);
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), id] };
+      }));
+      setAddTileOpen(false);
+      resetAddTileForm();
+      refreshActives();
+    } catch (err) {
+      setAddTileError(err?.message || 'Failed to start decoder');
+    } finally {
+      setAddTileSubmitting(false);
+    }
+  };
+
+  const handleCreate = async () => {
+    if (!probeUrl) return;
+    const id = decoderId || `decoder-${Date.now()}`;
+    try {
+      const targetUrl = normaliseProbeUrl(probeUrl);
+      const existingId = Object.values(decoderMeta).find((m) => normaliseProbeUrl(m?.url) === targetUrl)?.id || null;
+      if (existingId) {
+        setPanels((prev) => prev.map((p) => {
+          if (p.id !== activePanelId) return p;
+          return { ...p, decoderIds: [...(p.decoderIds || []), existingId] };
+        }));
+        setOpenCreate(false);
+        setDecoderId('');
+        refreshActives();
+        return;
+      }
+      await startContinuous(id, probeUrl, parseInt(interval, 10) || 5000);
+      setPanels((prev) => prev.map((p) => {
+        if (p.id !== activePanelId) return p;
+        if ((p.decoderIds || []).includes(id)) return p;
+        return { ...p, decoderIds: [...(p.decoderIds || []), id] };
+      }));
+      setOpenCreate(false);
+      setDecoderId('');
+      // Sync in background; do not block first-tile render.
+      refreshActives();
+    } catch (_) {
+      // Hook exposes error state; keep form open for correction/retry.
+    }
+  };
+
+  return (
+    <>
+    <div className="space-y-6 broadcast-legacy">
+      <BentoCard icon={Monitor} title="Decoder Multiview">
+        <div className="flex items-center justify-between">
+          <h2 className="text-[10px] text-gray-500 uppercase tracking-[0.3em] font-bold">Multiview Workspaces</h2>
+          <div className="flex items-center gap-3">
+            <div className="text-[10px] text-gray-500 font-mono">
+              Active: {activeIds.length} · Panel: {activePanel?.name || '-'} ({visibleIds.length})
+            </div>
+            {isEditingEngineerModeLabel ? (
+              <div className="inline-flex items-center gap-1">
+                <input
+                  value={engineerModeLabelDraft}
+                  onChange={(e) => setEngineerModeLabelDraft(e.target.value)}
+                  onBlur={commitEngineerModeLabelEdit}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitEngineerModeLabelEdit();
+                    if (e.key === 'Escape') cancelEngineerModeLabelEdit();
+                  }}
+                  maxLength={32}
+                  autoFocus
+                  className="text-xs px-2 py-1 rounded border border-neon-cyan/50 text-gray-200 bg-black/40 min-w-[96px]"
+                  title="Enter to save, Esc to cancel"
+                />
+              </div>
+            ) : (
+              <div className="inline-flex items-center gap-1">
+                <button
+                  onClick={() => setEngineerMode((v) => !v)}
+                  onDoubleClick={beginEngineerModeLabelEdit}
+                  className={`text-xs px-2 py-1 rounded border inline-flex items-center gap-1 ${
+                    engineerMode
+                      ? 'border-neon-cyan/50 bg-neon-cyan/10'
+                      : 'border-white/10 bg-black/20'
+                  }`}
+                  title="Click to toggle mode. Double-click text to edit label."
+                >
+                  <span className="text-gray-400">{engineerModeLabel}</span>
+                  <span className="text-gray-500">:</span>
+                  <span className={engineerMode ? 'text-neon-cyan' : 'text-gray-400'}>
+                    {engineerMode ? 'ON' : 'OFF'}
+                  </span>
+                </button>
+                <button
+                  onClick={beginEngineerModeLabelEdit}
+                  className="inline-flex items-center justify-center w-6 h-6 rounded border border-white/15 text-gray-300 bg-black/20 hover:bg-black/35"
+                  title="Edit mode label"
+                >
+                  <Pencil className="w-3 h-3" />
+                </button>
+              </div>
+            )}
+            {visibleIds.length > 0 && (
+              <button
+                onClick={() => setIsFullscreen(true)}
+                className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded border transition-all duration-150"
+                style={{
+                  color: '#fde68a',
+                  borderColor: 'rgba(251, 191, 36, 0.45)',
+                  background: 'rgba(251, 191, 36, 0.10)',
+                  boxShadow: '0 0 8px rgba(251,191,36,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+                }}
+                title="Fullscreen multiview — thumbnails only"
+              >
+                <Maximize2 className="w-3 h-3" />
+                Full Screen
+              </button>
+            )}
+            <button
+              onClick={() => setOpenPanelCommission((v) => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] px-2.5 py-1 rounded border transition-all duration-150"
+              style={{
+                color: '#a5f3fc',
+                borderColor: 'rgba(34, 211, 238, 0.45)',
+                background: 'rgba(34, 211, 238, 0.12)',
+                boxShadow: '0 0 10px rgba(34,211,238,0.22), inset 0 1px 0 rgba(255,255,255,0.10)',
+              }}
+            >
+              <Plus className="w-3 h-3" />
+              Panel
+            </button>
+            <button
+              onClick={() => setOpenCreate(v => !v)}
+              className="inline-flex items-center gap-1.5 text-xs font-bold uppercase tracking-[0.08em] px-3 py-1.5 rounded border transition-all duration-150"
+              style={{
+                color: '#67e8f9',
+                borderColor: 'rgba(34,211,238,0.55)',
+                background: openCreate
+                  ? 'rgba(34,211,238,0.22)'
+                  : 'rgba(34,211,238,0.10)',
+                boxShadow: openCreate
+                  ? '0 0 14px rgba(34,211,238,0.35), inset 0 1px 0 rgba(255,255,255,0.12)'
+                  : '0 0 8px rgba(34,211,238,0.18), inset 0 1px 0 rgba(255,255,255,0.07)',
+              }}
+              title="Add a new decoder tile"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Decoder
+            </button>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept=".csv,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <button
+              onClick={() => importFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+              title="Import streams from CSV or JSON"
+            >
+              <Upload className="w-3 h-3" />
+              Import
+            </button>
+            {(activePanel?.streams || []).length > 0 && (
+              <button
+                onClick={handleExportCsv}
+                className="inline-flex items-center gap-1 text-xs bg-neon-cyan/20 hover:bg-neon-cyan/30 text-neon-cyan border border-neon-cyan/40 px-2 py-1 rounded"
+                title="Export panel streams as CSV"
+              >
+                <Download className="w-3 h-3" />
+                Export
+              </button>
+            )}
+            {/* Stream catalog import / export */}
+            <input
+              ref={catalogImportFileRef}
+              type="file"
+              accept=".json,.csv"
+              className="hidden"
+              onChange={handleImportCatalog}
+            />
+            <button
+              onClick={handleExportCatalog}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#6ee7b7', borderColor: 'rgba(52,211,153,0.4)', background: 'rgba(16,185,129,0.10)' }}
+              title="Export stream catalog as JSON"
+            >
+              <Download className="w-3 h-3" />
+              Catalog
+            </button>
+            <button
+              onClick={() => catalogImportFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#6ee7b7', borderColor: 'rgba(52,211,153,0.4)', background: 'rgba(16,185,129,0.10)' }}
+              title="Import stream catalog — accepts JSON or CSV (name,ip,port,mode)"
+            >
+              <Upload className="w-3 h-3" />
+              Catalog
+            </button>
+            {/* Full workstation config export / import */}
+            <input
+              ref={configImportFileRef}
+              type="file"
+              accept=".json"
+              className="hidden"
+              onChange={handleImportConfig}
+            />
+            <button
+              onClick={handleExportConfig}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#c4b5fd', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(139,92,246,0.12)' }}
+              title="Export full multiview config — all decoders, panels and assignments"
+            >
+              <Download className="w-3 h-3" />
+              Config
+            </button>
+            <button
+              onClick={() => configImportFileRef.current?.click()}
+              className="inline-flex items-center gap-1 text-xs border px-2 py-1 rounded"
+              style={{ color: '#c4b5fd', borderColor: 'rgba(167,139,250,0.4)', background: 'rgba(139,92,246,0.12)' }}
+              title="Import full multiview config onto this workstation"
+            >
+              <Upload className="w-3 h-3" />
+              Config
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          {panels.map((panel) => (
+            <div key={panel.id} className="inline-flex items-center">
+              <button
+                onClick={() => setActivePanelId(panel.id)}
+                className={`text-[10px] font-mono uppercase tracking-[0.1em] px-2.5 py-1 rounded-l border ${
+                  activePanelId === panel.id
+                    ? 'border-neon-cyan/60 text-neon-cyan bg-neon-cyan/10'
+                    : 'border-white/15 text-gray-400 bg-black/20'
+                }`}
+                title={panel.name}
+              >
+                {panel.name}
+              </button>
+              {panels.length > 1 && (
+                <button
+                  onClick={() => removePanel(panel.id)}
+                  className="text-[9px] px-1.5 py-1 rounded-r border border-l-0 transition-colors"
+                  style={{
+                    borderColor: 'rgba(255,255,255,0.12)',
+                    color: '#6b7280',
+                    background: 'rgba(0,0,0,0.22)',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = '#9ca3af';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.22)';
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.34)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = '#6b7280';
+                    e.currentTarget.style.borderColor = 'rgba(255,255,255,0.12)';
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.22)';
+                  }}
+                  title="Remove panel"
+                >
+                  x
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+
+        {openPanelCommission && (
+          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-black/20 space-y-2">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold">Panel Commissioning</div>
+            <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-2 items-end">
+              <Field
+                label="Panel Callsign"
+                value={newPanelName}
+                onChange={(v) => setNewPanelName(v)}
+                placeholder="e.g. BES"
+              />
+              <button
+                onClick={createPanel}
+                disabled={!panelNameValid}
+                className="text-xs px-3 py-2 rounded border disabled:opacity-50 border-neon-cyan/40 text-neon-cyan bg-neon-cyan/10"
+              >
+                Rack Panel
+              </button>
+              <button
+                onClick={() => {
+                  setOpenPanelCommission(false);
+                  setNewPanelName('');
+                }}
+                className="text-xs px-3 py-2 rounded border border-white/15 text-gray-400 bg-black/20"
+              >
+                Abort
+              </button>
+            </div>
+            <div className="text-[10px] font-mono text-gray-500">
+              TAB PREVIEW: [{normalizedDraftPanelName || '---'}]
+            </div>
+            {!panelNameValid && newPanelName ? (
+              <div className="text-[10px] text-amber-300">
+                {panelNameInUse ? 'Callsign already in use.' : 'Use 3-24 chars: A-Z, 0-9, -'}
+              </div>
+            ) : null}
+          </div>
+        )}
+
+        {activeIds.length > 0 && activePanel && (
+          <div className="mt-3 p-3 rounded-xl border border-white/10 bg-black/20">
+            <div className="text-[10px] uppercase tracking-[0.2em] text-gray-500 font-bold mb-2">
+              Panel Routing - {activePanel.name}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {activeIds.map((id) => {
+                const assigned = (activePanel.decoderIds || []).includes(id);
+                return (
+                  <button
+                    key={`route-${activePanel.id}-${id}`}
+                    onClick={() => toggleDecoderInActivePanel(id)}
+                    className={`text-[10px] font-mono px-2 py-1 rounded border ${
+                      assigned
+                        ? 'border-neon-cyan/60 text-neon-cyan bg-neon-cyan/10'
+                        : 'border-white/15 text-gray-500 bg-black/20'
+                    }`}
+                  >
+                    {id}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {openCreate && (
+          <div className="mt-4 p-3 rounded-xl border border-white/10 bg-black/20 space-y-3">
+            {/* Select stream from catalog + mode buttons in one row */}
+            <div className="flex items-center gap-2">
+              <div className="relative flex-1" ref={catalogRef}>
+                <div className="flex items-center gap-1.5 px-2 py-1.5 rounded-lg border border-white/10 bg-black/30 focus-within:border-neon-cyan/40">
+                  <Search className="w-3 h-3 text-gray-500 shrink-0" />
+                  <input
+                    type="text"
+                    value={catalogSearch}
+                    onChange={(e) => { setCatalogSearch(e.target.value); setShowCatalog(true); }}
+                    onFocus={() => setShowCatalog(true)}
+                    placeholder="Select stream from catalog…"
+                    className="flex-1 bg-transparent text-xs text-gray-300 placeholder-gray-600 outline-none font-mono"
+                  />
+                </div>
+                {showCatalog && catalog.length > 0 && (() => {
+                  const q = catalogSearch.toLowerCase();
+                  const filtered = q.length >= 1
+                    ? catalog.filter(s => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                    : catalog;
+                  const catOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
+                  const grouped = {};
+                  filtered.forEach(s => {
+                    const c = deriveCategory(s.name);
+                    if (!grouped[c]) grouped[c] = [];
+                    grouped[c].push(s);
+                  });
+                  const cats = catOrder.filter(c => grouped[c]);
+                  return (
+                    <div
+                      className="absolute left-0 right-0 z-50 mt-1 rounded border border-white/15 overflow-y-auto"
+                      style={{ background: '#0d1117', boxShadow: '0 8px 32px rgba(0,0,0,0.7)', maxHeight: '320px' }}
+                    >
+                      {cats.length === 0 && (
+                        <div className="px-3 py-2 text-[10px] text-gray-500">No streams match</div>
+                      )}
+                      {cats.map(cat => (
+                        <div key={cat}>
+                          <div className="px-2 py-1 text-[9px] uppercase tracking-widest font-bold sticky top-0"
+                            style={{ background: '#0d1117', color: '#3a6a9a', borderBottom: '1px solid rgba(40,90,160,0.2)' }}>
+                            {cat} ({grouped[cat].length})
+                          </div>
+                          {grouped[cat].map(s => (
+                            <button
+                              key={s.ip + ':' + s.port}
+                              className="w-full text-left px-3 py-1.5 flex items-center gap-3 hover:bg-white/5"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setHost(s.ip);
+                                setPort(s.port);
+                                setMode(s.mode || 'rtp');
+                                setDecoderId(deriveStreamDecoderId(s));
+                                setShowCatalog(false);
+                                setCatalogSearch('');
+                              }}
+                            >
+                              <span className="text-[10px] font-mono text-gray-300 truncate flex-1">{s.name}</span>
+                              <span className="text-[9px] font-mono shrink-0" style={{ color: '#3a6a9a' }}>{s.ip}:{s.port}</span>
+                            </button>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+              {['rtp', 'srt', 'udp'].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setMode(v)}
+                  className={`px-3 py-1.5 rounded-lg text-xs border shrink-0 ${mode === v ? 'bg-neon-cyan/20 border-neon-cyan/50 text-white' : 'bg-black/30 border-white/10 text-gray-400 hover:text-gray-200'}`}
+                >
+                  {v.toUpperCase()}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+              <Field label="Host / IP" value={host} onChange={setHost} placeholder="239.x.x.x" />
+              <Field label="Port" value={port} onChange={setPort} type="number" placeholder="Port" />
+              <Field label="Decoder ID" value={decoderId} onChange={setDecoderId} placeholder="decoder-a" />
+              <Field label="Refresh (ms)" value={interval} onChange={setInterval} type="number" placeholder="5000" />
+            </div>
+            {mode === 'srt' && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <Field label="Latency (ms)" value={latency} onChange={setLatency} type="number" placeholder="2000" />
+                <Field label="Passphrase" value={passphrase} onChange={setPassphrase} placeholder="optional" />
+              </div>
+            )}
+            <div className="text-[11px] text-gray-500 font-mono truncate">{probeUrl || 'Fill host/port to build decoder URL'}</div>
+            <div className="flex justify-end">
+              <button
+                onClick={handleCreate}
+                disabled={!probeUrl}
+              className="text-xs bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded disabled:opacity-50"
+              >
+                Add Tile
+              </button>
+            </div>
+            <div className="text-[10px] text-gray-500">
+              Continuous probe cadence is target-based. Heavy bitrate/SI sampling runs every few cycles to reduce multiview lag.
+            </div>
+          </div>
+        )}
+
+        {error && (
+          <p className="text-amber-300 text-xs mt-2">Multiview warning: {error}</p>
+        )}
+
+        {/* Decoder tile grid — always rendered; "+" tile is always the last slot */}
+        <div className="grid gap-3 mt-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))' }}>
+          {visibleIds.map((id, idx) => (
+            <DecoderCard
+              key={`${id}-${idx}`}
+              id={id}
+              displayName={getMultiviewDisplayName(id)}
+              meta={decoderMeta[id]}
+              result={resultsById[id]}
+              onStop={async () => {
+                if (stoppingIds.has(id)) return;
+                setStoppingIds((prev) => { const next = new Set(prev); next.add(id); return next; });
+                try { await stop(id); } finally {
+                  refreshActives();
+                  setStoppingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+                }
+              }}
+              nowMs={nowMs}
+              engineerMode={engineerMode}
+              isStopping={stoppingIds.has(id)}
+            />
+          ))}
+          {/* Quick-add slot */}
+          <button
+            onClick={() => setAddTileOpen(true)}
+            style={{
+              minHeight: '200px',
+              border: '1px dashed #1c3040',
+              borderRadius: '4px',
+              background: 'transparent',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              padding: 0,
+            }}
+            className="hover:border-teal-600 hover:bg-teal-950/20 transition-colors group"
+            title="Add decoder to multiview"
+          >
+            <Plus size={32} className="text-gray-700 group-hover:text-teal-500 transition-colors" />
+          </button>
+        </div>
+      </BentoCard>
+    </div>
+
+    {/* ── Add decoder modal (triggered by "+" tile) ── */}
+    {addTileOpen && (
+      <div
+        style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(0,0,0,0.75)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+        onClick={(e) => { if (e.target === e.currentTarget) { setAddTileOpen(false); resetAddTileForm(); } }}
+      >
+        <div style={{ background: '#0d1117', border: '1px solid #1a2d3a', borderRadius: '6px', padding: '28px 28px 24px', width: '480px', maxWidth: '96vw' }}>
+          <p style={{ fontFamily: 'monospace', fontSize: '11px', color: '#00ff9f', letterSpacing: '0.25em', textTransform: 'uppercase', marginBottom: '20px' }}>
+            Add Decoder
+          </p>
+
+          {/* Catalog search + mode buttons */}
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ flex: 1, position: 'relative' }} ref={addTileCatalogRef}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '6px 8px', background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px' }}>
+                <Search size={12} style={{ color: '#4b5563', flexShrink: 0 }} />
+                <input
+                  type="text"
+                  value={addTileCatalogSearch}
+                  onChange={(e) => { setAddTileCatalogSearch(e.target.value); setAddTileShowCatalog(true); }}
+                  onFocus={() => setAddTileShowCatalog(true)}
+                  placeholder="Select from catalog…"
+                  style={{ flex: 1, background: 'transparent', border: 'none', outline: 'none', color: '#d1d5db', fontFamily: 'monospace', fontSize: '11px' }}
+                />
+              </div>
+              {addTileShowCatalog && catalog.length > 0 && (() => {
+                const q = addTileCatalogSearch.toLowerCase();
+                const filtered = q.length >= 1
+                  ? catalog.filter((s) => s.name.toLowerCase().includes(q) || s.ip.includes(q))
+                  : catalog;
+                const catOrder = ['GV Receivers','LK Receivers','GV Encoders','LK Encoders','GV IP Decoders','LK IP Decoders','GV Blue Multicast','GV Red Multicast','LK Blue Multicast','LK Red Multicast','Other','Legacy'];
+                const grouped = {};
+                filtered.forEach((s) => {
+                  const c = deriveCategory(s.name);
+                  if (!grouped[c]) grouped[c] = [];
+                  grouped[c].push(s);
+                });
+                const cats = catOrder.filter((c) => grouped[c]);
+                return (
+                  <div
+                    style={{ position: 'absolute', left: 0, right: 0, zIndex: 100, marginTop: '2px', background: '#0d1117', border: '1px solid #1a2d3a', borderRadius: '3px', boxShadow: '0 8px 32px rgba(0,0,0,0.7)', maxHeight: '280px', overflowY: 'auto' }}
+                  >
+                    {cats.length === 0 && (
+                      <div style={{ padding: '8px 12px', fontFamily: 'monospace', fontSize: '10px', color: '#4b5563' }}>No streams match</div>
+                    )}
+                    {cats.map((cat) => (
+                      <div key={cat}>
+                        <div style={{ padding: '4px 8px', fontFamily: 'monospace', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.15em', fontWeight: 700, color: '#3a6a9a', background: '#0d1117', borderBottom: '1px solid rgba(40,90,160,0.2)', position: 'sticky', top: 0 }}>
+                          {cat} ({grouped[cat].length})
+                        </div>
+                        {grouped[cat].map((s) => (
+                          <button
+                            key={s.ip + ':' + s.port}
+                            style={{ width: '100%', textAlign: 'left', padding: '6px 12px', display: 'flex', alignItems: 'center', gap: '12px', background: 'transparent', border: 'none', cursor: 'pointer', outline: 'none' }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.04)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              setAddTileHost(s.ip);
+                              setAddTilePort(String(s.port));
+                              setAddTileMode(s.mode || 'rtp');
+                              setAddTileDecoderId(deriveStreamDecoderId(s));
+                              setAddTileShowCatalog(false);
+                              setAddTileCatalogSearch('');
+                            }}
+                          >
+                            <span style={{ fontFamily: 'monospace', fontSize: '10px', color: '#d1d5db', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                            <span style={{ fontFamily: 'monospace', fontSize: '9px', color: '#3a6a9a', flexShrink: 0 }}>{s.ip}:{s.port}</span>
+                          </button>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                );
+              })()}
+            </div>
+            {['rtp', 'srt', 'udp'].map((v) => (
+              <button
+                key={v}
+                onClick={() => setAddTileMode(v)}
+                style={{
+                  fontFamily: 'monospace', fontSize: '10px', letterSpacing: '0.1em', padding: '6px 10px', borderRadius: '3px', cursor: 'pointer', flexShrink: 0,
+                  background: addTileMode === v ? 'rgba(34,211,238,0.15)' : '#080d12',
+                  border: addTileMode === v ? '1px solid rgba(34,211,238,0.5)' : '1px solid #1a2d3a',
+                  color: addTileMode === v ? '#a5f3fc' : '#6b7280',
+                }}
+              >
+                {v.toUpperCase()}
+              </button>
+            ))}
+          </div>
+
+          {/* Host / IP */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Host / IP
+          </label>
+          <input
+            type="text"
+            value={addTileHost}
+            onChange={(e) => { setAddTileHost(e.target.value); setAddTileError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="239.x.x.x"
+            autoFocus
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {/* Port */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Port
+          </label>
+          <input
+            type="text"
+            value={addTilePort}
+            onChange={(e) => { setAddTilePort(e.target.value); setAddTileError(null); }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="e.g. 9000"
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '12px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {/* SRT latency + passphrase */}
+          {addTileMode === 'srt' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+              <div>
+                <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  Latency (ms)
+                </label>
+                <input
+                  type="text"
+                  value={addTileLatency}
+                  onChange={(e) => setAddTileLatency(e.target.value)}
+                  placeholder="2000"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+                    color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+                  Passphrase <span style={{ color: '#374151' }}>(optional)</span>
+                </label>
+                <input
+                  type="text"
+                  value={addTilePassphrase}
+                  onChange={(e) => setAddTilePassphrase(e.target.value)}
+                  placeholder="optional"
+                  style={{
+                    width: '100%', boxSizing: 'border-box',
+                    background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+                    color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+                    outline: 'none',
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Optional decoder ID */}
+          <label style={{ display: 'block', fontFamily: 'monospace', fontSize: '10px', color: '#6b7280', letterSpacing: '0.2em', textTransform: 'uppercase', marginBottom: '4px' }}>
+            Decoder ID <span style={{ color: '#374151' }}>(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={addTileDecoderId}
+            onChange={(e) => setAddTileDecoderId(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAddTile(); }}
+            placeholder="auto-generated if blank"
+            style={{
+              width: '100%', boxSizing: 'border-box', marginBottom: '20px',
+              background: '#080d12', border: '1px solid #1a2d3a', borderRadius: '3px',
+              color: '#e5e7eb', fontFamily: 'monospace', fontSize: '12px', padding: '7px 10px',
+              outline: 'none',
+            }}
+          />
+
+          {addTileError && (
+            <p style={{ fontFamily: 'monospace', fontSize: '10px', color: '#f87171', marginBottom: '12px' }}>{addTileError}</p>
+          )}
+
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button
+              onClick={() => { setAddTileOpen(false); resetAddTileForm(); }}
+              style={{ fontFamily: 'monospace', fontSize: '11px', color: '#6b7280', background: 'transparent', border: '1px solid #1a2d3a', borderRadius: '3px', padding: '6px 16px', cursor: 'pointer' }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleAddTile}
+              disabled={addTileSubmitting}
+              style={{
+                fontFamily: 'monospace', fontSize: '11px', letterSpacing: '0.1em',
+                color: addTileSubmitting ? '#374151' : '#00ff9f',
+                background: 'transparent', border: `1px solid ${addTileSubmitting ? '#1a2d3a' : '#00ff9f'}`,
+                borderRadius: '3px', padding: '6px 20px', cursor: addTileSubmitting ? 'not-allowed' : 'pointer',
+              }}
+            >
+              {addTileSubmitting ? 'STARTING…' : 'START'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+
+    {/* Hidden prefetch layer — keeps browser HTTP cache warm so fullscreen tiles appear instantly.
+        One invisible 1×1 img per decoder; same URL the fullscreen tiles will use.
+        display:none would suppress fetching, so we use visibility:hidden + overflow:hidden instead. */}
+    {/* Hidden prefetch layer — always mounted (including during fullscreen) so cache stays
+        warm through the transition boundary. One invisible 1×1 img per decoder keeps the
+        browser HTTP cache populated continuously; fullscreen tiles hit cache on first paint.
+        visibility:hidden (not display:none) is required — display:none suppresses fetching. */}
+    <div
+      aria-hidden="true"
+      style={{ position: 'fixed', top: 0, left: 0, width: 1, height: 1, overflow: 'hidden', visibility: 'hidden', pointerEvents: 'none' }}
+    >
+      {visibleIds.map((id, idx) => {
+        const url = resultsById[id]?.thumbnailUrl;
+        return url ? (
+          <img
+            key={`${id}-${idx}`}
+            src={url}
+            alt=""
+            width={1}
+            height={1}
+            loading="eager"
+            fetchPriority="high"
+            decoding="async"
+          />
+        ) : null;
+      })}
+    </div>
+
+    {/* ── Professional MCR-style fullscreen multiview overlay ── */}
+    {isFullscreen && (() => {
+      const d = new Date(fsNowMs);
+      const utcTime = [d.getUTCHours(), d.getUTCMinutes(), d.getUTCSeconds()].map((v) => String(v).padStart(2, '0')).join(':');
+      const utcDate = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+      const liveCount = visibleIds.filter((id) => {
+        const r = resultsById[id];
+        return r?.probeTime && (Date.now() - r.probeTime) < 20000;
+      }).length;
+      return (
+        <div
+          ref={fullscreenRef}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            backgroundColor: '#040608',
+            backgroundImage: 'url("/broadcast-rack-bays.svg")',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundRepeat: 'no-repeat',
+            display: 'flex', flexDirection: 'column',
+            fontFamily: 'monospace',
+          }}
+        >
+          {/* Top header bar — 40px MCR chrome */}
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '0 16px',
+            height: 40,
+            background: '#070707',
+            borderBottom: '2px solid #0f0f0f',
+            boxShadow: '0 2px 12px rgba(0,0,0,0.7)',
+            flexShrink: 0,
+            gap: 12,
+          }}>
+            {/* Left: panel callsign */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <div style={{ lineHeight: 1 }}>
+                <div style={{ color: '#3a3a3a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>PANEL</div>
+                <div style={{ color: '#d8d8d8', fontSize: '12px', fontWeight: 700, letterSpacing: '0.18em', textTransform: 'uppercase' }}>
+                  {activePanel?.name || '—'}
+                </div>
+              </div>
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              {/* Live stream indicator */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                <div style={{ width: 6, height: 6, borderRadius: '50%', background: liveCount > 0 ? '#00dd55' : '#333', boxShadow: liveCount > 0 ? '0 0 5px #00dd5566' : 'none' }} />
+                <span style={{ color: liveCount > 0 ? '#00bb44' : '#333', fontSize: '9px', letterSpacing: '0.1em', textTransform: 'uppercase' }}>
+                  {liveCount}/{visibleIds.length}
+                </span>
+              </div>
+            </div>
+
+            {/* Centre: system title */}
+            <div style={{ textAlign: 'center', flexShrink: 0 }}>
+              <div style={{
+                color: '#8a9ab8',
+                fontSize: '10px',
+                fontWeight: 700,
+                letterSpacing: '0.36em',
+                textTransform: 'uppercase',
+              }}>
+                LABOTECH
+              </div>
+              <div style={{ color: '#1e2e40', fontSize: '7px', letterSpacing: '0.22em', textTransform: 'uppercase', marginTop: 1 }}>
+                MULTIVIEW MONITOR
+              </div>
+            </div>
+
+            {/* Right: UTC timecode + exit */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, flex: 1, justifyContent: 'flex-end', minWidth: 0 }}>
+              {/* UTC clock */}
+              <div style={{ textAlign: 'right', lineHeight: 1 }}>
+                <div style={{ color: '#2a4a5a', fontSize: '7px', letterSpacing: '0.2em', textTransform: 'uppercase' }}>UTC</div>
+                <div style={{ color: '#4a8ab0', fontSize: '14px', fontWeight: 700, letterSpacing: '0.06em', fontVariantNumeric: 'tabular-nums' }}>
+                  {utcTime}
+                </div>
+              </div>
+              <div style={{ width: 1, height: 18, background: '#1a1a1a', flexShrink: 0 }} />
+              <button
+                onClick={() => { document.exitFullscreen?.(); setIsFullscreen(false); }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: 5,
+                  background: 'transparent',
+                  border: '1px solid #1e1e1e',
+                  borderRadius: '2px',
+                  color: '#3a3a3a',
+                  padding: '4px 10px',
+                  cursor: 'pointer',
+                  fontSize: '9px',
+                  letterSpacing: '0.14em',
+                  textTransform: 'uppercase',
+                  transition: 'color 0.1s, border-color 0.1s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.color = '#888'; e.currentTarget.style.borderColor = '#333'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.color = '#3a3a3a'; e.currentTarget.style.borderColor = '#1e1e1e'; }}
+                title="Exit fullscreen (ESC)"
+              >
+                <Minimize2 style={{ width: 10, height: 10 }} />
+                EXIT
+              </button>
+            </div>
+          </div>
+
+          {/* Tile grid — fills remaining height, all tiles sized to fit viewport instantly */}
+          {(() => {
+            const cols = fsColumns(visibleIds.length);
+            const rows = Math.max(1, fsRows(visibleIds.length, cols));
+            // Header is 40px + 2px border. Subtract gap/padding (1px each side = 2px total).
+            // Each row height = (100vh - 42px - gaps) / rowCount, capped to maintain 16:9.
+            const rowH = `calc((100vh - 42px - ${rows + 1}px) / ${rows})`;
+            return (
+          <div style={{
+            flex: 1,
+            display: 'grid',
+            gridTemplateColumns: `repeat(${cols}, 1fr)`,
+            gridTemplateRows: `repeat(${rows}, ${rowH})`,
+            overflow: 'hidden',
+            gap: '1px',
+            padding: '1px',
+            background: '#010203',
+          }}>
+            {visibleIds.map((id) => (
+              <FullscreenThumbTile
+                key={id}
+                id={id}
+                result={resultsById[id]}
+                nowMs={nowMs}
+              />
+            ))}
+          </div>
+            );
+          })()}
+
+        </div>
+      );
+    })()}
+    </>
+  );
+}

@@ -1,0 +1,312 @@
+'use strict';
+
+const { EventEmitter } = require('events');
+const { spawn, execSync } = require('child_process');
+
+class IATSniffer extends EventEmitter {
+  constructor(options = {}) {
+    super();
+    this.id = options.id || `iat-${Date.now()}`;
+    this.url = options.url || null;
+    this.nicName = options.nicName || 'eno2';
+    this.windowSize = options.windowSize || 300;
+
+    this.isRunning = false;
+    this.captureMethod = null; // tshark | tcpdump | unavailable
+    this._proc = null;
+    this._metricsTimer = null;
+    this._iats = [];
+    this._prevTs = null;
+    this._prevSeq = null;
+    this._lostPackets = 0;
+    this._totalPackets = 0;
+    this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
+    this._lastPacketMeta = {
+      sourceIp: null,
+      destIp: null,
+      ttl: null,
+      tos: null,
+      dscp: null,
+      vlanId: null,
+    };
+    this.lastError = null;
+  }
+
+  static _detectCaptureMethod() {
+    try {
+      execSync('which tshark', { stdio: 'ignore' });
+      return 'tshark';
+    } catch (_) {}
+    try {
+      execSync('which tcpdump', { stdio: 'ignore' });
+      return 'tcpdump';
+    } catch (_) {}
+    return 'unavailable';
+  }
+
+  static _parseUrl(url) {
+    if (!url) return null;
+    const m = String(url).match(/^(?:udp|rtp|srt):\/\/([^/:?#]+):(\d+)/i);
+    if (!m) return null;
+    return { host: m[1], port: parseInt(m[2], 10) };
+  }
+
+  start(url) {
+    if (url) this.url = url;
+    if (this.isRunning) return this;
+
+    this.captureMethod = IATSniffer._detectCaptureMethod();
+    if (this.captureMethod === 'unavailable') {
+      this.lastError = 'tshark and tcpdump not found';
+      this.emit('unavailable', { id: this.id, reason: this.lastError });
+      return this;
+    }
+
+    const target = IATSniffer._parseUrl(this.url);
+    if (!target) {
+      this.captureMethod = 'unavailable';
+      this.lastError = `Cannot parse URL: ${this.url}`;
+      this.emit('unavailable', { id: this.id, reason: this.lastError });
+      return this;
+    }
+
+    this.isRunning = true;
+    this.lastError = null;
+    this._iats = [];
+    this._prevTs = null;
+    this._prevSeq = null;
+    this._lostPackets = 0;
+    this._totalPackets = 0;
+    this._jitterMs = 0;
+    this._seqObserved = false;
+    this._seqGapEvents = 0;
+    this._seqDuplicateEvents = 0;
+    this._seqReorderedEvents = 0;
+    this._lastPacketMeta = {
+      sourceIp: null,
+      destIp: null,
+      ttl: null,
+      tos: null,
+      dscp: null,
+      vlanId: null,
+    };
+
+    this._spawnCapture(target);
+    this._metricsTimer = setInterval(() => {
+      this.emit('metrics', this.getMetrics());
+    }, 2000);
+    return this;
+  }
+
+  stop() {
+    this.isRunning = false;
+    if (this._metricsTimer) {
+      clearInterval(this._metricsTimer);
+      this._metricsTimer = null;
+    }
+    if (this._proc) {
+      try { this._proc.kill('SIGTERM'); } catch (_) {}
+      this._proc = null;
+    }
+    this.emit('stopped', { id: this.id });
+  }
+
+  getMetrics() {
+    const iats = this._iats.slice();
+    if (iats.length === 0) {
+      return {
+        iatMs: { min: null, max: null, avg: null, p95: null },
+        jitterMs: null,
+        packetLossPct: null,
+        sampleCount: 0,
+        captureMethod: this.captureMethod,
+      };
+    }
+
+    const sorted = [...iats].sort((a, b) => a - b);
+    const sum = iats.reduce((s, v) => s + v, 0);
+    const p95idx = Math.min(sorted.length - 1, Math.max(0, Math.floor(sorted.length * 0.95)));
+    const lossPct = this._totalPackets > 0
+      ? parseFloat(((this._lostPackets / this._totalPackets) * 100).toFixed(2))
+      : null;
+
+    return {
+      iatMs: {
+        min: parseFloat(sorted[0].toFixed(3)),
+        max: parseFloat(sorted[sorted.length - 1].toFixed(3)),
+        avg: parseFloat((sum / iats.length).toFixed(3)),
+        p95: parseFloat(sorted[p95idx].toFixed(3)),
+      },
+      jitterMs: parseFloat(this._jitterMs.toFixed(3)),
+      packetLossPct: lossPct,
+      sampleCount: iats.length,
+      captureMethod: this.captureMethod,
+      rtpDrops: this._lostPackets,
+      rtpOutOfOrder: this._seqReorderedEvents,
+      network: { ...this._lastPacketMeta },
+      rtpSequence: {
+        observed: this._seqObserved,
+        lastSeq: this._prevSeq,
+        gapEvents: this._seqGapEvents,
+        duplicateEvents: this._seqDuplicateEvents,
+        reorderedEvents: this._seqReorderedEvents,
+      },
+    };
+  }
+
+  toJSON() {
+    return {
+      id: this.id,
+      url: this.url,
+      isRunning: this.isRunning,
+      captureMethod: this.captureMethod,
+    };
+  }
+
+  _spawnCapture(target) {
+    let args;
+    let parser;
+
+    if (this.captureMethod === 'tshark') {
+      args = [
+        '-i', this.nicName,
+        '-f', `udp dst port ${target.port}`,
+        '-T', 'fields',
+        '-e', 'frame.time_epoch',
+        '-e', 'rtp.seq',
+        '-e', 'ip.src',
+        '-e', 'ip.dst',
+        '-e', 'ip.ttl',
+        '-e', 'ip.dsfield',
+        '-e', 'ip.dsfield.dscp',
+        '-e', 'vlan.id',
+        '-l',
+      ];
+      parser = (line) => this._parseTsharkLine(line);
+    } else {
+      args = [
+        '-i', this.nicName,
+        '-n', '-tt', '-u',
+        `udp dst port ${target.port}`,
+      ];
+      parser = (line) => this._parseTcpdumpLine(line);
+    }
+
+    const proc = spawn(this.captureMethod, args);
+    this._proc = proc;
+    let buf = '';
+    let stderrBuf = '';
+
+    proc.stdout.on('data', (d) => {
+      buf += d.toString();
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) parser(trimmed);
+      }
+    });
+    proc.stderr.on('data', (d) => {
+      stderrBuf += d.toString();
+      if (stderrBuf.length > 2000) stderrBuf = stderrBuf.slice(-2000);
+    });
+    proc.on('error', (err) => {
+      this.captureMethod = 'unavailable';
+      this.lastError = err && err.message ? err.message : 'capture process error';
+      this.emit('unavailable', { id: this.id, reason: this.lastError });
+      // Do not re-emit as 'error' — spawn failure is a config/permissions issue,
+      // not a runtime error. Callers read lastError or listen to 'unavailable'.
+      this.stop();
+    });
+    // Use 'close' not 'exit': guarantees stderr has fully flushed before we read stderrBuf.
+    proc.on('close', (code) => {
+      if (this.isRunning && code !== 0 && code !== null) {
+        const reason = (stderrBuf || '').trim().split('\n').slice(-1)[0];
+        this.lastError = reason
+          ? `${this.captureMethod} exited ${code}: ${reason}`
+          : `${this.captureMethod} exited ${code}`;
+        this.emit('unavailable', { id: this.id, reason: this.lastError });
+        // Do not emit 'error' — a non-zero exit is a permissions/config issue (e.g.
+        // CAP_NET_RAW not granted). Callers should listen to 'unavailable' or poll lastError.
+        this.stop();
+      }
+    });
+  }
+
+  _parseTsharkLine(line) {
+    const parts = line.split('\t');
+    const epoch = parseFloat(parts[0]);
+    const seq = parts[1] != null && parts[1] !== '' ? parseInt(parts[1], 10) : null;
+    const sourceIp = parts[2] || null;
+    const destIp = parts[3] || null;
+    const ttl = parts[4] != null && parts[4] !== '' ? parseInt(parts[4], 10) : null;
+    const tos = parts[5] || null;
+    const dscp = parts[6] != null && parts[6] !== '' ? parseInt(parts[6], 10) : null;
+    const vlanId = parts[7] != null && parts[7] !== '' ? parseInt(parts[7], 10) : null;
+    if (!Number.isFinite(epoch) || epoch <= 0) return;
+
+    if (sourceIp) this._lastPacketMeta.sourceIp = sourceIp;
+    if (destIp) this._lastPacketMeta.destIp = destIp;
+    if (Number.isFinite(ttl)) this._lastPacketMeta.ttl = ttl;
+    if (tos) this._lastPacketMeta.tos = tos;
+    if (Number.isFinite(dscp)) this._lastPacketMeta.dscp = dscp;
+    if (Number.isFinite(vlanId)) this._lastPacketMeta.vlanId = vlanId;
+
+    this._totalPackets += 1;
+    if (this._prevTs != null) {
+      const iatMs = (epoch - this._prevTs) * 1000;
+      if (iatMs > 0 && iatMs < 10000) {
+        this._iats.push(iatMs);
+        if (this._iats.length > this.windowSize) this._iats.shift();
+        const prevIat = this._iats.length > 1 ? this._iats[this._iats.length - 2] : iatMs;
+        const d = Math.abs(iatMs - prevIat);
+        this._jitterMs += (d - this._jitterMs) / 16;
+      }
+    }
+    this._prevTs = epoch;
+
+    if (Number.isFinite(seq) && this._prevSeq != null) {
+      const delta = (seq - this._prevSeq + 65536) % 65536;
+      if (delta === 0) {
+        this._seqDuplicateEvents += 1;
+      } else if (delta === 1) {
+        // in-order packet
+      } else if (delta > 1 && delta < 32768) {
+        this._seqGapEvents += 1;
+        this._lostPackets += delta - 1;
+      } else {
+        this._seqReorderedEvents += 1;
+      }
+    }
+    if (Number.isFinite(seq)) {
+      this._seqObserved = true;
+      this._prevSeq = seq;
+    }
+  }
+
+  _parseTcpdumpLine(line) {
+    const m = line.match(/^([\d]+\.[\d]+)\s/);
+    if (!m) return;
+    const epoch = parseFloat(m[1]);
+    if (!Number.isFinite(epoch) || epoch <= 0) return;
+
+    this._totalPackets += 1;
+    if (this._prevTs != null) {
+      const iatMs = (epoch - this._prevTs) * 1000;
+      if (iatMs > 0 && iatMs < 10000) {
+        this._iats.push(iatMs);
+        if (this._iats.length > this.windowSize) this._iats.shift();
+        const prevIat = this._iats.length > 1 ? this._iats[this._iats.length - 2] : iatMs;
+        const d = Math.abs(iatMs - prevIat);
+        this._jitterMs += (d - this._jitterMs) / 16;
+      }
+    }
+    this._prevTs = epoch;
+  }
+}
+
+module.exports = IATSniffer;

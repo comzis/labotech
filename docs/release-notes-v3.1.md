@@ -1,0 +1,2152 @@
+# Labotech v3.1 Release Notes
+
+Date: 2026-04-12 (latest: web 3.1.156 / backend 3.2.37)
+
+## v3.1.156 — 2026-04-12
+
+### Fix: multiview decoder start opens two tiles instead of one
+
+- **Issue** — starting a decoder from the multiview panel (Add Tile or Create) produced two tiles for the same source.
+- **Cause** — PR #117 removed the dedup guard (`if decoderIds.includes(id) return p`) from the `setPanels` call in both `handleAddTile` and `handleCreate`. A race condition between the auto-seed `useEffect([activeIds])` and the handler's own `setPanels` was already adding the ID once; without the guard, the handler added it a second time. The same PR also changed `visibleIds` to be derived from `decoderIds` (needed for same-source aliases), which made the pre-existing duplicate visible as an actual second tile.
+- **Fix** — restored the dedup guard in the new-decoder path of both handlers. The alias path (same-URL `existingId`) and the `visibleIds` computation are unchanged.
+- **Operator impact** — starting a decoder now always produces exactly one tile.
+
+## v3.1.155 — 2026-04-08
+
+### Fix: fullscreen multiview UTC clock live-tick regression
+
+- **Issue** — UTC clock in fullscreen multiview could freeze instead of updating every second.
+- **Cause** — local state setter name `setInterval` shadowed the global timer API inside the component scope.
+- **Fix** — renamed state setter to `setProbeInterval` and switched timer calls to `window.setInterval` / `window.clearInterval`.
+- **Operator impact** — fullscreen UTC now ticks live again and stays aligned to server-offset time.
+
+## v3.1.154 — 2026-04-08
+
+### Enhancement: Alarm Log instance dropdown filter
+
+- Added an **Instance** dropdown in Alarm Log to filter rows by decoder/ETR/system ID without typing.
+- Dropdown options are auto-derived from current event IDs and kept in sync with the active log set.
+- Existing severity and free-text filters continue to work together with the new instance filter.
+
+## v3.1.153 — 2026-04-08
+
+### Fix: multiview UTC header now tracks server time
+
+- **Issue** — fullscreen multiview UTC clock could be incorrect when the operator workstation clock drifted from server time.
+- **Cause** — UI used browser `Date.now()` directly for UTC header rendering.
+- **Fix** — multiview now computes a server-time offset from incoming WebSocket `time` fields and renders UTC using server-referenced time.
+- **Operator impact** — UTC readout in multiview aligns with backend event timestamps.
+
+## v3.1.152 — 2026-04-08
+
+### Fix: suppress `thumbnail_frame` in frontend Alarm Log mapper
+
+- **Issue** — operators could still see `info` rows derived from `thumbnail_frame` in Alarm Log even though backend excluded it from persisted `/api/events`.
+- **Cause** — `toLogEntry()` in `web/src/App.jsx` did not explicitly filter `thumbnail_frame` from live WebSocket messages.
+- **Fix** — added a hard return `null` path for `msg.type === 'thumbnail_frame'` in the frontend log mapper.
+- **Operator impact** — Alarm Log now stays focused on actionable alarms/lifecycle events only; thumbnail telemetry remains live for tile updates.
+
+## v3.2.37 / v3.1.151 — 2026-04-08
+
+### Fix: allow multiple multiview tiles for the same source URL
+
+- **Issue** — operators could add only one tile when using the same multicast URL multiple times (manual add path), while some workflows require the same feed in different panel positions.
+- **Cause** — frontend tile assignment used unique-by-ID behavior (`activeIds` filter + duplicate guard), so repeated assignments to the same analyser ID were collapsed.
+- **Fix** — multiview now supports tile aliasing: if a decoder URL already exists, the UI reuses that analyser ID and appends another panel tile entry; tile rendering keys preserve duplicates.
+- **Operator impact** — same source can be placed multiple times in multiview without spawning duplicate backend probe workers.
+
+## v3.2.36 / v3.1.150 — 2026-04-08
+
+### Fix: multiview decoder tile add regression with URL dedupe enabled
+
+- **Issue** — adding a decoder tile could fail to appear when the source URL matched an existing active analyser with a different ID.
+- **Cause** — start route returned the existing analyser object (`reused`) instead of activating the requested ID, breaking UI expectations for tile identity.
+- **Fix** — `POST /analyse/start` now performs controlled handover for same-URL collisions: stop old analyser + linked ETR monitor, then start the requested ID.
+- **Operator impact** — decoder tile add behavior is restored while keeping one-analyser-per-source worker dedupe protection.
+
+## v3.2.35 / v3.1.149 — 2026-04-08
+
+### Enhancement: dedupe guard telemetry, cooldown, and burst alarm
+
+- **Health visibility** — `/health` now includes `telemetry.analyserDedup` counters (`duplicateAutoStopped`, `staleAutoStopped`, `alertsRaised`, window stats, last action timestamp).
+- **Auto-heal burst alarm** — URL dedupe watchdog raises `health_alarm` critical if auto-heals exceed threshold in a sliding window (`ANALYSER_URL_DEDUP_ALERT_WINDOW_MS`, `ANALYSER_URL_DEDUP_ALERT_THRESHOLD`).
+- **Restart cooldown** — after duplicate collision cleanup, the URL is temporarily rate-limited on `POST /analyse/start` (`429` with `retryAfterMs`) via `ANALYSER_URL_RESTART_COOLDOWN_MS`.
+- **Operator impact** — faster detection of abnormal retry loops, fewer self-induced respawn storms, and clearer runtime observability.
+
+## v3.2.34 / v3.1.148 — 2026-04-08
+
+### Fix: automatic duplicate analyser containment (no-operator recovery)
+
+- **URL-level start dedupe** — `POST /api/analyse/start` now reuses the existing analyser when a source URL is already monitored, preventing duplicate `tshark`/`tsp`/thumbnail workers from spawning under new IDs.
+- **Runtime watchdog** — added an analyser URL dedupe guard in `src/api.js` that auto-stops duplicate/stale analysers and linked `etr-<id>` monitors, then persists clean state.
+- **Ops tuning defaults documented** — `.env.example` now includes `NODE_OPTIONS=--max-old-space-size=6144` plus `ANALYSER_URL_DEDUP_GUARD` / `ANALYSER_URL_DEDUP_CHECK_MS` controls.
+- **Operator impact** — duplicate worker storms self-heal automatically; manual container recreate should no longer be required for this failure mode.
+
+## v3.1.147 — 2026-04-08
+
+### Fix: Restore instant fullscreen thumbnail warmup
+
+- **Issue** — fullscreen multiview could regress to slow first paint on some browsers even with hidden prefetch images present.
+- **Cause** — browser heuristics may still deprioritize hidden/offscreen image requests unless explicitly marked as eager/high-priority.
+- **Fix** — fullscreen tile images and hidden prefetch-layer images now use eager/high-priority fetch hints.
+- **Operator impact** — first fullscreen entry returns to near-instant thumbnail visibility with warmed cache behavior.
+
+## v3.1.146 — 2026-04-08
+
+### Fix: TS Analyser startup crash after catalog integration
+
+- **Root cause** — catalog state (`catalog`, `showCatalog`, `catalogRef`) was declared after `useEffect` blocks that referenced it.
+- **Symptom** — TS Analyser tab failed to render with runtime error: "can't access lexical declaration before initialization".
+- **Fix** — moved catalog state/ref declarations to the main hook section before those effects so lexical bindings are initialized before use.
+- **Operator impact** — TS Analyser loads normally again; no behavior change to probe logic or API payloads.
+
+## v3.2.33 / v3.1.144 — 2026-04-08
+
+### Fix: Suppress thumbnail_frame from event log; emit etr290_started
+
+- **`thumbnail_frame` excluded from event log** — added to `TELEMETRY_TYPES` in `src/api.js`. These fire on every frame capture (up to 5/s per decoder) and were flooding the Event Log tab with noise.
+- **`etr290_started` event broadcast** — all three ETR start paths (auto-start with decoder, manual `POST /etr290/start`, restore from state) now emit `{ type: 'etr290_started', id, url, time }`. Restore path also carries `restored: true`.
+- **Frontend** — `App.jsx` event formatter handles `etr290_started` with status `started` and title "ETR monitor started" / "ETR monitor restored". Event now appears in the Event Log tab alongside ETR alarm entries.
+
+## v3.1.144 — 2026-04-08
+
+### Feat: ETR per-decoder alarm log + catalog picker in TS Analyser
+
+**ETR alarm log (Decoder tab)**
+- A compact scrollable alarm log now appears inside the ETR 290 Alarm Configuration section when a decoder with ETR events is selected.
+- Shows up to 20 most recent events for the selected decoder (polling every 10 s via `GET /api/events?id=etr-<id>&limit=30`).
+- Each row: UTC time · priority badge (P1/P2/P3 colour-coded) · check label.
+
+**Stream catalog picker (TS Analyser tab)**
+- The stream catalog dropdown (same as Decoder tab) is now available above the monitor selector in the TS Analyser.
+- Selecting a stream from the catalog fills the Host/IP A and Port A fields and sets the transport mode (RTP/SRT/UDP) automatically.
+- Catalog loads once on mount from `GET /api/multiview/catalog`; hidden when catalog is empty.
+
+## v3.1.143 — 2026-04-08
+
+### UI: Add auto-start notice to ETR 290 Alarm Configuration section
+
+Added a one-line subtitle — "ETR analysis starts automatically when a decoder is provisioned." — below the section header so operators understand why no Enable button is present.
+
+## v3.1.142 — 2026-04-08
+
+### UI: Remove redundant ETR enable controls from Decoder tab
+
+ETR290 analysis now starts automatically with every decoder — the manual "Enable ETR" button and "Auto-enable ETR when starting a decoder" checkbox are no longer needed.
+
+- Removed **"▶ Enable ETR / ● RUNNING"** button from the ETR 290 Alarm Configuration section.
+- Removed **"Auto-enable ETR when starting a decoder"** checkbox from the Advanced section.
+- Removed `enableEtrOnProvision` state and all associated provisioning logic (`startEtrForSelected`, ETR branch in `startRows`, ETR count in provision summary).
+- Grid in the ETR controls row reduced from `1fr auto auto` to `1fr auto` (decoder selector + Stop button only).
+- **Stop** button and Apply Config button remain fully functional for operator use.
+- No change to backend behaviour.
+
+## v3.2.32 / v3.1.141 — 2026-04-08
+
+### Fix: ETR290 lifecycle correctness (Cursor peer-review findings)
+
+- **Orphan watchdog pattern** — `_isManagedEtrMonitorId` now matches any `etr-*` ID (was `/^etr-(decoder|analyser)-/i`). Auto-started monitors (`etr-<analyserID>`) were previously invisible to the watchdog and could remain as orphans after a crash.
+- **Compliance endpoint stopped state** — `overallStatus` now returns `'stopped'` when `isRunning=false`, preventing a dashboard from showing green compliance for a non-running monitor.
+- **Events API response bounding** — `GET /api/events` now accepts `?limit=<n>` (default 500, max 2000). Prevents unbounded payloads on busy deployments.
+- **ETR restore robustness** — `linkedAnalyserId` is now stored explicitly in `state.json`. Restore no longer depends solely on the `etr-<id>` naming convention; non-standard ETR IDs restore correctly via the explicit link.
+- **Tests** — 24 new tests covering: watchdog ID matching, compliance status (stopped/ok/p1-alarm), events filtering (id/type/limit/since), and state-persistence `linkedAnalyserId` round-trip. Suite: 267/267.
+
+## v3.2.31 / v3.1.140 — 2026-04-08
+
+### Feat: ETR290 auto-start, auto-stop, auto-restore + per-stream compliance API
+
+**ETR auto-start with decoder**
+- ETR290 monitor (`etr-<id>`) is now created automatically when a decoder starts (`POST /api/analyse/start`). No separate UI action required — consistent with professional broadcast analyser behaviour.
+- For SRT streams the relay is instantiated synchronously inside `startContinuous()`, so `getRelayUrl()` returns the correct UDP loopback URL immediately at ETR creation time.
+- ETR auto-stops synchronously when the decoder is stopped (`DELETE /api/analyse/:id`) — before the orphan watchdog would clean it up, ensuring saveState() captures a clean snapshot.
+
+**ETR idempotent start**
+- `POST /api/etr290/start` now returns `200` with current state if the monitor already exists (was `409`). UI toggles that fire while ETR is already auto-running will succeed gracefully.
+
+**ETR auto-restore on container restart**
+- ETR state is persisted to `config/state.json` alongside decoders. On boot, ETR monitors restore after analysers so the SRT relay is available. The original SRT URL (not the relay UDP URL) is stored — relay URL is re-derived at restore time via `getRelayUrl()`.
+- `setEtrMonitor` link re-established on restore for correct SRT probe cycle suspend/resume.
+
+**Per-stream compliance API**
+- `GET /api/etr290/:id/compliance` — returns per-priority (P1/P2/P3) pass/fail aggregation, per-check alarm status and hit counts, active incidents, and recent alarm list. Suitable for a compliance dashboard or automated reporting.
+- `GET /api/events?id=<streamId>&type=<eventType>` — event log now supports `id` and `type` query filters (cumulative AND logic) in addition to the existing `since` filter. Enables per-stream ETR alarm history queries.
+
+**Operator impact:** Enable ETR once per stream on initial commissioning — it starts automatically with the decoder on every subsequent restart.
+
+## v3.1.139 — 2026-04-08
+
+### Fix: Fullscreen multiview — thumbnails appear instantly on first entry
+
+- Browsers allow ~6 concurrent HTTP connections per host. Opening fullscreen with 24+ tiles caused all tile `<img>` elements to mount simultaneously, queuing image requests into sequential batches. First fullscreen entry was visibly slow (several seconds) even though all thumbnails existed on disk.
+- **Fix:** A hidden prefetch layer (`visibility:hidden`, 1×1 px, `pointer-events:none`) is always rendered outside fullscreen. It contains one `<img>` per active decoder using the same thumbnail URL the fullscreen tiles use. The browser fetches and caches each image continuously. When fullscreen opens, all tiles hit cache and appear immediately.
+- `display:none` suppresses image fetching — the layer uses `visibility:hidden` + `overflow:hidden` to remain invisible while still triggering HTTP cache population.
+- **Operator impact:** Fullscreen multiview now opens with thumbnails immediately visible on first entry, not just on subsequent opens.
+
+## v3.2.30 / v3.1.138 — 2026-04-08
+
+### Feat: `THUMBNAIL_KEYFRAME_ONLY` toggle — I-frame clean vs near-live operator choice
+
+- `THUMBNAIL_KEYFRAME_ONLY=true` (default): `select=key,fps=${THUMBNAIL_FPS}` — I-frames only, every JPEG clean and artefact-free. Rate = `min(keyframe_rate, THUMBNAIL_FPS)` (~0.5fps on 2s-GOP).
+- `THUMBNAIL_KEYFRAME_ONLY=false`: `fps=${THUMBNAIL_FPS}` all frames — near-live regardless of GOP, may show B/P artefacts on some encoders.
+- Applied to both `PersistentThumbnailCapture` (RTP/UDP) and SRT relay. Documented in `.env.example`.
+- **Operator guidance:** `true` for MCR image quality; `false` for near-live on low-latency short-GOP SRT feeds.
+
+## v3.2.29 / v3.1.137 — 2026-04-08
+
+### Fix: SRT thumbnails now near-live — relay ffmpeg and poll rate match THUMBNAIL_FPS
+
+- SRT streams use a relay ffmpeg process for thumbnails. Its output used `thumbnail=100` (buffers 100 frames, picks sharpest) — ~4s per frame at 25fps — making near-live refresh impossible even with `THUMBNAIL_FPS=5`.
+- `pollRelayThumb` polled every hardcoded 2000ms — a further bottleneck.
+- **Fix 1:** Relay ffmpeg output switched to `fps=${THUMBNAIL_FPS},scale=480:-2,format=yuv420p` matching `PersistentThumbnailCapture`. Removed `thumbnail=N`.
+- **Fix 2:** `pollRelayThumb` interval set to `1000/THUMBNAIL_FPS` ms so mtime checks keep pace with new frames.
+- **Operator impact:** SRT stream thumbnails now refresh at the same near-live rate as RTP/UDP streams. All protocols consistent at `THUMBNAIL_FPS`.
+
+## v3.1.136 — 2026-04-08
+
+### Fix: Fullscreen multiview loads instantly — explicit row sizing, extended column breakpoints
+
+- `gridAutoRows: 'auto'` with `aspectRatio: 16/9` per tile caused the browser to reflow the entire grid after layout, making fullscreen slow to appear and tiles black or zero-height when tile count exceeded 16.
+- **Fix:** Grid rows are now explicitly sized to `calc((100vh - 42px - gaps) / rowCount)` — all tiles fill the viewport in one layout pass with no reflow. `aspectRatio` removed from tile; `minHeight: 0` added so flex children shrink correctly.
+- **Fix:** Column breakpoints extended to 36 (6 cols), 49 (7 cols), 64+ (8 cols) — previously capped at 5 columns which clipped tiles off-screen for large deployments.
+- **Operator impact:** Fullscreen multiview opens immediately at any decoder count. Supports up to 64 tiles in an 8×8 grid.
+
+## v3.1.135 — 2026-04-08
+
+### Fix: Fullscreen multiview audio meters stable and persistent — broadcast standard
+
+- ffprobe inconsistently returns 2 or 8 channels between probe cycles. `FullscreenThumbTile` had no audio data latch, causing two separate issues: (1) bar count flipping between 1 and 4 pairs every cycle, (2) meters going dark on probes that returned only the primary stereo pair.
+- **Fix 1:** `audioSnapshot` latch holds the last known channel data; `displayChannels` falls back to the snapshot when the current probe returns fewer channels — meters stay live between probes, matching the standard tile behaviour.
+- **Fix 2:** `pairCountLatch` only increases — once 4 pairs are seen the layout remains stable at 4 pairs.
+- **Operator impact:** Fullscreen multiview audio meters are continuously live and structurally stable — consistent with broadcast monitoring standards.
+
+## v3.1.134 — 2026-04-08
+
+### Fix: Fullscreen multiview tiles load thumbnails immediately on entry
+
+- `FullscreenThumbTile` reset `displaySrc` to `null` on every `thumbUrl` change, blanking the tile on entry and on each refresh until the next `onLoad` fired.
+- **Fix:** Removed the reset effect — `displaySrc` is now only updated via `onLoad`, so the last good frame persists until a new one arrives.
+- **Operator impact:** Opening fullscreen multiview now shows thumbnails immediately instead of "Awaiting Frame" on all tiles.
+
+## v3.2.28 / v3.1.133 — 2026-04-08
+
+### Feat: Near-live thumbnails — `THUMBNAIL_FPS` env var, keyframe-only mode removed
+
+- `select=key` limited thumbnail output to one frame per GOP (0.5 fps on a 2s-GOP broadcast stream) regardless of interval setting. Removed.
+- New `THUMBNAIL_FPS` env var (default `5`, max `25`) sets the target frame rate for `PersistentThumbnailCapture`. The ffmpeg filter is now `fps=N` on all decoded frames.
+- `THUMBNAIL_INTERVAL_SEC` and its `Math.max(1,…)` floor are retained for the legacy one-shot capture path but are no longer used by the persistent capture worker.
+- **Operator impact:** Set `THUMBNAIL_FPS=5` (default) or higher in `.env` for near-live thumbnails in both the confidence monitor and multiview tiles. CPU cost scales linearly with stream count × fps — the Xeon Gold 5120 handles 10 streams at 10 fps comfortably.
+
+## v3.1.132 — 2026-04-08
+
+### Fix: Confidence monitor thumbnail no longer flashes on refresh
+
+- `key={thumbnailUrl}` on the `<img>` in `DecoderPanelRevamp.jsx` caused React to unmount and remount the element on every URL change, producing a visible black flash between frames.
+- **Fix:** Removed the `key` prop — the browser now updates `src` in place, displaying the previous frame until the new one is fully loaded. Matches the multiview tile behaviour.
+- **Operator impact:** Confidence monitor thumbnail updates smoothly with no flash.
+
+## v3.2.27 — 2026-04-08
+
+### Fix: Catalog import fails for files over 100 KB
+
+- `express.json()` default body size limit is 100 KB. The catalog import sends raw file content encoded inside a JSON body, which can easily exceed this for catalogs with hundreds of streams.
+- **Fix:** Raised `express.json` limit to `2mb` in both app instances in `src/api.js`.
+- **Operator impact:** JSON and CSV catalog uploads no longer fail with an HTML error response.
+
+## v3.2.26 — 2026-04-08
+
+### Chore: Simplify Docker env file — use `.env` directly
+
+- `docker-compose.yml` previously required a separate `docker-env.txt` file (a copy of `.env`) to inject runtime environment variables into both containers. This caused confusion on fresh deploys and after `git reset --hard` which removed gitignored files.
+- **Change:** Both service `env_file` entries now point to `.env`. `docker-env.txt` removed from `.gitignore`.
+- **Operator impact:** Only `.env` is needed on the server — no need to maintain a separate `docker-env.txt`.
+
+## v3.1.129 — 2026-04-06
+
+### Chore: Remove logo mark asset (`web/public/labotech-mark.png`)
+
+- The PNG was already unreferenced after the fullscreen multiview header cleanup (v3.1.126). Deleted the file to avoid shipping an unused binary asset.
+- No UI change — the mark was not visible anywhere in the current build.
+
+## v3.1.128 — 2026-04-06
+
+### Fix: Thumbnail clears without browser refresh; ETR stop no longer greys decoder lane
+
+**Thumbnail cache not clearing on decoder state change (`web/src/hooks/useTSAnalysis.js`)**
+
+- **Root cause:** `refreshActives()` polled the server every 5 s and restored `lastResult` (including `thumbnailUrl`) for *all* analysers — including stopped ones. After the 12 s stop-suppression window, the stale thumbnail re-appeared in the confidence monitor without a browser refresh. Additionally, the `analyse_stopped` WS handler did not clear the one-shot `result` state, leaving `selectedResult` with a stale fallback via `result?.id === selectedId`.
+- **Fix:** `refreshActives()` now only restores `lastResult` into `resultsById` for analysers where `isRunning === true`. The `analyse_stopped` WS handler now also clears `result` state, matching the existing `stop()` code path.
+- **Operator impact:** Confidence monitor thumbnail clears immediately when a decoder is stopped, with no browser refresh required. On restart, "Awaiting Frame" is shown correctly until the first frame arrives.
+
+**ETR 290 stop causing decoder lane to appear stopped on Live View (`web/src/components/StreamViewPanel.jsx`)**
+
+- **Root cause:** `buildLaneGradient()` computed `stopAfterActive` by finding the first `runtime_stopped` event after the last decoder start, with no distinction between decoder stops and ETR monitor stops. `etr290_stopped` WS messages are mapped to `category: 'runtime_stopped'` (title `'ETR monitor stopped'`); since the ETR monitor shares the same normalised lane ID as its linked decoder, the ETR stop event became `stopAfterActive`, clipping the lane to grey. The 5 s heartbeat guard recovered the lane, but left a visible grey flash at MCR distance.
+- **Fix:** Added `&& e.title !== 'ETR monitor stopped'` to the `stopAfterActive` filter in `buildLaneGradient()`, mirroring the identical guard already applied in the ETR-lane gradient function (line 769) and the seed-suppression logic (line 1329).
+- **Operator impact:** Stopping ETR 290 monitoring for a stream no longer causes the decoder lane on Live View to flash grey. Decoder running status and ETR monitor status remain visually independent.
+
+## v3.2.24 — 2026-04-06
+
+### Feat: Replace ETR 290 engine with TSDuck (`src/etr290-analyser.js`, `src/tsduck-process.js`)
+
+- **Root cause of previous engine failure:** The FFmpeg engine regex-matched log output rather than measuring the transport stream directly. PCR jitter could not be measured, `pcr_rep` never fired, P3 SI table checks were structurally blind, and SRT streams required a 60-second retry cycle to avoid fighting the thumbnail relay for the single-listener slot.
+- **New engine:** Replaces the FFmpeg subprocess with a `tsp` pipeline that performs real TS packet analysis:
+  - `tsp -I ip|srt ... -P continuity --json-line -P analyze -i 1 --json-line -O drop`
+  - `continuity` plugin emits per-PID CC discontinuity events immediately as they occur.
+  - `analyze` plugin emits full per-PID + transport-stream statistics every 1 second.
+  - JSON output is read from `tsp` stderr (where `--json-line` writes via the message logger), parsed line-by-line with `readline`, and mapped to the existing incident model via `_parseTsduckLine()`.
+- **ETR 290 field mapping:**
+  - `ts.packets["invalid-syncs"]` → `ts_sync` (P1)
+  - continuity event `{ pid, type: "missing"|"break" }` → `cc_error` (P1)
+  - `ts.packets["transport-errors"]` → `transport_error` (P2)
+  - `pids[N].packets["pcr-leap"] > 0` → `pcr_disc` (P2)
+  - `pids[N].packets["pts-leap"] > 0` → `pts_error` (P2)
+  - `pids[N].packets["dts-leap"] > 0` → `pcr_disc` supplementary (P2)
+- **Zero false alarms on join:** The existing 5-second startup grace period absorbs the initial CC noise when tsp begins reading a mid-stream feed. Confirmed via live test.
+- **Input plugin routing:**
+  - `srt://host:port` → `-I srt --caller host:port`
+  - `udp://239.x.x.x:port` → `-I ip 239.x.x.x:port` (multicast group join)
+  - `udp://host:port` (unicast) → `-I ip :port` (listen on all interfaces)
+  - `rtp://` follows the same multicast/unicast split as UDP
+- **Bitrate:** Derived from `ts["pcr-bitrate"]` when available; falls back to `ts.bytes × 8` for the 1-second reporting interval on streams without reliable PCR timestamps.
+- **FFmpeg fallback:** Set `ETR290_ENGINE=ffmpeg` in `.env` to revert to the legacy log-scraping engine. Default is `tsduck`.
+- **Unchanged:** Incident model, startup grace, burst-window threshold, PID filter, WebSocket broadcast shape, REST API, React frontend.
+- **Operator impact:** ETR 290 alarms now reflect real measured values — CC errors are counted per-PID from actual continuity counter deltas, PCR discontinuities are detected from real timestamp leaps, and transport errors are measured at the packet TEI flag level. False-alarm rate on stream join is zero.
+
+## v3.1.117 / web — 2026-03-25
+### Fix: Live View noise — suppress ETR 290 status heartbeat blocks
+
+- ETR 290 `etr290_status` heartbeats are still used to drive lane coloring/state.
+- Visible timeline blocks for `etr290_status` are now suppressed to avoid periodic "probe pulse" noise in Live View.
+- Operator impact: Live View focuses on real signal-loss/runtime faults (and ETR incidents/alarms), not periodic ETR monitor heartbeat ticks.
+
+## v3.2.23 — 2026-03-22
+
+### Fix: ThumbnailWorkerClient — stall watchdog + shutdown visibility
+
+- **Stall watchdog:** Added a periodic `setInterval` (period = `stallWatchdogMs`, default 120 s) that fires while `_active.size > 0`. If no IPC has been received from the worker for at least `stallWatchdogMs`, the worker is presumed hung: a `console.warn` is emitted, the `worker_stall` event fires with `{ stallMs }`, and the process receives `SIGKILL` so the existing respawn/backoff path takes over. Pass `stallWatchdogMs: 0` to disable. Minimum enforced value is 1 s (allows fast test cycles with `options.now` clock injection).
+- **Shutdown visibility:** The existing 5 s force-kill timeout now logs `[ThumbnailWorkerClient] worker did not acknowledge shutdown within 5s; sending SIGTERM` before killing, making silent shutdown failures visible in operator logs.
+- **Tests (3 new):** `start()` during respawn backoff → stream replays after ready; stall watchdog fires SIGKILL deterministically; shutdown warning logged on timeout.
+- **Operator impact:** Hung thumbnail worker processes are now automatically recovered within 120 s rather than blocking stream thumbnail updates indefinitely.
+
+## v3.2.22 — 2026-03-22
+
+### Fix: suppress spurious "Input signal missing" alarms during SRT relay restart window
+
+- **Root cause:** When the relay's ffmpeg exits (network blip → `Input/output error`), `SRTRelay._ready` becomes `false` and the relay schedules a restart with 5 s+ backoff. During this window the UDP loopback has no sender, so any in-flight `ffprobe` reads an empty socket and throws "ffprobe returned empty probe payload (no input packets observed during probe window)". `TSAnalyser.run()` caught this and emitted `error`, which `App.jsx`'s `isExpectedNoSignalError()` correctly classified as "Input signal missing" — but the stream was not actually lost; only the relay was momentarily restarting.
+- **Fix:** Added a guard in `TSAnalyser.run()` catch block: if `this._relay` exists and `!this._relay.isReady()`, the probe error is silently swallowed (no `emit('error')`). The relay's own restart logging still fires; only the false-positive alarm is suppressed.
+- **Operator impact:** SRT streams will no longer generate "Input signal missing" alarm log entries during the relay's brief restart window after a transient network interruption.
+
+## v3.2.21 — 2026-03-22
+
+### Revert: ffmpeg upgrade rolled back — static 7.x build caused SRT connection instability
+
+- **Reason:** John Van Sickle ffmpeg 7.x static build caused SRT connection instability in production. Likely cause: SRT socket option handling differences between 5.1.8 and 7.x (adapter binding, timeout semantics, or OpenSSL vs GnuTLS differences). Reverted to Debian Bookworm apt `ffmpeg` 5.1.8.
+- **Known limitation:** Full SRT stats remain unavailable for relay streams (RATE only). Revisit with a controlled ffmpeg upgrade when the root cause of the instability is understood.
+
+## v3.2.20 — 2026-03-22
+
+### Feat: upgrade ffmpeg to 7.x (John Van Sickle static build) for full SRT stats
+
+- **Change:** Replaced Debian Bookworm's `ffmpeg` apt package (5.1.8) with the John Van Sickle static build of ffmpeg 7.x in the Dockerfile. The static build is placed at `/usr/local/bin/ffmpeg` and `/usr/local/bin/ffprobe`, taking precedence over any system-installed version.
+- **Why:** ffmpeg 5.1.8 does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines (`msRTT=`, `mbpsBandwidth=`, etc.) to stderr, even with `-loglevel verbose` and `statsintvl=1000`. ffmpeg 7.x corrects this.
+- **Also:** Re-enabled `statsintvl=1000` in SRT relay URL and `srt_stats_line` event emission in `srt-relay.js` so the existing `_extractSrtStatsFromLog()` parsing path produces RTT, Bandwidth, Loss, NAK, ACK for relay-backed SRT streams if ffmpeg 7.x confirms the stats output.
+- **Operator impact:** SRT Transport panel should now show full stats (RTT, RATE, BANDWIDTH, LOSS) after the first probe cycle (~30 s). RATE was already available; all other fields require the ffmpeg upgrade to take effect.
+
+## v3.2.19 — 2026-03-22
+
+### Revert: SRT relay back to ffmpeg (v3.2.16–v3.2.18 srt-live-transmit approach reverted)
+
+- **Reason:** The srt-live-transmit relay (v3.2.16) introduced two regressions: (1) stream rate spikes and gaps visible in monitoring due to slt reconnect behaviour differing from ffmpeg's internal handling; (2) thumbnails stuck on "Awaiting Frame" because slt-to-UDP mid-stream joiners cannot decode H.264 without the SPS/PPS headers that are only available at SRT session start. The latency-delay workaround (v3.2.17) was insufficient in practice.
+- **Reverted to:** ffmpeg as SRT connection holder with integrated thumbnail output (v3.2.9–v3.2.13 architecture). ffmpeg holds SPS/PPS from initial connection, writes thumbnails directly, and handles reconnects stably.
+- **Known limitation:** Full SRT stats (RTT, Bandwidth, NAK, ACK) remain unavailable for relay-backed streams — ffmpeg 5.1.8 on Debian Bookworm does not emit periodic libsrt stats. RATE is synthesised from measured bitrate. Revisit when ffmpeg is upgraded to 6.x/7.x.
+- **Retained from the reverted work:** `_parseSltStats()` helper and NAK/ACK parsing (v3.2.14 fix 2) remain in ts-analyser.js for non-relay SRT paths.
+
+## v3.2.18 — 2026-03-22
+
+### Fix: SRT relay — stream gaps on transient network blips (srt-live-transmit `-a no`)
+
+- **Root cause:** `srt-live-transmit` was started with `-a no` (auto-reconnect disabled). Any brief network interruption caused slt to exit immediately, triggering the Node.js 5 s restart delay (doubling on repeated drops). This produced visible gaps in the stream every time the SRT sender had a minor network blip, whereas the previous ffmpeg relay handled transient disconnects internally.
+- **Fix:** Removed `-a no` — auto-reconnect is now enabled (slt default). Transient drops are recovered internally by slt without restarting the Node.js relay process or the backoff timer. The `close` handler now only fires on fatal exits (bad URL, explicit `stop()`).
+- **Operator impact:** SRT stream gaps caused by brief network interruptions are eliminated. The transmission stability matches the pre-v3.2.16 ffmpeg relay behaviour.
+
+## v3.2.17 — 2026-03-22
+
+### Fix: SRT relay thumbnail not arriving after v3.2.16 srt-live-transmit relay change
+
+- **Root cause:** `srt-live-transmit` with `latency=4000` buffers 4 seconds of data before outputting anything to the UDP loopback. The thumbnail ffmpeg was spawned at 800 ms (relay ready timer) with a 3 s UDP read timeout — it timed out and exited before the first UDP packet arrived, then restarted and repeated the cycle indefinitely.
+- **Fix:** Thumbnail ffmpeg is now spawned after a delay of `latencyMs + 500 ms` (parsed from the SRT URL). UDP read timeout is set to `max(5s, latencyMs + 3s)` so ffmpeg waits long enough for the latency buffer to fill before giving up.
+- **Operator impact:** Thumbnails and full SRT stats (RTT, Bandwidth, NAK, ACK, Loss) now both work simultaneously for SRT streams with any latency setting.
+
+### Fix: `stop()` leaked stale field reference `_lastRelayStatsLine` after rename to `_lastRelaySrtStats`
+
+- **Root cause:** Agent B peer review caught that `ts-analyser.js` `stop()` still cleared `this._lastRelayStatsLine = null` after the field was renamed to `this._lastRelaySrtStats` in v3.2.16. The stale field was silently assigned to `undefined` on every `stop()` call; the actual field retained its last value across restarts, causing stale stats from a previous session to appear briefly after a decoder stop/start cycle.
+- **Fix:** `stop()` now clears `this._lastRelaySrtStats = null`.
+- **Operator impact:** SRT Transport stats correctly show "AWAITING STATS" immediately after a decoder is stopped and restarted.
+
+## v3.2.16 — 2026-03-22
+
+### Fix: SRT Transport stats — RTT, Bandwidth, NAK, ACK, Loss all missing for relay-backed SRT streams
+
+- **Root cause:** The relay used `ffmpeg` to hold the SRT caller connection. ffmpeg 5.1.8 (Debian Bookworm) does not call `srt_bistats()` periodically and therefore never emits libsrt stats lines to stderr, even with `-loglevel verbose` and `statsintvl=1000` in the URL. No stats lines → `_lastRelayStatsLine` was always null → only `RATE` was synthesised from bitrate. The v3.2.14 fix (second `srt-live-transmit` caller) was also ineffective because the SRT sender at the operator's site only accepts one simultaneous caller and immediately rejected the second connection.
+- **Fix:** Replaced `ffmpeg` with `srt-live-transmit` as the SRT connection holder in `SRTRelay`. `srt-live-transmit 1.5.3` emits full JSON stats (RTT, bandwidth, packet loss, NAK, ACK, retransmissions) on stdout every ~0.75 s (`-s 1000 -pf json`). A separate `ffmpeg` process now reads from the UDP loopback for thumbnail capture (mid-GOP join is tolerated because SPS/PPS are embedded per-IDR in the MPEG-TS bitstream). `_probeSrtLinkStats()` for relay streams now returns the cached relay stats directly — no second SRT connection is ever opened.
+- **Operator impact:** SRT Transport panel now shows full stats (RTT, RATE, BANDWIDTH, LOSS, NAK SENT, ACK SENT, RETRANSMITTED, DROPPED, LOST, TOTAL RECEIVED) for all SRT streams, including those from senders that only accept a single caller.
+
+## v3.2.15 — 2026-03-22
+
+### Fix: thumbnail disappears on tab switch for worker-managed streams (direct SRT, RTP/UDP)
+
+- **Root cause:** The `thumbnail_frame` event handler in `api.js` only updated `a._lastThumbnailUrl` but never merged the URL into `a.lastResult`. On tab switch, `refreshActives()` → `toJSON()` reads `lastResult` to build the REST snapshot — `_lastThumbnailUrl` is in-memory only and not visible to `toJSON()`. The thumbnail appeared live via WS but was lost on any navigation that caused a REST re-fetch.
+- **Affected streams:** All streams using `ThumbnailWorkerClient` — direct SRT caller and RTP/UDP multicast. Relay-backed SRT was already fixed via `pollRelayThumb`.
+- **Fix:** Frame handler now merges `thumbnailUrl` into `a.lastResult` on every new frame, matching the pattern established in `pollRelayThumb`.
+- **Operator impact:** Thumbnails for direct SRT and multicast decoders now persist correctly across Multiview ↔ Decoder tab switches and after nodemon restarts.
+
+## v3.2.14 — 2026-03-22
+
+### Fix: SRT Transport stats — only RATE shown; RTT, Bandwidth, NAK, ACK, retransmissions, loss all missing
+
+- **Root cause 1 (relay streams):** `_probeSrtLinkStats()` had an early-return guard `|| this._relay` that caused it to always return null for relay-backed SRT streams. The fallback path synthesised a minimal `srtStats = { rateMbps }` from the measured bitrate, so only RATE ever populated the SRT Transport panel.
+- **Root cause 2 (all SRT streams):** The `srt-live-transmit -pf json` output includes `recv.naksSent` and `recv.acksSent` but these fields were never parsed and mapped to `srt.pktNak` / `srt.pktAck`. NAK and ACK always showed "—" even when stats were available.
+- **Fix 1:** Removed the `|| this._relay` guard. `srt-live-transmit` now connects to the SRT source as a second caller alongside the relay's ffmpeg process. Professional broadcast SRT senders (GV/LK receivers, encoders) accept multiple simultaneous callers. If the sender rejects the second connection, `srt-live-transmit` exits immediately and the system falls back to rate-only — the relay is unaffected.
+- **Fix 2:** Added parsing of `recv.naksSent` → `srt.pktNak` and `recv.acksSent` → `srt.pktAck`. Added `retransRatio` calculation for the health penalty scorer.
+- **Operator impact:** SRT Transport panel now shows RTT, Bandwidth, Total Received, Dropped, Lost, Retransmissions, NAK Sent, and ACK Sent for both relay and non-relay SRT streams.
+- **Superseded (relay stats path):** Fix 1 above (second `srt-live-transmit` caller for relay streams) was superseded by v3.2.16, which replaced `ffmpeg` with `srt-live-transmit` as the primary SRT connection holder. The operator's sender rejects second callers; the v3.2.16 approach avoids the problem entirely. Fix 2 (NAK/ACK parsing) remains in effect.
+
+## v3.1.121 / web — 2026-03-22
+
+### Fix: Decoder tab — Active Decoders list does not show decoders started from Multiview tab
+
+- **Root cause:** `DecoderPanel` called `refreshActives()` only once on mount. If a decoder was started from the Multiview tab, the `analyse_started` WS event fired while `DecoderPanel` was unmounted (conditional render). On switching back, the mount-time REST call was the only opportunity to pick up the new decoder — any timing race left the list stale until the next `analyse_result` WS event arrived (up to 5 s later).
+- **Fix:** Added a 5 s polling interval to `DecoderPanel` (matching the Multiview cadence). Active Decoders now stays in sync with the backend regardless of which tab provisioned the decoder.
+- **Operator impact:** Decoders started from the Multiview "+" tile (or any other source) appear in the Decoder tab's Active Decoders list within 5 seconds without any manual refresh.
+
+## v3.1.120 / web — 2026-03-22
+
+### Fix: Multiview — existing tiles disappear when adding a new decoder; ghost processes shown in grid
+
+- **Root cause:** The auto-seeding `useEffect` used a "prune or full-reseed" approach that only checked whether *any* stored decoder ID was still in `activeIds`. If a panel held stale IDs from a previous session (stopped decoders, server restart with new IDs), `anyActive` evaluated to `false` → the effect replaced all `decoderIds` with the entire current `activeIds` set, wiping tile assignments built by the operator.
+- **Fix:** The effect now *prunes* stale IDs from every panel before checking `anyActive`. Ghost IDs (processes that are no longer active on the server) are silently removed. Only if every panel ends up empty after pruning does a first-time reseed occur (placing all active IDs onto panel 0). Existing tile assignments are preserved.
+- **Operator impact:** Adding a new decoder via the "+" tile or the "+ Decoder" form no longer causes existing tiles to disappear. Ghost decoder entries in the grid are automatically cleared on the next `activeIds` refresh.
+
+### Feature: Multiview "+" tile modal — catalog stream picker, protocol selector, SRT latency/passphrase
+
+- **What's new:** The "+" tile modal now includes: (1) a catalog search dropdown identical to the existing "+ Decoder" form — streams can be selected by name or IP/port with grouped category headers; selecting a stream auto-fills Host, Port, Mode, and Decoder ID. (2) Protocol mode buttons (RTP / SRT / UDP). (3) SRT-specific Latency and Passphrase fields that appear when SRT mode is selected. URL construction uses `buildProbeUrl` for consistency.
+- **Operator impact:** Operators can add any catalogued stream to the multiview directly from the "+" tile without having to type addresses manually.
+
+## v3.1.119 / web — 2026-03-22
+
+### Feature: Multiview — "+" tile to add decoder without leaving the Multiview tab
+
+- **What's new:** The Decoder Multiview grid now always shows a "+" tile as the last slot. Clicking it opens a compact modal (Host/IP or full SRT:// URL · Port · optional Decoder ID). On submit, the decoder is provisioned and immediately added to the active panel — no need to switch to the Decoder tab.
+- **UX:** Port field is hidden when a full `srt://` / `rtp://` / `udp://` URL is typed. Decoder ID is optional (auto-generated from timestamp if blank). Modal closes on Escape or backdrop click. Enter key submits. Consistent with existing provisioning flow (`handleCreate`).
+- **Operator impact:** Operators can build a multiview stack from the Multiview tab in a single session without switching tabs.
+
+## v3.2.13 — 2026-03-22
+
+### Fix: system status flashes "OFFLINE" briefly when stopping a decoder
+
+- **Root cause:** `saveState()` writes `config/state.json` via `fs.writeFileSync` on every decoder start/stop. `docker-compose.dev.yml` mounts `./config:/app/config` into the container, and nodemon (running without an ignore list) watches `*.json` files in the working directory — which includes `config/state.json`. Every stop triggered a nodemon restart → WebSocket dropped → status indicator briefly showed "OFFLINE" (red LED) → WebSocket reconnected → "RUNNING" restored.
+- **Fix:** Added `nodemon.json` to the project root with `ignore: ["config/state.json", "logs/"]`. Nodemon now ignores runtime state writes and the thumbnail directory. Code changes in `src/` and `routes/` still trigger restarts as expected.
+- **Operator impact:** Stopping decoders no longer causes a server restart or WS disconnect. Status indicator stays green throughout.
+
+## v3.2.12 — 2026-03-22
+
+### Fix: SRT relay thumbnail — disappears on tab switch; lost after nodemon restart
+
+- **Root cause 1 (null lastResult seed):** In v3.2.11, `pollRelayThumb` guarded `lastResult` update with `if (this.lastResult)`. If no probe had run yet (`lastResult === null`), the thumbnail URL was emitted as a live WS event but `lastResult` stayed null. On tab switch, `refreshActives()` → `toJSON()` → `lastResult: null` — the URL was not in the REST snapshot and was lost.
+- **Fix 1:** `pollRelayThumb` now always seeds `lastResult`: `this.lastResult = this.lastResult ? { ...this.lastResult, thumbnailUrl } : { id, thumbnailUrl }`. The minimal seed is overwritten by the next full probe result.
+- **Root cause 2 (toJSON never checks disk):** After a nodemon restart, all in-memory TSAnalyser state is gone — `lastResult` is null, `_lastThumbnailUrl` is null. Even though the JPEG file from the previous session still exists on disk, `toJSON()` returned `lastResult: null` and `refreshActives()` could not restore the thumbnail.
+- **Fix 2:** `toJSON()` now falls back to `_resolveCachedThumbnailUrl()` (disk file check) when `lastResult` has no `thumbnailUrl`. If the file exists it seeds a minimal `lastResult` with the URL, so the Multiview and Confidence Monitor restore the thumbnail immediately after restart.
+
+## v3.2.11 — 2026-03-22
+
+### Fix: SRT relay thumbnail — URL not persisted across tab switches; multiview tile delayed
+
+- **Root cause (persistence):** `pollRelayThumb` set `_lastThumbnailUrl` in-memory but never updated `this.lastResult`. On tab switch the component remounts and calls `refreshActives()` → `GET /api/analysers` → `toJSON()` → `lastResult` — but `lastResult` had no `thumbnailUrl` (it was set before the thumbnail was ever written). Result: "AWAITING FRAME" on every tab switch.
+- **Root cause (multiview delay):** No `analyse_result` WS event fires until the first probe cycle completes (up to 30–60 s with startup jitter). The multiview tile renders from `resultsById[id]`, which only populates from `analyse_result`. The decoder appeared in Active Decoders immediately (from `analyse_started`) but the multiview tile had no data.
+- **Fix:** When `pollRelayThumb` detects a new file mtime (relay wrote a JPEG), immediately: (1) merge `thumbnailUrl` into `this.lastResult` so the REST snapshot is always current; (2) emit a `result` event with the merged lastResult so the WS broadcast pushes the new URL to all live clients without waiting for the next probe cycle. Thumbnails now appear in both panels within ~2 s of the relay writing the first frame.
+
+## v3.2.10 — 2026-03-22
+
+### Fix: SRT relay thumbnail — `thumbnail=1` crashes filter graph on ffmpeg 5.1.8
+
+- **Root cause 1:** `thumbnail=1` is invalid — ffmpeg 5.1.8's `thumbnail` filter requires `n ≥ 2` (default 100). The filter graph failed to initialise on every relay spawn → `Error reinitializing filters!` → exit code 1 → 30 s restart loop. No thumbnail was ever written.
+- **Root cause 2:** `select=eq(pict_type\,I)` before `thumbnail=1` would have fed only I-frames to the thumbnail batch. With a 10 s GOP that is one I-frame every 250 frames; `thumbnail=100` on that input would need 100 I-frames (≈ 1000 s) before writing the first JPEG. Even without the crash this was self-defeating.
+- **Fix:** Replace `select=eq(pict_type\,I),thumbnail=1` with `thumbnail=100`. All decoded frames feed the 100-frame sliding window. At 25 fps one JPEG is written every ~4 s. The thumbnail filter tolerates a mix of corrupt/valid frames from the initial mid-GOP probe window and starts producing output once a decodeable frame arrives.
+- **Operator impact:** Relay no longer crashes on startup. First thumbnail appears within ~4 s of the relay connecting (one 100-frame window at 25 fps). Thumbnails rotate continuously while the stream is live.
+
+## v3.2.9 — 2026-03-22
+
+### Fix: SRT relay thumbnail — integrate JPEG capture into relay ffmpeg to fix permanent H.264 mid-GOP failure
+
+- **Root cause:** Any separate ffmpeg process joining the relay's loopback UDP stream mid-stream cannot decode H.264. The encoder sends SPS/PPS only at initial SRT connection — not before subsequent IDR slices. Any joiner that misses the opening connection (which is always the case for the one-shot `doCapture` timer) never receives the SPS/PPS → `non-existing PPS 0 referenced` → exit code 69. Neither `thumbnail=pick` nor `select=eq(pict_type\,I)` can work from a mid-stream joiner because both require H.264 decoding, which requires SPS/PPS.
+- **Fix:** Integrated thumbnail capture into the relay's own ffmpeg process as a second output branch. Since the relay connects to SRT from scratch at startup, it sees the SPS/PPS from the encoder's initial sequence. A second ffmpeg output (`-map 0:v:0 -vf "select=eq(pict_type\,I),thumbnail=1,scale=480:-2" -vsync vfr -update 1 -f image2 -q:v 3`) writes a JPEG on each I-frame directly to `THUMBNAIL_DIR`. The `thumbPath` parameter is added to `SRTRelay`'s constructor and wired from `TSAnalyser`.
+- **Fix:** Replaced the `doCapture` one-shot timer loop for relay streams with a lightweight mtime poller (`pollRelayThumb`, 2 s interval). The poller checks the JPEG file's mtime and updates `_lastThumbnailUrl` when the relay writes a new frame. No separate ffmpeg process, no UDP port competition, no EADDRINUSE.
+- **Removed:** The `_relayProbeRunning` backoff logic in `doCapture` and the EADDRINUSE silent-retry in `doCapture` are no longer needed for SRT relay streams (the `doCapture` path is no longer used for relay).
+- **Operator impact:** SRT relay thumbnails now appear and rotate reliably on every I-frame boundary (≈ every 2–10 s depending on encoder GOP). No capture failures logged. Log is clean for SRT relay streams.
+
+## v3.2.8 — 2026-03-22
+
+### Fix: SRT relay — thumbnail always fails mid-GOP; SRT stats "AWAITING" on ffmpeg 5.x
+
+- **Root cause (thumbnail):** `thumbnail=pick` requires at least one decoded H.264 frame. Joining a long-GOP stream (10–25 s GOPs) mid-GOP means no IDR frame is available in the short capture window → exit code 69 with `decode_slice_header error`. Only the very first capture (which happened to land on a keyframe boundary) ever succeeded.
+- **Fix:** For loopback UDP relay streams, skip `thumbnail=pick` entirely and use `select=eq(pict_type\,I),thumbnail=1` with a 30 s timeout. This waits for the next I-frame (average ~5–12 s on a 25 s GOP) and captures it cleanly. The JPEG is always a fully decoded reference frame.
+- **Root cause (SRT stats):** ffmpeg 5.1.8/Debian 12 does not call `srt_bistats()` periodically — the `statsintvl` SRT option is accepted by the socket but this build never logs the result via `av_log`. The relay's stderr contains only H.264 parser noise during the initial GOP join; no stats lines appear after stabilisation.
+- **Fix:** When the relay transport probe measures a valid `bitrateBps` but has no libsrt stats, synthesise `srtStats = { rateMbps }` from the measured value. The SRT Transport panel shows RATE (from PCR/ffmpeg progress) and `—` for RTT/bandwidth/loss (genuinely unavailable from this ffmpeg build). The "AWAITING STATS" placeholder is cleared.
+- **Operator impact:** Thumbnails now rotate for SRT relay streams. SRT Transport panel shows measured receive rate immediately after first probe cycle.
+
+## v3.2.7 — 2026-03-22
+
+### Fix: SRT relay — statsintvl too low floods stderr; add relay connection log lines
+
+- **Fix:** `_buildInputUrl()` now normalises any `statsintvl` value below 500 ms to 1000 ms. Decoder URLs provisioned with `statsintvl=1` (1 ms — effectively ~1000 stats lines/second) are silently corrected to 1 s. Values ≥ 500 ms are left as-is.
+- **Logging:** Added `console.log` on relay `ready` event and on first `srt_stats_line` received. Operators can confirm relay connection and stats pipeline from `docker logs` without needing to inspect the UI.
+
+## v3.2.6 — 2026-03-22
+
+### Fix: SRT relay — thumbnail EADDRINUSE flood and H.264 log noise
+
+- **Root cause 1 (thumbnail EADDRINUSE flood):** The thumbnail one-shot timer fires every 2 s. The sequential `isRelayBacked` probe path holds the loopback UDP port for ~15–20 s (tsanalyze 5 s + ffprobe transport 2 s + audio + tsDisc + CC + Dolby). Every thumbnail attempt during a probe cycle failed with `bind failed: Address already in use`, producing a flood of errors in the log and never capturing a frame.
+- **Fix:** Added `_relayProbeRunning` flag. Set to `true` at the start of the `isRelayBacked` sequential probe block, cleared in the `finally`. `doCapture` checks the flag and if set, backs off 3 s without attempting the bind — no error logged. Thumbnail runs in the gaps between probe cycles.
+- **Root cause 2 (H.264 decode_slice_header noise):** The relay runs ffmpeg at `-loglevel verbose` (needed for libsrt periodic stats). Verbose level exposes H.264 parser warnings (`decode_slice_header error`, `non-existing PPS`, `mmco:`) that occur when ffmpeg joins the stream mid-GOP before the first keyframe. These are harmless but polluted the log with hundreds of lines per minute.
+- **Fix:** Added a suppression rule in the relay's stderr filter — lines matching H.264 parser patterns are skipped before reaching `console.error`.
+- **Operator impact:** Log is clean under normal operation. Thumbnails now capture successfully between probe cycles.
+
+## v3.2.5 — 2026-03-22
+
+### Fix: SRT transport stats — colon-space separator not parsed; sequential probe port hold time reduced
+
+- **Root cause 1 (stats still "AWAITING"):** FFmpeg's verbose log emits libsrt stats with a space after the colon: `msRTT: 18.500`. The `SEP = '[:=]'` pattern in `_extractSrtStatsFromLog` expected the digit to immediately follow the separator. With a space present, `Number('') === NaN` — every field returned `null` and stats stayed at "AWAITING STATS" even though the line filter passed.
+- **Fix:** Changed `SEP` to `'[:=]\\s*'` (with optional whitespace) so both `msRTT=18.500` (libsrt format) and `msRTT: 18.500` (ffmpeg verbose format) are captured correctly.
+- **Root cause 2 (slow thumbnail rotation):** The sequential `isRelayBacked` probe path ran `_probeTSDuck()` with a 9 s kill timer and `_probeTransportBitrateBps()` with a 3 s capture window. For loopback UDP the relay stream is already buffered — there is no SRT latency fill needed. The combined probe cycle took 40+ seconds, leaving the thumbnail one-shot path waiting for the port.
+- **Fix:** For relay-backed streams, `_probeTSDuck()` kill timer is reduced from 9 s to 5 s, and `_probeTransportBitrateBps()` capture is reduced from 3.0 s to 2.0 s. Total sequential probe cycle now ~15–20 s vs. 40+ s previously.
+- **Operator impact:** RTT, bandwidth, and packet-loss stats now populate on first relay stats event. Thumbnail rotation resumes between probe cycles rather than being starved.
+
+## v3.2.4 — 2026-03-22
+
+### Fix: SRT relay — no-signal spurious alarms from dual UDP output
+
+## v3.2.3 — 2026-03-22
+
+### Fix: SRT relay — TS bitrate shows 0.38 Mb/s "STREAMS" instead of measured rate
+
+- **Root cause:** For relay-backed SRT, all heavy probes (`tsanalyze`, `ffprobe` transport, `ffprobe` tsDisc/CC/Dolby/audio) ran in parallel on the relay's loopback unicast UDP probe port. Unicast UDP does not duplicate packets to multiple readers the way multicast does — parallel processes split the packet stream, each getting only a fraction. `tsanalyze` (PCR bitrate) and the transport ffprobe both received partial streams, producing no usable bitrate. The fallback is codec-metadata `bitrateSource='streams'`, which was 0.38 Mb/s from the encoder's declared elementary stream bitrate — not the actual transport rate.
+- **Fix:** Added `isRelayBacked` path that serialises heavy probes on the relay probe port sequentially (same as `isSrtDirect`) but without inter-probe settle delays (no SRT reconnect cooldown needed for loopback UDP). Each probe now gets the full packet stream.
+- **Operator impact:** SRT decoder tiles now show the correct TS rate (TSDUCK PCR-based source) and complete program information (PIDs, bitrate, DVB service info) matching the quality of RTP/UDP multicast tiles.
+
+## v3.2.2 — 2026-03-22
+
+### Fix: SRT transport stats always "AWAITING" — wrong separator in regex
+
+- **Root cause:** Two different log sources produce SRT statistics in different formats. libsrt's own periodic stats output (enabled by `statsintvl=N` in the SRT URL) uses `key=value` (`msRTT=18.5`). FFmpeg's verbose log layer uses `key:value` (`msRTT:18.5`). All regex patterns in `_extractSrtStatsFromLog` used only `=`, so lines from ffmpeg's verbose layer never matched and `srtStats` was always `null`.
+- **Fix 1 — enable libsrt stats:** Added `statsintvl=1000` to the relay's SRT input URL (`_buildInputUrl`). This enables libsrt's built-in 1 s periodic stats output in `key=value` format.
+- **Fix 2 — both separators:** Updated the relay's line-filter regex and all field-extraction regexes to accept `[:=]` as separator, covering both libsrt (`=`) and ffmpeg verbose (`:`). Added short field-name aliases (`pktRecv`, `pktSndLoss`, `pktRetrans`, `pktRecvACK`, `pktRecvNAK`) used by ffmpeg's verbose log variant.
+- **Operator impact:** RTT, Receive Rate, Bandwidth, and ARQ counters now populate in the SRT Transport tab within one probe cycle (~5–10 s) of starting an SRT decoder.
+
+## v3.2.1 — 2026-03-22
+
+### Fix: SRT thumbnail refresh — persistent capture via dedicated relay output port
+
+- **Problem:** SRT relay thumbnails refreshed every ~7 s (5 s interval + ~2 s ffmpeg startup + analyze time). Each one-shot capture had to start ffmpeg from scratch, connect to the relay UDP port, wait for `analyzeduration` (2 s), grab a frame, and release the socket. The RTP/UDP path uses `PersistentThumbnailCapture` (continuous ffmpeg) and updates at the configured interval with no reconnect overhead.
+- **Root cause:** The relay outputs a single loopback UDP unicast stream. Only one process can bind to a unicast UDP port at a time. `PersistentThumbnailCapture` holding the port would block `tsanalyze`/`ffprobe` probes from binding — so thumbnails were forced into one-shot mode.
+- **Fix:** The relay now outputs **two UDP streams**: the existing probe port (`5500–5599`) for `tsanalyze`/`ffprobe`/ETR, and a new dedicated thumbnail port (probe port + 100, range `5600–5699`). `TSAnalyser.startContinuous()` launches `PersistentThumbnailCapture` on the thumb port — no port conflict, continuous like RTP/UDP. The one-shot path is retained only as the no-worker fallback for RTP/UDP without a thumbnail worker.
+- **Operator impact:** SRT decoder thumbnails now refresh at the configured interval (default 5 s) with no startup latency between frames — matching the RTP/UDP multicast experience.
+
+## web 3.1.118 — 2026-03-22
+
+### Fix: MCR mode — default off, stable status, simplified tile view
+
+- **Default MCR off:** `engineerMode` now defaults to `false` (MCR/operator view). Engineer details are opt-in via the MRC toggle. Previous sessions that saved `engineerMode: true` to localStorage continue to restore correctly.
+- **Status stabilised during toggle:** In MCR-off mode `signalOk` is now simply `isRunning` — the telemetry-freshness penalty (`staleMs > 15000`) is no longer applied. This eliminates the amber flash that appeared when toggling MCR while a probe cycle was delayed. Engineer mode retains the full staleness check.
+- **Simplified tile (MCR off):** When MCR is off, each tile shows only the service name and audio level meters. Source URL, update age, thumbnail age, and the stats grid (Programs / PIDs / TS Rate / Last Probe / TS source) are hidden. Thumbnail frame is preserved in both modes.
+- **Operator impact:** MCR operators see a clean, uncluttered multiview by default. Engineers can turn MRC on for full diagnostic details.
+
+## v3.1.92 — 2026-03-18
+
+### Fix: SRT relay thumbnail — switch to one-shot timer to free loopback UDP socket
+
+- **Problem:** When `TSAnalyser` starts a `SRTRelay`, the relay re-outputs the stream as `udp://127.0.0.1:55xx` (loopback unicast). `PersistentThumbnailCapture` was used for relay-backed streams — it runs a continuous ffmpeg process that permanently binds the UDP port. This left no window for ffprobe probes to bind the same port, causing EADDRINUSE on every probe cycle → "Probe Method UNAVAILABLE" and no thumbnails.
+- **Root cause:** Loopback unicast UDP does not support simultaneous multiple receivers (unlike multicast). SO_REUSEPORT distributes packets round-robin rather than fanning out to all receivers.
+- **Fix:** Changed the thumbnail branch in `startContinuous()` so that relay-backed streams use the periodic one-shot `captureThumbnail()` timer (same as RTP/UDP multicast) instead of `PersistentThumbnailCapture`. Each capture runs briefly, writes the JPEG, and releases the socket. ffprobe probes bind the port in the windows between captures. Direct SRT (no relay) still uses `PersistentThumbnailCapture` to avoid paying the SRT latency reconnect cost on every frame.
+- **Operator impact:** Decoders using SRT sources now show continuous thumbnails and full probe telemetry simultaneously. The thumbnail cadence is unchanged (default 5 s interval).
+
+## web 3.1.114 — 2026-03-18
+
+### Fix: SRT relay — eliminate H.264 parse warnings and RCV-DROPPED drops
+
+- **Problem 1 (H.264 warnings):** Relay ffmpeg auto-detected the H.264 codec and opened a parser context. Joining mid-GOP (before a keyframe) produced a continuous wall of `non-existing PPS / decode_slice_header error / mmco: unref short failure` log entries. These appeared even at `-loglevel error` because they originate from the H.264 parser, not ffmpeg's application logger.
+- **Fix 1:** Added `-f mpegts` to the relay's input args. ffmpeg now treats the SRT payload as raw MPEG-TS and copies TS packets without ever opening a codec context. H.264 parser is never invoked — warnings are gone regardless of GOP position.
+- **Problem 2 (RCV-DROPPED):** Transient network jitter caused SRT to drop packets whose arrival exceeded the latency buffer deadline (`RCV-DROPPED … delayed for 4–8 ms`). Dropped packets corrupted the TS stream, caused the relay ffmpeg to emit errors, and could trigger restarts.
+- **Fix 2:** Added `rcvlatency=500` (500 ms) to the relay input URL when no latency is set. This gives the SRT receive buffer 500 ms of headroom to absorb path jitter without dropping packets. Analysis/monitoring consumers are latency-insensitive.
+- **Also added:** `-fflags +discardcorrupt` so any residual corrupt TS units from a brief drop are silently skipped rather than producing an error exit.
+- **Operator impact:** Relay logs are now clean under normal operation. SRT streams with up to ~250 ms of path jitter will be absorbed without drops.
+
+## web 3.1.113 — 2026-03-18
+
+### Fix: SRT relay log noise suppressed — mid-GOP H.264 warnings removed
+
+- **Problem:** `docker compose logs` was flooded with `non-existing PPS 0 referenced` / `decode_slice_header error` / `mmco: unref short failure` warnings from the relay's ffmpeg process. These appear when ffmpeg joins a live H.264 SRT stream mid-GOP before seeing the SPS/PPS headers. With `-c copy` the stream is not decoded — the warnings are cosmetic only and stop after the first keyframe.
+- **Fix:** Changed relay ffmpeg from `-loglevel warning` to `-loglevel error`. Genuine SRT connection failures still surface; mid-GOP parse noise is suppressed.
+- **Operator impact:** Logs are clean. Relay is working correctly — the previous flood of warnings was not indicative of a fault.
+
+## v3.1.91 — 2026-03-18
+
+### Fix: Reverted multicast localaddr probe hint — caused RTP/UDP fallback failure
+
+- **Problem:** The `localaddr=169.254.0.2` hint added to multicast probe URLs caused ffprobe to fail with a bind error when eno2's link-local address was not reachable from the probe context (e.g. first boot before rc.local runs, or different network layout). This broke the RTP→UDP fallback path in `probe()`, producing "RTP UDP fallback failed" errors.
+- **Fix:** Reverted `localaddr` injection from `_withLiveInputHints()`. The kernel route `239.0.0.0/8 dev eno2` (installed by `setup-host.sh`) already routes IGMP joins to eno2 for all processes including Docker containers using `network_mode: host`. No code-level hint is needed.
+- **Operator action for IGMP snooping churn:** Reset alarms on the external IP analyser — the 142 historical resyncs were from setup/testing. If IGMP churn recurs, verify the host route is in place: `ip route show 239.0.0.0/8` should show `dev eno2`.
+
+## v3.1.90 / web 3.1.111 — 2026-03-18
+
+### Feature: SRTRelay — single-connection SRT fan-out via local UDP
+
+- **Problem:** SRT contribution encoders accept exactly one simultaneous caller. All Labotech consumers (thumbnail, tsanalyze, ffprobe, ETR) each attempted independent SRT connections, starving each other. Thumbnail would hold the slot; ETR and probe cycles would be dropped or compete. Result: AWAITING FRAME, Probe Method UNAVAILABLE, and ETR silently blocked.
+- **Fix:** New `SRTRelay` class (`src/srt-relay.js`). When `TSAnalyser.startContinuous()` detects an `srt://` URL, it starts a relay — one persistent ffmpeg process that holds the single SRT caller slot and re-outputs as `udp://127.0.0.1:PORT` (deterministic djb2 hash, range 5500–5599). All consumers (thumbnail, tsanalyze, ffprobe, ETR) transparently read the local UDP copy via `this._effectiveUrl`.
+- **ETR on SRT:** `routes/etr290.js` is now relay-aware — when an SRT analyser has an active relay, ETR gets the relay's UDP URL instead of returning 422. The Enable ETR button is no longer disabled for SRT sources; the proactive SRT warning banner is removed.
+- **Relay resilience:** Exponential backoff (5 s → 10 s → 20 s → 30 s cap) on ffmpeg restart. Epoch guard prevents stale close callbacks from triggering restarts after intentional stop.
+- **Tests:** 26 new tests in `test/srt-relay.test.js` covering port hashing, lifecycle, restart behaviour, backoff doubling, and epoch guard. Full suite: 220 tests passing.
+- **Operator impact:** SRT decoders now deliver continuous thumbnails, full probe telemetry, and ETR 290 monitoring simultaneously — no slot conflicts. No configuration change required; relay starts automatically on SRT decoder activation.
+
+## web 3.1.110 — 2026-03-18
+
+### UX: Proactive SRT warning in ETR 290 section — button disabled, amber banner shown
+
+- **Problem:** Operator selected an SRT decoder in the ETR Monitor section and clicked Enable ETR, receiving no visible feedback (fixed in 3.1.109 with a toast). But the button was still clickable and the limitation wasn't communicated upfront.
+- **Fix:** When the selected decoder URL starts with `srt://`, the ETR 290 section now shows an amber inline banner — *"SRT source — ETR290 unavailable. The thumbnail capture holds the sole SRT caller slot. Use a UDP/RTP multicast feed."* — and the Enable ETR button is disabled (greyed out, `not-allowed` cursor) immediately on decoder selection, before any click.
+- **Operator impact:** The SRT constraint is communicated proactively. No click required to understand why ETR is unavailable.
+
+## web 3.1.109 — 2026-03-18
+
+### Fix: Enable ETR 422 error surfaced as toast — silent failure on SRT sources
+
+- **Problem:** Clicking "Enable ETR" on an SRT decoder returned HTTP 422 (SRT sources are blocked by design). The error was caught and set in a small `fontSize: 10` note below the button — invisible without scrolling. The button appeared to do nothing.
+- **Fix:** Added `toast.error(msg, { duration: 8000 })` in the ETR start catch block. The 422 reason now appears as a prominent 8-second toast notification.
+- **Operator impact:** Clicking Enable ETR on an SRT decoder now immediately shows why it was rejected.
+
+## v3.1.89 — 2026-03-18
+
+### Fix: tcpdump `cap_net_raw` persistence — deploy warning + rc.local re-apply
+
+- **Problem:** `apt upgrade tcpdump` silently wipes the `cap_net_raw` capability set by `setup-host.sh`, causing Probe Method to show **UNAVAILABLE** after routine package updates. No warning was surfaced during the next deploy.
+- **Fix 1 (`scripts/setup-host.sh`):** Added `setcap` to the `rc.local` block so the capability is automatically re-applied on every boot (and after upgrades that trigger a reboot).
+- **Fix 2 (`scripts/deploy-one-shot.sh`):** Added `check_tcpdump_capability` as a non-fatal warning stage. On every deploy, the script now checks `getcap /usr/bin/tcpdump` and prints the exact fix command if `cap_net_raw` is missing.
+- **Operator impact:** Future `apt upgrade` cycles will no longer silently break NIC capture. The deploy output will call out the missing capability with the exact remediation command.
+
+## web 3.1.107 — 2026-03-18
+
+### UI: Readability improvements — consistent label/value sizing across quality panels
+
+- **Problem:** Field labels in the Quality Dashboard (DecoderPanelRevamp), TS Analyser metric tiles, and Alarm Log were set at 8–9 px using the dark `C.muted` (#3e506a) palette entry — unreadable at MCR room distance and on secondary displays.
+- **Fix:** Targeted font-size and colour changes across three panels (no layout or structural changes):
+  - **DecoderPanelRevamp `StatBox`:** Label `8px → 10px`, colour `C.muted → C.head` (#6b82aa). Value `11px → 13px`. Applies to all Quality Dashboard, ETR counters, IAT, Stream Profile, and SRT Transport tiles.
+  - **TSAnalyser metric tiles (all three sets):** Label `8px → 10px`, colour `C.muted → C.head`. Value `11–12px → 13px`. Applies to bitrate / CC / PCR header strip, confidence/policy strip, per-lane arrival KPIs, and SRT `Stat` component.
+  - **EventLogPanel table body:** Base `fontSize 10 → 12`. Timestamp column colour `C.muted → C.head` for contrast.
+- **Operator impact:** All key telemetry values are now legible from MCR operator distance. No layout, colour scheme, tab structure, or canvas elements changed.
+
+## v3.1.88 — 2026-03-18
+
+### Fix: Block ETR290 on single-listener SRT — eliminate thumbnail/ETR slot fight
+
+- **Problem:** Starting ETR290 monitoring on an SRT contribution source caused a persistent fight loop: the thumbnail ffmpeg process held the single SRT caller slot; ETR's ffmpeg was rejected and restarted every 60 s (v3.1.86 retry delay). Each retry briefly displaced the thumbnail, causing periodic SRT instability visible in the Intinor stats graph as repeated send-rate dips.
+- **Fix:** `POST /etr290/start` now returns HTTP 422 if the URL begins with `srt://`. The ETR panel in the frontend surfaces this as a clear operator message: *"ETR290 monitoring is not available on single-listener SRT sources. Use a UDP/RTP multicast feed for ETR290 monitoring."*
+- **Rationale:** SRT contribution encoders (Intinor, Haivision, and similar) accept exactly one simultaneous caller. Thumbnail capture must hold that slot continuously. ETR monitoring requires its own persistent ffmpeg connection and cannot share the slot. The correct architecture is a UDP/RTP multicast feed (unlimited receivers) for ETR290 monitoring.
+- **Operator impact:** "Enable ETR" button on SRT decoders now immediately shows the reason it is unavailable instead of silently fighting the thumbnail and destabilising the link.
+
+## v3.1.87 — 2026-03-18
+
+### Fix: Ghost decoder thumbnails — URL dedup on restore + stale JPEG cleanup on stop
+
+- **Problem:** When a user started a new decoder without stopping an old one pointing to the same SRT source, both decoder IDs were persisted in `config/state.json`. On the next container restart/deploy, both were restored and both thumbnail ffmpeg processes competed for the single SRT caller slot, causing repeated "Peer rejected connection" errors in the logs and unstable SRT graphs.
+- **Fix 1 (api.js restore):** URL dedup on state restore — if multiple saved analysers share the same source URL, only the most recently started one (last index in state) is restored. Superseded entries are logged and skipped.
+- **Fix 2 (routes/analyse.js):** On `DELETE /analyse/:id` (decoder stop), the thumbnail JPEG for that decoder is immediately deleted from `logs/thumbnails/`. This prevents stale images persisting across restarts and old decoder IDs leaving ghost files that could conflict with a fresh decoder using the same stream.
+- **Operator impact:** Clean slate on every deploy — no more ghost thumbnail processes competing for SRT slots after a container restart.
+
+## v3.1.86 — 2026-03-18
+
+### Fix: HEVC 4:2:2 Rext thumbnail AWAITING FRAME — `select=key` + `format=yuv420p`
+
+- **Problem:** Confidence Monitor thumbnail remained "AWAITING FRAME" on HEVC Main 4:2:2 Range Extensions streams (yuv422p10le, 10-bit). Two compounding causes: (1) The HEVC decoder does not set the `pict_type` AVFrame field for 4:2:2 Rext — frames remain `AV_PICTURE_TYPE_NONE`, so `select=eq(pict_type,I)` matches nothing and ffmpeg produces zero output. Server log showed `PPS id out of range: 0` × 17 followed by `Could not find ref with POC` errors. (2) The mjpeg encoder has no 10-bit pixel format support; `yuv422p10le` input is incompatible, causing silent encode failure.
+- **Fix:** Changed `select=eq(pict_type\\,I)` to `select=key` — uses the `key_frame` AVFrame flag, which all decoders (including HEVC Rext) set reliably. Added `format=yuv420p` as the last vf filter to downconvert 10-bit 4:2:2 to 8-bit 4:2:0 before the mjpeg encoder. Both changes are in `src/monitoring.js` `PersistentThumbnailCapture._spawn()`.
+- **Operator impact:** Confidence Monitor thumbnail now works for HEVC 4:2:2 10-bit SRT streams.
+
+### Fix: ETR/thumbnail SRT slot fight — ETR auto-restart with 60 s SRT retry delay
+
+- **Problem:** On single-listener SRT sources, `ETR290Analyser` and `PersistentThumbnailCapture` both attempt to maintain persistent connections simultaneously. When ETR connects it kicks the thumbnail; when thumbnail reconnects (5 s backoff) it kicks ETR; ETR exited permanently (`isRunning = false`) — but on each heavy-probe-window resume, ETR tried again, causing periodic 1–2 minute dropouts visible on the SRT stats graph as send-rate falling to 0.
+- **Fix:** `ETR290Analyser._spawnProc()` exit handler now detects unexpected exits (not triggered by `stop()` or `suspend()`): when `isRunning` is still true, schedule auto-restart instead of permanent stop. SRT URLs use a 60 s retry delay; non-SRT uses 5 s. The long SRT delay prevents the rapid fight loop — thumbnail holds the slot for a clean 60 s window between ETR attempts.
+- **Operator impact:** SRT source connection is stable. The periodic ~1-minute send-rate dropouts are eliminated.
+
+### Fix: Inter-probe SRT settle delay — 1 s gap between sequential probes
+
+- **Problem:** Sequential SRT probes (tsanalyze → ffmpeg transport → srt-live-transmit → audio → ts-disc → CC → Dolby E) were chained with zero delay between them. Rapid connect/disconnect cycles may cause some SRT sources to stall or produce packet loss on the subsequent connection before their accept state fully resets.
+- **Fix:** Added a 1 s `_srtSettle()` await between each sequential SRT probe in `ts-analyser.js`. Adds ≤6 s to the probe cycle; negligible against the per-probe latency-window fill time.
+- **Operator impact:** More stable probe cycle on strict single-listener SRT sources.
+
+## v3.1.85 — 2026-03-18
+
+### Fix: ETR290 immediate exit code 1 on SRT — startup slot race
+
+- **Problem:** When a decoder started on a single-listener SRT source, `ETR290Analyser` spawned ffmpeg immediately (via `start()` → `_spawnProc()`), racing the persistent thumbnail capture for the single SRT caller slot. Thumbnail won; ETR was rejected → `FFmpeg exited with code 1` on every startup. The `suspend()`/`resume()` coordination (v3.1.84) only kicks in during heavy probe cycles — it did not prevent this initial race.
+- **Fix:** `ETR290Analyser.start(delayMs)` accepts an optional delay; first spawn is deferred via the suspend-timer slot. `TSAnalyser.getEtrStartDelay()` returns `srtLatency + 15000` ms when thumbnail is active on SRT, or 0 otherwise. `routes/etr290.js` links ETR to the analyser **before** calling `mon.start()` and passes the computed delay. On a 4000 ms SRT latency stream, ETR waits 19 s before its first connection attempt.
+- **Operator impact:** ETR290 monitoring starts cleanly on single-listener SRT sources. "FFmpeg exited with code 1" alarm on decoder start is eliminated.
+
+## v3.1.84 — 2026-03-18
+
+### Fix: ETR290 analyser no longer holds SRT connection during heavy probes (SNAG-027)
+
+- **Problem:** `ETR290Analyser` runs ffmpeg as a persistent process, holding the SRT caller slot permanently. On streams served by a single-listener SRT source (one caller permitted), this blocked all other probes: the thumbnail capture showed AWAITING FRAME, the transport bitrate probe failed to connect, `srt-live-transmit` got rejected, and the TSDuck probe timed out — all because ETR already held the only connection slot.
+- **Fix:** Added `suspend(durationMs)` and `resume()` methods to `ETR290Analyser` (epoch-guarded, same pattern as `PersistentThumbnailCapture`). Added `setEtrMonitor(mon)` / `clearEtrMonitor()` to `TSAnalyser`. During SRT heavy probe cycles, `TSAnalyser` now suspends ETR alongside the thumbnail and TSDuck monitor before starting sequential probes, then resumes all three after probes complete.
+- **Wiring:** `routes/etr290.js` receives the `analysers` map (passed from `api.js`) and calls `linkedAnalyser.setEtrMonitor(mon)` on ETR start and `clearEtrMonitor()` on ETR stop/delete. The orphan watchdog in `api.js` also clears the link.
+- **Operator impact:** On single-listener SRT sources, thumbnail, SRT transport stats, bitrate, and TSDuck PCR metrics now populate correctly. ETR resumes monitoring automatically between probe windows.
+
+## v3.1.83 / web v3.1.102 — 2026-03-18
+
+### Fix: S302M ES excluded from amerge audio level probe
+
+- **Problem:** `_probeAudioLevels()` in `ts-analyser.js` counted S302M audio ESes (AES3/SMPTE 302M) in `audioEsCount` and included them in the ffmpeg `amerge` filter. S302M carries SMPTE 337M data bursts (Dolby E, AC-3 metadata) encoded as PCM, which presents as constant near-full-scale audio to astats. All VU meter pairs showed at maximum level regardless of actual programme audio.
+- **Fix (backend):** `audioEsCount` now excludes streams where `s302m` is truthy, so the amerge only includes programme audio ESes.
+- **Fix (frontend):** `audioEsCount` in `DecoderPanelRevamp.jsx` `pairCount` calculation also excludes S302M ESes, preventing phantom channel-pair placeholders in the audio meter panel.
+- **Operator impact:** Audio level meters now show correct levels for streams containing embedded S302M/Dolby E metadata. The S302M panel (AES3 section) still shows S302M structure independently.
+
+### Fix: Thumbnail `fps=1/N` — remove `setpts=N*AVTB` (SNAG-026)
+
+- **Problem:** PR #51 added `setpts=N*AVTB` alongside `select=eq(pict_type,I)` to reset I-frame PTS values. This compressed all I-frame timestamps to near-zero (video-frame-rate intervals, ~40 ms apart at 25fps), causing `fps=1/N` to interpret stream-seconds as microseconds. After the first frame, the filter produced no further output — thumbnail remained frozen at the first frame.
+- **Fix:** Removed `setpts=N*AVTB` from the vf chain. `select=eq(pict_type,I)` alone is sufficient — I-frames are self-contained and the `fps=1/N` limiter operates correctly on the original stream timestamps.
+- **Operator impact:** Confidence Monitor thumbnail now refreshes continuously at the configured interval for both H.264 and HEVC SRT streams.
+
+## v3.1.81 — 2026-03-18
+
+### Fix: HEVC SRT thumbnail — `select=I-frames` prevents PPS/ref errors (SNAG-025)
+
+- **Problem:** After removing `-skip_frame nokey` (SNAG-022), the HEVC thumbnail ffmpeg connected but produced no frames. Server log: `PPS id out of range: 0` (×23) + `Could not find ref with POC 50/52/56/64`. Root cause: when ffmpeg joins an SRT stream mid-GOP, B and P frames arrive before the decoder has seen the IDR that carries the parameter sets. The decoder cannot resolve reference frames and outputs nothing.
+- **Fix:** Added `select=eq(pict_type\,I),setpts=N*AVTB` before the `fps=1/N` filter. I-frames (IDR/CRA in HEVC, IDR in H.264) are fully self-contained — they carry their own VPS/SPS/PPS and have no reference dependencies. Thumbnail output is now driven exclusively by I-frames; `fps=1/N` limits to one per interval.
+- **Operator impact:** Confidence Monitor thumbnail now displays correctly for HEVC SRT streams.
+
+### Fix: ETR290 analyser SRT ffmpeg missing `adapter=` — exits code 1 (SNAG-024)
+
+- **Problem:** `ETR290Analyser._buildFFmpegArgs()` passed the raw SRT URL to ffmpeg without `adapter=<YOUR_SERVER_IP>`. ffmpeg routed the SRT caller socket via eno2 (multicast NIC, no IP assigned) → connection refused → `FFmpeg exited with code 1`. ETR monitoring was non-functional on all SRT streams.
+- **Fix:** Added `adapter=<YOUR_SERVER_IP>` to the SRT URL in `_buildFFmpegArgs()` for the `srt` input type, matching the invariant already applied in ffprobe (`_withLiveInputHints`) and thumbnail capture (`_buildSrtSrc`).
+- **Operator impact:** ETR 290 alarm monitoring now connects and runs on SRT RX streams.
+
+## web v3.1.100 — 2026-03-18
+
+### Fix: Error boundary — panel crash no longer blacks out entire app
+
+- Added `PanelErrorBoundary` React class component wrapping each tab panel in `App.jsx`. Any future uncaught render error in a panel shows a red inline error message with a Retry button instead of unmounting the entire React root (blank page).
+- **Operator impact:** A broken tab shows its error in-place; all other tabs remain functional.
+
+## web v3.1.99 — 2026-03-18
+
+### Fix: Decoder tab blank page (ReferenceError `pidRows`)
+
+- **Problem:** The S302M / AES3 section added in v3.1.98 referenced `pidRows` instead of `pids` (the correct variable name at component scope). This caused a `ReferenceError` on every render, crashing the entire React tree — no error boundary existed, so the whole page went black.
+- **Fix:** `pidRows` → `pids` in the S302M IIFE. Error boundary added (see above) so this class of bug cannot recur.
+- **Operator impact:** Full application restored.
+
+## v3.1.80 / web v3.1.97 — 2026-03-18
+
+### SMPTE 302M (AES3) audio recognition and channel-map display
+
+**Backend** — `_mapStream()` now detects SMPTE 302M streams (ffprobe `codec_name: s302m` or PCM codec on stream types 0x06/0x82/0x83) and extracts:
+- `bitDepth` — 16/20/24-bit from `bits_per_raw_sample`
+- `pairCount` — AES3 stereo pair count (channels ÷ 2)
+- `channels` — total channel count
+- `sampleRate` — always 48 kHz for broadcast S302M
+- `theoreticalBps` — raw PCM bitrate (sampleRate × bitDepth × channels)
+- `pairs` — array of `{ pair, ch: [L, R] }` sequential channel assignments from Ch 1
+
+**Streams tab PID table** — S302M rows now show a gold `S302M` type badge and an inline description: `AES3 / 24-bit / 4 pairs (8ch) / 48kHz` with per-pair channel chips (`P1: 1/2`, `P2: 3/4`, …).
+
+**Confidence Monitor — Dolby E pair indicator** — when `dvb.dolbyE.detected` is true, audio pair(s) carrying SMPTE 337M non-PCM data burst are replaced by a solid amber block (`DolbyEPairBlock`): dark amber background, amber top/bottom rails, vertical "DE" label — broadcast standard visual convention for non-PCM data channels. Pair identification uses a heuristic: constant near-equal amplitude on both channels (L/R symmetry < 3 dB, −35 to −8 dBFS average). When Dolby E is detected but the pair heuristic has not yet fired (e.g. first probe cycle), a stream-level amber banner shows "Dolby E · SMPTE 337M carrier detected". When the program config is known (e.g. "5.1+2"), it is appended to the indicator.
+
+**AES3 / SMPTE 302M Audio panel** — appears below the PID table whenever S302M streams are present. Shows: bit depth, sample rate, total pairs/channels summary grid, per-PID channel strip with actual and theoretical bitrate, and a note that SMPTE 337M non-PCM carrier detection requires the Dolby E adapter.
+
+**Operator impact:** S302M audio content (professional PCM audio encapsulation used in broadcast IP gateways and SRT contribution feeds) is now identified and its channel structure shown without needing an external analyser.
+
+## v3.1.79 / web v3.1.96 — 2026-03-18
+
+### Fix SRT thumbnail (HEVC) and SRT Transport stats always null
+
+**HEVC thumbnail** — removed `-skip_frame nokey` from `PersistentThumbnailCapture._spawn()`. This flag breaks HEVC decoder initialisation: HEVC slices reference VPS/SPS/PPS context that is established by frames marked as non-keyframes in ffmpeg's view, causing `PPS id out of range: 0` errors on every frame and zero JPEG output. The `fps=1/N` vf filter alone is sufficient to throttle output rate without corrupting decoder state. Fix is codec-agnostic: H.264 thumbnails are unaffected.
+
+**SRT Transport stats** — `srt-live-transmit --help` exits non-zero on all known builds, causing `_checkTool()` (which gates on exit code 0) to mark the tool unavailable even when it is installed. Added `_checkSltTool()` which marks available when any stdout/stderr output is produced — a spawn failure (binary not found) produces none. This unblocks `_probeSrtLinkStats()` so RTT, loss, NAK, retransmit and drop counters appear in the SRT Transport tab.
+
+**Operator impact:** SRT RX Confidence Monitor now shows a live thumbnail for HEVC and H.264 streams. SRT Transport tab shows real-time link metrics.
+
+## web v3.1.95 — 2026-03-18
+
+### Decoder Provisioning: stream catalog, latency default 4 s, button glow removed
+
+**Stream catalog** — a search field now appears above the provisioning rows when the multiview stream catalog (`/api/multiview/catalog`) contains entries. Typing filters by name or IP across grouped categories. Selecting an entry populates the first empty row's host, port, decoder ID, and mode in one click. Same catalog data and category grouping as the Multiview panel.
+
+**SRT latency default** — changed from 2000 ms to 4000 ms. Field remains fully editable; placeholder shows `4000`. Paste-from-URI still overwrites with the URI's `tsbpddelay` value.
+
+**Button glow removed** — `boxShadow` bloom on Start, Start Batch, and Apply ETR Config buttons toned down to none. Active state is indicated by filled background and border colour only — no halogen spread.
+
+**Operator impact:** Stream catalog shortcut eliminates manual host/port/ID entry for known sources. Latency default now matches the typical broadcast contribution SRT window.
+
+## v3.1.78 / web v3.1.94 — 2026-03-18
+
+### SRT decoder: real-time link stats via srt-live-transmit (RTT, loss, NAK, retransmit, drop)
+
+Added `_probeSrtLinkStats()` to `TSAnalyser`. On every heavy probe cycle for SRT streams, a `srt-live-transmit` process connects as a receiver for `latency + 3 s`, emitting one JSON stats line per second. The last received stats object is parsed to extract: `rttMs`, `bwMbps`, `rateMbps`, `pktTotal`, `pktLost`, `pktDropped`, `pktRetrans`, and `lossPercent`. These are written to `result.dvb.srtStats` and surfaced in the SRT Transport tab.
+
+This replaces the previous `_extractSrtStatsFromLog()` path which parsed libsrt verbose log format from ffmpeg stderr — that format uses different field names than srt-live-transmit JSON and was never matching, leaving `srtStats` always null and the Transport tab showing "NOT SRT / AWAITING STATS".
+
+RTP/UDP streams receive a null placeholder in the probe results array so array destructuring indices remain consistent.
+
+**Operator impact:** SRT Transport tab now shows live RTT, bandwidth, receive rate, packet loss %, dropped and retransmitted packet counts. No configuration required.
+
+## web v3.1.93 — 2026-03-18
+
+### evc workspace: SRT Encapsulator tab now visible; landing page spacing fix
+
+Removed `streams` from `OPS_HIDDEN_TABS` — evc (OPS role) can now access the SRT Encapsulator tab. Previously hidden alongside transcode/multicast/api; only transcode, multicast, and api remain hidden for OPS.
+
+Landing page: LABOTECH block pushed down 10px from the "Operator Access" label, and "Powered by Docker" gap tightened to 3px — proportions now match the header badge.
+
+**Operator impact:** evc operators can provision and monitor SRT encapsulation streams without switching to admin login.
+
+## web v3.1.92 — 2026-03-18
+
+### Landing hero 42px + Powered by Docker
+
+## web v3.1.91 — 2026-03-18
+
+### Fix SRT URI smart-paste — BroadcastUI Input was not forwarding onPaste
+
+`BroadcastUI.jsx Input` component did not accept or forward the `onPaste` prop, causing the full `srt://` URI to land in the Host/IP field verbatim and corrupt the probe URL to `srt://srt://...`. Fixed by adding `onPaste` to the Input component signature and forwarding it to the underlying `<input>`. Also added `handleHostChange` so that pasting via keyboard shortcut or browser autofill that bypasses `onPaste` also triggers URI extraction via `onChange`. Both `onPaste` and `onChange` paths call the same `_applySrtUri()` helper.
+
+**Operator impact:** Pasting an `srt://` connection string now correctly populates host, port, passphrase, pbkeylen, and latency. Previous deployments of web 3.1.89 should be upgraded immediately — any host field containing a full `srt://` URI must be cleared and re-entered.
+
+## web v3.1.90 — 2026-03-18
+
+### Landing page: match hero font to header logo
+
+Landing page LABOTECH hero now uses the same font, weight, colour (`#7b879a`), and letter-spacing (`0.18em`) as the header badge — consistent brand identity across entry and main UI. Size 56 px (system font-black). Replaces Bebas Neue.
+
+## web v3.1.89 — 2026-03-18
+
+### Landing page: Bebas Neue hero + SRT URI smart-paste in Decoder Provisioning
+
+**Landing page** — "LABOTECH" now renders in Bebas Neue (72 px, broadcast-grade condensed font used in MCR signage and lower thirds). Sub-label changed from "Secure operator access / Control Room Access" to "Operator Access". Removes generic security-portal language in favour of terse professional MCR wording.
+
+**SRT URI smart-paste** — pasting an `srt://` URI into the Host / IP field of Decoder Provisioning now auto-extracts and populates: host, port, passphrase, pbkeylen, and latency (from `tsbpddelay`). Mode is automatically switched to SRT. Field label updated to hint at the feature. Example: pasting `srt://203.0.113.10:40002?mode=caller&passphrase=EXAMPLE_PASSPHRASE&tsbpddelay=4000&pbkeylen=32` fills all fields in one action.
+
+**Operator impact:** Significant reduction in manual entry when provisioning SRT streams from gateway-provided connection strings.
+
+## v3.1.77 / web v3.1.88 — 2026-03-18
+
+### SRT Transport tab: remove nonexistent policy reference; SRT thumbnail bind to eno1
+
+Removed the "Use the SRT Contribution monitoring policy for additional tuning" sentence from the SRT Transport note — no such policy exists in the UI. The remaining note (IAT P95 critical ≥ 400 ms, jitter critical ≥ 40 ms) is accurate and matches `_healthThresholds()`.
+
+### SRT thumbnail capture: bind ffmpeg to eno1
+
+`_buildSrtSrc()` in `monitoring.js` now appends `adapter=<YOUR_SERVER_IP>` to all SRT thumbnail capture URLs (both `captureThumbnail()` and `PersistentThumbnailCapture`). Without this, the thumbnail ffmpeg process routed SRT connections via eno2 (no IP address), causing silent capture failures and a permanently blank Confidence Monitor in SRT decoder mode.
+
+**Operator impact:** Confidence Monitor now shows a live thumbnail when decoding SRT streams.
+
+## v3.1.76 / web v3.1.86 — 2026-03-18
+
+### SRT analyser: bind ffprobe to eno1 + correct Capture NIC hint
+
+`_withLiveInputHints()` in `ts-analyser.js` now appends `adapter=<YOUR_SERVER_IP>` to all `srt://` probe URLs — same fix already applied to the encapsulator. Without this, ffprobe routed SRT connections via eno2 (no IP) causing code 1 exits. Decoder Provisioning form placeholder updated to show `eno1 (SRT / management)` when SRT mode is selected instead of the misleading `eno2 (recommended)`.
+
+**Operator impact:** SRT decoder provisioning now connects correctly via eno1 without any manual NIC configuration.
+
+## v3.1.75 / web v3.1.85 — 2026-03-18
+
+### SRT encapsulator: srt-live-transmit preferred engine with FFmpeg fallback
+
+`srt-live-transmit` (SLT) is now the primary encapsulation engine for copy+SRT streams with UDP or SRT inputs. FFmpeg copy mode remains the fallback when SLT is not installed, or when the input is RTP (SLT cannot strip RTP headers — FFmpeg demuxes cleanly).
+
+Engine selection is automatic at stream start based on the preflight snapshot:
+
+| Condition | Engine |
+|---|---|
+| SLT installed + input UDP or SRT + output SRT + copy mode | `srt-live-transmit` |
+| Any other configuration | `ffmpeg` |
+
+**Why SLT is preferred:** pure byte relay with no demux/remux, no SI table rewrite, ~10–20× lower CPU per stream, <100 ms startup vs 1–2 s for FFmpeg. Stats (RTT, loss, retransmit, send rate) parsed from SLT JSON stdout (`-pf json -s 1000`) and surfaced via existing `srtStats` WebSocket events. `classifyHaivisionLink()` reused for link health classification.
+
+Preflight now checks `srt-live-transmit --help` and reports availability as `tooling.tools.srtLiveTransmit` in `/health`. Stream `toJSON()` includes `engine: 'srt-live-transmit' | 'ffmpeg'`. UI stream cards show a green `SLT` badge or grey `FFmpeg` badge.
+
+**Install on server:** `sudo apt install srt-tools`
+
+**Operator impact:** no form changes needed — engine is selected automatically. Streams tab shows which engine is running. Existing FFmpeg streams unaffected.
+
+## v3.1.74 — 2026-03-18
+
+### Preflight: SRT protocol availability check
+
+`tooling-preflight.js` now runs `ffmpeg -protocols` on startup (and every 5 min) and reports whether `libsrt` is compiled into the system FFmpeg. Result is exposed as `tooling.srtProtocol` in the `/health` endpoint:
+
+```json
+"srtProtocol": { "available": true,  "reason": "libsrt compiled in" }
+"srtProtocol": { "available": false, "reason": "srt protocol not listed — ffmpeg may need --enable-libsrt rebuild or ffmpeg-srt PPA" }
+```
+
+**Operator impact:** operators can confirm whether SRT encapsulation will actually work before starting a stream, without having to attempt a connection and read FFmpeg error output. 3 new tests added (194 total across 9 suites).
+
+## web v3.1.84 — 2026-03-18
+
+### Decoder Confidence Monitor: vertical audio VU meters
+
+Added per-pair vertical audio level bars to the Confidence Monitor in the Decoder panel, matching the broadcast-standard meters in fullscreen multiview. Bars appear to the right of the thumbnail; width auto-scales to the number of audio ES pairs detected. Each pair renders an L+R bar (3 px each, 1 px gap) with bottom-up RMS fill, peak-hold dot, and three-zone colour coding (green < −18 dBFS · amber < −9 dBFS · red ≥ −9 dBFS). Bars are driven by `selectedResult.audioLevels.channels` — they update at the probe cycle rate. Null-PID ghost ES are excluded from the pair count. If no audio levels are present yet, the meter panel is not rendered and the thumbnail occupies the full width.
+
+**Operator impact:** audio levels are now visible on the Decoder tab without switching to fullscreen multiview.
+
+## web v3.1.82 — 2026-03-18
+
+### Fullscreen multiview: full-frame thumbnails, no crop
+
+`objectFit: cover` cropped picture edges — visible as the leftmost character of service names being clipped. Changed to `objectFit: contain` with black background; full 16:9 frame is always preserved. Broadcast-correct: no picture content is ever cropped.
+
+
+
+## web v3.1.81 — 2026-03-18
+
+### UMD overlay: remove status tally strip + refine colours
+
+Removed the 1px coloured left-edge tally from the UMD label. Service name: `#7ecfdc` (mid cyan); bitrate: `#2d6272` (dim steel teal).
+
+
+
+## v3.1.73 / web v3.1.83 — 2026-03-18
+
+### Fix: all 4 audio pairs now live in multiview VU meters + ghost track removed from analyser
+
+**`src/ts-analyser.js` — `_probeAudioLevels()` (backend):**
+
+Root cause of the remaining single-pair issue: `astats` was passed via `-af` after a `-filter_complex` output. FFmpeg rejects mixing `-filter_complex` mapped outputs with a subsequent `-af` — the filter graph is silently dropped and no channel stats are produced. Fixed by embedding `astats=reset=1` directly inside the filter_complex chain: `amerge=inputs=N,astats=reset=1[aout]`. The `-af` flag is removed from the multi-ES path.
+
+**`web/src/components/DecoderPanelRevamp.jsx` — `audioStreams` ghost suppression (frontend):**
+
+`audioStreams` filtered on `codecType === 'audio'` but did not exclude null-PID ghost entries — ffprobe emits each ES twice (once in the PMT program list with a PID, once in the global stream array without). This caused "AUDIO (5 TRACKS)" when the stream has only 4. Added the same ghost-suppression guard already present in `extractPidRows()`: if any audio stream has a real PID, all null-PID audio rows are suppressed.
+
+**Operator impact:** Multiview VU meters show all 4 stereo pairs live. TS Analyser panel shows "AUDIO (4 TRACKS)" instead of 5.
+
+
+
+## v3.1.72 / web v3.1.80 — 2026-03-18
+
+### Fix: all audio ES pairs now measured in multiview VU meters
+
+**`src/ts-analyser.js` — `_probeAudioLevels()`:**
+
+**Root cause:** `_probeAudioLevels()` had no `-map` argument, so FFmpeg defaulted to selecting only the first audio Elementary Stream. On a stream with 4 audio ESes (8 channels) only the first stereo pair (Ch1+Ch2) was measured; pairs 2–4 always showed as dark/inactive placeholders.
+
+**Fix:** On probe cycles where `this.lastResult` shows more than one audio ES in the PMT (null-PID ghost entries excluded), the probe now builds a `filter_complex` that merges all ESes into one multi-channel stream via `amerge=inputs=N` before passing to `astats`. This gives FFmpeg a single 8-channel (for 4×stereo) stream to analyse, producing `Channel: 1` through `Channel: 8` in the astats output — mapping to pairs P1L/P1R through P4L/P4R.
+
+First-probe cycle (no `lastResult` yet) falls back to single-stream behaviour; the merged probe runs from the second cycle onward. Cap of 8 inputs guards against malformed PMT data.
+
+**Operator impact:** All 4 audio pairs on current multicast streams now show live VU bar levels in fullscreen multiview, not just the first stereo pair.
+
+
+
+## web v3.1.80 — 2026-03-18
+
+### Fullscreen: remove status bar + redesign UMD overlay
+
+- **Bottom status bar removed** — cleaner, minimal fullscreen look; no dead chrome below the tile grid.
+- **UMD overlay redesigned**: moved to bottom-left of thumbnail; Labotech cyan palette (`#c8eaf0` service name, `#1a7a8a` bitrate); gradient semi-transparent background (`rgba(0,12,22,0.92)→rgba(0,8,16,0.72)`); 1px status-colour tally accent on left edge. Courier New monospace, uppercase, tight letter-spacing — broadcast MCR style.
+
+**Operator impact:** Fullscreen multiview is fully edge-to-edge with no footer bar. Service name and bitrate remain visible as a professional UMD overlay at the bottom of each tile.
+
+
+
+## web v3.1.79 — 2026-03-18
+
+### Fullscreen tiles: subtle 1px semi-transparent status border
+
+Top border reduced from `2px solid` to `1px solid` at 33% opacity (`statusColor55`). Side/bottom borders darkened to `#080808`. Status color still readable as tally indicator without forming bold continuous lines across the screen.
+
+
+
+## web v3.1.78 — 2026-03-18
+
+### Fullscreen multiview: true 16:9 tiles + correct audio pair count
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **True 16:9 tile aspect ratio**: `aspectRatio: '16/9'` added to `FullscreenThumbTile` root. Grid changed from `gridAutoRows: '1fr'` (stretches tiles to fill height, causing anamorphic distortion) to `gridAutoRows: 'auto'` with `alignContent: 'center'` — tiles maintain 16:9 and are centred vertically; unused background shows as black bars rather than stretching the video.
+- **Correct audio pair count**: `pairCount = Math.max(measuredPairs, audioEsCount)` — always shows as many meter pairs as there are audio Elementary Streams in the PMT, even when only the primary ES was probed. Unprobed pairs render as dark/inactive bars, showing the channel slot exists.
+- **Ghost null-PID audio ES fix**: PMT audio ES count now filters `s.pid != null` — ffprobe emits each ES twice (once in the program list with a PID, once in the global stream array without). The null-PID ghost was inflating the audio pair count by 1 for every stream.
+
+**Operator impact:** Thumbnails are true 16:9 at all tile counts. All 4 audio tracks on the current multicast streams now show meter slots. The phantom 5th audio track disappears.
+
+
+
+## web v3.1.77 — 2026-03-18
+
+### Fix: bitrate units corrected to Mb/s throughout
+
+`Mbps` and bare `Mb` replaced with `Mb/s` — the correct SI-derived notation used in EBU/DVB/SMPTE documentation. Affects: UMD overlay (`DecoderMultiviewPanel`), TS Rate stat cells (`formatMbps` in `transportBitrate.js`).
+
+
+
+## web v3.1.76 — 2026-03-18
+
+### Fix: UMD bitrate shows "Mb" unit
+
+Bitrate in the fullscreen UMD overlay now displays as `8.2 Mb` instead of bare `8.2`.
+
+
+
+## web v3.1.75 — 2026-03-18
+
+### Fix: UMD label shrink-wraps content, maximises thumbnail area
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- UMD overlay changed from `display:flex; left:0; right:0` (full tile width) to `display:inline-flex; left:0` with no `right` — background covers only the service name + bitrate text. `maxWidth:88%` prevents overflow. Service name span no longer uses `flex:1`; bitrate rendered only when available and sits immediately after the name. Thumbnail video is unobscured everywhere outside the label.
+
+**Operator impact:** UMD background is now exactly as wide as the label text, leaving the thumbnail image visible behind it rather than blacked out across the full top strip.
+
+
+
+## web v3.1.74 — 2026-03-18
+
+### Fix: fullscreen UMD service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- `FullscreenThumbTile` now latches the last known-good service name in `svcLatch` state — same pattern as `DecoderCard.svcSnapshot`. `rawSvc` is derived from `result.dvb.services[0].serviceName` or `result.programs[0].name`; when the result momentarily clears between probe cycles, `svcLatch` keeps the UMD label stable. The name only ever updates forward — it never reverts to `'—'` once a service name has been seen.
+
+**Operator impact:** UMD service name no longer flickers/disappears between probe cycles.
+
+
+
+## web v3.1.73 — 2026-03-18
+
+### Fullscreen multiview: UMD service label + 2px audio bars
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **UMD overlay at top of thumbnail**: professional broadcast-style source label. Semi-transparent black strip (18px, `rgba(0,0,0,0.82)`) at the top of each thumbnail. Left-edge tally strip (3px, status color — green/amber/red). Service name in bold white monospace uppercase. Bitrate right-aligned in dim blue. Decoder ID moved to bottom-right corner of thumbnail at 18% opacity. Bottom label bar removed — UMD carries all info.
+- **2px VU bars**: each individual bar is fixed 2px wide (was `flex:1`). At 2px per bar + 1px L/R gap + 2px inter-pair gap, 4 stereo pairs fit in 30px total panel width. Labels removed from bars (too narrow). Zone ticks remain at 5% opacity.
+- **Audio panel**: fixed 30px width, uniform 2px padding — accommodates 4 pairs exactly.
+- **Top border**: reduced from 3px to 2px for a tighter tile chrome.
+
+**Operator impact:** Service names are now legible on each thumbnail at MCR distance. Audio meter column is minimal and non-intrusive. 4 stereo pairs visible per tile.
+
+
+
+## web v3.1.72 — 2026-03-18
+
+### Fullscreen multiview: refined audio meters + tighter tile grid
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **VU bar styling**: removed bar border, zone ticks reduced to `rgba(255,255,255,0.04)` (near-invisible), peak hold thinned to 1px with no glow, bar colors slightly desaturated for MCR legibility. Inactive bars render at 20% opacity.
+- **Audio panel**: narrowed to `clamp(20px, 7%, 42px)` — significantly slimmer footprint preserving more thumbnail area. dBFS header label removed. Padding and gap reduced.
+- **Audio pair count from PMT**: pair count is now derived from `result.programs[].streams` filtered to `codecType === 'audio'` — so tiles show the correct number of L/R pairs matching the actual ES audio stream count, not just what astats happened to measure. Real level data fills pairs that were probed; unmeasured pairs render as dark/inactive bars.
+- **Tile grid gap**: reduced from 2px to 1px with 1px padding on `#010203` background — tighter seams, rack SVG shows through more subtly as a bezel.
+
+**Operator impact:** Audio meters are slimmer and better integrated visually. Pair count reflects actual audio ESes in the transport stream. Grid lines are nearly invisible.
+
+
+
+## web v3.1.71 — 2026-03-18
+
+### Fullscreen multiview: professional MCR redesign
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **Tile status indicator moved to top border** (3px, status color) — Evertz VMX style replaces the left-edge accent strip. Uniform 1px dark dividers between tiles; tile background changed from transparent to `#040507` for cleaner contrast against rack SVG.
+- **Tile label bar**: coloured status dot (4px, matching tile border) + service name in slightly brighter text; bitrate readout right-aligned; label bar background tied to status color at 14% alpha for subtle context.
+- **Header redesigned** (40px): LaboTech mark · PANEL callsign · live-stream count indicator (green LED + `N/M` ratio) · centered LABOTECH wordmark · UTC timecode (14px monospace, tabular nums, 1 Hz update) · EXIT button. Partner logo removed.
+- **Bottom status bus** (26px): `LABOTECH MVW · PANEL-NAME` left, `YYYY-MM-DD HH:MM:SS UTC` centre, `N LIVE / M STREAMS` right — all in very dark blue text, visible only at close range (not distracting at MCR distance).
+- **Tile grid**: 2px gap + 2px padding on a `#020304` background so rack SVG frames the grid as a bezel.
+- **UTC clock**: `fsNowMs` state with 1 Hz interval only active when fullscreen is open — no timer overhead in normal view.
+- **`+ Decoder` button**: text label corrected to `Decoder` (was `+ Decoder`, which combined with the `<Plus>` icon rendered as `+ + DECODER`).
+
+**Operator impact:** Fullscreen multiview now has the tight dark chrome and UTC timecode expected on a professional MCR monitor wall. Double `+` on the Add Decoder button is fixed.
+
+## web v3.1.70 — 2026-03-18
+
+### Fullscreen multiview: vertical audio meters + rack background
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **Vertical audio meters** embedded in each fullscreen tile. Per-channel `audioLevels.channels` data is paired into L/R pairs and rendered as vertical VU bars filling bottom-to-top (−60→0 dBFS). Zone tick marks at −18 and −9 dBFS. Peak-hold marker per bar. Color: green (nominal) / amber (−18 to −9) / red (> −9). Panel width is `clamp(44px, 20%, 110px)` — scales proportionally with tile size. Falls back to aggregate mean bar when only `meanDb` is available; hides the panel entirely when no audio data is present.
+- **Rack background** applied to the fullscreen overlay container — same `broadcast-rack-bays.svg` + blue radial gradient as the main app background. The 1px tile separator lines let it show through, matching the engineering console aesthetic of the other tabs.
+
+**Operator impact:** Active audio pairs visible at MCR distance inside each fullscreen tile. Fullscreen view now matches the platform's rack aesthetic.
+
+## v3.1.71 — 2026-03-18
+
+### Fix: TSDuckMonitor — 4 correctness issues (Phase 3 pre-merge)
+
+**`src/tsduck-monitor.js`:**
+
+- **SRT caller mode** (`_inputPluginArgs`): replaced `--listener --local-port` with `--caller --remote-host HOST --remote-port PORT`. `--listener` made tsp open a local port waiting for an inbound connection — wrong direction for monitoring a remote encoder/mux. tsp must connect TO the source.
+- **Remove `--all-sections`** from `tables` plugin args: incompatible with `--json-line` on TSDuck 3.44-4581 (the version on <YOUR_SERVER_HOSTNAME>). Absence detection still works — without `--all-sections`, tables are emitted on version change; complete table absence within a sample window is still detectable.
+- **SI stale detection fix** (`_checkSiIntervals`): `_siTableTimes` persisted across sample runs, so `lastSeen == null` was only ever true on the very first sample. After that, tables were never flagged absent even if they stopped appearing. Fix: `_parseOutput` now passes `windowStartMs` (the `startMs` of the current `tsp` run) through to `_checkSiIntervals`. A table is absent from the current window if `lastSeen < windowStartMs`.
+
+**`src/ts-analyser.js`:**
+
+- **health_alarm hysteresis** (`_onTsduckAlarm`): previously emitted `health_alarm` directly on every alarm event, bypassing the probe-level hysteresis. A single `pcrverify` error during stream join was immediately generating a P1/P2 alarm in the event log. Fix: `_tsduckAlarmState` map tracks consecutive alarm count per `checkId`; `health_alarm` is held until the same check fires on 2 consecutive sample windows. Counter resets when the alarm is absent for >2 sample intervals.
+
+**`test/tsduck-monitor.test.js`:**
+
+- Updated SRT test to assert `--caller`, `--remote-host`, `--remote-port` present and `--listener` absent.
+- Updated `_buildTspArgs` test to assert `--all-sections` is absent.
+- Added SI stale detection test: table seen in a previous window triggers alarm in the next window where it is absent.
+
+**Operator impact:** ETR 290 PCR/SI alarms from TSDuckMonitor are now: (1) directionally correct for SRT streams, (2) working correctly for repeated absent-table detection, (3) gated behind a 2-consecutive-window threshold so stream-join transients do not generate false alarms.
+
+## web v3.1.68 — 2026-03-18
+
+### Feature: Fullscreen multiview — Evertz-style thumbnail wall
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- Added **FULL SCREEN** button (amber, visible when tiles are active). Invokes the browser Fullscreen API on the overlay container; ESC exits natively.
+- Fullscreen overlay renders `FullscreenThumbTile` components in a responsive grid (2/3/4/5 columns by tile count) with no UI chrome.
+- Each tile: 16:9 thumbnail fills the cell, thin left-edge status accent (green/amber/red), LED dot in corner, decoder-ID badge (top-right, dimmed), service name + bitrate label bar at the bottom.
+- Header bar (44px): LaboTech mark (left) · panel name · centre wordmark `LABOTECH MULTIVIEW MONITOR` · EXIT button.
+- Background is pure black (#000) with 1px dark separators — Evertz VMX-style monitor wall look.
+
+**Operator impact:** One click converts any multiview panel into a full-screen confidence monitor suitable for MCR wall display.
+
+## v3.1.70 — 2026-03-18
+
+### Fix: Log thumbnail capture failures to docker logs
+
+**`src/ts-analyser.js`:**
+
+- The `doCapture` catch block in `startContinuous()` was silently swallowing errors. Added `console.error` so failures appear in `docker compose logs labotech` as `[thumb:<id>] capture failed: <message>`.
+
+**Why:** With thumbnails still not appearing at expected latency after v3.1.69, the silent catch made it impossible to diagnose whether the issue was ffmpeg errors, network/multicast access, filesystem permissions, or something else.
+
+**Operator impact:** Thumbnail capture failures are now visible in server logs for diagnosis.
+
+## web v3.1.67 — 2026-03-18
+
+### Multiview tile: PID breakdown and service name latch
+
+**`web/src/components/DecoderMultiviewPanel.jsx`:**
+
+- **PIDs stat** now shows `NV NA ND` (e.g. `1V 2A 3D`) using `result.dvb.streamBreakdown` instead of a raw count — gives immediate clarity on stream composition at MCR distance. Falls back to raw count if breakdown is absent (older probe result).
+- **Service name latch**: last known-good `serviceName` and `serviceProvider` are persisted in component state so the tile never flickers back to "Unknown" between probe cycles or during the initial fast-probe window.
+
+**Operator impact:** PID cell shows video/audio/data counts; service name no longer briefly shows "Unknown" when a new result arrives without DVB-SI tags.
+
+## v3.1.69 — 2026-03-18
+
+### Fix: Replace 4-attempt I-frame ladder with 2-attempt thumbnail=pick (long-GOP streams)
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `-skip_frame nokey` and the 4-attempt fallback ladder from `_doCaptureThumbnail`.
+- Now uses 2 attempts: (1) `thumbnail=pick + pp=de/de + scale`, (2) `thumbnail=pick + scale` (handles builds without the `pp` filter).
+- `thumbnail=N` buffers N frames and picks the least-blurry one — no keyframe wait required.
+
+**Why:** Broadcast contribution links commonly use GOPs of 10–25 s. `-skip_frame nokey -frames:v 1` waited up to one full GOP for a keyframe — reliably hitting the 8 s timeout on all three I-frame attempts every cycle. The fallback (attempt 4) also failed intermittently, causing the 5 s reschedule to fire before any frame was written. First thumbnail was appearing at 40–45 s. `thumbnail=pick` needs only a small frame window (160 ms at 25 fps) — no keyframe alignment required.
+
+**Operator impact:** First thumbnail expected within 4–6 s of decoder start regardless of GOP length.
+
+## v3.1.68 — 2026-03-18
+
+### Fix: Remove select=eq(pict_type\,I) from one-shot capture — incompatible with -skip_frame nokey
+
+**`src/monitoring.js`, `test/monitoring.test.js`:**
+
+- Removed `select=eq(pict_type\,I)` from the I-frame vf chain in `_doCaptureThumbnail` attempts 1–3.
+- `-skip_frame nokey` already guarantees only keyframes are decoded but does **not** set `pict_type` metadata on the output frames. The `select` filter therefore matched nothing, causing ffmpeg to exit code=0 with no output file on every I-frame attempt — even after the fallback-chain short-circuit fix in v3.1.67.
+- Now relies on `-skip_frame nokey` + `-frames:v 1` alone, matching the approach already in `PersistentThumbnailCapture`.
+
+**Operator impact:** Attempt 1 now captures the first keyframe reliably (~2–4 s). First thumbnail should appear within 5–8 s of decoder start.
+
+## v3.1.67 — 2026-03-18
+
+### Fix: captureThumbnail fallback chain short-circuit and fallback analyzeduration
+
+**`src/monitoring.js`:**
+
+- `runAttempt` now checks `fs.existsSync(tmpPath)` after `code === 0`. If ffmpeg exits cleanly but wrote no frame (e.g. `select=eq(pict_type\,I)` found no I-frame in the capture window), the attempt is **rejected** so the fallback chain continues to the next attempt. Previously `code === 0` unconditionally resolved, which then threw ENOENT in `fs.rename`, bypassing all remaining attempts and failing the entire capture in one shot.
+- Fallback attempt (`iFrameOnly=false`, `thumbnail=pick`) now uses the same `analyzeduration`/`probesize` as the I-frame path (`2000000 µs` / `3 MB` for RTP, SRT-latency-derived for SRT). The previous `7000000 µs` fallback value left only ~1 s for `thumbnail=pick` buffering within the 8 s RTP timeout, causing reliable timeouts on every fallback attempt.
+
+**Why:** For live RTP streams that are mid-GOP at connect time, `select=eq(pict_type\,I)` exits code=0 with no file. This silently short-circuited the 4-attempt ladder on the very first attempt, causing the capture to fail immediately and reschedule for 5 s later — repeated until ffmpeg happened to join near a keyframe. Combined with the fallback analyzeduration being too long to fit in the timeout budget, thumbnails were appearing after 35–50 s instead of 5–10 s.
+
+**Operator impact:** First thumbnail frame should now appear within 5–10 s of decoder start under normal live-stream conditions.
+
+## v3.1.66 — 2026-03-18
+
+### Fix: RTP/UDP first thumbnail fires after jitter only, not jitter + interval
+
+**`src/ts-analyser.js`:**
+
+- Extracted capture logic into `doCapture()` in the RTP/UDP thumbnail loop.
+- First call schedules `doCapture` after `thumbStartJitterMs` (0–1.5 s hash-based).
+- Subsequent calls continue on the normal `thumbIntervalMs` cadence via `scheduleThumb()`.
+
+**Why:** First capture previously waited `thumbStartJitterMs + thumbIntervalMs` (5–6.5 s of dead time) before even starting. The interval wait serves its purpose between captures but not before the first one — there is no previous capture to space from. Thundering-herd jitter is preserved (hash-based per stream ID).
+
+**Operator impact:** First thumbnail frame appears within ~3–5 s of decoder start instead of ~10–15 s. Subsequent refresh cadence is unchanged.
+
+## v3.1.65 — 2026-03-18
+
+### Fix: Remove duplicate thumbnail capture in analyser streams (>1 min first-frame delay)
+
+**`routes/analyse.js`, `src/api.js`:**
+
+- Removed `thumbnailClient.start()` calls from `POST /analyse/start` and `restoreState()`.
+- Removed `thumbnailClient.stop()` call from `DELETE /analyse/:id`.
+- Removed now-unused `THUMBNAIL_INTERVAL_SEC` constant from both files.
+
+**Why:** `TSAnalyser.startContinuous()` already manages thumbnail capture internally — a `captureThumbnailTimer` loop for RTP/UDP and a `PersistentThumbnailCapture` for SRT. The v3.1.62 wiring introduced a second concurrent `PersistentThumbnailCapture` via the worker subprocess for every stream, creating two simultaneous ffmpeg processes per decoder. Under load this doubled CPU usage for thumbnail capture and caused resource contention that delayed the first frame from ~10 s to >1 minute.
+
+**Operator impact:** First thumbnail frame appears within 10–15 s of decoder start (jitter + first capture cycle). The `ThumbnailWorkerClient` infrastructure remains for future use with streams that do not have their own capture logic.
+
+## v3.1.64 — 2026-03-18
+
+### Fix: Thumbnails not displaying after thumbnail worker wiring (regression v3.1.62)
+
+**`src/api.js`:**
+
+- In the `thumbnail_frame` handler, when the worker emits a new frame, the corresponding `TSAnalyser` instance's `_lastThumbnailUrl` is now updated immediately.
+
+**Why:** The v3.1.62 wiring moved thumbnail capture out of `ts-analyser.js` into the worker process. However, `TSAnalyser._lastThumbnailUrl` was never updated by the worker — it was only set when `runThumbnailCapture` (one-shot probe mode) ran. In continuous mode (`runThumbnailCapture = false`), the `analyse_result` events propagated `thumbnailUrl: undefined`, causing the Confidence Monitor and multiview tiles to show "AWAITING FRAME" indefinitely.
+
+**Operator impact:** Confidence Monitor and multiview thumbnails display correctly again.
+
+## v3.1.63 — 2026-03-18
+
+### Fix: ETR290Analyser 5s startup grace — suppress multicast join noise
+
+**`src/etr290-analyser.js`:**
+- Added `STARTUP_GRACE_MS = 5000` (overridable via `ETR290_STARTUP_GRACE_MS` env var).
+- `start()` sets `_startedAt = Date.now()`.
+- `_parseLine()` suppresses incident creation (but still increments `_counts`) for the first 5 seconds after start.
+
+**Why:** ffmpeg joining a multicast stream mid-stream emits `RTP: missed N packets` and similar lines within the first 1–3 seconds. With `transport_error` threshold set to 1, this fired a spurious alarm in the event log on every decoder start, with no corresponding count growth in the TS Analyser (which has its own 20s probe-cycle grace). The ETR290 and TS Analyser alarm logs were therefore inconsistent at startup.
+
+**Operator impact:** Transport Error and PCR Discontinuity alarms will no longer fire in the first 5 seconds after a decoder starts. Genuine persistent errors that begin immediately after the grace window still fire normally. The count totals in the UI still increment during the grace period.
+
+## v3.1.62 — 2026-03-17
+
+### Feat: Phase 2 thumbnail worker — api.js wiring and analyser lifecycle integration
+
+**`src/api.js`:**
+
+- Creates `ThumbnailWorkerClient` on startup, before route mounting.
+- Wires `frame` events to WebSocket broadcast as `{ type: 'thumbnail_frame', id, url, path }`.
+- Passes client to the analyse route so analyser start/stop automatically manages thumbnail captures.
+- `restoreState()` now calls `thumbnailClient.start()` for each restored analyser on boot.
+- SIGTERM handler: awaits `thumbnailClient.shutdown()` for clean worker teardown before `process.exit(0)`.
+
+**`routes/analyse.js`:**
+
+- `POST /analyse/start` calls `thumbnailClient.start(id, url, THUMBNAIL_INTERVAL_SEC)` after analyser starts.
+- `DELETE /analyse/:id` calls `thumbnailClient.stop(id)` when analyser is removed.
+- `thumbnailClient` is optional (null-safe) — test and standalone usage unaffected.
+
+**Operator impact:** Confidence Monitor thumbnails are now driven by the isolated worker process. Thumbnail capture failures no longer affect the main API process; the worker restarts automatically with exponential backoff. No UI change required — the frontend already consumes `thumbnail_frame` events.
+
+## v3.1.61 — 2026-03-17
+
+### Chore: Phase 2 thumbnail worker scaffolding (worker + client + tests)
+
+**Included in this PR:**
+
+- Added `src/thumbnail-worker.js` worker runtime using `child_process.fork()` IPC command handling.
+- Added `src/thumbnail-worker-client.js` with restart/backoff and active capture replay logic.
+- Added `test/thumbnail-worker.test.js` for command routing, shutdown handshake, and restart replay behavior.
+
+**Scope clarification:**
+
+- `src/api.js` wiring is intentionally deferred to a follow-up change after this Phase 2 scaffolding PR merges.
+- No frontend behavior changes in this entry.
+
+**Operator impact:** No immediate operator-facing behavior change from this scaffolding-only patch. Runtime integration (API wiring and activation path) lands in follow-up work.
+
+## v3.1.59 — 2026-03-17
+
+### Feat: severity-aware probe scheduling — alarm streams poll up to 4× faster
+
+**`src/ts-analyser.js` — `_effectiveProbeIntervalMs()`:**
+
+- Streams in `warning` severity now probe at 50% of `baseIntervalMs` (default: 2.5 s instead of 5 s)
+- Streams in `critical` severity probe at 25% of `baseIntervalMs` (default: 1.25 s)
+- `ok` severity (or no result yet) retains the full base interval — no change to normal operation
+- Floor of 1 s enforced regardless of `baseIntervalMs` setting to prevent probe storms
+- Effective interval exposed in `probeDiagnostics.scheduler.effectiveIntervalMs` and `priorityBoost` fields
+- Global heavy-probe semaphore (max 3 concurrent) still caps parallel load across all streams
+
+**Operator impact:** Alarm conditions detected and recovered faster. A stream that goes critical will
+re-probe within ~1–2 s rather than waiting up to 5 s for the next cycle. No configuration change needed.
+
+## v3.1.58 — 2026-03-17
+
+### Fix: PCR metrics wired to analyser panel, multiview persistence across tab switches, improved muted-text legibility
+
+**TSAnalyser.jsx — PCR / Timing panel now shows live data:**
+
+- PCR Interval now reads from `dvb.pcrMetrics.repetitionMaxMs` (populated by TSDuck heavy probe). Previously read from `dvb.pcr.intervalMs` which was never populated. ETR 290 P2.1 limit is 40ms — value shown amber if exceeded.
+- PCR Jitter now reads from `dvb.pcrMetrics.accuracyMaxMs`. ETR 290 P2.2 practical threshold 0.5ms — value shown amber if exceeded.
+- PCR Discontinuity Indicator row appears when `discontIndicatorErrors > 0`.
+- CRC Errors row appears when `crcErrors > 0`.
+- Both fields fall back gracefully to the legacy `dvb.pcr` path if available (forward-compat for any future direct PCR extraction).
+
+**DecoderMultiviewPanel.jsx — multiview layout survives tab navigation:**
+
+- `decoderIds[]` per panel is now persisted to and restored from localStorage on mount. Previously blanked on every restore, causing the operator to lose all tile assignments on every tab switch.
+- The existing auto-seed logic (line 661: `anyActive` check) still handles server-restart staleness: if restored IDs are all stale (none match current active analysers), the panel re-seeds from the current active set automatically.
+
+**tailwind.config.js — muted text legibility improvement:**
+
+- `gray-500` lifted from `#6b7280` → `#8b95a8` (contrast ratio on `#070b14` improved from ~3.5:1 to ~5.0:1, crossing WCAG AA threshold for small text).
+- `gray-600` lifted from `#4b5563` → `#6b7587`.
+- Affects all panels uniformly. Active/accent/alarm colours are unchanged (neon/led palette).
+
+**Operator impact:** PCR interval and jitter now show real values in the Analyser panel whenever TSDuck has run a heavy probe. Multiview tile layout is no longer lost when switching tabs. All label and metadata text is easier to read on dark displays.
+
+---
+
+## Overview
+
+v3.1 is a broadcast-operator readiness release focused on four areas:
+
+1. **Timeline Confidence Monitor** — MCR-grade lane visualisation with per-protocol alarm accuracy, stable live-lane rendering, operator status labels, and smooth 60fps now-line.
+2. **UI Hardening** — rAF-throttled crosshair cursor, Stop All control, larger lanes/thumbnails, soft monitoring colour palette, short-window zoom (30s/1m/2m).
+3. **Health / Alarm Accuracy** — per-protocol CC/discontinuity thresholds; probe timeouts separated from genuine signal loss.
+4. **False Positive Elimination** — ffprobe capture-window misses no longer drive lane red; noSignal recovery in one probe cycle.
+
+---
+
+## v3.1.57 — 2026-03-17
+
+### Professional-grade backend improvements: PCR/ETR 290, alarm hold-down, CC accumulator, thumbnail backoff
+
+**monitoring.js — PersistentThumbnailCapture improvements:**
+
+- **Reduced high-profile thumbnail resolution** from 640px to 320px, quality from qv=2 to qv=4, and removed hqdn3d denoise filter. Reduces CPU load per capture without operator-visible quality loss at MCR distance.
+- **Exponential backoff on restart:** `_scheduleRestart()` now doubles `_restartDelay` (capped at 30s) on each consecutive failure. Resets to 5s on successful frame write, on `resume()`, and on `suspend()` so transient failures do not permanently stall thumbnails.
+- **stderr logging:** ffmpeg stderr is now forwarded to console.error with stream ID prefix (first 200 chars) for diagnosing capture failures in journalctl.
+- **SRT post-probe settle delay:** `analyzeduration` for SRT increased by 1s (`latencyMs + 3000ms`) to give sources with a 1–2s reconnect cooldown time to accept the new connection.
+
+**ts-analyser.js — ETR 290 / alarm accuracy improvements:**
+
+- **Lifetime CC accumulator:** `_ccTotal` and `_ccHeavyCount` now accumulate CC errors across all probe cycles (never reset). Health assessment deducts 8pts if the lifetime average per cycle reaches the warn threshold after ≥5 cycles, catching persistent low-rate errors that individually never breach the per-cycle floor.
+- **Alarm hold-down on recovery:** Added `OK_HYSTERESIS_N = 2` — after an alarm, requires 2 consecutive clean probes before reporting 'ok'. Prevents single-probe flicker from causing false clear alarms in the event log.
+- **PCR metrics extraction (`_extractTSDuckPcrMetrics`):** Walks TSDuck JSON output to extract PCR repetition max/mean, PCR accuracy max, PCR discontinuity indicator errors, and PSI CRC errors. ETR 290 Priority 2 scoring: repetition >40ms (10pts, >100ms 20pts), accuracy >10ms (8pts, >50ms 16pts), discontinuity indicators (12pts), CRC errors (10pts, ≥3 errors 20pts).
+- **Unreferenced PIDs extraction (`_extractUnreferencedPids`):** Detects PIDs in the TS stream not referenced by any PMT (ETR 290 P3.5). Applies a 6pt penalty when found.
+- **SRT thumbnail post-probe settle delay:** `this._persistentThumb.resume()` is now called after a 1500ms settle delay to avoid immediate connection rejection from SRT sources with a reconnect cooldown.
+
+**Operator impact:** More accurate health scores (fewer false positives from PCR/CC/unreferenced PID faults), more resilient thumbnail capture with diagnostic logging, and reduced false alarm flicker on stream recovery.
+
+---
+
+## v3.1.56 — 2026-03-17
+
+### Feat: Multiview config export / import for workstation migration
+
+Operators can now save the complete multiview configuration — all decoders, panel names, stream catalogs, and panel→decoder assignments — to a single JSON file, and restore it on any other workstation.
+
+**Export** (`↓ Config` button in the Decoder Multiview header):
+- Calls `GET /api/multiview/export` (server provides running decoder URLs + panel stream registry)
+- Merges client-side panel→decoder assignments from browser state
+- Downloads `labotech-multiview-YYYY-MM-DD.json`
+- SRT passphrases, latency, and pbkeylen are included in the bundle
+
+**Import** (`↑ Config` button):
+- Reads the exported JSON, shows a confirmation prompt
+- Calls `POST /api/multiview/import`: starts all decoders, writes `multiview-panels.json`
+- Restores the panel→decoder layout in the browser without a full page reload
+- Already-running decoders with the same ID are skipped; any skipped IDs are reported
+
+**Export format** (`exportVersion: 1`):
+- `panels[]` — panel id, name, stream catalog, decoderIds assignment
+- `decoders[]` — id, url, interval, nicName, plus `parsed{}` with human-readable host/port/protocol/latency/passphrase for reference
+- `_clientPanelIds[]` — full client-side panel state for round-trip fidelity
+
+**Operator impact:** Commissioning a second monitoring workstation now takes seconds: export from the primary, import on the secondary. No manual re-entry of decoder URLs or passphrases.
+
+**Backend route changes:** `routes/multiview.js` factory now accepts `(analysers, saveState, broadcast)` so it can start decoders on import. `src/api.js` updated accordingly.
+
+---
+
+## v3.1.55 — 2026-03-17
+
+### Fix: Monitoring Policy dropdown clipped by Stream Profile panel
+
+The Policy chip in the Stream Profile panel opens an absolute-positioned dropdown. `PanelBox` has `overflow: hidden` (required for border-radius clipping on most panels), which clipped the dropdown against the panel's lower edge — making profile options unreachable.
+
+Fix: added `overflow: visible` to the specific Stream Profile `PanelBox` instance only. All other `PanelBox` components are unchanged. The dropdown now renders above the panel boundary and is fully interactive.
+
+---
+
+## v3.1.54 — 2026-03-17
+
+### Fix: Audio meter bars showing reversed colours — silence appeared full/red
+
+**Root cause:** `_probeAudioLevels()` in `ts-analyser.js` parsed `RMS level dB` and `Peak level dB` from ffmpeg astats output using `Number.isFinite()` to validate the parsed value. For truly silent channels, ffmpeg reports `RMS level dB: -inf` and `Peak level dB: -inf`. `parseFloat('-inf')` returns `-Infinity`, and `Number.isFinite(-Infinity)` is `false` — so silent channels were silently dropped. The fallback behaviour left those channels unset, causing them to be excluded entirely or coerced to 0 dBFS downstream. `dbToPercent(0)` maps to 100% bar width; `meterColor(0)` maps to red.
+
+**Fix:** Explicitly handle `-inf`/`inf` string literals before calling `parseFloat`. Silent channels (`-inf`) are stored as −90 dBFS — a floor value that renders as an empty (green) bar at MCR distance. Clipping channels (`inf`) are stored as 0 dBFS. `Number.isFinite()` validation still guards numeric parse results.
+
+**Operator impact:** Silence no longer shows as a full red bar. Silent channels render with an empty green meter, consistent with broadcast convention (silence = no signal, green = no alarm).
+
+---
+
+### Fix: CC errors not flagging on RTP/UDP feeds — carry-forward and 3-probe rolling average
+
+Two compounding issues prevented CC errors from registering on RTP/UDP multicast feeds:
+
+1. **Light probe carry-forward**: On light probe cycles (`runHeavyProbe = false`), `continuityCounterErrors` was unconditionally reset to `{count: 0}`. Health assessment scored CC as clean every light cycle (which is ~2 of every 3 probe cycles). Fix: light cycles now carry forward the last known heavy-probe CC result.
+
+2. **Per-probe ffprobe join artefacts**: Each `_probeContinuityCounterErrors()` call spawns a new ffprobe that reconnects to the multicast group and always produces 1–10 CC errors while syncing to the first keyframe. The broadcast-balanced-v1 floor (`ccWarnCount ≥ 3`) was designed to absorb these, but it also suppressed genuine single-digit CC error rates. Fix: the per-cycle count is now replaced with a 3-probe rolling average for RTP/UDP CC scoring. Join artefacts from a clean stream average out to ~1–2 per cycle; a genuinely degraded feed sustains an average ≥ 3 and crosses the threshold.
+
+**Operator impact:** Persistent CC errors on RTP/UDP contribution feeds now register as warnings/critical within 3 heavy probe cycles (~3–6 minutes depending on profile). Previously they were permanently suppressed.
+
+---
+
+## v3.1.53 — 2026-03-17
+
+### Fix: SRT probe serialisation — 0 PIDs/services despite full bitrate
+
+**Root cause:** `Promise.all` launched all heavy probes simultaneously (TSDuck, ffmpeg bitrate, ffprobe audio, tsDisc, CC). For SRT sources that accept only one caller, only the first process to connect received TS data — typically the transport bitrate probe. All others were rejected, returning empty results. Result: correct bitrate, 0 PIDs, 0 services, 0 CC errors.
+
+**Fix:** SRT heavy probes now run sequentially — one SRT connection at a time. RTP/UDP multicast keeps `Promise.all` (unlimited simultaneous receivers). The thumbnail suspend budget is extended to `latencyMs + 70s` to cover the full sequential probe window; `resume()` in the `finally` block still cancels it early as soon as all probes finish.
+
+Trade-off: SRT probe cycles are longer (sum of probe durations vs max), but all probes now succeed and populate the full dashboard.
+
+---
+
+## v3.1.52 — 2026-03-17
+
+### Fix: RTP/UDP thumbnails broken — PersistentThumbnailCapture scoped to SRT only
+
+`PersistentThumbnailCapture` (introduced v3.1.45) was applied to all protocols including RTP/UDP multicast. For SRT it is necessary — reconnecting every frame costs a full latency window. For RTP/UDP multicast, multicast join is near-instant and the proven one-shot `captureThumbnail()` path was already working before v3.1.45.
+
+The persistent process on multicast failed silently (`-loglevel error` suppresses stderr) and produced no frames, leaving all RTP/UDP decoders at "AWAITING FRAME" after deploy.
+
+Fix: `PersistentThumbnailCapture` is now SRT-only. RTP/UDP streams revert to the original interval timer loop calling `captureThumbnail()` — the approach that worked reliably before this session's changes.
+
+---
+
+## v3.1.51 — 2026-03-17
+
+### Fix: SRT thumbnail race condition + analyzeduration too aggressive
+
+Two bugs introduced in v3.1.49–v3.1.50 causing "AWAITING FRAME" and complete thumbnail loss:
+
+**Race condition (monitoring.js):** `suspend()` killed the ffmpeg process but the stale `close` event fired after `resume()` had already spawned a new one — setting `this._proc = null` on the live process and scheduling a spurious 5s restart. Fixed with an epoch counter (`this._epoch`) incremented on every `_spawn()`. Close and error handlers capture epoch at spawn time and bail out if it no longer matches, making them immune to stale events from processes killed by `suspend()`.
+
+**`analyzeduration` too short (monitoring.js):** Reduced from `latencyMs+3000ms` to `latencyMs+500ms` in v3.1.50 — too aggressive. ffmpeg needs to detect H.264/HEVC codec info by seeing at least one IDR frame. Broadcast streams with a 2s GOP at 25fps require up to 2000ms of media data after the SRT latency window fills. With only 500ms headroom, the format detection phase timed out before an IDR arrived → ffmpeg exited → "AWAITING FRAME". Restored to `latencyMs+2000ms` (a practical improvement over the original 3000ms while guaranteeing reliable GOP detection).
+
+---
+
+## v3.1.50 — 2026-03-17
+
+### Fix: SRT thumbnail first-frame latency — redundant I-frame filter and oversized analyze window
+
+Two compounding delays before the first thumbnail appeared after each spawn/resume:
+
+1. **`analyzeduration = latencyMs + 3000ms`** — the 3s headroom was added for the transport bitrate probe (which needs a full measurement window) but was also applied to the thumbnail process, which only needs the SRT latency window to fill. Reduced to `latencyMs + 500ms`.
+
+2. **`select=eq(pict_type\,I)` in the vf chain was redundant and harmful** — `-skip_frame nokey` already instructs the decoder to skip all non-keyframes, so every frame reaching the filter graph is already an I-frame. The `select` filter only passed frames that fell on the `fps=1/N` time grid, which could skip the very first keyframe and delay the first thumbnail by up to one full interval (e.g. 30s). Removed.
+
+Result: first thumbnail after spawn/resume now appears at `latencyMs + ~500ms + time-to-first-keyframe` instead of `latencyMs + 3000ms + interval`.
+
+---
+
+## v3.1.49 — 2026-03-17
+
+### Fix: SRT thumbnail frozen for full 35s probe budget
+
+`suspend()` set a 35s fallback restart timer but had no way to cancel it early. When the probe completed in ~10s the thumbnail stayed dead for the remaining 25s. Added `resume()` to `PersistentThumbnailCapture`: cancels the fallback timer and calls `_spawn()` immediately. Called from the `finally` block in the heavy probe path — thumbnail now restarts as soon as all probe processes exit, not after the worst-case budget.
+
+Operator impact: thumbnail freeze on SRT streams reduced from ~35s to the actual probe duration (~latency + 10s, typically 12–15s for 2s latency SRT).
+
+---
+
+## v3.1.48 — 2026-03-17
+
+### Fix: SRT probe failure — PersistentThumbnailCapture holding single connection slot
+
+**Problem:** `PersistentThumbnailCapture` (added v3.1.45) holds a long-lived SRT caller connection indefinitely. Many SRT encoders and contribution servers accept only one caller at a time. When the heavy probe cycle runs, `_probeTransportBitrateBps()` tries to open a second SRT connection — the source rejects it, the probe fails with 0 TS packets and 0 bitrate while the SRT Transport tab shows no counters.
+
+**Fix (`monitoring.js`):**
+Added `suspend(durationMs)` to `PersistentThumbnailCapture`:
+- Kills the current ffmpeg process (freeing the SRT caller slot)
+- Sets a restart timer for `durationMs` before killing, so the close handler's own `_scheduleRestart(5000)` sees `_restartTimer` already set and exits early — preventing the thumbnail from reclaiming the slot mid-probe
+- Does not set `_running = false`, so the class resumes cleanly after the budget expires
+
+**Fix (`ts-analyser.js`):**
+Before each heavy probe burst on SRT URLs: calls `this._persistentThumb.suspend(latencyMs + 30000)` then waits 600 ms for the SRT connection to close. After the burst completes, the thumbnail auto-restarts via its internal timer.
+
+Operator impact: SRT heavy probes now get the connection slot they need — TS packet counts, bitrate, and libsrt stats all populate correctly. Thumbnail freezes for ~35 s per probe cycle (every 15–60 s depending on policy) then resumes.
+
+---
+
+## v3.1.47 — 2026-03-17
+
+### Fix: SRT stats showing false zeros ("STATS OK" but all 0.0)
+
+**Root cause:** `_extractSrtStatsFromLog()` searched the entire ffmpeg stderr string with overly-broad patterns. The `rate` alias matched `bitrate=0.0kbits/s` from `ffmpeg -progress pipe:2`, `total` matched `total_size=N`, and `bw` / `rtt` hit other unrelated fields — all returning 0. This made `srtStats` truthy (showing "STATS OK") but with all-zero values.
+
+**Fix (ts-analyser.js):**
+- Pre-filter stderr to only lines containing a genuine libsrt marker (`msRTT=`, `mbpsRecvRate=`, `mbpsBandwidth=`) before parsing — lines from `-progress pipe:2` are excluded entirely
+- Removed all short-word fallback aliases (`rate`, `bw`, `total`, `rtt`, `retrans`, `loss`, `lost`, `nak`, `ack`) — replaced with exact libsrt field names using `\b` word boundary anchors
+- Returns `null` (not a falsy empty object) when no libsrt stat lines are present — UI correctly shows "AWAITING" instead of "STATS OK" with zeros
+
+**Fix (TSAnalyser.jsx):** SRT Transport tab reorganised with four sections:
+- **Link Quality** — RTT, Recv Rate, Bandwidth, Loss %
+- **ARQ Counters** — NAK, ACK, Retransmitted, Lost, Total, Retrans %
+- **Latency Health** — RcvDrop, SndDrop, Belated (with inline drop/belated banners)
+- **Buffer & Flow** — Rcv Buf (ms), Flow Window, Max BW
+
+Operator impact: SRT Transport tab now correctly shows "AWAITING" until the first transport probe completes, then populates with real libsrt counters. Drops/belated events surface with colour coding and diagnostic messages in-panel.
+
+---
+
+## v3.1.46 — 2026-03-17
+
+### Feat: SRT professional broadcast health thresholds (Haivision spec)
+
+SRT link quality assessment aligned to Haivision SRT specification and broadcast contribution link data (RTT ~19ms, 22–24 Mbps, all drops at 0).
+
+**Backend (`ts-analyser.js`):**
+
+*New stats parsed from libsrt verbose output:*
+- `pktRcvDrop` / `pktSndDrop` — drops due to latency window too short (per Haivision spec: non-zero = critical)
+- `pktRcvBelated` / `pktRcvAvgBelatedTime` — packets arriving after deadline (warning: raise latency)
+- `byteAvailRcvBuf` / `msRcvBuf` — receiver buffer fill level
+- `pktFlowWindow` — available flow window slots
+- `mbpsMaxBW` — sender max bandwidth limit
+- `retransRatio` — `pktRetrans / pktTotal × 100%` (>5% = warning, >25% = critical per Haivision spec)
+
+*New health penalties in `_buildHealthAssessment()`:*
+- `pktRcvDrop > 0` → −30pts critical: receiver drops, latency window too short for link RTT
+- `pktSndDrop > 0` → −30pts critical: sender could not retransmit within latency window
+- `pktRcvBelated > 0` → −12pts warning: packets arriving after deadline, consider raising latency
+- `RTT ≥ SRTO_LATENCY` → −25pts critical: ARQ cannot recover (mathematically impossible)
+- `RTT > SRTO_LATENCY/2` → −10pts warning: retransmits may miss receiver deadline
+- `retransRatio > 25%` → −20pts critical; `> 5%` → −8pts warning
+
+**Frontend (`MetricsTile.jsx`):**
+
+SRT Link panel gains a third row: **RcvDrop / Belated / Retrans%** with broadcast traffic-light colouring (green=0, yellow=warning, red=critical). RTT value now shows one decimal place. Retrans count colour-coded to retransRatio threshold.
+
+Operator impact: SRT drops and belated arrivals are now visible in the MCR tile immediately, with the health score and alarm system picking them up within one probe cycle.
+
+---
+
+## v3.1.45 — 2026-03-17
+
+### Fix: SRT bitrate measurement, persistent thumbnails, dynamic latency window
+
+Three related SRT improvements:
+
+**1. 786 kbps bitrate measurement bug fixed**
+`_probeTransportBitrateBps` used a fixed `-t 3.0 s` capture window and `analyzeduration=1s`. For SRT with `latency=2000ms`, the first 2s were consumed by the SRT handshake + latency window fill — leaving only 1s of data in a 3s window, producing ~⅓ of true bitrate. Now uses `parseSrtLatency()` to derive the capture window dynamically: `latency + 5s` capture, `latency + 2s` analyze, `latency + 20s` kill timer.
+
+**2. Persistent thumbnail process — near real-time refresh**
+Replaced the timer-based `captureThumbnail()` loop (which spawned a new ffmpeg every 5s, incurring a full SRT latency window reconnect on every cycle) with a long-lived `PersistentThumbnailCapture` per decoder. The ffmpeg process runs indefinitely, emitting JPEG frames to `pipe:1`; a `JpegFrameExtractor` detects complete frame boundaries (FF D8 … FF D9) and writes them atomically. After the first SRT latency window, subsequent frames are delivered in real time at the configured interval — no reconnect overhead.
+
+**3. SRT latency is now read from the URL parameter**
+`parseSrtLatency(url)` extracts `?latency=N` from the SRT URL. All analyze windows, capture durations, and attempt timeouts are derived from this value. Set your SRT latency in the decoder form — the probe and thumbnail pipeline adapts automatically. Higher-latency SRT links (e.g. `latency=5000`) now work without manual tuning.
+
+---
+
+## v3.1.44 — 2026-03-17
+
+### Fix: SRT caller thumbnail "Awaiting Frame" — latency window starving analyze
+
+Two bugs caused SRT caller streams to show "Awaiting Frame" indefinitely:
+
+1. **analyzeduration too short**: I-frame attempts used `analyzeduration=2s`. SRT caller's latency window (typically 2–5s) must fill before any data flows — the analyze window expired before a single packet arrived.
+2. **No connection timeout set**: SRT URLs got no `timeout` parameter, so ffmpeg hung on connection failures until the 8s kill timer fired — consuming all available thumbnail attempt slots.
+
+**Fix (`monitoring.js`):**
+- SRT URLs: automatically appends `mode=caller` (if absent) and `timeout=8000000` (8s connection timeout)
+- SRT I-frame `analyzeduration` raised from 2s → **6s**
+- SRT attempt timeout raised from 8s → **14s** per attempt (covers up to 5s latency window + decode)
+
+Operator impact: SRT caller confidence thumbnails now appear on first or second attempt instead of exhausting all retries.
+
+---
+
+## v3.1.43 — 2026-03-17
+
+### Ops: Full NUMA-aligned CPU/memory allocation for Xeon Gold 5120 dual-socket
+
+Previously using 16 of 56 available logical CPUs. Now NUMA-pinned:
+
+| Container | cpuset | cpus | mem |
+|---|---|---|---|
+| labotech | `0-13,28-41` (NUMA 0) | 24.0 | 24 GB |
+| labotech-encapsulator | `14-27,42-55` (NUMA 1) | 16.0 | 8 GB |
+
+- Node.js heap: 6 GB → **16 GB** (conservative ceiling; leaves 8 GB for concurrent child processes)
+- `TS_HEAVY_PROBE_MAX_CONCURRENT`: 3 → **8** (8 simultaneous ffprobe+tsanalyze spawns; I/O-bound, safe on 28 threads)
+- `THUMBNAIL_MAX_CONCURRENT`: 2 → **4**
+- `shm_size` labotech: 512 MB → 1 GB
+
+Operator impact: significantly reduced cross-socket memory latency, more headroom for concurrent probe cycles, faster thumbnail refresh. Pending soak validation under full lane load before further heap increase.
+
+---
+
+## v3.1.42 — 2026-03-17
+
+### Fix: TS analyser state persisted across container restarts
+
+Active decoders/analysers were not saved to `config/state.json`, so every container restart wiped the TS timeline and required manual re-adding of all decoders.
+
+- `state-persistence.js`: adds `analysers` to `save()`/`load()` (fields: `id`, `url`, `interval`, `nicName`)
+- `api.js`: `saveState()` now includes the analysers map; `restoreState()` always restores analysers on boot (no env var gate — decoders must survive restarts)
+- `routes/analyse.js`: calls `saveState()` on every `POST /analyse/start` and `DELETE /analyse/:id`
+
+Operator impact: start your decoders once — they auto-resume after every deploy.
+
+---
+
+## v3.1.41 — 2026-03-17
+
+### Ops: `scripts/diagnose.sh` — one-command health snapshot
+
+`bash scripts/diagnose.sh` prints: process status, systemd service state, journal errors (last 30 min), all registered analysers with running flag and last probe time, active probe URLs, WebSocket connection count, disk, and memory. Optional arg: `bash scripts/diagnose.sh "1 hour ago"`.
+
+---
+
+## v3.1.40 — 2026-03-17
+
+### UX: Catalog stream picker promoted to first-class control; mode buttons compact
+
+The decoder form now opens with a full-width **"Select stream from catalog…"** search input (with loupe icon) that filters all 914 streams by name or IP in real time. Selecting a stream auto-fills Host/IP, Port, Mode, and Decoder ID.
+
+The RTP / SRT / UDP mode buttons are now compact and sit to the right of the picker on the same row instead of spanning the full width. The Host/IP field below is a plain editable field (catalog picker no longer duplicated there).
+
+---
+
+## v3.1.39 — 2026-03-16
+
+### Fix: Decoder ID auto-fill uses stream name directly
+
+When selecting a stream from the catalog dropdown, the Decoder ID field is now populated with the stream name as-is (e.g. `GV RX096`) instead of a slugified compound string (`mv-gv-rx-096-239-100-20-196-6501`). Easier to read at MCR distance and matches the operator naming convention.
+
+---
+
+## v3.1.38 — 2026-03-16
+
+### Fix: Remove loaded stream tiles from multiview panel
+
+Multiview was accidentally flooding with 914 loaded (inactive) stream tiles from the catalog. The panel grid now shows **only active (running) decoder tiles** — no loaded tiles concept exists.
+
+- Removed `LoadedStreamCard` component entirely
+- Removed `startingStreamIds`, `collapsedCategories`, category-grouping for tile display
+- Bumped localStorage key from `v2` → `v3` to clear stale browser cache (browsers with old data will auto-reset on next load)
+- The 914-stream catalog remains available as a **dropdown picker on the Host/IP field only**
+
+Operator impact: multiview is clean again — only live decoders appear as tiles.
+
+---
+
+## v3.1.37 — 2026-03-16
+
+### Feature: Stream catalog picker on Host/IP field in decoder form
+
+Click the **Host/IP** field when adding a decoder — a categorised dropdown appears showing all 914 streams from the catalog, grouped by type (GV Receivers, LK Receivers, GV/LK Encoders, IP Decoders, Blue/Red Multicast). Type to filter by name or IP. Selecting a stream auto-fills IP, port, mode and decoder ID.
+
+Catalog served from `config/multiview-stream-catalog.json` via `GET /api/multiview/catalog`. Separate from the panel registry — does not load streams as multiview tiles.
+
+Reverts the accidental pre-population of `config/multiview-panels.json` — panels config is back to empty default.
+
+---
+
+### Revert: Remove pre-populated streams from multiview panels config
+
+`config/multiview-panels.json` reset to empty. The 914-stream catalog will be used as a source picker dropdown on the Host/IP field in the decoder form — not loaded as multiview tiles.
+
+---
+
+## v3.1.36 — 2026-03-16
+
+### Fix: Replace `node` with `jq` in post-deploy smoke script
+
+`post-deploy-smoke.sh` used a `node` heredoc to parse the health JSON — same issue as the preflight script (v3.1.25). Node.js is not installed on the host, causing a permanent FAIL=1 on every deploy. Replaced with `jq` one-liners, same fix pattern as preflight. Deploy summary will now show PASS=7 FAIL=0.
+
+---
+
+## v3.1.35 — 2026-03-16
+
+### Ops: Pre-populate stream registry with 914 multicast streams
+
+`config/multiview-panels.json` seeded with all 914 clean multicast streams across 10 categories on the default BES panel. No manual import needed after deploy — streams are available immediately on first load.
+
+---
+
+## v3.1.34 — 2026-03-16
+
+### Fix: Add GV/LK Blue and Red Multicast categories; filter invalid IPs from import
+
+New source JSON introduced four additional prefixes not present in the original files. Added to `deriveCategory()` and category order:
+- `GV_BMCAST_*` → GV Blue Multicast (199 streams)
+- `GV_RMCAST_*` → GV Red Multicast (199 streams)
+- `LK_BMCAST_*` → LK Blue Multicast (64 streams)
+- `LK_RMCAST_*` → LK Red Multicast (64 streams)
+
+Extraction script updated to filter non-multicast IPs (e.g. `0.0.0.0`) and `_old` legacy entries. Clean extracted file: **914 unique valid streams**.
+
+---
+
+## v3.1.33 — 2026-03-16
+
+### Feature: Auto-categorised collapsible groups for loaded stream tiles
+
+With large stream registries (e.g. 389 streams), a flat tile grid is unworkable. Loaded (inactive) tiles are now grouped into collapsible category sections, derived automatically from the stream name prefix — no extra column in the CSV/JSON needed.
+
+**Category mapping (auto-derived, ordered):**
+| Prefix | Category |
+|---|---|
+| `GV_IPDEC_*` | GV IP Decoders |
+| `LK_IPDEC_*` | LK IP Decoders |
+| `GV_TS_ENC_*` | GV Encoders |
+| `LK_TS_ENC_*` | LK Encoders |
+| `GV_RX_*` | GV Receivers |
+| `LK_RX_*` | LK Receivers |
+| `*_old` | Legacy |
+| anything else | Other |
+
+Each category shows a header with name and stream count. Click to collapse/expand. Active (live) tiles remain ungrouped at the top. Legacy streams extracted from source JSON were excluded from the clean import file.
+
+---
+
+## v3.1.32 — 2026-03-16
+
+### Fix: Move Import/Export buttons to header toolbar alongside Decoder button
+
+Import and Export buttons relocated from the stream registry section into the main header toolbar, styled consistently with the existing Decoder and Panel buttons. Export button only appears when the active panel has streams configured. Removes the separate registry toolbar row.
+
+---
+
+## v3.1.31 — 2026-03-16
+
+### Ops: One-command setup scripts for cron and Docker log rotation
+
+Replaces manual copy-paste commands with two runnable scripts:
+
+**`scripts/setup-disk-guard-cron.sh`** — installs the nightly 3am disk-guard cron entry:
+```bash
+bash scripts/setup-disk-guard-cron.sh
+```
+Writes `/etc/cron.d/labotech-disk-guard` automatically. Accepts optional username arg (default: `<service-user>`).
+
+**`scripts/setup-docker-log-rotation.sh`** — configures Docker daemon global log rotation:
+```bash
+bash scripts/setup-docker-log-rotation.sh
+```
+Writes `/etc/docker/daemon.json` and restarts the Docker daemon. Prompts for confirmation if the file already exists. **Causes brief container downtime — run during a quiet period.**
+
+---
+
+## v3.1.30 — 2026-03-16
+
+### Ops: Scheduled disk housekeeping script (`scripts/disk-guard.sh`)
+
+**Problem:** Disk fills up silently between deploys. The `update-and-deploy-safe.sh` cleanup only runs when a deploy is triggered and disk is already low — by then it may be too late.
+
+**Solution:** `scripts/disk-guard.sh` — a standalone cleanup script safe to run from cron while Labotech is live (no container stop or restart). Cleans five categories:
+1. Docker container JSON logs (`/var/lib/docker/containers/*/*-json.log`) — truncated in-place, the primary silent killer
+2. Unused Docker images and build cache (`docker system prune -af`)
+3. apt package cache + orphaned packages
+4. systemd journal vacuumed to 200 MB / 7 days
+5. Thumbnail JPEGs older than 1 hour from `logs/thumbnails/`
+
+Logs before/after free space for root and Docker volumes, with a warning if free space is still below `WARN_FREE_MB` (default 2 GB) after cleanup.
+
+**Cron entry (run once on server as root):**
+```bash
+echo '0 3 * * * <service-user> bash /home/<service-user>/LaboTech/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1' \
+  | sudo tee /etc/cron.d/labotech-disk-guard
+```
+
+**Docker daemon log rotation (run once on server as root):**
+```bash
+sudo tee /etc/docker/daemon.json <<'EOF'
+{
+  "log-driver": "json-file",
+  "log-opts": { "max-size": "50m", "max-file": "5" }
+}
+EOF
+sudo systemctl restart docker
+```
+This caps logs at the daemon level for all containers as a belt-and-braces measure alongside the per-service limits already in `docker-compose.yml`.
+
+**Operator impact:** Disk no longer fills up silently. Daily 3am run reclaims build cache, logs, and thumbnails. Operators see reclaimed MB in `/var/log/labotech-disk-guard.log`.
+
+---
+
+## v3.1.29 — 2026-03-16
+
+### Fix: Remove duplicate `background` key in StreamViewPanel severity badge
+
+`StreamViewPanel.jsx` had two `background` entries in the same style object for the severity badge (lines 1806/1810). The first (`cfg.bg`) was silently overwritten by the second (`#070b14ee`). Removed the dead `cfg.bg` entry; no visual change — the dark overlay was already winning.
+
+---
+
+## v3.1.28 — 2026-03-16
+
+### Feature: Stream registry import/export + visual tile distinction for Multiview
+
+**Stream registry per panel (server-persisted):**
+Each Multiview panel now has an independent stream registry — a named list of `{ name, ip, port, mode }` entries that survive browser refreshes, server restarts, and cross-workstation sessions. Registry data is stored in `config/multiview-panels.json` via two new API endpoints: `GET /api/multiview/panels` (load) and `PUT /api/multiview/panels` (save, debounced 800ms). localStorage acts as an offline fallback and is kept in sync.
+
+**Import CSV or JSON:**
+Click the **Import** button in the Stream Registry toolbar to load streams from a `.csv` or `.json` file.
+- CSV format: `name,ip,port,mode` (header row optional). Mode defaults to `rtp` if omitted.
+- JSON format: `[{ "name": "...", "ip": "...", "port": "..." }]` or `{ "streams": [...] }`.
+- Duplicate IP:port pairs are silently skipped on import.
+
+**Export CSV:**
+Click **Export CSV** to download all streams for the active panel as `multiview-<panel>-streams.csv`. Import the same file on any workstation running Labotech to instantly replicate the panel layout.
+
+**Visual tile distinction — Loaded vs Active:**
+Two distinct tile states are now rendered in the grid:
+- **Active (LIVE) tiles** — existing cyan-border treatment with thumbnail, audio meters, and stats. These are streams currently being probed.
+- **Loaded tiles** — dark navy (`#090e18`) background, dim blue left accent border (`rgba(40,90,200,0.5)`), "Loaded" badge in blue/grey. Show IP:port but no thumbnail. Operators can distinguish at-a-glance which feeds are configured vs actively monitored.
+
+**Start from loaded tile:**
+Each Loaded tile has a green **▶ Start** button. Clicking it launches a continuous TSAnalyser probe for that stream and immediately promotes the tile to Active in the same panel. The stream ID is derived deterministically from `name+ip+port`, so the same stream started twice lands on the same decoder slot.
+
+**Remove from registry:**
+Each Loaded tile has a × dismiss button to remove the entry from the panel registry.
+
+**OPS access:** Import/Export is available to all roles. It is an operational task (pre-show setup, roster changes), not engineering config.
+
+**Operator impact:** MCR operators can now pre-configure an entire show's multicast roster (import CSV), monitor a subset live, and share the configuration across workstations without manual re-entry.
+
+---
+
+## v3.1.27 — 2026-03-16
+
+### Fix: Panel names now survive server restarts and browser re-logins
+
+**Two root causes identified:**
+
+**1. React mount race condition (persist overwrites load):**
+The persist effect ran on mount with the initial default state (single empty "BES" panel) *before* the load effect's `setState` calls were applied. In the brief window between those two effects, localStorage was overwritten with default state. Fixed with a `hydratedRef` — the persist effect is blocked until the load effect has finished restoring state.
+
+**2. Stale decoder IDs across sessions:**
+Panel `decoderIds` were persisted across sessions, but decoder IDs are timestamp-based (`decoder-17773668150861`) and change on every server restart or decoder stop/start. After a redeploy, stored IDs matched nothing in `activeIds` → auto-seed triggered → first panel routing reset → custom panel routing lost. Fixed by not restoring `decoderIds` from storage. Panel names and structure are preserved; decoder routing is always seeded fresh from `activeIds` each session by the existing auto-seed logic.
+
+**Result:** Panel names ("MCR-A", "BES", etc.) survive indefinitely across logins, server restarts, and redeployments. Decoder routing auto-populates correctly on each session start.
+
+---
+
+## v3.1.26 — 2026-03-16
+
+### Fix: Auto-clear thumbnail cache + LVM root volume prune on every deploy
+
+**Thumbnail cache wipe (always, not just on low disk):**
+Stale or 0-byte JPEG files left from a previous crashed/disk-full run were served to the multiview and rendered as black frames until the next probe cycle overwrote them. `update-and-deploy-safe.sh` now removes all `logs/thumbnails/*.jpg` before calling `deploy-one-shot.sh`. The count of removed files is logged. Thumbnails regenerate automatically within the first probe cycle (≤5s) after startup.
+
+**LVM root volume cleanup added to `auto_cleanup`:**
+`/dev/mapper/ubuntu--vg-ubuntu--lv` was not explicitly targeted by the existing cleanup. Added to `auto_cleanup` (runs automatically when disk is below threshold):
+- `apt-get autoremove -y` (was missing, reclaims orphaned packages)
+- `journalctl --vacuum-time=7d` (tightened from 14d)
+- `find /tmp -atime +1 -delete` (clears stale temp files)
+- Logs free MB on the root LV after cleanup for visibility
+
+---
+
+## v3.1.25 — 2026-03-16
+
+### Fix: preflight script — replace `node` with `jq` for health JSON parsing
+
+**Problem:** `scripts/preflight-monitoring-tools.sh` used an inline `node` heredoc to parse the `/health` response. Node.js is not installed on the host — it runs only inside the Docker container. Every deploy failed at the preflight stage with `node: command not found`.
+
+**Fix:** Replaced the `node` block with four `jq` one-liners. `jq` is already a hard requirement of `deploy-one-shot.sh` (checked in `require_cmds`) so it is guaranteed to be present.
+
+---
+
+## v3.1.24 — 2026-03-16
+
+### Revert: Restore thumbnail analyzeduration and attempt timeouts to v3.1.22 values
+
+**Problem:** v3.1.23 reduced `analyzeduration` (2s→1s), `probesize` (3MB→1.5MB), and attempt timeouts (8s→5s) to speed up first thumbnail. This caused regressions on production streams:
+- 1s `analyzeduration` insufficient to find the first I-frame on some streams — attempts timed out and fell through to attempt 4 (any-frame fallback), producing macroblocked thumbnails.
+- Increased probe timeout error rate as more thumbnail attempts failed within the shorter window.
+
+**Fix:** Restored `monitoring.js` exactly to v3.1.22 state:
+- `analyzeduration`: I-frame path `2000000` (2s), fallback `7000000` (7s)
+- `probesize`: I-frame path `3000000` (3MB), fallback `7000000` (7MB)
+- All attempt timeouts: `8000ms`
+
+No other files changed. v3.1.21 (localStorage), v3.1.22 (storage key v2) changes are preserved and unaffected.
+
+---
+
+## v3.1.23 — 2026-03-16
+
+### Perf: Faster multiview thumbnail — reduce analyze latency and fallback timeouts
+
+**Problem:** First thumbnail on a fresh decoder was slow to appear ("Awaiting Frame" for 10–32 seconds) due to three compounding issues:
+- `analyzeduration: 2s` — ffmpeg spent 2 seconds analysing the stream format before decoding a single frame. For a live broadcast stream the codec is known within the first few packets; 2s was pure wasted wait.
+- Fallback ladder attempt timeouts were all 8s — if attempt 1 failed (e.g. `pp=de/de` filter unavailable on this ffmpeg build), attempt 2 did not start until 8s elapsed. Worst case: 32s before any thumbnail appeared.
+- `probesize: 3MB` — read up to 3MB of stream data for format detection, adding further latency on attempt start.
+
+**Fix:**
+- `analyzeduration` on I-frame path: `2000000` → `1000000` (1s)
+- `probesize` on I-frame path: `3000000` → `1500000` (1.5MB)
+- Attempt 1, 2, 3 timeouts: `8000ms` → `5000ms` (fail fast to reach bare-scale attempt sooner)
+- Attempt 4 (last resort / any frame) retains 8s timeout for very long GOP streams
+
+**Result:** First thumbnail appears in 2–4s on a typical broadcast stream. Worst-case (all 4 attempts exhaust): 23s instead of 32s.
+
+---
+
+## v3.1.22 — 2026-03-16
+
+### Fix: Multiview storage key bumped to v2 — clears stale localStorage data
+
+**Problem:** v3.1.21 switched multiview state from `sessionStorage` to `localStorage`. Any pre-existing entry under the old key `labotech:decoder-multiview:state:v1` in `localStorage` (from a prior dev or test session) was now being loaded, producing corrupt panel state and breaking the multiview on first load after the upgrade.
+
+**Fix:** Storage key bumped to `labotech:decoder-multiview:state:v2`. The old key is simply ignored; the component starts clean. Panels created from this version onward will persist correctly across refreshes and restarts.
+
+---
+
+## v3.1.21 — 2026-03-16
+
+### Fix: MCR panels now persist across page refresh and tab close
+
+**Root cause:** `DecoderMultiviewPanel` stored all state (panel names, panel count, decoder routing per panel, engineer mode label) in `sessionStorage`. Session storage is scoped to the browser tab — it is wiped the moment the tab is closed or the page is refreshed. Any MCR panel created during a shift was silently lost.
+
+**Fix:** Changed both `sessionStorage.getItem` and `sessionStorage.setItem` calls to `localStorage`. The storage key (`labotech:decoder-multiview:state:v1`) is unchanged — existing sessions will migrate transparently on first load because the same key is now read from `localStorage`.
+
+**Result:** Panel names, decoder routing, engineer mode label, and active panel selection all survive page refresh, browser restart, and shift handover.
+
+---
+
+## v3.1.20 — 2026-03-16
+
+### Fix: Docker log rotation + post-deploy image prune
+
+**Problem:** Disk filled up progressively between deploys from two sources:
+- Docker container logs had no size cap. The TS analyser runs ffprobe every 30 s per stream; stderr from each probe cycle is captured by the JSON log driver, which grew unbounded in `/var/lib/docker/containers/`.
+- `deploy-one-shot.sh` builds with `--no-cache` every deploy, leaving orphaned image layers in `/var/lib/docker/overlay2` that were never pruned.
+
+**Fix:**
+- `docker-compose.yml` — added `logging: driver: json-file, max-size: 50m, max-file: 5` to `labotech`; `max-size: 20m, max-file: 3` to `labotech-encapsulator`. Capped at ~310 MB total log retention across both containers.
+- `deploy-one-shot.sh` — added `docker image prune -f` as a `run_stage_warn` step after health assertions pass. Runs automatically on every successful deploy; non-fatal if it fails.
+
+**Steady-state disk budget (Docker):** ≤ 310 MB logs + current image layers only.
+
+---
+
+## v3.1.19 — 2026-03-16
+
+### Perf: Smooth 60fps now-line; reduce live tick to 250ms
+
+**Problem:** The cyan current-time line moved in 2-second jumps because `LIVE_TICK_MS=2000` caused `nowMs` state (and thus the entire timeline content) to update every 2 seconds.
+
+**Fix:**
+- `LIVE_TICK_MS` reduced 2000 → **250ms**: content jump is now 0.08% (~1px) at 5m window — imperceptible.
+- Now-line driven by `requestAnimationFrame` loop via `nowLineRef` DOM ref — updates at 60fps with zero React re-renders. Same pattern as the crosshair cursor.
+- `timeStartRef` / `effectiveWindowMsRef` hold latest values without restarting the rAF loop on every 250ms tick.
+- Works correctly in both live and custom range modes: hides when current time is outside the visible window.
+
+---
+
+## v3.1.18 — 2026-03-15
+
+### Fix: Probe timeouts show as narrow amber ticks, not red blocks
+
+**Root cause:** `ffprobe returned empty probe payload (no input packets observed during probe window)` is a ffprobe capture-window miss — ffprobe joined the multicast group but the capture window closed before any packets arrived. The service was delivering video fine. These were classified as `noSignal=true` → 15s critical red blocks, and with multiple occurrences every 12–28 seconds, created a solid false-positive red band.
+
+**Changes:**
+- `isProbeTimeoutError()` — new function, identifies capture-window timeouts as a distinct class from genuine signal loss.
+- `isExpectedNoSignalError()` — probe-timeout strings removed; returns false if `isProbeTimeoutError` matches.
+- `toEvent()` for `'error'` — uses `msg.details` as fallback for API-hydrated events; probe timeouts get `category: 'runtime_probe_timeout'`, `severity: 'warning'`, `title: 'Probe timeout'`.
+- `decEvtSev()` — `runtime_probe_timeout` returns null (never affects gradient); `runtime_error` also checks `description` for probe-timeout text to suppress old localStorage events.
+- `EVENT_BLOCK_DURATION_MS['runtime_probe_timeout'] = 2000ms` — narrow tick.
+- `EVENT_STYLE_BY_CATEGORY['runtime_probe_timeout']` — semi-transparent amber.
+
+**Result:** Lanes stay green throughout probe capture failures. Probe timeouts appear as thin amber tick marks at their exact timestamp. Only genuine LOS (`connection refused`, `input disappeared`, etc.) still drives the gradient red.
+
+---
+
+## v3.1.17 — 2026-03-15
+
+### Feature: Short timeframe windows + remove Scale toggle
+
+**New window options:** `30s`, `1m`, `2m` added at the start of the timeline window selector. Useful for watching brief signal glitches at close zoom — combined with the v3.1.16 noSignal fix, a 1-second glitch is now clearly visible as a narrow red segment at 30s/1m scale.
+
+**Scale Normalised/Absolute toggle removed:** The toggle controlled shared Y-axis min/max on IAT/jitter sparklines in the forensics popup. Since the popup is per-lane, a global cross-lane scale added no diagnostic value — per-lane auto-scaling is more readable. Removed: `scaleMode` state, `globalRanges` useMemo, `sparkScale()` helper, and persistence.
+
+---
+
+## v3.1.16 — 2026-03-15
+
+### Fix: Brief noSignal events clear on first ok probe
+
+Signal-loss events (`runtime_error noSignal`) were holding the lane RED for 2× probe interval (~30–60s) because `OKS_TO_CLEAR=2` required two consecutive ok results before recovery. A 1-second glitch appeared as a large red block.
+
+Signal presence is binary — once the first ok probe confirms the signal is back, the red segment ends. Added `noSignalRecovery` flag: after a `noSignal` event, the next single ok probe clears the critical state. If a subsequent `analyse_result critical` confirms sustained degradation, `noSignalRecovery` resets and normal 2-probe hysteresis resumes.
+
+Result: a brief signal glitch now shows as ~one probe interval of red (~5–15s on `broadcast-balanced-v1`) instead of 60–120s.
+
+---
+
+## v3.1.15 — 2026-03-15
+
+### Fix: Status label visibility (timeline)
+
+- Lane canvas container shortened to `right: 46px` so it no longer paints over the right-edge status chip.
+- Status label background set to opaque (`#070b14ee`) — readable regardless of lane colour beneath.
+
+---
+
+## v3.1.14 — 2026-03-15
+
+### Fix: Lane start position reflects actual decoder start time
+
+- Lane bar now begins at `Math.max(timeStart, lastExplicitStartTs)` — decoders started mid-window show a partial bar from their real start, not from the left window edge.
+- Bootstrap-only lanes (no explicit `runtime_started` event) correctly fill from window start.
+
+---
+
+## v3.1.13 — 2026-03-15
+
+### Feature: Visual polish for MCR readability
+
+- Lane height increased (LANE_STEP_PX 34 → 44 px, bar thickness 8 → 12 px).
+- Thumbnail size increased (14×10 → 26×18 px).
+- Green colour changed from neon `#00dd55` to soft monitoring green `#3db86a` — reduced eye strain on low-light MCR displays.
+
+---
+
+## v3.1.12 — 2026-03-15
+
+### Feature: Right-edge status labels per timeline lane
+
+- Each lane now shows a chip at the right edge: **OK** / **WARN** / **CRIT** / **LOS**.
+- LOS (Loss of Signal) shown when no heartbeat within the stale threshold.
+- Derived from `laneStatusById` useMemo over fullLaneMap — no extra API calls.
+- Consistent with broadcast MCR operator conventions.
+
+---
+
+## v3.1.11 — 2026-03-15
+
+### Fix: Tombstone race condition (isLive false after fast restart)
+
+- `stopAfterActive` anchor changed from `firstActiveTs` → `lastExplicitStartTs`.
+- Eliminates false LOS when `seedFromActiveAnalysers` fires a synthetic `runtime_stopped` tombstone between stop and restart events.
+
+---
+
+## v3.1.10 — 2026-03-14
+
+### Docs: CLAUDE.md corrections (Cursor review)
+
+- API port corrected 3000 → 4000 throughout guidance.
+- Inheritance model corrected: `TSAnalyser` and `MulticastForwarder` extend `EventEmitter` directly, not `SRTEncoder`.
+
+---
+
+## v3.1.9 — 2026-03-14
+
+### Fix: isLive — heartbeat-in-window as primary live condition
+
+- Added `lastHeartbeatTs >= timeStart` as a third OR condition for `isLive`.
+- Eliminates lanes going grey: previous condition `staleStopTs >= timeEnd` was always false for live windows (now+30s < now+5min).
+
+---
+
+## v3.1.8 — 2026-03-14
+
+### Docs: CLAUDE.md — timeline colour contract and protocol threshold rules
+
+- Documented green/amber/red/grey lane semantics.
+- Documented per-protocol CC threshold override rule.
+- Documented heartbeat-must-use-`Date.now()` invariant.
+- Documented live-lane fill-from-left-edge convention.
+
+---
+
+## v3.1.7 — 2026-03-14
+
+### Fix: Solid colour lanes on page load
+
+- Bootstrap heartbeat seed changed from `probeTime` → `Date.now()`.
+- `probeTime` from server could be minutes stale, causing heartbeat to expire immediately on load and all lanes to render grey.
+
+---
+
+## v3.1.6 — 2026-03-14
+
+### Fix: Grey gaps between events eliminated
+
+- `lastActivityTs` now computed as `Math.max(lastSevEvtTs, lastHeartbeatTs)`.
+- Previous logic used only `lastSevEvtTs`; probe cycle (30–60 s) exceeded LANE_ACTIVITY_STALE_MS (30 s) causing periodic grey flashes between probes.
+
+---
+
+## v3.1.5 — 2026-03-14
+
+### Feature: Stop All button in Active Decoders
+
+- Added STOP ALL button to the Active Decoders section header in DecoderPanelRevamp.
+- Visible only when one or more decoders are active.
+- Iterates active IDs, calls `stop()` per decoder, then refreshes the active list.
+
+---
+
+## v3.1.4 — 2026-03-14
+
+### Fix: Per-protocol CC thresholds + rAF crosshair cursor
+
+**Per-protocol health thresholds:**
+- `_healthThresholds()` in `ts-analyser.js` now auto-selects `broadcast-balanced-v1` floor values (ccWarnCount ≥ 3, ccCriticalCount ≥ 8, tsDiscWarnCount ≥ 3, tsDiscCriticalCount ≥ 8) for RTP and UDP multicast sources.
+- Eliminates false CC/discontinuity alarms caused by ffprobe joining mid-stream — a normal 1–10 packet window at join time was triggering `srt-contribution` policy alarms (ccWarnCount = 1).
+- SRT streams retain the configured policy thresholds unchanged.
+
+**rAF-throttled crosshair cursor:**
+- Crosshair line position updated via direct DOM ref (`crosshairLineRef`) — zero React re-renders at 120 Hz mousemove.
+- React state (mouseX/Y/laneId for popup) throttled to `requestAnimationFrame` (≤ 60 fps).
+- `onMouseLeave` cancels pending rAF and hides line immediately.
+
+---
+
+## v3.1.3 — 2026-03-14
+
+### Fix: False-positive health penalties removed
+
+- SMPTE 2022-7 `insufficient_data` no longer penalises the health score — probe windows shorter than `minSamples` are ambiguous, not degraded.
+- Bitrate drift within normal transient bounds no longer penalises on first probe.
+
+---
+
+## v3.1.2 — 2026-03-14
+
+### Feature: Canvas-rendered timeline lane bars
+
+- Replaced CSS gradient `div` with `LaneCanvas` (`HTMLCanvasElement`) per lane.
+- Eliminates CSS repaint overhead on dense timelines; gradient rendered via `fillRect` in a `useEffect`.
+
+---
+
+## v3.1.1 — 2026-03-14 (tag)
+
+### Feature: Confidence Monitor layout and live thumbnail restore
+
+- Confidence Monitor panel moved below Decoder Provisioning section.
+- ETR 290 panel moved below Confidence Monitor.
+- Live frame thumbnail restored to Decoder Quality Dashboard.
+
+---
+
+## Upgrade Notes
+
+- No schema migrations or config file changes required.
+- `config/monitoring-policy.json` profile selection unchanged — RTP/UDP threshold floor is applied automatically in code.
+- Run `bash scripts/deploy-one-shot.sh` on the server to apply.
+
+## Verification
+
+- Backend tests: 107 passing.
+- Frontend production build: 0 warnings.
+- Health endpoint: `status=ok`, `tsanalyze.available=true`.
+

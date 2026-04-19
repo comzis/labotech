@@ -1,0 +1,65 @@
+---
+description: CPU, memory, and deployment tuning rules for Labotech
+alwaysApply: true
+---
+
+# CPU and Memory Tuning
+
+## Per-lane process cost
+Each active decoder lane spawns ~3 concurrent processes:
+- FFmpeg (ETR 290 monitor — continuous demux)
+- ffprobe / tsanalyze (TS analyser — periodic deep probe)
+- tshark / tcpdump (IAT sniffer — NIC packet capture)
+
+Rule of thumb: **1.5–2 cores and ~400 MB RAM per active decoder lane**.
+
+## Example allocation (adjust cpuset and memory to your server)
+- `labotech`: cpuset=0-15 (16 cores), mem=8 GB
+- `labotech-encapsulator`: cpuset=16-19 (4 cores)
+- Configure via `LABOTECH_CPUSET` / `LABOTECH_MEM_LIMIT` in your `.env`
+
+## Scaling table — do not go below these limits
+| Active lanes | Min cores (CPUSET) | Min memory |
+|---|---|---|
+| 1–4  | 8 cores (0-7)   | 4096m |
+| 5–9  | 16 cores (0-15) | 8192m |
+| 10–16 | 24 cores (0-23) | 12288m |
+| 17+  | 32 cores (0-31) | 16384m |
+
+## NODE_OPTIONS heap override (mandatory)
+`NODE_OPTIONS=--max-old-space-size=6144` must be set in `docker-env.txt`.
+Without it, Node.js 20 inside a cgroup auto-limits its V8 heap to ~25% of
+the container memory limit (~1 GB with 4 GB limit). With 9+ active lanes
+this causes GC pressure and event loop latency under sustained load.
+
+## CPU starvation → false ETR alarms
+CPU starvation causes FFmpeg internal UDP receive-buffer drops, logged as:
+- `Packet corrupt (stream = N, dts = ...)` → `transport_error` P2 alarm
+- `DTS N, next:M discont` → `pcr_disc` P2 alarm
+
+These are **processing artifacts, not signal faults**. If you see transport_error
+or pcr_disc alarms on only some lanes while others on the same multicast source
+are clean, check `docker stats` for CPU saturation before investigating the signal.
+
+Mitigations already in place in `src/etr290-analyser.js`:
+- `transport_error` and `pcr_disc` default threshold = 3 (requires 3 hits within 30s)
+- `PENDING_BURST_WINDOW_MS=30000` resets pending count if no match for >30s
+- Do not lower these defaults without understanding the burst-window mechanism
+
+## Applying resource limit changes
+Changes to `docker-env.txt` (cpuset, mem_limit, NODE_OPTIONS) require:
+```bash
+docker compose up -d --force-recreate labotech
+```
+A plain `docker compose restart` or `docker compose up -d` does NOT apply
+new cgroup resource limits — the container must be recreated.
+
+## Deployment discipline
+Always commit and push ALL modified files before running the deploy script.
+The server builds from its git checkout — locally modified but unstaged files
+cause Docker build failures on the server. Check `git status` before deploying.
+
+Deploy command:
+```bash
+bash scripts/update-and-deploy-safe.sh
+```
