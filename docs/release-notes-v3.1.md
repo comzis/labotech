@@ -2024,7 +2024,7 @@ Result: a brief signal glitch now shows as ~one probe interval of red (~5–15s 
 - Each lane now shows a chip at the right edge: **OK** / **WARN** / **CRIT** / **LOS**.
 - LOS (Loss of Signal) shown when no heartbeat within the stale threshold.
 - Derived from `laneStatusById` useMemo over fullLaneMap — no extra API calls.
-- Consistent with Elecard Boro / Telestream PRISM operator conventions.
+- Consistent with broadcast MCR operator conventions.
 
 ---
 

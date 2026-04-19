@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install-compose-v2.sh — upgrade the server from docker-compose v1 to Compose v2 plugin
-# Run once on gva-boro-probe as root or with sudo.
+# Run once on the server as root or with sudo.
 # Safe to re-run: idempotent.
 set -euo pipefail
 

@@ -1,5 +1,5 @@
 ---
-description: CPU, memory, and deployment tuning rules for gva-boro-probe (56-core DL360)
+description: CPU, memory, and deployment tuning rules for Labotech
 alwaysApply: true
 ---
 
@@ -13,10 +13,10 @@ Each active decoder lane spawns ~3 concurrent processes:
 
 Rule of thumb: **1.5–2 cores and ~400 MB RAM per active decoder lane**.
 
-## Current allocation (gva-boro-probe)
+## Example allocation (adjust cpuset and memory to your server)
 - `labotech`: cpuset=0-15 (16 cores), mem=8 GB
 - `labotech-encapsulator`: cpuset=16-19 (4 cores)
-- Server total: 56 logical cores
+- Configure via `LABOTECH_CPUSET` / `LABOTECH_MEM_LIMIT` in your `.env`
 
 ## Scaling table — do not go below these limits
 | Active lanes | Min cores (CPUSET) | Min memory |

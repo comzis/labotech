@@ -4,7 +4,7 @@
  * TSDuckMonitor — periodic PCR + SI table sampler using available tsp plugins.
  *
  * Phase 0a spike (2026-03-17) confirmed that `monitor` and `etr290` plugins are
- * NOT present on gva-boro-probe TSDuck 3.44-4581.  This class uses only the
+ * NOT present on production TSDuck 3.44-4581.  This class uses only the
  * confirmed-available plugins:
  *
  *   pcrverify     — PCR monotonicity / jitter / repetition violations (stdout/stderr)

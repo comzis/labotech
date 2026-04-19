@@ -34,7 +34,7 @@ function _extractCommandHint(line) {
 }
 
 function _allowlistRegexes() {
-  const raw = process.env.ENCAP_KILL_ALLOWLIST || 'encapsulator,boro,dashboard';
+  const raw = process.env.ENCAP_KILL_ALLOWLIST || 'encapsulator,labotech,dashboard';
   return raw
     .split(',')
     .map((s) => s.trim())
@@ -212,7 +212,7 @@ async function resolvePortOffenders(options = {}) {
     skippedCount: skipped.length,
     remaining: after.listeners || [],
     remainingCount: after.listenersCount || 0,
-    allowlist: (process.env.ENCAP_KILL_ALLOWLIST || 'encapsulator,boro,dashboard').split(',').map((s) => s.trim()).filter(Boolean),
+    allowlist: (process.env.ENCAP_KILL_ALLOWLIST || 'encapsulator,labotech,dashboard').split(',').map((s) => s.trim()).filter(Boolean),
     forceAny,
     namespaceHint: 'If remaining offenders are host processes outside this container PID namespace, use scripts/triage-port-kill.sh on host.',
   };

@@ -8,7 +8,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GUARD_SCRIPT="${SCRIPT_DIR}/disk-guard.sh"
 CRON_FILE="/etc/cron.d/labotech-disk-guard"
 LOG_FILE="/var/log/labotech-disk-guard.log"
-RUN_AS="${1:-boro}"
+RUN_AS="${1:-labotech}"
 
 echo "[setup-cron] installing disk-guard cron entry"
 echo "[setup-cron] script : ${GUARD_SCRIPT}"

@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Disk housekeeping for gva-boro-probe (broadcast appliance).
+# Disk housekeeping for Labotech (broadcast appliance).
 # Safe to run from cron — all operations are non-destructive to running streams.
 #
-# Install as cron job (run once as boro):
+# Install as cron job (run once as your service user):
 #   bash scripts/disk-housekeeping.sh --install-cron
 #
 # Manual run:
 #   bash scripts/disk-housekeeping.sh
 #
-# The --install-cron flag adds a 03:00 daily entry to boro's crontab.
+# The --install-cron flag adds a 03:00 daily entry to the current user's crontab.
 # Remove it with:  crontab -e  (delete the disk-housekeeping line)
 
 set -euo pipefail

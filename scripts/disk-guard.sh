@@ -11,8 +11,8 @@
 #   5. /tmp files older than 1 day
 #   6. Stale thumbnail JPEGs older than 1 hour
 #
-# Cron entry (3am daily, run as service user 'boro'):
-#   0 3 * * * boro bash /home/boro/LaboTech/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1
+# Cron entry (3am daily, run as your service user):
+#   0 3 * * * <service-user> bash /path/to/labotech/scripts/disk-guard.sh >> /var/log/labotech-disk-guard.log 2>&1
 #
 # The log file accumulates indefinitely — rotate with logrotate or cap it:
 #   /etc/logrotate.d/labotech-disk-guard

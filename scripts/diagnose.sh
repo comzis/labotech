@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# diagnose.sh — quick health snapshot for Labotech on gva-boro-probe
+# diagnose.sh — quick health snapshot for Labotech
 # Usage: bash scripts/diagnose.sh ["1 hour ago"]  (default: 30 min ago)
 
 SINCE="${1:-30 min ago}"

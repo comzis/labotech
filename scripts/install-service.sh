@@ -5,7 +5,7 @@
 set -euo pipefail
 
 APP_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-APP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo boro)}"
+APP_USER="${SUDO_USER:-$(logname 2>/dev/null || echo labotech)}"
 
 echo "==> Installing Labotech systemd service"
 echo "    App dir:  $APP_DIR"
