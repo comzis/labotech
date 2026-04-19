@@ -85,7 +85,7 @@ FFmpeg's mpegts muxer only writes PAT+PMT. NIT, SDT, EIT must be injected extern
 3. **`-flags +ildct+ilme` on deinterlace path** — causes double-interlacing artifact; must be guarded by `p.interlaced`.
 4. **Multi-audio keyed by `kind` instead of `sourceIndex`** — second audio track overwrites first in the parsed stream map.
 5. **SRT URL built with `srt://` prefix already in host field** — produces `srt://srt://host:port`; constructor must strip scheme.
-6. **`0.0.0.0` bind in API server** — violates project rule; must bind to `10.67.18.29`.
+6. **`0.0.0.0` bind in API server** — violates project rule; must bind to the management NIC IP (`API_HOST` / configured management address), never all interfaces.
 7. **`exec()` for SNMP traps** — shell injection; must use `execFile('snmptrap', args)`.
 8. **Multicast address outside `239.100.25.0/26`** — must be validated before use.
 

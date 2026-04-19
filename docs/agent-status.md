@@ -15,17 +15,16 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 - Current task: idle — all PRs from this session merged
 - Active branch: none
 - Last known focus: ETR alarm log (Decoder tab), catalog picker (TS Analyser), thumbnail_frame event suppression, etr290_started event, README Supported Platforms
-- Notes: session closed cleanly at backend 3.2.37 / web 3.1.156
+- Notes: session closed cleanly at backend 3.2.37 / web 3.1.157 (see `package.json` files for current semver)
 
 ## Agent B Status
 
-- Current task: idle — duplicate analyser auto-heal shipped (PR #111 merged)
-- Active branch: none
+- Current task: idle — public documentation consistency pass (versions, OSS hygiene, README engineering index)
+- Active branch: `cursor/docs-public-consistency` (merge to main via PR)
 - Files modified this session:
-  - `.env.example`
-  - `docs/release-notes-v3.1.md`
-  - `routes/analyse.js`
-  - `src/api.js`
+  - `README.md`, `CLAUDE.md`, `WORKFLOW.md`, `USER_GUIDE.md`, `labotech-project.md`
+  - `docs/README.md` (new), `docs/api-reference.md`, `docs/etr290-triage-guide.md`, `docs/srt-encapsulator-fine-tuned-profile.md`
+  - `.claude/marketplace/plugins/labotech-broadcast/skills/dvb-broadcast/SKILL.md` (removed literal IP from example)
 - Open questions: none
 
 ## Merge Log

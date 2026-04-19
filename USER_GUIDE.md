@@ -25,15 +25,15 @@
 
 Labotech manages broadcast-grade SRT encapsulation, 1080p↔1080i conversion, multicast forwarding, and MPEG-TS stream analysis from a single web interface.
 
-**Network layout:**
+**Network layout** (interface names vary by hardware; common Ubuntu examples are `eno1`/`eno2` or `eth0`/`eth1`):
 
 | Interface | Role | IP |
 |---|---|---|
-| `eno1` | Management — Web UI & API | `<server-ip>` |
-| `eno2` | Multicast — no IP assigned | all `239.0.0.0/8` traffic |
+| `<management-nic>` | Management — Web UI & API | `<server-ip>` (your `API_HOST`) |
+| `<multicast-nic>` | Multicast — often no IP on this NIC | all `239.0.0.0/8` traffic routed here |
 
-- **Web UI / API:** `http://<server-ip>:4000`
-- **Multicast subnet:** `239.100.25.0/26` (forward address `239.100.25.29`)
+- **Web UI / API:** `http://<server-ip>:4000` (port from `API_PORT` in `.env`, default `4000`)
+- **Multicast forward range:** configured in `.env` / `config/multicast.json` (defaults in the repo use `239.100.25.0/26`; adjust to your deployment)
 
 ---
 
@@ -84,7 +84,7 @@ Notes:
 
 ## 3. Ubuntu Optimisation for Broadcast Processing
 
-These steps should be applied once on the HPE DL360 Ubuntu Server to ensure low-latency, high-throughput FFmpeg performance for live broadcast workloads.
+These steps should be applied once on the Ubuntu Server host to ensure low-latency, high-throughput FFmpeg performance for live broadcast workloads.
 
 ### 3.1 Install FFmpeg
 
@@ -162,14 +162,14 @@ sudo sysctl -p /etc/sysctl.d/99-labotech.conf
 
 ### 3.4 Disable IRQ Balancing & Pin NICs to Cores
 
-On the HPE DL360, binding `eno2` interrupts to dedicated CPU cores reduces packet processing jitter:
+On production hosts, binding the **multicast** NIC’s interrupts to dedicated CPU cores reduces packet processing jitter:
 
 ```bash
 sudo apt install -y irqbalance
 sudo systemctl stop irqbalance
 sudo systemctl disable irqbalance
 
-# Find eno2 IRQ numbers
+# Find IRQ numbers for your multicast NIC (replace eno2 with your interface name)
 grep eno2 /proc/interrupts
 
 # Pin each IRQ to a specific core (e.g. core 4)
@@ -398,7 +398,7 @@ Active transcoder jobs appear as cards with live metrics. Click **Terminate** to
 
 ## 7. Multicast Panel
 
-Forwards MPEG-TS multicast streams via `eno2`.
+Forwards MPEG-TS multicast streams via the configured multicast NIC (`<multicast-nic>`).
 
 > All destination addresses must be within `239.100.25.0/26`.
 
@@ -411,7 +411,7 @@ Forwards MPEG-TS multicast streams via `eno2`.
 | Destination IP | Must be within `239.100.25.0/26` |
 | Destination Port | UDP port |
 
-The panel also displays the current multicast NIC configuration (`eno2`, subnet, TTL).
+The panel also displays the current multicast NIC configuration (name, subnet, TTL).
 
 ---
 
@@ -490,15 +490,15 @@ For deployment, rollback, TS analysis accuracy path (`tsduck` + fallback), Strea
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Cannot connect to UI | Wrong IP in browser | Use `http://<server-ip>:4000` where `<server-ip>` is your eno1 address |
+| Cannot connect to UI | Wrong IP in browser | Use `http://<server-ip>:4000` where `<server-ip>` is your management NIC address |
 | Status shows **OFFLINE** | Backend not running | Run `npm start` or `docker-compose up -d` |
 | 500 errors on all API calls | Backend crashed or not started | Check terminal for errors; restart backend |
 | Blank page | Vite dev server not running | Run `cd web && npm run dev` |
-| Multicast route error | `eno2` route not configured | Run `sudo bash scripts/setup-host.sh` |
+| Multicast route error | Multicast NIC route not configured | Run `sudo bash scripts/setup-host.sh` |
 | Stream fails to start | FFmpeg not installed | Run `sudo apt install ffmpeg` on server |
 | IAT lane shows analyser-derived/unavailable | NIC capture tool missing | Install `tshark` or `tcpdump` and verify with `which tshark \|\| which tcpdump` |
 | EPERM on node_modules | Stale Docker-owned files | Run `sudo rm -rf node_modules && npm install` |
 
 ---
 
-*Labotech is designed for HPE DL360 running Ubuntu Server with Docker.*
+*Labotech targets x86_64 Ubuntu Server LTS with Docker (`network_mode: host`).*

@@ -1,6 +1,6 @@
 # ETR 290 Triage Guide — Labotech Operations
 
-**Version:** v3.1.92 | **Date:** 2026-03-18 | **Applies to:** Labotech v3.1+
+**Document revision:** 2026-04-19 | **Applies to:** Labotech 3.x (backend ≥3.2.x, web ≥3.1.x). For exact semver, see root `package.json`, `web/package.json`, and `GET /health`.
 
 ---
 

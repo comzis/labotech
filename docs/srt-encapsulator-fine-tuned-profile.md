@@ -1,7 +1,7 @@
 # SRT Encapsulator Fine-Tuned Profile
 
 Date: 2026-03-14  
-Target: HPE DL360 (Ubuntu), Docker host networking, Labotech `v2.0.0+`
+Target: x86_64 Ubuntu Server, Docker host networking, Labotech `v2.0.0+`
 
 ## Objective
 

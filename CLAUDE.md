@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Labotech** is a professional DVB-IP stream processor for an HPE DL360 server running Ubuntu. It handles SRT encapsulation, multicast routing, MPEG-TS analysis, multiview monitoring, and ETR 290 compliance checking. Transcoding (1080p→1080i interlace conversion) is present but considered a secondary and currently limited feature. There is no broadcast encoding capability — the product is an encapsulator, analyser, and multiview platform.
+**Labotech** is a professional DVB-IP stream processor for x86_64 Linux (Ubuntu Server LTS is the validated target). It handles SRT encapsulation, multicast routing, MPEG-TS analysis, multiview monitoring, and ETR 290 compliance checking. Transcoding (1080p→1080i interlace conversion) is present but considered a secondary and currently limited feature. There is no broadcast encoding capability — the product is an encapsulator, analyser, and multiview platform.
 
-**Server target:** HPE DL360, Ubuntu Server, Docker with `network_mode: host`
+**Server target:** Ubuntu Server LTS, Docker with `network_mode: host`
 - **<management-nic>:** Management NIC → `<management-nic-ip>` → Web UI + API on port `4000`
 - **<multicast-nic>:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
 - **Multicast forward subnet:** `<multicast-forward-subnet>` (address `<multicast-forward-ip>`)
