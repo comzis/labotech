@@ -19,12 +19,9 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 
 ## Agent B Status
 
-- Current task: idle — public documentation consistency pass (versions, OSS hygiene, README engineering index)
-- Active branch: `cursor/docs-public-consistency` (merge to main via PR)
-- Files modified this session:
-  - `README.md`, `CLAUDE.md`, `WORKFLOW.md`, `USER_GUIDE.md`, `labotech-project.md`
-  - `docs/README.md` (new), `docs/api-reference.md`, `docs/etr290-triage-guide.md`, `docs/srt-encapsulator-fine-tuned-profile.md`
-  - `.claude/marketplace/plugins/labotech-broadcast/skills/dvb-broadcast/SKILL.md` (removed literal IP from example)
+- Current task: idle — PR #126 merged
+- Active branch: none
+- Last known focus: public documentation consistency pass (versions, OSS hygiene, README engineering index)
 - Open questions: none
 
 ## Merge Log
@@ -51,6 +48,7 @@ This file tracks active AI-agent work, branch ownership, and merge coordination.
 - PR #105 merged: ETR per-decoder alarm log (Decoder tab) + catalog picker (TS Analyser tab)
 - PR #106 merged: suppress thumbnail_frame from event log; emit etr290_started on all start paths
 - PR #123 merged: README Supported Platforms section + hardware wording softened for OSS
+- PR #126 merged: public documentation consistency — version alignment, OSS hygiene, broken link removal, docs/README.md index
 
 ## Notes
 
