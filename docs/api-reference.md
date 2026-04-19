@@ -1,10 +1,10 @@
 # Labotech API Reference
 
-**Base URL:** `http://<management-nic-ip>:4000` (set `API_HOST` / `API_PORT` in `.env`; default port shown)
-**Document revision:** 2026-04-19 — aligns with backend **3.2.37** / web **3.1.157** at time of writing.
+**Base URL:** `http://<management-nic-ip>:4000` (set `API_HOST` / `API_PORT` in `.env`; default port `4000` in `.env.example`)
+**Document revision:** 2026-04-19
 **Protocol:** REST (JSON) + WebSocket
 
-`GET /health` returns `version` from the backend `package.json` and `release` from `LABOTECH_RELEASE` when set (otherwise `v` + semver). The web UI has its own semver in `web/package.json` and may differ.
+`GET /health` returns `version` from the backend `package.json` and `release` from `LABOTECH_RELEASE` when set (otherwise `v` + semver). The web UI has its own semver in `web/package.json` and may differ. **Do not treat the JSON example below as authoritative for your tree** — confirm live values with `/health` after deploy.
 
 ---
 
