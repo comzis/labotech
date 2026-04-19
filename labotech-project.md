@@ -206,7 +206,7 @@ Phase 5 — Advanced Features
 
 ## PROMPT
 
-You are building **Labotech** — a professional broadcast encoder and stream management application for an HPE DL360 server running Ubuntu.
+You are building **Labotech** — a professional DVB-IP stream processor (encapsulation, analysis, multiview, ETR 290) for x86_64 Linux — **not** a broadcast encoder. Ubuntu Server LTS is the validated target.
 
 Use the **labotech skill** for all implementation decisions. Read the relevant reference files before writing any code.
 
@@ -214,7 +214,7 @@ Use the **labotech skill** for all implementation decisions. Read the relevant r
 
 ### Infrastructure
 
-- **Server:** HPE DL360, Ubuntu Server, Docker (`network_mode: host`)
+- **Server:** x86_64 Linux (Ubuntu Server LTS validated), Docker (`network_mode: host`)
 - **<management-nic>:** Management NIC → IP `<management-nic-ip>` → Web UI and API on port `4000`
 - **<multicast-nic>:** Multicast NIC → no IP → all `239.0.0.0/8` traffic routed here
 - **Multicast forward subnet:** `<multicast-forward-subnet>` (address `<multicast-forward-ip>`)

@@ -71,13 +71,13 @@ have explicitly confirmed the pattern is intentional (it never should be).
 
 ---
 
-## Deploy flow (production server gva-boro-probe)
+## Deploy flow (production server)
 
 Only deploy from `main` after a PR has been merged:
 
 ```bash
-# On server as boro
-cd ~/LaboTech/labotech
+# On the server — use your clone path
+cd /path/to/labotech
 git fetch --prune origin && git pull --ff-only origin main
 bash scripts/update-and-deploy-safe.sh
 ```

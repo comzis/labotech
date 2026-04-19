@@ -1,8 +1,10 @@
 # Labotech API Reference
 
-**Base URL:** `http://<YOUR_SERVER_IP>:4000`
-**Version:** v3.1.91
+**Base URL:** `http://<management-nic-ip>:4000` (set `API_HOST` / `API_PORT` in `.env`; default port shown)
+**Document revision:** 2026-04-19 — aligns with backend **3.2.37** / web **3.1.157** at time of writing.
 **Protocol:** REST (JSON) + WebSocket
+
+`GET /health` returns `version` from the backend `package.json` and `release` from `LABOTECH_RELEASE` when set (otherwise `v` + semver). The web UI has its own semver in `web/package.json` and may differ.
 
 ---
 
@@ -33,8 +35,8 @@ Returns server status, tooling availability, and system telemetry.
 ```json
 {
   "status": "ok",
-  "version": "3.1.91",
-  "release": "v3.1.91",
+  "version": "3.2.37",
+  "release": "v3.2.37",
   "uptime": 3721.4,
   "streams": 2,
   "telemetry": {
@@ -534,7 +536,7 @@ Save multiview layout configuration.
 
 ## WebSocket Protocol
 
-Connect to `ws://<YOUR_SERVER_IP>:4000`.
+Connect to `ws://<management-nic-ip>:4000` (same host/port as the HTTP API; use `wss:` when the site is served over HTTPS).
 
 On connect the server sends:
 ```json
@@ -641,7 +643,7 @@ Key env vars that affect API behaviour:
 
 | Variable | Default | Description |
 |---|---|---|
-| `API_HOST` | `<YOUR_SERVER_IP>` | Bind address — never change to `0.0.0.0` |
+| `API_HOST` | `<management-nic-ip>` | Bind address — never change to `0.0.0.0` |
 | `API_PORT` | `4000` | Listen port |
 | `MULTICAST_NIC` | `<multicast-nic>` | Multicast output NIC |
 | `FORWARD_MULTICAST_SUBNET` | `<multicast-forward-subnet>` | Allowed multicast subnet |

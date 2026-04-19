@@ -7,7 +7,7 @@
 [![TSDuck](https://img.shields.io/badge/ETR290-TSDuck-orange)](https://tsduck.io)
 [![Docker](https://img.shields.io/badge/docker-ready-blue)](https://docker.com)
 
-**v3.2.37 / web 3.1.156**
+**v3.2.37 / web 3.1.157**
 
 Professional DVB-IP stream processor for broadcast MCR operations.
 Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 compliance, decoder multiview monitoring, and 1080p↔1080i interlace conversion.
@@ -32,7 +32,7 @@ Handles SRT encapsulation, multicast routing, MPEG-TS analysis, ETR 290 complian
 
 | Component | Detail |
 |---|---|
-| Server | x86_64 Linux server with `network_mode: host` Docker support (validated on HPE DL360) |
+| Server | x86_64 Linux server with `network_mode: host` Docker support (validated on typical 1U/2U rack servers) |
 | OS | Ubuntu Server LTS (22.04 or 24.04) |
 | Management NIC | `<management-nic>` → `$API_HOST` → Web UI + API port `4000` |
 | Multicast NIC | `<multicast-nic>` → no IP → all `239.0.0.0/8` traffic |
@@ -389,17 +389,19 @@ npm test -- --runInBand    # run full backend Jest suite
 
 | Document | Purpose |
 |---|---|
-| `docs/release-notes-v3.1.md` | Historical changelog for v3.1.x series |
-| `docs/release-notes-v3.2.md` | Active changelog for current v3.2.x releases |
-| `docs/engineering-snag-list.md` | Defect log — 18 closed snags, root causes, lessons, invariants |
+| `docs/README.md` | Documentation index, version numbering, hygiene notes |
+| `docs/api-reference.md` | REST + WebSocket API |
+| `docs/release-notes-v3.1.md` | Detailed changelog (v3.1.x / combined entries) |
+| `docs/release-notes-v3.2.md` | v3.2.x release series |
+| `docs/etr290-triage-guide.md` | ETR 290 alarm triage for operators |
 | `docs/engineering-support-manual.md` | Operator and engineer runbook |
-| `docs/architecture-roadmap-continuous-monitoring.md` | Continuous monitoring + thumbnail worker architecture |
-| `docs/broadcast-grade-compliance-roadmap.md` | Broadcast compliance phases (tooling preflight, monitoring policy, probe scheduler, UI clarity, ops hardening) |
 | `docs/git-workflow-and-rollback.md` | Production-safe git and rollback procedure |
-| `docs/ops-disk-recovery.md` | Disk recovery and log-rotation runbook |
-| `docs/ops-scripts-reference.md` | All ops scripts reference |
+| `docs/ops-scripts-reference.md` | Ops scripts reference |
 | `docs/day1-monitoring-checklist.md` | Post-change operations checklist |
+| `docs/server-optimisation-ubuntu.md` | Ubuntu host tuning and stability |
+| `docs/production-forward-probe-runbook.md` | Forward/probe operations |
 | `docs/tsduck-spike-findings.md` | TSDuck production capability findings |
+| `USER_GUIDE.md` | End-user guide |
 | `CLAUDE.md` | AI agent coding rules, pitfalls, and invariants |
 | `docs/agent-status.md` | Multi-agent collaboration logbook (Claude Code + Cursor) |
 
